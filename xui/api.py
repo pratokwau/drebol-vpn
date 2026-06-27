@@ -89,12 +89,16 @@ def _extract_obj(data: dict[str, Any] | None) -> dict[str, Any]:
 
 async def api_get_inbounds() -> tuple[list[dict[str, Any]], str]:
     result = await xui_get("/panel/api/inbounds/list")
+    if not isinstance(result, dict):
+        return [], "Пустой ответ от панели 3x-ui"
     if result.get("success"):
         obj = result.get("obj", [])
         return (obj if isinstance(obj, list) else [], "")
     # fallback for different panels
     for path in ("/panel/api/inbounds", "/api/inbounds/list", "/api/inbounds"):
         result = await xui_get(path)
+        if not isinstance(result, dict):
+            continue
         if result.get("success"):
             obj = result.get("obj", [])
             if isinstance(obj, list):
