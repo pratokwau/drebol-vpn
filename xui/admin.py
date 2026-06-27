@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import datetime
 
@@ -395,6 +396,27 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
             )
         except Exception:
             pass
+
+
+@router.callback_query(F.data.startswith("xui_udel_"))
+async def cb_user_delete(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    payload = _cache_lookup(call.data[len("xui_udel_"):])
+    user_key, _ = _decode_user_payload(payload)
+    if not user_key:
+        return await call.answer("Пользователь не найден", show_alert=True)
+    info = load_vpn_users().get(user_key, {})
+    for device in list(info.get("devices", [])):
+        email = device.get("email", "")
+        if email:
+            await api_del_client_by_email(email)
+    delete_user_completely(user_key)
+    try:
+        await call.message.edit_text("✅ Пользователь удалён.")
+    except Exception:
+        await call.message.answer("✅ Пользователь удалён.")
+    await call.answer()
 
 
 @router.callback_query(F.data.startswith("xui_ublk_"))
