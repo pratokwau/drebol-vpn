@@ -24,7 +24,7 @@ def settings_kb() -> InlineKeyboardMarkup:
     )
 
 
-def inbounds_kb(inbounds: list[dict]) -> InlineKeyboardMarkup:
+def inbounds_kb(inbounds: list[dict], *, show_settings: bool = True) -> InlineKeyboardMarkup:
     rows = []
     for inbound in inbounds:
         inbound_id = inbound.get("id")
@@ -35,7 +35,8 @@ def inbounds_kb(inbounds: list[dict]) -> InlineKeyboardMarkup:
         h = cache(f"ib_{inbound_id}", {"id": inbound_id})
         rows.append([InlineKeyboardButton(text=f"{remark} | {protocol}:{port} | 👥 {len(clients)}", callback_data=f"xui_ib_{h}")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="xui_inbounds")])
-    rows.append([InlineKeyboardButton(text="⚙️ Настройки", callback_data="xui_settings")])
+    if show_settings:
+        rows.append([InlineKeyboardButton(text="⚙️ Настройки", callback_data="xui_settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

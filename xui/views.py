@@ -26,7 +26,7 @@ def inbound_text(inbound: dict) -> str:
     )
 
 
-async def render_inbounds(message_or_call):
+async def render_inbounds(message_or_call, *, show_settings: bool = True):
     inbounds, err = await api_get_inbounds()
     if not inbounds:
         if hasattr(message_or_call, "edit_text"):
@@ -39,9 +39,9 @@ async def render_inbounds(message_or_call):
         f"Выберите инбаунд:"
     )
     if hasattr(message_or_call, "edit_text") and getattr(getattr(message_or_call, "from_user", None), "is_bot", False):
-        await message_or_call.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=inbounds_kb(inbounds))
+        await message_or_call.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=inbounds_kb(inbounds, show_settings=show_settings))
     else:
-        await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=inbounds_kb(inbounds))
+        await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=inbounds_kb(inbounds, show_settings=show_settings))
 
 
 async def render_inbound(call, inbound: dict):

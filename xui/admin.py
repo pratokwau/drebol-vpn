@@ -5,7 +5,6 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command
 
 from xui.api import api_get_inbounds
-from xui.keyboards import inbounds_kb
 from xui.utils import is_admin
 from xui.views import render_inbound, render_inbounds
 
@@ -17,7 +16,7 @@ async def cmd_adminxui(message: types.Message):
         await message.answer("⛔ Доступ запрещён.")
         return
 
-    await render_inbounds(message)
+    await render_inbounds(message, show_settings=False)
 
 
 @router.callback_query(F.data == "xui_inbounds")
@@ -25,7 +24,7 @@ async def cb_inbounds(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     await call.answer()
-    await render_inbounds(call.message)
+    await render_inbounds(call.message, show_settings=False)
 
 
 @router.callback_query(F.data.startswith("xui_ib_"))
