@@ -142,6 +142,7 @@ async def api_add_client(
     flow: str = "",
     *,
     expiry_time_ms: int | None = None,
+    limit_ip: int = 0,
 ) -> tuple[dict, str]:
     import time
     import uuid as uuid_lib
@@ -156,6 +157,7 @@ async def api_add_client(
         "email": email,
         "flow": flow,
         "limitIp": 0,
+        "limitIp": int(limit_ip or 0),
         "totalGB": total_bytes,
         "expiryTime": expiry_time,
         "enable": True,

@@ -90,7 +90,7 @@ def get_tg_id_by_client(ib_id: int, email: str) -> int | None:
     return None
 
 
-def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str):
+def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str, limit_ip: int | None = None):
     data = load_vpn_users()
     key = str(tg_id)
     if key not in data:
@@ -107,7 +107,10 @@ def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str):
             d["uuid"] = uuid
             save_vpn_users(data)
             return
-    data[key]["devices"].append({"ib_id": ib_id, "uuid": uuid, "email": email})
+    device = {"ib_id": ib_id, "uuid": uuid, "email": email}
+    if limit_ip is not None:
+        device["limit_ip"] = int(limit_ip)
+    data[key]["devices"].append(device)
     save_vpn_users(data)
 
 

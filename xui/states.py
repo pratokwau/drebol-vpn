@@ -23,6 +23,11 @@ class XuiAdminAddDevice(StatesGroup):
     waiting_limit_ip = State()
 
 
+class XuiVpnAddDevice(StatesGroup):
+    waiting_name = State()
+    waiting_limit_ip = State()
+
+
 class XuiSettings(StatesGroup):
     waiting_url = State()
     waiting_token = State()
