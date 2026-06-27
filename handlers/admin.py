@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from updater import apply_update, request_restart, update_available
-from storage import load_xui_settings, save_xui_settings
+from storage import load_xui_settings, save_xui_settings, save_update_state
 from xui.keyboards import settings_kb
 from xui.utils import is_admin
 
@@ -185,14 +185,21 @@ async def cb_update_apply(call: types.CallbackQuery):
 
     await call.message.edit_text(
         "⏳ <b>Обновляю бота...</b>\n\n"
-        "Сейчас я скачиваю свежую версию и перезапускаю сервис.",
+        "Сейчас я скачиваю свежую версию и начинаю перезагрузку.",
         parse_mode=ParseMode.HTML,
     )
     ok, msg = apply_update()
     if ok:
+        save_update_state(
+            {
+                "chat_id": call.message.chat.id,
+                "admin_id": call.from_user.id,
+                "status": "pending_success",
+            }
+        )
         await call.message.edit_text(
-            "✅ <b>Обновление установлено</b>\n\n"
-            "Сейчас бот завершает работу, а systemd поднимет новый процесс.",
+            "🔄 <b>Обновление установлено</b>\n\n"
+            "Сейчас бот завершает работу и перезапускается. После старта я пришлю подтверждение.",
             parse_mode=ParseMode.HTML,
         )
         request_restart()
