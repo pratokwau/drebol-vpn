@@ -154,6 +154,51 @@ def set_user_vpn_access(tg_id: int, value: bool = True):
         save_vpn_users(data)
 
 
+def set_user_vpn_access_key(user_key: str, value: bool = True):
+    data = load_vpn_users()
+    key = str(user_key)
+    if key in data:
+        data[key]["has_vpn_access"] = bool(value)
+        save_vpn_users(data)
+
+
+def set_admin_disabled_key(user_key: str, value: bool):
+    data = load_vpn_users()
+    key = str(user_key)
+    if key in data:
+        data[key]["admin_disabled"] = bool(value)
+        save_vpn_users(data)
+
+
+def set_user_note_key(user_key: str, note: str):
+    data = load_vpn_users()
+    key = str(user_key)
+    if key in data:
+        data[key]["note"] = note[:NOTE_MAX_LEN]
+        save_vpn_users(data)
+
+
+def rekey_user(old_key: str, new_key: str) -> bool:
+    data = load_vpn_users()
+    old_key = str(old_key)
+    new_key = str(new_key)
+    if old_key not in data:
+        return False
+    payload = data.pop(old_key)
+    if new_key in data:
+        existing = data[new_key]
+        existing_devices = existing.get("devices", [])
+        payload_devices = payload.get("devices", [])
+        merged_devices = existing_devices + [d for d in payload_devices if d not in existing_devices]
+        existing.update(payload)
+        existing["devices"] = merged_devices
+        data[new_key] = existing
+    else:
+        data[new_key] = payload
+    save_vpn_users(data)
+    return True
+
+
 def delete_user_completely(user_key: str):
     data = load_vpn_users()
     user = data.pop(user_key, None)
