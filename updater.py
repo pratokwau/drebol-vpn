@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -58,8 +59,8 @@ def apply_update() -> tuple[bool, str]:
     if pip.returncode != 0:
         return False, pip.stderr.strip() or pip.stdout.strip() or "pip install failed"
 
-    restart = _run(["systemctl", "restart", SERVICE_NAME])
-    if restart.returncode != 0:
-        return False, restart.stderr.strip() or restart.stdout.strip() or "systemctl restart failed"
+    return True, "Обновление установлено."
 
-    return True, "Обновление установлено, сервис перезапущен."
+
+def request_restart() -> None:
+    raise SystemExit(0)
