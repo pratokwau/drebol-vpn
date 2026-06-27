@@ -41,6 +41,9 @@ async def cmd_vpn(message: types.Message):
     if not user_data or not user_data.get("has_vpn_access"):
         await message.answer("⛔ У вас пока нет доступа к /vpn.")
         return
+    if user_data.get("admin_disabled"):
+        await message.answer("⛔ Ваш доступ временно отключён администратором.")
+        return
 
     devices = user_data.get("devices", [])
     if not devices:
