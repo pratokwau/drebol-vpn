@@ -1,19 +1,63 @@
 from __future__ import annotations
 
+import html
+
+from aiogram import types
 from aiogram.enums import ParseMode
 
-from xui.api import api_get_inbounds
-from xui.keyboards import clients_kb, inbounds_kb
-from xui.utils import format_bytes
+from xui.api import api_get_client, api_get_inbounds
+from xui.helpers import get_client_stats_map, parse_clients
+from xui.keyboards import clients_kb, inbounds_kb, myvpn_device_kb, myvpn_main_kb, user_menu_kb, client_actions_kb
+from xui.storage import DEFAULT_MAX_DEVICES, get_client_note, get_vpn_user, load_vpn_users, refresh_username, save_vpn_users, set_user_username
+from xui.utils import _cache, cache, format_bytes
+
+
+async def sync_user_devices_with_panel(user_key: str) -> bool:
+    data = load_vpn_users()
+    info = data.get(user_key)
+    if not info:
+        return False
+
+    devices = info.get("devices", [])
+    if not devices:
+        return False
+
+    try:
+        panel_emails = set()
+        page = 1
+        while True:
+            res = await api_get_inbounds()
+            if not res:
+                break
+            inbounds, _ = res
+            for ib in inbounds:
+                for c in parse_clients(ib):
+                    if c.get("email"):
+                        panel_emails.add(c.get("email"))
+            break
+    except Exception:
+        return False
+
+    if not panel_emails:
+        return False
+
+    clean = [d for d in devices if d.get("email") in panel_emails]
+    if len(clean) == len(devices):
+        return False
+
+    data[user_key]["devices"] = clean
+    save_vpn_users(data)
+    return True
 
 
 def inbound_text(inbound: dict) -> str:
     protocol = str(inbound.get("protocol", "?")).upper()
     port = inbound.get("port", "?")
     remark = inbound.get("remark") or f"{protocol}:{port}"
-    clients = inbound.get("settings", {}).get("clients", [])
-    total_up = sum(int((c.get("clientStats") or {}).get("up", 0)) for c in clients)
-    total_down = sum(int((c.get("clientStats") or {}).get("down", 0)) for c in clients)
+    clients = parse_clients(inbound)
+    stats_map = get_client_stats_map(inbound)
+    total_up = sum(int((s or {}).get("up", 0)) for s in stats_map.values())
+    total_down = sum(int((s or {}).get("down", 0)) for s in stats_map.values())
     return (
         f"📡 <b>{remark}</b>\n"
         f"━━━━━━━━━━━━━━\n"
@@ -50,3 +94,136 @@ async def render_inbound(call, inbound: dict):
         parse_mode=ParseMode.HTML,
         reply_markup=clients_kb(inbound),
     )
+
+
+async def _show_user_menu(call_or_msg, user_key: str, ib_id_default: int = 0, edit: bool = True):
+    data = load_vpn_users()
+    info = data.get(user_key)
+    if not info:
+        text = "❌ Пользователь не найден"
+        return await call_or_msg.edit_text(text) if edit else await call_or_msg.answer(text)
+
+    devices = info.get("devices", [])
+    if devices:
+        seen = set()
+        deduped = []
+        for d in devices:
+            em = d.get("email")
+            if em not in seen:
+                seen.add(em)
+                deduped.append(d)
+        if len(deduped) != len(devices):
+            data[user_key]["devices"] = deduped
+            save_vpn_users(data)
+            devices = deduped
+
+    if not ib_id_default and devices:
+        ib_id_default = devices[0]["ib_id"]
+
+    username = info.get("username", "")
+    if not user_key.startswith("anon_") and not username:
+        try:
+            username = await refresh_username(int(user_key))
+        except Exception:
+            pass
+
+    note = info.get("note", "")
+    max_devs = info.get("max_devices", DEFAULT_MAX_DEVICES)
+    admin_disabled = info.get("admin_disabled", False)
+
+    inbounds, _ = await api_get_inbounds()
+    total_up = 0
+    total_down = 0
+    active_count = 0
+    devs_in_ib = [d for d in devices if d.get("ib_id") == ib_id_default]
+    for d in devs_in_ib:
+        ib = next((i for i in inbounds if i.get("id") == d.get("ib_id")), None)
+        if not ib:
+            continue
+        cl = next((c for c in parse_clients(ib) if c.get("email") == d.get("email")), None)
+        if cl and cl.get("enable", True):
+            active_count += 1
+        stats_map = get_client_stats_map(ib)
+        s = stats_map.get(d.get("email"), {})
+        total_up += s.get("up", 0)
+        total_down += s.get("down", 0)
+
+    status = "🚫 Заблокировано" if admin_disabled else (f"✅ Активен ({active_count}/{len(devs_in_ib)})" if devs_in_ib else "📭 Нет устройств")
+    if user_key.startswith("anon_"):
+        header = "👤 <b>Пользователь без TG ID</b>"
+    else:
+        username_str = f" (@{username})" if username else ""
+        header = f"👤 <b>TG: {user_key}</b>{username_str}"
+    note_str = f"\n📝 Заметка: <i>{html.escape(note)}</i>" if note else ""
+    text = (
+        f"{header}{note_str}\n\n"
+        f"📌 Статус: {status}\n"
+        f"📱 Устройств: <b>{len(devs_in_ib)} / {max_devs}</b>\n"
+        f"📤 Общий: <b>{format_bytes(total_up)}</b>\n"
+        f"📥 Общий: <b>{format_bytes(total_down)}</b>"
+    )
+    text += "\n\nВыберите устройство или действие:" if devs_in_ib else "\n\n<i>Устройств нет. Пользователь может добавить их через /myvpn</i>"
+    kb = user_menu_kb(user_key, admin_disabled, devices, ib_id_default)
+    if edit:
+        await call_or_msg.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    else:
+        await call_or_msg.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+async def _refresh_client_view(call: types.CallbackQuery, cl_h: str):
+    info = _cache.get(cl_h, {})
+    email = info.get("email", "?")
+    ib_id = info.get("ib_id")
+    inbounds, _ = await api_get_inbounds()
+    inbound = next((ib for ib in inbounds if ib.get("id") == ib_id), None)
+    if not inbound:
+        return
+
+    owner_user_key = info.get("owner_uk", "")
+    if owner_user_key:
+        await sync_user_devices_with_panel(str(owner_user_key))
+
+    client = await api_get_client(email)
+    if not client:
+        return
+
+    stats_map = get_client_stats_map(inbound)
+    stats = stats_map.get(email, {})
+    enabled = client.get("enable", True)
+    up = format_bytes(stats.get("up", 0))
+    down = format_bytes(stats.get("down", 0))
+    total = stats.get("total", 0)
+    total_str = format_bytes(total) if total > 0 else "∞"
+    expiry = client.get("expiryTime", 0)
+    expiry_str = "∞" if not expiry or expiry == 0 else f"{expiry}"
+    status = "✅ Активен" if enabled else "❌ Отключён"
+
+    if not owner_user_key:
+        for uk, uinfo in load_vpn_users().items():
+            for d in uinfo.get("devices", []):
+                if d.get("ib_id") == ib_id and d.get("email") == email:
+                    owner_user_key = uk
+                    break
+            if owner_user_key:
+                break
+
+    note = get_client_note(ib_id, email) if not owner_user_key else ""
+    text = f"👤 <b>{email}</b>\n\n"
+    if owner_user_key:
+        if owner_user_key.startswith("anon_"):
+            text += "👥 Владелец: <i>без TG</i>\n"
+        else:
+            text += f"👥 Владелец: TG <code>{owner_user_key}</code>\n"
+    text += (
+        f"📌 Статус: {status}\n"
+        f"📤 Отправлено: <b>{up}</b>\n"
+        f"📥 Получено: <b>{down}</b>\n"
+        f"💾 Лимит: <b>{total_str}</b>\n"
+        f"⏳ Срок: <b>{expiry_str}</b>"
+    )
+    if note:
+        text += f"\n📝 Заметка: <i>{html.escape(note)}</i>"
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=client_actions_kb(cl_h, enabled, owner_user_key))
+    except Exception:
+        pass

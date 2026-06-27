@@ -6,94 +6,146 @@ import aiohttp
 
 from xui.config_runtime import get_xui_token, get_xui_url
 
+_session: aiohttp.ClientSession | None = None
+
+
+async def get_session() -> aiohttp.ClientSession:
+    global _session
+    if _session is None or _session.closed:
+        connector = aiohttp.TCPConnector(ssl=False)
+        _session = aiohttp.ClientSession(connector=connector)
+    return _session
+
+
+async def close_session() -> None:
+    global _session
+    if _session and not _session.closed:
+        await _session.close()
+
 
 def _headers() -> dict[str, str]:
     token = get_xui_token().strip()
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
+    headers = {"Accept": "application/json"}
     if token:
-        headers.update(
-            {
-                "Authorization": f"Bearer {token}",
-                "X-API-KEY": token,
-                "X-Token": token,
-                "token": token,
-            }
-        )
+        headers["Authorization"] = f"Bearer {token}"
     return headers
 
 
-def _url(path: str) -> str:
-    base = get_xui_url().rstrip("/")
-    if not path.startswith("/"):
-        path = "/" + path
-    return f"{base}{path}"
-
-
-async def xui_request(method: str, path: str, *, json_data: Any | None = None) -> tuple[dict[str, Any] | None, str]:
-    url = _url(path)
+async def xui_get(path: str) -> dict:
+    xui_url = get_xui_url()
+    xui_token = get_xui_token()
+    if not xui_url or not xui_token:
+        return {"success": False, "msg": "XUI_URL/XUI_TOKEN not configured"}
+    session = await get_session()
     try:
-        timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(timeout=timeout, headers=_headers()) as session:
-            async with session.request(method.upper(), url, json=json_data) as resp:
-                text = await resp.text()
-                if "application/json" in resp.headers.get("Content-Type", ""):
-                    try:
-                        return await resp.json(content_type=None), ""
-                    except Exception:
-                        return None, text
-                return None, text
-    except Exception as exc:
-        return None, str(exc)
+        async with session.get(f"{xui_url}{path}", headers=_headers(), ssl=False) as resp:
+            text = await resp.text()
+            print(f"[XUI GET] {path} → {resp.status} {text[:200]}")
+            try:
+                return await resp.json(content_type=None)
+            except Exception:
+                return {"success": False, "msg": f"HTTP {resp.status}: {text[:100]}"}
+    except Exception as e:
+        return {"success": False, "msg": str(e)}
 
 
-async def xui_get(path: str) -> tuple[dict[str, Any] | None, str]:
-    return await xui_request("GET", path)
+async def xui_post(path: str, data=None) -> dict:
+    xui_url = get_xui_url()
+    xui_token = get_xui_token()
+    if not xui_url or not xui_token:
+        return {"success": False, "msg": "XUI_URL/XUI_TOKEN not configured"}
+    session = await get_session()
+    try:
+        kwargs = {
+            "headers": {
+                "Authorization": f"Bearer {xui_token}",
+                "Content-Type": "application/json",
+            },
+            "ssl": False,
+            "allow_redirects": True,
+        }
+        if data is not None:
+            kwargs["json"] = data
+        async with session.post(f"{xui_url}{path}", **kwargs) as resp:
+            text = await resp.text()
+            print(f"[XUI POST] {path} → {resp.status} {text[:200]}")
+            try:
+                return await resp.json(content_type=None)
+            except Exception:
+                return {"success": False, "msg": f"HTTP {resp.status}: {text[:100]}"}
+    except Exception as e:
+        return {"success": False, "msg": str(e)}
 
 
-async def xui_post(path: str, json_data: Any | None = None) -> tuple[dict[str, Any] | None, str]:
-    return await xui_request("POST", path, json_data=json_data)
-
-
-def _extract_list_payload(data: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _extract_obj(data: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(data, dict):
-        return []
-
-    candidates: list[Any] = [
-        data.get("obj"),
-        data.get("data"),
-        data.get("result"),
-        data.get("inbounds"),
-    ]
-    for item in candidates:
-        if isinstance(item, list):
-            return [x for x in item if isinstance(x, dict)]
-        if isinstance(item, dict):
-            nested = item.get("inbounds")
-            if isinstance(nested, list):
-                return [x for x in nested if isinstance(x, dict)]
-            for key in ("list", "items"):
-                nested_list = item.get(key)
-                if isinstance(nested_list, list):
-                    return [x for x in nested_list if isinstance(x, dict)]
-    return []
+        return {}
+    for key in ("obj", "data", "result"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            return value
+    return data
 
 
 async def api_get_inbounds() -> tuple[list[dict[str, Any]], str]:
-    paths = [
-        "/panel/api/inbounds/list",
-        "/panel/api/inbounds",
-        "/api/inbounds/list",
-        "/api/inbounds",
-    ]
-    last_err = ""
-    for path in paths:
-        data, err = await xui_get(path)
-        if err:
-            last_err = err
-        payload = _extract_list_payload(data)
-        if payload:
-            return payload, ""
-    return [], last_err or "Некорректный ответ панели"
+    result = await xui_get("/panel/api/inbounds/list")
+    if result.get("success"):
+        obj = result.get("obj", [])
+        return (obj if isinstance(obj, list) else [], "")
+    # fallback for different panels
+    for path in ("/panel/api/inbounds", "/api/inbounds/list", "/api/inbounds"):
+        result = await xui_get(path)
+        if result.get("success"):
+            obj = result.get("obj", [])
+            if isinstance(obj, list):
+                return obj, ""
+    return [], result.get("msg", "Неизвестная ошибка API")
+
+
+async def api_get_client(email: str) -> dict | None:
+    result = await xui_get(f"/panel/api/clients/get/{email}")
+    if not result.get("success"):
+        return None
+    obj = _extract_obj(result)
+    client = obj.get("client") if isinstance(obj.get("client"), dict) else obj
+    return client if isinstance(client, dict) else None
+
+
+async def api_add_client(ib_id: int, email: str, expiry_days: int, limit_gb: float, flow: str = "") -> tuple[dict, str]:
+    import time
+    import uuid as uuid_lib
+
+    expiry_time = 2523456000000  # 12.12.2050
+    if expiry_days > 0:
+        expiry_time = int((time.time() + expiry_days * 86400) * 1000)
+    total_bytes = 0 if limit_gb <= 0 else int(limit_gb * 1024 ** 3)
+    client_uuid = str(uuid_lib.uuid4())
+    client = {
+        "id": client_uuid,
+        "email": email,
+        "flow": flow,
+        "limitIp": 0,
+        "totalGB": total_bytes,
+        "expiryTime": expiry_time,
+        "enable": True,
+        "tgId": 0,
+        "reset": 0,
+    }
+    result = await xui_post("/panel/api/clients/add", data={"client": client, "inboundIds": [ib_id]})
+    return result, client_uuid
+
+
+async def api_del_client_by_email(email: str) -> dict:
+    return await xui_post(f"/panel/api/clients/del/{email}")
+
+
+async def api_update_client(email: str, client_obj: dict) -> dict:
+    allowed = {"email", "subId", "id", "flow", "totalGB", "expiryTime", "limitIp", "tgId", "comment", "enable", "reset"}
+    payload = {k: v for k, v in client_obj.items() if k in allowed}
+    if "id" in payload and isinstance(payload["id"], int):
+        payload.pop("id", None)
+    return await xui_post(f"/panel/api/clients/update/{email}", data=payload)
+
+
+async def api_reset_client_traffic(email: str) -> dict:
+    return await xui_post(f"/panel/api/clients/resetTraffic/{email}")
