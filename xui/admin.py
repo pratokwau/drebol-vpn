@@ -583,3 +583,23 @@ async def cb_client_delete(call: types.CallbackQuery):
                 break
     await call.message.edit_text("✅ Клиент удалён.")
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("xui_tog_"))
+async def cb_client_toggle(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    client_hash = call.data[len("xui_tog_"):]
+    info = _cache_lookup(client_hash)
+    email = info.get("email", "")
+    if not email:
+        return await call.answer("Клиент не найден", show_alert=True)
+    client = await api_get_client(email)
+    if not client:
+        return await call.answer("Не удалось загрузить клиента", show_alert=True)
+    client["enable"] = not bool(client.get("enable", True))
+    result = await api_update_client(email, client)
+    if not result.get("success", True):
+        return await call.answer(result.get("msg", "Не удалось обновить клиента"), show_alert=True)
+    await _refresh_client_view(call, client_hash)
+    await call.answer("Состояние обновлено")
