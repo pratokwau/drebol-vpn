@@ -298,8 +298,19 @@ async def cb_user_unblock(call: types.CallbackQuery):
     user_key, ib_id = _decode_user_payload(payload)
     if not user_key:
         return await call.answer("Пользователь не найден", show_alert=True)
+    info = load_vpn_users().get(user_key, {})
+    for device in info.get("devices", []):
+        email = device.get("email", "")
+        if not email:
+            continue
+        client = await api_get_client(email)
+        if client:
+            client["enable"] = True
+            await api_update_client(email, client)
     if user_key.isdigit():
         set_admin_disabled(int(user_key), False)
+    else:
+        set_admin_disabled_key(user_key, False)
     await _show_user_menu(call.message, user_key, ib_id, edit=True)
     await call.answer("Пользователь разблокирован")
 
@@ -314,8 +325,19 @@ async def cb_user_block(call: types.CallbackQuery):
     user_key, ib_id = _decode_user_payload(payload)
     if not user_key:
         return await call.answer("Пользователь не найден", show_alert=True)
+    info = load_vpn_users().get(user_key, {})
+    for device in info.get("devices", []):
+        email = device.get("email", "")
+        if not email:
+            continue
+        client = await api_get_client(email)
+        if client:
+            client["enable"] = False
+            await api_update_client(email, client)
     if user_key.isdigit():
         set_admin_disabled(int(user_key), True)
+    else:
+        set_admin_disabled_key(user_key, True)
     await _show_user_menu(call.message, user_key, ib_id, edit=True)
     await call.answer("Пользователь заблокирован")
 
