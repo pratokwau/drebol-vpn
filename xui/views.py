@@ -25,6 +25,26 @@ from xui.storage import (
 from xui.utils import _cache, cache, format_bytes
 
 
+def _format_limit_gb(value) -> str:
+    if value in (None, "", 0, 0.0):
+        return "∞"
+    try:
+        return f"{float(value):g} GB"
+    except Exception:
+        return "∞"
+
+
+def _format_expiry_time(value) -> str:
+    if value in (None, "", 0, DEFAULT_EXPIRY_TIME_MS):
+        return "12.12.2050"
+    try:
+        from datetime import datetime
+
+        return datetime.fromtimestamp(int(value) / 1000).strftime("%d.%m.%Y")
+    except Exception:
+        return str(value)
+
+
 async def sync_user_devices_with_panel(user_key: str) -> bool:
     data = load_vpn_users()
     info = data.get(user_key)
@@ -213,8 +233,8 @@ async def _show_user_settings(call_or_msg, user_key: str, edit: bool = True):
         "⚙️ <b>Настройки пользователя</b>\n\n"
         f"👤 TG: <code>{user_key}</code>\n"
         f"📱 Лимит устройств: <b>{get_effective_user_setting(info, 'max_devices')}</b>\n"
-        f"💾 Лимит ГБ: <b>{info.get('limit_gb', DEFAULT_LIMIT_GB)}</b>\n"
-        f"⏳ Дата окончания: <b>{info.get('expiry_time_ms', DEFAULT_EXPIRY_TIME_MS)}</b>\n"
+        f"💾 Лимит ГБ: <b>{_format_limit_gb(info.get('limit_gb', DEFAULT_LIMIT_GB))}</b>\n"
+        f"⏳ Дата окончания: <b>{_format_expiry_time(info.get('expiry_time_ms', DEFAULT_EXPIRY_TIME_MS))}</b>\n"
         f"🌐 Лимит IP: <b>{info.get('limit_ip', DEFAULT_LIMIT_IP)}</b>"
     )
     kb = user_settings_kb(user_key, info)

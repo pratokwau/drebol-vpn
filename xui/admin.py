@@ -82,6 +82,11 @@ def _parse_max_devices(raw: str | None) -> int:
     return max(1, int(text))
 
 
+def _sanitize_slug(text: str) -> str:
+    slug = re.sub(r"[^\w-]+", "_", text.strip().lower(), flags=re.UNICODE)
+    return slug.strip("_") or "device"
+
+
 def _cache_lookup(hash_value: str) -> dict:
     from xui.utils import _cache
 
@@ -100,6 +105,12 @@ async def _render_user(call_or_msg, user_key: str, ib_id: int, edit: bool = True
 
 async def _render_settings(call_or_msg, user_key: str, edit: bool = True):
     await _show_user_settings(call_or_msg, user_key, edit=edit)
+
+
+def _settings_back_button(user_key: str) -> str:
+    from xui.utils import cache
+
+    return cache(f"usetm_back_{user_key}", {"user_key": user_key, "ib_id": 0})
 
 
 async def _ensure_user_owner_key(user_key: str) -> str:
@@ -251,8 +262,17 @@ async def user_settings_value(message: types.Message, state: FSMContext):
     except ValueError:
         await message.answer("Некорректное значение.\n\nДля выхода введите /cancel")
         return
+    current = load_vpn_users().get(user_key, {})
     await state.clear()
-    await message.answer("✅ Настройка сохранена.")
+    await message.answer(
+        "✅ Настройка сохранена.",
+        reply_markup=types.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [types.InlineKeyboardButton(text="⬅️ Назад", callback_data=f"xui_usetm_{_settings_back_button(user_key)}")],
+            ]
+        ),
+    )
+    await _show_user_settings(message, user_key, edit=False)
 
 
 @router.callback_query(F.data.startswith("xui_adduser_"))
@@ -333,7 +353,13 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer("⛔ Не выбран инбаунд для добавления устройства.")
         return
-    email = f"{user_key}_{secrets.token_hex(3)}"
+    devices = info.get("devices", [])
+    if len(devices) >= int(info.get("max_devices", 1) or 1):
+        await state.clear()
+        await message.answer("⛔ Достигнут лимит устройств.")
+        return
+    slug = _sanitize_slug(name)
+    email = f"{user_key}_{slug}"
     expiry_time_ms = int(info.get("expiry_time_ms") or 2523456000000)
     limit_gb = float(info.get("limit_gb") or 0.0)
     limit_ip = int(info.get("limit_ip") or 2)
@@ -350,7 +376,8 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer(f"❌ Не удалось создать устройство.\n<code>{result.get('msg', '')}</code>", parse_mode=ParseMode.HTML)
         return
-    add_device_to_user(int(user_key) if user_key.isdigit() else 0, base_ib, client_uuid, email, limit_ip=limit_ip)
+    if user_key.isdigit():
+        add_device_to_user(int(user_key), base_ib, client_uuid, email, limit_ip=limit_ip)
     await state.clear()
     await message.answer(
         f"✅ Устройство <code>{email}</code> создано.\n"
