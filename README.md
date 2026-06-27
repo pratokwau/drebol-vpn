@@ -1,4 +1,4 @@
-# Drebol VPN Bot
+# drebol-vpn
 
 Telegram-бот для управления 3x-ui из админского меню.
 
@@ -13,7 +13,7 @@ Telegram-бот для управления 3x-ui из админского ме
   - `XUI_URL`
   - `XUI_TOKEN`
 - автозапуск через `systemd`
-- установка в `/root/drebolvpn`
+- установка в `/root/drebol-vpn`
 
 ## Установка
 
@@ -40,8 +40,8 @@ bash <(curl -Ls https://raw.githubusercontent.com/pratokwau/drebol-vpn/main/inst
 В `install.sh` создаётся сервис `systemd`, после чего выполняются команды:
 
 - `systemctl daemon-reload`
-- `systemctl enable drebolvpn`
-- `systemctl restart drebolvpn`
+- `systemctl enable drebol-vpn`
+- `systemctl restart drebol-vpn`
 
 Это означает, что после рестарта сервера бот поднимется сам.
 
@@ -50,13 +50,13 @@ bash <(curl -Ls https://raw.githubusercontent.com/pratokwau/drebol-vpn/main/inst
 Посмотреть лог бота в консоли можно так:
 
 ```bash
-journalctl -u drebolvpn -f
+journalctl -u drebol-vpn -f
 ```
 
 Если нужен просто последний кусок лога:
 
 ```bash
-journalctl -u drebolvpn -n 100 --no-pager
+journalctl -u drebol-vpn -n 100 --no-pager
 ```
 
 ## Первичная настройка
@@ -74,7 +74,7 @@ python3 install.py
 - `data/settings.json`
 - `data/xui_settings.json`
 
-По умолчанию бот ставится в `/root/drebolvpn`.
+По умолчанию бот ставится в `/root/drebol-vpn`.
 
 ## Команды
 

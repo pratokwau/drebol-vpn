@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-SERVICE_NAME = os.getenv("SERVICE_NAME", "drebolvpn")
+SERVICE_NAME = os.getenv("SERVICE_NAME", "drebol-vpn")
 REPO_URL = os.getenv("REPO_URL", "https://github.com/pratokwau/drebol-vpn.git")
 
 
