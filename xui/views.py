@@ -38,7 +38,7 @@ async def render_inbounds(message_or_call):
         f"📡 Инбаундов: <b>{len(inbounds)}</b>\n\n"
         f"Выберите инбаунд:"
     )
-    if hasattr(message_or_call, "edit_text"):
+    if hasattr(message_or_call, "edit_text") and getattr(getattr(message_or_call, "from_user", None), "is_bot", False):
         await message_or_call.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=inbounds_kb(inbounds))
     else:
         await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=inbounds_kb(inbounds))
