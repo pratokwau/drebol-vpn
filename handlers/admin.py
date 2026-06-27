@@ -90,7 +90,8 @@ async def cb_xui_set_url(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(XuiSettings.url)
     await call.message.edit_text(
         "Отправь <b>URL панели 3x-ui</b> следующим сообщением.\n\n"
-        "Пример: <code>https://example.com</code>",
+        "Пример: <code>https://example.com</code>\n\n"
+        "Для выхода введите /cancel",
         parse_mode=ParseMode.HTML,
     )
     await call.answer()
@@ -102,7 +103,8 @@ async def cb_xui_set_token(call: types.CallbackQuery, state: FSMContext):
         return await call.answer("Нет доступа", show_alert=True)
     await state.set_state(XuiSettings.token)
     await call.message.edit_text(
-        "Отправь <b>API токен</b> панели следующим сообщением.",
+        "Отправь <b>API токен</b> панели следующим сообщением.\n\n"
+        "Для выхода введите /cancel",
         parse_mode=ParseMode.HTML,
     )
     await call.answer()
