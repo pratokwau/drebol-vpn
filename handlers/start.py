@@ -15,7 +15,7 @@ async def cmd_start(message: types.Message):
     user_id = message.from_user.id
 
     text = (
-        "<b>drebol</b> приветствует вас!\n\n"
+        "<b>drebol-vpn</b> приветствует вас!\n\n"
         "• /start — Главное меню\n"
         "• /cancel — Отмена действия"
     )
