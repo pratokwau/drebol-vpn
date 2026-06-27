@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from aiogram import BotCommand, BotCommandScopeChat
+from aiogram.types import BotCommand, BotCommandScopeChat
 
 from config import ADMIN_ID
 from handlers.admin import router as admin_router
