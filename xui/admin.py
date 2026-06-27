@@ -7,7 +7,7 @@ from aiogram.filters import Command
 from xui.api import api_get_inbounds
 from xui.keyboards import inbounds_kb
 from xui.utils import is_admin
-from xui.views import render_inbound
+from xui.views import render_inbound, render_inbounds
 
 
 router = Router()
@@ -33,17 +33,8 @@ async def cmd_adminxui(message: types.Message):
 async def cb_inbounds(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
-    inbounds, err = await api_get_inbounds()
-    if not inbounds:
-        await call.answer(f"Не удалось загрузить инбаунды: {err}", show_alert=True)
-        return
-    text = "📡 <b>Инбаунды</b>\n\nВыберите инбаунд:"
-    await call.message.edit_text(
-        text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=inbounds_kb(inbounds),
-    )
     await call.answer()
+    await render_inbounds(call.message)
 
 
 @router.callback_query(F.data.startswith("xui_ib_"))

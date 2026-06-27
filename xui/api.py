@@ -9,13 +9,17 @@ from xui.config_runtime import get_xui_token, get_xui_url
 
 def _headers() -> dict[str, str]:
     token = get_xui_token().strip()
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
     if token:
         headers.update(
             {
                 "Authorization": f"Bearer {token}",
                 "X-API-KEY": token,
                 "X-Token": token,
+                "token": token,
             }
         )
     return headers
@@ -53,13 +57,43 @@ async def xui_post(path: str, json_data: Any | None = None) -> tuple[dict[str, A
     return await xui_request("POST", path, json_data=json_data)
 
 
+def _extract_list_payload(data: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(data, dict):
+        return []
+
+    candidates: list[Any] = [
+        data.get("obj"),
+        data.get("data"),
+        data.get("result"),
+        data.get("inbounds"),
+    ]
+    for item in candidates:
+        if isinstance(item, list):
+            return [x for x in item if isinstance(x, dict)]
+        if isinstance(item, dict):
+            nested = item.get("inbounds")
+            if isinstance(nested, list):
+                return [x for x in nested if isinstance(x, dict)]
+            for key in ("list", "items"):
+                nested_list = item.get(key)
+                if isinstance(nested_list, list):
+                    return [x for x in nested_list if isinstance(x, dict)]
+    return []
+
+
 async def api_get_inbounds() -> tuple[list[dict[str, Any]], str]:
-    data, err = await xui_get("/panel/api/inbounds/list")
-    if not data:
-        return [], err
-    obj = data.get("obj") if isinstance(data, dict) else None
-    if isinstance(obj, list):
-        return obj, ""
-    if isinstance(obj, dict):
-        return obj.get("inbounds", []) if isinstance(obj.get("inbounds", []), list) else [], ""
-    return [], err or "Некорректный ответ панели"
+    paths = [
+        "/panel/api/inbounds/list",
+        "/panel/api/inbounds",
+        "/api/inbounds/list",
+        "/api/inbounds",
+    ]
+    last_err = ""
+    for path in paths:
+        data, err = await xui_get(path)
+        if err:
+            last_err = err
+        payload = _extract_list_payload(data)
+        if payload:
+            return payload, ""
+    return [], last_err or "Некорректный ответ панели"

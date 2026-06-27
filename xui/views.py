@@ -29,7 +29,9 @@ def inbound_text(inbound: dict) -> str:
 async def render_inbounds(message_or_call):
     inbounds, err = await api_get_inbounds()
     if not inbounds:
-        return await message_or_call.answer(f"❌ Не удалось загрузить инбаунды.\n<code>{err}</code>")
+        if hasattr(message_or_call, "edit_text"):
+            return await message_or_call.edit_text(f"❌ Не удалось загрузить инбаунды.\n<code>{err}</code>", parse_mode=ParseMode.HTML)
+        return await message_or_call.answer(f"❌ Не удалось загрузить инбаунды.\n<code>{err}</code>", parse_mode=ParseMode.HTML)
     text = (
         f"🖥 <b>3X-UI Панель</b>\n"
         f"━━━━━━━━━━━━━━\n"
