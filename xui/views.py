@@ -73,19 +73,27 @@ def inbound_text(inbound: dict) -> str:
 async def render_inbounds(message_or_call, *, show_settings: bool = True):
     inbounds, err = await api_get_inbounds()
     if not inbounds:
-        if hasattr(message_or_call, "edit_text"):
-            return await message_or_call.edit_text(f"❌ Не удалось загрузить инбаунды.\n<code>{err}</code>", parse_mode=ParseMode.HTML)
-        return await message_or_call.answer(f"❌ Не удалось загрузить инбаунды.\n<code>{err}</code>", parse_mode=ParseMode.HTML)
+        text = f"❌ Не удалось загрузить инбаунды.\n<code>{err}</code>"
+        if isinstance(message_or_call, types.CallbackQuery):
+            try:
+                return await message_or_call.message.edit_text(text, parse_mode=ParseMode.HTML)
+            except Exception:
+                return await message_or_call.message.answer(text, parse_mode=ParseMode.HTML)
+        return await message_or_call.answer(text, parse_mode=ParseMode.HTML)
     text = (
         f"🖥 <b>3X-UI Панель</b>\n"
         f"━━━━━━━━━━━━━━\n"
         f"📡 Инбаундов: <b>{len(inbounds)}</b>\n\n"
         f"Выберите инбаунд:"
     )
-    if hasattr(message_or_call, "edit_text") and getattr(getattr(message_or_call, "from_user", None), "is_bot", False):
-        await message_or_call.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=inbounds_kb(inbounds, show_settings=show_settings))
-    else:
-        await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=inbounds_kb(inbounds, show_settings=show_settings))
+    markup = inbounds_kb(inbounds, show_settings=show_settings)
+    if isinstance(message_or_call, types.CallbackQuery):
+        try:
+            await message_or_call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        except Exception:
+            await message_or_call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        return
+    await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 
 async def render_inbound(call, inbound: dict):
