@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import aiohttp
@@ -7,6 +8,10 @@ import aiohttp
 from xui.config_runtime import get_xui_token, get_xui_url
 
 _session: aiohttp.ClientSession | None = None
+
+
+def _build_url(base: str, path: str) -> str:
+    return base.rstrip("/") + "/" + path.lstrip("/")
 
 
 async def get_session() -> aiohttp.ClientSession:
@@ -38,11 +43,19 @@ async def xui_get(path: str) -> dict:
         return {"success": False, "msg": "XUI_URL/XUI_TOKEN not configured"}
     session = await get_session()
     try:
-        async with session.get(f"{xui_url}{path}", headers=_headers(), ssl=False) as resp:
+        url = _build_url(xui_url, path)
+        async with session.get(url, headers=_headers(), ssl=False) as resp:
             text = await resp.text()
             print(f"[XUI GET] {path} → {resp.status} {text[:200]}")
+            if not text.strip():
+                return {"success": False, "msg": f"Пустой ответ ({resp.status}) от панели"}
+            if text.strip() == "null":
+                return {"success": False, "msg": f"Пустой JSON-ответ ({resp.status}) от панели"}
             try:
-                return await resp.json(content_type=None)
+                payload = json.loads(text)
+                if payload is None:
+                    return {"success": False, "msg": f"Пустой JSON-ответ ({resp.status}) от панели"}
+                return payload if isinstance(payload, dict) else {"success": True, "obj": payload}
             except Exception:
                 return {"success": False, "msg": f"HTTP {resp.status}: {text[:100]}"}
     except Exception as e:
@@ -56,6 +69,7 @@ async def xui_post(path: str, data=None) -> dict:
         return {"success": False, "msg": "XUI_URL/XUI_TOKEN not configured"}
     session = await get_session()
     try:
+        url = _build_url(xui_url, path)
         kwargs = {
             "headers": {
                 "Authorization": f"Bearer {xui_token}",
@@ -66,11 +80,18 @@ async def xui_post(path: str, data=None) -> dict:
         }
         if data is not None:
             kwargs["json"] = data
-        async with session.post(f"{xui_url}{path}", **kwargs) as resp:
+        async with session.post(url, **kwargs) as resp:
             text = await resp.text()
             print(f"[XUI POST] {path} → {resp.status} {text[:200]}")
+            if not text.strip():
+                return {"success": False, "msg": f"Пустой ответ ({resp.status}) от панели"}
+            if text.strip() == "null":
+                return {"success": False, "msg": f"Пустой JSON-ответ ({resp.status}) от панели"}
             try:
-                return await resp.json(content_type=None)
+                payload = json.loads(text)
+                if payload is None:
+                    return {"success": False, "msg": f"Пустой JSON-ответ ({resp.status}) от панели"}
+                return payload if isinstance(payload, dict) else {"success": True, "obj": payload}
             except Exception:
                 return {"success": False, "msg": f"HTTP {resp.status}: {text[:100]}"}
     except Exception as e:
@@ -88,14 +109,12 @@ def _extract_obj(data: dict[str, Any] | None) -> dict[str, Any]:
 
 
 async def api_get_inbounds() -> tuple[list[dict[str, Any]], str]:
-    result = await xui_get("/panel/api/inbounds/list")
-    if not isinstance(result, dict):
-        return [], "Пустой ответ от панели 3x-ui"
-    if result.get("success"):
-        obj = result.get("obj", [])
-        return (obj if isinstance(obj, list) else [], "")
-    # fallback for different panels
-    for path in ("/panel/api/inbounds", "/api/inbounds/list", "/api/inbounds"):
+    for path in (
+        "/panel/api/inbounds/list",
+        "/panel/api/inbounds",
+        "/api/inbounds/list",
+        "/api/inbounds",
+    ):
         result = await xui_get(path)
         if not isinstance(result, dict):
             continue
