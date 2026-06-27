@@ -114,6 +114,20 @@ def _settings_back_button(user_key: str) -> str:
     return cache(f"usetm_back_{user_key}", {"user_key": user_key, "ib_id": 0})
 
 
+def _format_user_menu_text(user_key: str, info: dict, *, devices: list | None = None) -> tuple[str, int]:
+    devices = info.get("devices", []) if devices is None else devices
+    max_devices = int(info.get("max_devices", 1) or 1)
+    if user_key.startswith("anon_"):
+        header = "👤 <b>Пользователь без TG ID</b>"
+    else:
+        header = f"👤 <b>TG: {user_key}</b>"
+    return (
+        f"{header}\n\n"
+        f"📱 Устройств: <b>{len(devices)} / {max_devices}</b>",
+        max_devices,
+    )
+
+
 async def _ensure_user_owner_key(user_key: str) -> str:
     if user_key.startswith("anon_"):
         return user_key
@@ -321,6 +335,8 @@ async def cb_user_add_device(call: types.CallbackQuery, state: FSMContext):
     info = load_vpn_users().get(user_key, {})
     if not user_settings_ready(info):
         return await call.answer("Сначала настройте лимиты пользователя", show_alert=True)
+    if len(info.get("devices", [])) >= int(info.get("max_devices", 1) or 1):
+        return await call.answer("⛔ Достигнут лимит устройств", show_alert=True)
     await state.update_data(target_user_key=user_key, target_ib_id=ib_id_default or int(info.get("default_ib_id", 0) or 0))
     await state.set_state(XuiAdminAddDevice.waiting_name)
     await call.message.edit_text(
@@ -398,11 +414,38 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
             pass
 
 
-@router.callback_query(F.data.startswith("xui_udel_"))
+@router.callback_query(F.data.startswith("xui_udelall_"))
+async def cb_user_delete_all(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    payload = _cache_lookup(call.data[len("xui_udelall_"):])
+    user_key, ib_id = _decode_user_payload(payload)
+    if not user_key:
+        return await call.answer("Пользователь не найден", show_alert=True)
+    info = load_vpn_users().get(user_key, {})
+    removed = 0
+    for device in list(info.get("devices", [])):
+        email = device.get("email", "")
+        if not email:
+            continue
+        await api_del_client_by_email(email)
+        removed += 1
+        if user_key.isdigit():
+            remove_device_from_user(int(user_key), int(device.get("ib_id", 0) or 0), email)
+    if not user_key.isdigit():
+        data = load_vpn_users()
+        if user_key in data:
+            data[user_key]["devices"] = []
+            save_vpn_users(data)
+    await _show_user_menu(call.message, user_key, ib_id, edit=True)
+    await call.answer("Устройства удалены" if removed else "Устройств не было")
+
+
+@router.callback_query(F.data.startswith("xui_udel_user_"))
 async def cb_user_delete(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
-    payload = _cache_lookup(call.data[len("xui_udel_"):])
+    payload = _cache_lookup(call.data[len("xui_udel_user_"):])
     user_key, _ = _decode_user_payload(payload)
     if not user_key:
         return await call.answer("Пользователь не найден", show_alert=True)

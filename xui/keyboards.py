@@ -186,7 +186,7 @@ def user_menu_kb(user_key: str, admin_disabled: bool, devices: list, ib_id_defau
     else:
         rows.append([InlineKeyboardButton(text="🔓 Отвязать TG", callback_data=f"xui_uunbind_{uk_h}")])
     rows.append([InlineKeyboardButton(text="🗑 Удалить все устройства", callback_data=f"xui_udelall_{uk_h}")])
-    rows.append([InlineKeyboardButton(text="🗑 Удалить пользователя", callback_data=f"xui_udel_{uk_h}")])
+    rows.append([InlineKeyboardButton(text="🗑 Удалить пользователя", callback_data=f"xui_udel_user_{uk_h}")])
     ib_h = cache(f"ib_{ib_id_default}", {"id": ib_id_default})
     rows.append([
         InlineKeyboardButton(text="🔄 Обновить", callback_data=f"xui_usr_{uk_h}"),
