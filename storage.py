@@ -6,6 +6,8 @@ from typing import Any
 
 from config import AUTH_FILE, SETTINGS_FILE, XUI_SETTINGS_FILE
 
+UPDATE_STATE_FILE = Path("data/update_state.json")
+
 
 def _ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -56,3 +58,17 @@ def load_xui_settings() -> dict[str, str]:
 
 def save_xui_settings(data: dict[str, str]) -> None:
     _write_json(Path(XUI_SETTINGS_FILE), {str(k): str(v) for k, v in data.items()})
+
+
+def load_update_state() -> dict[str, Any]:
+    raw = _read_json(UPDATE_STATE_FILE, {})
+    return raw if isinstance(raw, dict) else {}
+
+
+def save_update_state(data: dict[str, Any]) -> None:
+    _write_json(UPDATE_STATE_FILE, data)
+
+
+def clear_update_state() -> None:
+    if UPDATE_STATE_FILE.exists():
+        UPDATE_STATE_FILE.unlink()
