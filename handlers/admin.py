@@ -4,9 +4,9 @@ from aiogram import F, Router, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 
-from config import ADMIN_ID
 from updater import apply_update, update_available
-from xui.keyboards import admin_menu_kb
+from storage import load_xui_settings, save_xui_settings
+from xui.keyboards import settings_kb
 from xui.utils import is_admin
 
 
@@ -17,7 +17,7 @@ def _admin_kb() -> types.InlineKeyboardMarkup:
     configured = update_available()
     rows = [
         [types.InlineKeyboardButton(text="🔄 Проверить обновление", callback_data="app_update_check")],
-        [types.InlineKeyboardButton(text="⚙️ XUI", callback_data="xui_settings")],
+        [types.InlineKeyboardButton(text="⚙️ Настроить XUI", callback_data="admin_xui_settings")],
     ]
     if configured:
         rows[0] = [types.InlineKeyboardButton(text="⬆️ Обновить бота", callback_data="app_update_apply")]
@@ -38,6 +38,24 @@ async def cmd_admin(message: types.Message):
         parse_mode=ParseMode.HTML,
         reply_markup=_admin_kb(),
     )
+
+
+@router.callback_query(F.data == "admin_xui_settings")
+async def cb_admin_xui_settings(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    data = load_xui_settings()
+    url = data.get("XUI_URL") or "не задан"
+    token = data.get("XUI_TOKEN") or "не задан"
+    await call.message.edit_text(
+        "⚙️ <b>Настройки XUI</b>\n\n"
+        f"URL: <code>{url}</code>\n"
+        f"Токен: <code>{token}</code>\n\n"
+        "Сейчас это только просмотр. Следующим шагом можно добавить редактирование здесь же.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=settings_kb(),
+    )
+    await call.answer()
 
 
 @router.callback_query(F.data == "app_update_check")
