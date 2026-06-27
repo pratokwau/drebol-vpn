@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from aiogram.types import BotCommand, BotCommandScopeChat
-
+from aiogram.types import BotCommand
 from config import ADMIN_ID
 from handlers.admin import router as admin_router
 from handlers.cancel import router as cancel_router
@@ -17,19 +16,8 @@ async def setup_commands() -> None:
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="cancel", description="Отмена"),
         ]
     )
-    if ADMIN_ID:
-        await bot.set_my_commands(
-            [
-                BotCommand(command="start", description="Главное меню"),
-                BotCommand(command="cancel", description="Отмена"),
-                BotCommand(command="admin", description="Админ-панель"),
-                BotCommand(command="adminxui", description="Панель 3X-UI"),
-            ],
-            scope=BotCommandScopeChat(chat_id=ADMIN_ID),
-        )
 
 
 async def main() -> None:
