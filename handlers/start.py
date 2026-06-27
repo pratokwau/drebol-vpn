@@ -32,7 +32,7 @@ def _device_cache_key(ib_id: int, email: str) -> str:
 
 
 def _sanitize_slug(text: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9_-]+", "_", text.strip().lower())
+    slug = re.sub(r"[^\w-]+", "_", text.strip().lower(), flags=re.UNICODE)
     return slug.strip("_") or "device"
 
 
@@ -129,6 +129,11 @@ async def vpn_add_name(message: types.Message, state: FSMContext):
     if not name:
         await message.answer("Название не может быть пустым.\n\nДля выхода введите /cancel")
         return
+    devices = user_data.get("devices", [])
+    if len(devices) >= int(user_data.get("max_devices", 1) or 1):
+        await state.clear()
+        await message.answer("⛔ Достигнут лимит устройств.")
+        return
     await state.update_data(vpn_device_name=name)
     await state.set_state(XuiVpnAddDevice.waiting_limit_ip)
     await message.answer(
@@ -159,10 +164,6 @@ async def vpn_add_limit_ip(message: types.Message, state: FSMContext):
     data = await state.get_data()
     name = str(data.get("vpn_device_name") or "device")
     devices = user_data.get("devices", [])
-    if len(devices) >= int(user_data.get("max_devices", 1) or 1):
-        await state.clear()
-        await message.answer("⛔ Достигнут лимит устройств.")
-        return
     if not devices:
         await state.clear()
         await message.answer("⛔ У вас нет базового устройства для добавления ещё одного.")
