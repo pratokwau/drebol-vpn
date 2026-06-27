@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 from aiogram import F, Router, types
 from aiogram.enums import ParseMode
@@ -12,7 +13,7 @@ from loader import bot
 from xui.api import api_add_client, api_get_client, api_get_inbounds
 from xui.helpers import parse_clients
 from xui.keyboards import flow_choice_kb
-from xui.storage import DEFAULT_MAX_DEVICES, add_device_to_user, create_user, get_vpn_user, save_vpn_users
+from xui.storage import DEFAULT_MAX_DEVICES, add_device_to_user, create_user, get_vpn_user, save_vpn_users, set_user_vpn_access
 from xui.utils import is_admin
 from xui.views import _refresh_client_view, _show_user_menu, render_inbound, render_inbounds
 
@@ -26,6 +27,21 @@ class XuiAddClient(StatesGroup):
     limit_gb = State()
     expiry = State()
     flow = State()
+
+
+def _default_or_value(raw: str | None, default, parser):
+    text = (raw or "").strip()
+    if not text or text == "-":
+        return default
+    return parser(text)
+
+
+def _parse_expiry_date(raw: str | None) -> int:
+    text = (raw or "").strip()
+    if not text or text == "-":
+        return 2523456000000
+    dt = datetime.strptime(text, "%d.%m.%Y")
+    return int(dt.timestamp() * 1000)
 @router.message(Command("adminxui"))
 async def cmd_adminxui(message: types.Message):
     if not is_admin(message.from_user.id):
@@ -116,12 +132,11 @@ async def add_user_tg_id(message: types.Message, state: FSMContext):
     if not raw.isdigit():
         await message.answer("Нужен числовой TG ID.\n\nДля выхода введите /cancel")
         return
-    data = await state.get_data()
     await state.update_data(xui_tg_id=int(raw))
     await state.set_state(XuiAddClient.max_devices)
     await message.answer(
-        "Введите лимит устройств.\n"
-        f"Если отправите пустое значение, будет {DEFAULT_MAX_DEVICES}.\n\n"
+        "Введите лимит устройств или отправьте <code>-</code> для значения по умолчанию.\n"
+        f"По умолчанию: <b>{DEFAULT_MAX_DEVICES}</b>.\n\n"
         "Для выхода введите /cancel"
     )
 
@@ -131,20 +146,21 @@ async def add_user_max_devices(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     raw = (message.text or "").strip()
-    max_devices = DEFAULT_MAX_DEVICES
-    if raw:
+    if raw and raw != "-":
         try:
             max_devices = max(1, int(raw))
         except ValueError:
-            await message.answer(f"Введите число или оставьте пустым.\n\nДля выхода введите /cancel")
+            await message.answer("Введите число или <code>-</code>.\n\nДля выхода введите /cancel", parse_mode=ParseMode.HTML)
             return
+    else:
+        max_devices = DEFAULT_MAX_DEVICES
     await state.update_data(xui_max_devices=max_devices)
     await state.set_state(XuiAddClient.limit_gb)
     await message.answer(
-        "Введите лимит ГБ.\n"
-        "Если отправите пустое значение, будет бесконечность.\n\n"
+        "Введите лимит ГБ или отправьте <code>-</code> для бесконечности.\n"
+        "Пример: <code>100</code>\n\n"
         "Для выхода введите /cancel"
-    )
+    , parse_mode=ParseMode.HTML)
 
 
 @router.message(XuiAddClient.limit_gb)
@@ -152,19 +168,21 @@ async def add_user_limit_gb(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     raw = (message.text or "").strip()
-    limit_gb = 0.0
-    if raw:
+    if raw and raw != "-":
         try:
             limit_gb = float(raw)
         except ValueError:
-            await message.answer("Введите число или оставьте пустым.\n\nДля выхода введите /cancel")
+            await message.answer("Введите число или <code>-</code>.\n\nДля выхода введите /cancel", parse_mode=ParseMode.HTML)
             return
+    else:
+        limit_gb = 0.0
     await state.update_data(xui_limit_gb=limit_gb)
     await state.set_state(XuiAddClient.expiry)
     await message.answer(
-        "Введите срок окончания в днях.\n"
-        "Если отправите пустое значение, будет до 12.12.2050.\n\n"
+        "Введите дату окончания в формате <code>дд.мм.гггг</code> или отправьте <code>-</code> для дефолта.\n"
+        "Дефолт: <b>12.12.2050</b>.\n\n"
         "Для выхода введите /cancel"
+        , parse_mode=ParseMode.HTML
     )
 
 
@@ -173,13 +191,17 @@ async def add_user_expiry(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     raw = (message.text or "").strip()
-    expiry_days = 0
-    if raw:
+    if raw and raw != "-":
         try:
-            expiry_days = int(raw)
+            expiry_time = _parse_expiry_date(raw)
         except ValueError:
-            await message.answer("Введите число или оставьте пустым.\n\nДля выхода введите /cancel")
+            await message.answer(
+                "Нужен формат <code>дд.мм.гггг</code> или <code>-</code>.\n\nДля выхода введите /cancel",
+                parse_mode=ParseMode.HTML,
+            )
             return
+    else:
+        expiry_time = 2523456000000
 
     data = await state.get_data()
     tg_id = int(data["xui_tg_id"])
@@ -187,20 +209,27 @@ async def add_user_expiry(message: types.Message, state: FSMContext):
     limit_gb = float(data.get("xui_limit_gb", 0))
     ib_id = int(data.get("xui_ib_id", 0))
 
-    # В этой версии flow пока оставляем через пропуск.
-    result, client_uuid = await api_add_client(ib_id, f"{tg_id}_{ib_id}", expiry_days, limit_gb, "")
+    result, client_uuid = await api_add_client(
+        ib_id,
+        f"{tg_id}_{ib_id}",
+        0,
+        limit_gb,
+        "",
+        expiry_time_ms=expiry_time,
+    )
     if not result.get("success"):
         await message.answer(f"❌ Не удалось добавить пользователя.\n<code>{result.get('msg', '')}</code>", parse_mode=ParseMode.HTML)
         return
 
     create_user(tg_id, max_devices=max_devices)
     add_device_to_user(tg_id, ib_id, client_uuid, f"{tg_id}_{ib_id}")
+    set_user_vpn_access(tg_id, True)
 
     try:
         await bot.send_message(
             tg_id,
             "✅ <b>Вам был добавлен VPN.</b>\n\n"
-            "Введите /myvpn для управления.",
+            "Теперь в /start доступна команда /vpn для управления устройством.",
             parse_mode=ParseMode.HTML,
         )
     except Exception:

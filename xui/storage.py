@@ -52,6 +52,7 @@ def _migrate_vpn_users(data: dict) -> dict:
         info.setdefault("note", "")
         info.setdefault("max_devices", DEFAULT_MAX_DEVICES)
         info.setdefault("admin_disabled", False)
+        info.setdefault("has_vpn_access", False)
         if "devices" not in info:
             old_uuid = info.get("uuid")
             old_email = info.get("email")
@@ -98,6 +99,7 @@ def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str):
             "note": "",
             "max_devices": DEFAULT_MAX_DEVICES,
             "admin_disabled": False,
+            "has_vpn_access": False,
             "devices": [],
         }
     for d in data[key]["devices"]:
@@ -137,10 +139,19 @@ def create_user(tg_id: int | None, max_devices: int = DEFAULT_MAX_DEVICES, note:
         "note": note[:NOTE_MAX_LEN],
         "max_devices": max_devices,
         "admin_disabled": False,
+        "has_vpn_access": False,
         "devices": [],
     }
     save_vpn_users(data)
     return key
+
+
+def set_user_vpn_access(tg_id: int, value: bool = True):
+    data = load_vpn_users()
+    key = str(tg_id)
+    if key in data:
+        data[key]["has_vpn_access"] = bool(value)
+        save_vpn_users(data)
 
 
 def delete_user_completely(user_key: str):

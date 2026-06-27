@@ -134,12 +134,20 @@ async def api_get_client(email: str) -> dict | None:
     return client if isinstance(client, dict) else None
 
 
-async def api_add_client(ib_id: int, email: str, expiry_days: int, limit_gb: float, flow: str = "") -> tuple[dict, str]:
+async def api_add_client(
+    ib_id: int,
+    email: str,
+    expiry_days: int,
+    limit_gb: float,
+    flow: str = "",
+    *,
+    expiry_time_ms: int | None = None,
+) -> tuple[dict, str]:
     import time
     import uuid as uuid_lib
 
-    expiry_time = 2523456000000  # 12.12.2050
-    if expiry_days > 0:
+    expiry_time = 2523456000000 if expiry_time_ms is None else int(expiry_time_ms)
+    if expiry_time_ms is None and expiry_days > 0:
         expiry_time = int((time.time() + expiry_days * 86400) * 1000)
     total_bytes = 0 if limit_gb <= 0 else int(limit_gb * 1024 ** 3)
     client_uuid = str(uuid_lib.uuid4())
