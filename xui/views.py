@@ -7,8 +7,21 @@ from aiogram.enums import ParseMode
 
 from xui.api import api_get_client, api_get_inbounds
 from xui.helpers import get_client_stats_map, parse_clients
-from xui.keyboards import clients_kb, inbounds_kb, myvpn_device_kb, myvpn_main_kb, user_menu_kb, client_actions_kb
-from xui.storage import DEFAULT_MAX_DEVICES, get_client_note, get_vpn_user, load_vpn_users, refresh_username, save_vpn_users, set_user_username
+from xui.keyboards import clients_kb, inbounds_kb, myvpn_device_kb, myvpn_main_kb, user_menu_kb, client_actions_kb, user_settings_kb
+from xui.storage import (
+    DEFAULT_MAX_DEVICES,
+    DEFAULT_LIMIT_GB,
+    DEFAULT_LIMIT_IP,
+    DEFAULT_EXPIRY_TIME_MS,
+    get_client_note,
+    get_effective_user_setting,
+    get_vpn_user,
+    load_vpn_users,
+    refresh_username,
+    save_vpn_users,
+    set_user_username,
+    user_settings_ready,
+)
 from xui.utils import _cache, cache, format_bytes
 
 
@@ -136,8 +149,9 @@ async def _show_user_menu(call_or_msg, user_key: str, ib_id_default: int = 0, ed
             pass
 
     note = info.get("note", "")
-    max_devs = info.get("max_devices", DEFAULT_MAX_DEVICES)
+    max_devs = get_effective_user_setting(info, "max_devices")
     admin_disabled = info.get("admin_disabled", False)
+    settings_ready = user_settings_ready(info)
 
     inbounds, _ = await api_get_inbounds()
     total_up = 0
@@ -156,7 +170,9 @@ async def _show_user_menu(call_or_msg, user_key: str, ib_id_default: int = 0, ed
         total_up += s.get("up", 0)
         total_down += s.get("down", 0)
 
-    status = "🚫 Заблокировано" if admin_disabled else (f"✅ Активен ({active_count}/{len(devs_in_ib)})" if devs_in_ib else "📭 Нет устройств")
+    status = "🚫 Заблокировано" if admin_disabled else (
+        f"✅ Активен ({active_count}/{len(devs_in_ib)})" if devs_in_ib else "📭 Нет устройств"
+    )
     if user_key.startswith("anon_"):
         header = "👤 <b>Пользователь без TG ID</b>"
     else:
@@ -170,8 +186,38 @@ async def _show_user_menu(call_or_msg, user_key: str, ib_id_default: int = 0, ed
         f"📤 Общий: <b>{format_bytes(total_up)}</b>\n"
         f"📥 Общий: <b>{format_bytes(total_down)}</b>"
     )
-    text += "\n\nВыберите устройство или действие:" if devs_in_ib else ""
-    kb = user_menu_kb(user_key, admin_disabled, devices, ib_id_default)
+    if not settings_ready:
+        text += (
+            "\n\n⚙️ <b>Настройки не завершены</b>\n"
+            f"• Лимит ГБ: <code>{info.get('limit_gb', DEFAULT_LIMIT_GB)}</code>\n"
+            f"• Дата окончания: <code>{info.get('expiry_time_ms', DEFAULT_EXPIRY_TIME_MS)}</code>\n"
+            f"• Лимит IP: <code>{info.get('limit_ip', DEFAULT_LIMIT_IP)}</code>\n"
+            f"• Лимит устройств: <code>{info.get('max_devices', DEFAULT_MAX_DEVICES)}</code>"
+        )
+    elif devs_in_ib:
+        text += "\n\nВыберите устройство или действие:"
+    kb = user_menu_kb(user_key, admin_disabled, devices, ib_id_default, settings_ready=settings_ready)
+    if edit:
+        await call_or_msg.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    else:
+        await call_or_msg.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+
+async def _show_user_settings(call_or_msg, user_key: str, edit: bool = True):
+    data = load_vpn_users()
+    info = data.get(user_key)
+    if not info:
+        text = "❌ Пользователь не найден"
+        return await call_or_msg.edit_text(text) if edit else await call_or_msg.answer(text)
+    text = (
+        "⚙️ <b>Настройки пользователя</b>\n\n"
+        f"👤 TG: <code>{user_key}</code>\n"
+        f"📱 Лимит устройств: <b>{get_effective_user_setting(info, 'max_devices')}</b>\n"
+        f"💾 Лимит ГБ: <b>{info.get('limit_gb', DEFAULT_LIMIT_GB)}</b>\n"
+        f"⏳ Дата окончания: <b>{info.get('expiry_time_ms', DEFAULT_EXPIRY_TIME_MS)}</b>\n"
+        f"🌐 Лимит IP: <b>{info.get('limit_ip', DEFAULT_LIMIT_IP)}</b>"
+    )
+    kb = user_settings_kb(user_key, info)
     if edit:
         await call_or_msg.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
     else:

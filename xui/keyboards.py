@@ -3,7 +3,13 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from xui.helpers import get_client_stats_map, parse_clients
-from xui.storage import load_vpn_users
+from xui.storage import (
+    DEFAULT_EXPIRY_TIME_MS,
+    DEFAULT_LIMIT_GB,
+    DEFAULT_LIMIT_IP,
+    DEFAULT_MAX_DEVICES,
+    load_vpn_users,
+)
 from xui.utils import cache, format_bytes, CLIENTS_PAGE_SIZE, _cache
 
 
@@ -154,7 +160,7 @@ def flow_choice_kb() -> InlineKeyboardMarkup:
     ])
 
 
-def user_menu_kb(user_key: str, admin_disabled: bool, devices: list, ib_id_default: int) -> InlineKeyboardMarkup:
+def user_menu_kb(user_key: str, admin_disabled: bool, devices: list, ib_id_default: int, settings_ready: bool = True) -> InlineKeyboardMarkup:
     rows = []
     uk_h = cache(f"uk_{user_key}", {"user_key": user_key, "ib_id": ib_id_default})
     for d in devices:
@@ -169,7 +175,11 @@ def user_menu_kb(user_key: str, admin_disabled: bool, devices: list, ib_id_defau
         rows.append([InlineKeyboardButton(text="✅ Включить все", callback_data=f"xui_unblk_{uk_h}")])
     else:
         rows.append([InlineKeyboardButton(text="🚫 Отключить все", callback_data=f"xui_ublk_{uk_h}")])
-    rows.append([InlineKeyboardButton(text="➕ Добавить устройство", callback_data=f"xui_uadd_{uk_h}")])
+    rows.append([InlineKeyboardButton(text="⚙️ Настройки", callback_data=f"xui_usetm_{uk_h}")])
+    if settings_ready:
+        rows.append([InlineKeyboardButton(text="➕ Добавить устройство", callback_data=f"xui_uadd_{uk_h}")])
+    else:
+        rows.append([InlineKeyboardButton(text="⚙️ Сначала настройте лимиты", callback_data=f"xui_uset_{uk_h}")])
     rows.append([InlineKeyboardButton(text="📝 Изменить заметку", callback_data=f"xui_unote_{uk_h}")])
     if user_key.startswith("anon_"):
         rows.append([InlineKeyboardButton(text="📱 Привязать TG ID", callback_data=f"xui_bindanon_{uk_h}")])
@@ -185,7 +195,23 @@ def user_menu_kb(user_key: str, admin_disabled: bool, devices: list, ib_id_defau
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def myvpn_main_kb(devices: list, max_devices: int, admin_disabled: bool, can_add: bool) -> InlineKeyboardMarkup:
+def user_settings_kb(user_key: str, info: dict) -> InlineKeyboardMarkup:
+    uk_h = cache(f"uk_{user_key}", {"user_key": user_key, "ib_id": int(info.get("default_ib_id", 0) or 0)})
+    max_devices = info.get("max_devices")
+    limit_gb = info.get("limit_gb")
+    expiry_time = info.get("expiry_time_ms")
+    limit_ip = info.get("limit_ip")
+    rows = [
+        [InlineKeyboardButton(text=f"📱 Лимит устройств: {max_devices if max_devices is not None else DEFAULT_MAX_DEVICES}", callback_data=f"xui_set_max_{uk_h}")],
+        [InlineKeyboardButton(text=f"💾 Лимит ГБ: {limit_gb if limit_gb is not None else DEFAULT_LIMIT_GB}", callback_data=f"xui_set_gb_{uk_h}")],
+        [InlineKeyboardButton(text=f"⏳ Дата окончания: {expiry_time if expiry_time is not None else DEFAULT_EXPIRY_TIME_MS}", callback_data=f"xui_set_exp_{uk_h}")],
+        [InlineKeyboardButton(text=f"🌐 Лимит IP: {limit_ip if limit_ip is not None else DEFAULT_LIMIT_IP}", callback_data=f"xui_set_ip_{uk_h}")],
+        [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"xui_usr_{uk_h}")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def myvpn_main_kb(devices: list, max_devices: int, admin_disabled: bool, can_add: bool, settings_ready: bool = True) -> InlineKeyboardMarkup:
     rows = []
     for d in devices:
         ib_id = d.get("ib_id")
@@ -193,7 +219,7 @@ def myvpn_main_kb(devices: list, max_devices: int, admin_disabled: bool, can_add
         uuid_val = d.get("uuid", "")
         h = cache(f"mvd_{ib_id}_{email}", {"email": email, "uuid": uuid_val, "ib_id": ib_id})
         rows.append([InlineKeyboardButton(text=f"📱 {email}", callback_data=f"myvpn_dev_{h}")])
-    if can_add:
+    if can_add and settings_ready:
         rows.append([InlineKeyboardButton(text="➕ Добавить устройство", callback_data="myvpn_add")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="myvpn_refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -10,6 +10,10 @@ class XuiAddUser(StatesGroup):
     waiting_expiry = State()
 
 
+class XuiUserSettings(StatesGroup):
+    waiting_value = State()
+
+
 class XuiNoteEdit(StatesGroup):
     waiting_note = State()
 
