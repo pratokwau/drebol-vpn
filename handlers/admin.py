@@ -4,7 +4,7 @@ from aiogram import F, Router, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 
-from updater import apply_update, update_available
+from updater import apply_update, request_restart, update_available
 from storage import load_xui_settings, save_xui_settings
 from xui.keyboards import settings_kb
 from xui.utils import is_admin
@@ -93,9 +93,10 @@ async def cb_update_apply(call: types.CallbackQuery):
     if ok:
         await call.message.edit_text(
             "✅ <b>Обновление установлено</b>\n\n"
-            "Бот перезапущен. Новая версия уже должна быть активна.",
+            "Сейчас бот завершает работу, а systemd поднимет новый процесс.",
             parse_mode=ParseMode.HTML,
         )
+        request_restart()
     else:
         await call.message.edit_text(
             f"❌ <b>Не удалось обновиться</b>\n\n<code>{msg}</code>",
