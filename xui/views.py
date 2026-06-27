@@ -170,7 +170,7 @@ async def _show_user_menu(call_or_msg, user_key: str, ib_id_default: int = 0, ed
         f"📤 Общий: <b>{format_bytes(total_up)}</b>\n"
         f"📥 Общий: <b>{format_bytes(total_down)}</b>"
     )
-    text += "\n\nВыберите устройство или действие:" if devs_in_ib else "\n\n<i>Устройств нет. Пользователь может добавить их через /myvpn</i>"
+    text += "\n\nВыберите устройство или действие:" if devs_in_ib else ""
     kb = user_menu_kb(user_key, admin_disabled, devices, ib_id_default)
     if edit:
         await call_or_msg.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)

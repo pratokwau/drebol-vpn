@@ -20,6 +20,7 @@ class XuiBindTg(StatesGroup):
 
 class XuiAdminAddDevice(StatesGroup):
     waiting_name = State()
+    waiting_limit_ip = State()
 
 
 class XuiSettings(StatesGroup):
