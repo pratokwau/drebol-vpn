@@ -4,6 +4,8 @@ set -euo pipefail
 SERVICE_NAME="drebol-vpn"
 ROOT="/root/drebol-vpn"
 REPO_URL="${REPO_URL:-https://github.com/pratokwau/drebol-vpn.git}"
+LEGACY_ROOTS=("/root/drebol-vpn" "/root/drebolvpn" "/root/drebolbot")
+LEGACY_SERVICES=("drebol-vpn" "drebolvpn" "drebolbot")
 
 if [[ $EUID -ne 0 ]]; then
   echo "Запусти установщик от root."
@@ -13,12 +15,20 @@ fi
 apt-get update
 apt-get install -y git python3 python3-pip python3-venv
 
-if systemctl list-unit-files | grep -q "^${SERVICE_NAME}\.service"; then
-  systemctl stop "$SERVICE_NAME" || true
-  systemctl disable "$SERVICE_NAME" || true
-fi
+for legacy_service in "${LEGACY_SERVICES[@]}"; do
+  if systemctl list-unit-files | grep -q "^${legacy_service}\.service"; then
+    systemctl stop "$legacy_service" || true
+    systemctl disable "$legacy_service" || true
+    rm -f "/etc/systemd/system/${legacy_service}.service"
+  fi
+done
 
-rm -rf "$ROOT"
+for legacy_root in "${LEGACY_ROOTS[@]}"; do
+  if [[ -d "$legacy_root" ]]; then
+    rm -rf "$legacy_root"
+  fi
+done
+
 git clone "$REPO_URL" "$ROOT"
 cd "$ROOT"
 
