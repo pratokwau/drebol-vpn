@@ -5,6 +5,7 @@ import asyncio
 from aiogram import BotCommand, BotCommandScopeChat
 
 from config import ADMIN_ID
+from handlers.admin import router as admin_router
 from handlers.cancel import router as cancel_router
 from handlers.start import router as start_router
 from loader import bot, dp
@@ -23,6 +24,7 @@ async def setup_commands() -> None:
             [
                 BotCommand(command="start", description="Главное меню"),
                 BotCommand(command="cancel", description="Отмена"),
+                BotCommand(command="admin", description="Админ-панель"),
                 BotCommand(command="adminxui", description="Панель 3X-UI"),
             ],
             scope=BotCommandScopeChat(chat_id=ADMIN_ID),
@@ -32,6 +34,7 @@ async def setup_commands() -> None:
 async def main() -> None:
     dp.include_router(cancel_router)
     dp.include_router(start_router)
+    dp.include_router(admin_router)
     dp.include_router(xui_router)
     await setup_commands()
     await dp.start_polling(bot)
