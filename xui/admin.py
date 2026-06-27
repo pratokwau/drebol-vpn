@@ -17,16 +17,7 @@ async def cmd_adminxui(message: types.Message):
         await message.answer("⛔ Доступ запрещён.")
         return
 
-    await message.answer(
-        "⚙️ <b>Админ XUI</b>\n\n"
-        "Здесь доступен только список инбаундов.",
-        parse_mode=ParseMode.HTML,
-        reply_markup=types.InlineKeyboardMarkup(
-            inline_keyboard=[
-                [types.InlineKeyboardButton(text="📡 Инбаунды", callback_data="xui_inbounds")]
-            ]
-        ),
-    )
+    await render_inbounds(message)
 
 
 @router.callback_query(F.data == "xui_inbounds")
