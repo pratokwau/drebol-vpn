@@ -7,6 +7,7 @@ from config import ADMIN_ID
 
 _callback_cache: dict[str, object] = {}
 _cache = _callback_cache
+CLIENTS_PAGE_SIZE = 10
 
 
 def is_admin(user_id: int) -> bool:
