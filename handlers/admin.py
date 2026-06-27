@@ -58,7 +58,7 @@ async def cb_admin_xui_settings(call: types.CallbackQuery):
         "⚙️ <b>Настройки XUI</b>\n\n"
         f"URL: <code>{url}</code>\n"
         f"Токен: <code>{token}</code>\n\n"
-        "Сейчас это только просмотр. Следующим шагом можно добавить редактирование здесь же.",
+        "Нажми кнопку ниже, чтобы изменить значение.",
         parse_mode=ParseMode.HTML,
         reply_markup=settings_kb(),
     )
