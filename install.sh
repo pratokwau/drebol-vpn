@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_NAME="drebolbot"
-ROOT="/opt/drebolbot"
+SERVICE_NAME="drebolvpn"
+ROOT="/opt/drebolvpn"
 REPO_URL="${REPO_URL:-https://github.com/pratokwau/drebol-vpn.git}"
 
 if [[ $EUID -ne 0 ]]; then

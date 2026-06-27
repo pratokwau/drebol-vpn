@@ -39,10 +39,24 @@ bash <(curl -Ls https://raw.githubusercontent.com/pratokwau/drebol-vpn/main/inst
 В `install.sh` создаётся сервис `systemd`, после чего выполняются команды:
 
 - `systemctl daemon-reload`
-- `systemctl enable drebolbot`
-- `systemctl restart drebolbot`
+- `systemctl enable drebolvpn`
+- `systemctl restart drebolvpn`
 
 Это означает, что после рестарта сервера бот поднимется сам.
+
+## Логи
+
+Посмотреть лог бота в консоли можно так:
+
+```bash
+journalctl -u drebolvpn -f
+```
+
+Если нужен просто последний кусок лога:
+
+```bash
+journalctl -u drebolvpn -n 100 --no-pager
+```
 
 ## Первичная настройка
 
@@ -101,4 +115,3 @@ python3 install.py
 
 - `install.sh`
 - README-команде установки выше
-
