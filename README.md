@@ -13,6 +13,7 @@ Telegram-бот для управления 3x-ui из админского ме
   - `XUI_URL`
   - `XUI_TOKEN`
 - автозапуск через `systemd`
+- установка в `/root/drebolvpn`
 
 ## Установка
 
@@ -72,6 +73,8 @@ python3 install.py
 - `data/authorized.json`
 - `data/settings.json`
 - `data/xui_settings.json`
+
+По умолчанию бот ставится в `/root/drebolvpn`.
 
 ## Команды
 

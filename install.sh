@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SERVICE_NAME="drebolvpn"
-ROOT="/opt/drebolvpn"
+ROOT="/root/drebolvpn"
 REPO_URL="${REPO_URL:-https://github.com/pratokwau/drebol-vpn.git}"
 
 if [[ $EUID -ne 0 ]]; then
