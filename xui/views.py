@@ -304,7 +304,7 @@ async def _refresh_client_view(call: types.CallbackQuery, cl_h: str):
             if owner_user_key:
                 break
 
-    note = get_client_note(ib_id, email) if not owner_user_key else ""
+    note = get_client_note(ib_id, email)
     text = f"👤 <b>{email}</b>\n\n"
     if owner_user_key:
         if owner_user_key.startswith("anon_"):

@@ -142,7 +142,7 @@ def client_actions_kb(client_hash: str, enabled: bool, owner_user_key: str = "")
     ]
     if not owner_user_key:
         buttons.append([InlineKeyboardButton(text="📱 Привязать TG ID", callback_data=f"xui_bind_{client_hash}")])
-        buttons.append([InlineKeyboardButton(text="📝 Изменить заметку", callback_data=f"xui_clnote_{client_hash}")])
+    buttons.append([InlineKeyboardButton(text="📝 Изменить заметку", callback_data=f"xui_clnote_{client_hash}")])
     buttons.append([InlineKeyboardButton(text="🗑 Удалить устройство", callback_data=f"xui_del_{client_hash}")])
     if owner_user_key:
         uk_h = cache(f"uk_{owner_user_key}", {"user_key": owner_user_key, "ib_id": ib_id})

@@ -40,7 +40,6 @@ from xui.storage import (
     set_user_limit_gb,
     set_user_limit_ip,
     set_user_max_devices,
-    set_user_note,
     set_user_note_key,
     user_settings_ready,
 )
@@ -54,10 +53,6 @@ router = Router()
 
 class XuiAdminAddDevice(StatesGroup):
     waiting_name = State()
-
-
-class XuiClientNoteEdit(StatesGroup):
-    waiting_note = State()
 
 
 def _decode_user_payload(payload: dict) -> tuple[str | None, int]:
@@ -111,6 +106,33 @@ def _decode_client_payload(payload: dict) -> tuple[str, int, str]:
     ib_id = int(payload.get("ib_id", 0) or 0)
     uuid_value = str(payload.get("uuid", "") or "")
     return email, ib_id, uuid_value
+
+
+async def _sync_user_settings_to_panel(user_key: str) -> None:
+    info = load_vpn_users().get(user_key, {})
+    devices = info.get("devices", [])
+    if not devices:
+        return
+    limit_gb = float(info.get("limit_gb") or 0.0)
+    expiry_time_ms = int(info.get("expiry_time_ms") or DEFAULT_EXPIRY_TIME_MS)
+    limit_ip = int(info.get("limit_ip") or DEFAULT_LIMIT_IP)
+    flow = str(info.get("flow") or DEFAULT_FLOW)
+    for device in devices:
+        email = str(device.get("email", "") or "")
+        if not email:
+            continue
+        client = await api_get_client(email)
+        if not client:
+            continue
+        client["totalGB"] = 0 if limit_gb <= 0 else int(limit_gb * 1024 ** 3)
+        client["expiryTime"] = expiry_time_ms
+        client["limitIp"] = limit_ip
+        client["flow"] = flow
+        await api_update_client(email, client)
+
+
+async def _show_user_after_note(call_or_message, user_key: str, ib_id: int, *, edit: bool) -> None:
+    await _show_user_menu(call_or_message, user_key, ib_id, edit=edit)
 
 
 def _device_hash(ib_id: int, email: str) -> str:
@@ -283,11 +305,38 @@ async def cb_client_note(call: types.CallbackQuery, state: FSMContext):
     email, ib_id, _ = _decode_client_payload(payload)
     if not email:
         return await call.answer("Клиент не найден", show_alert=True)
-    await state.update_data(target_client_email=email, target_client_ib_id=ib_id)
-    await state.set_state(XuiClientNoteEdit.waiting_note)
+    await state.update_data(
+        target_note_kind="client",
+        target_client_email=email,
+        target_client_ib_id=ib_id,
+    )
+    await state.set_state(XuiNoteEdit.waiting_note)
     await call.message.edit_text(
         "📝 Отправь новую заметку для устройства.\n\n"
-        "Можно отправить пустое сообщение, чтобы очистить заметку.\n\n"
+        "Можно отправить <code>-</code>, чтобы очистить заметку.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("xui_unote_"))
+async def cb_user_note(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    payload = _cache_lookup(call.data[len("xui_unote_"):])
+    user_key, ib_id = _decode_user_payload(payload)
+    if not user_key:
+        return await call.answer("Пользователь не найден", show_alert=True)
+    await state.update_data(
+        target_note_kind="user",
+        target_user_key=user_key,
+        target_user_ib_id=ib_id,
+    )
+    await state.set_state(XuiNoteEdit.waiting_note)
+    await call.message.edit_text(
+        "📝 Отправь новую заметку для пользователя.\n\n"
+        "Можно отправить <code>-</code>, чтобы очистить заметку.\n\n"
         "Для выхода введите /cancel",
         parse_mode=ParseMode.HTML,
     )
@@ -380,14 +429,19 @@ async def cb_user_settings_default(call: types.CallbackQuery):
         return await call.answer("Пользователь не найден", show_alert=True)
     if call.data.startswith("xui_def_max_"):
         set_user_max_devices(user_key, DEFAULT_MAX_DEVICES)
+        await _sync_user_settings_to_panel(user_key)
     elif call.data.startswith("xui_def_gb_"):
         set_user_limit_gb(user_key, DEFAULT_LIMIT_GB)
+        await _sync_user_settings_to_panel(user_key)
     elif call.data.startswith("xui_def_exp_"):
         set_user_expiry_time_ms(user_key, DEFAULT_EXPIRY_TIME_MS)
+        await _sync_user_settings_to_panel(user_key)
     elif call.data.startswith("xui_def_ip_"):
         set_user_limit_ip(user_key, DEFAULT_LIMIT_IP)
+        await _sync_user_settings_to_panel(user_key)
     elif call.data.startswith("xui_def_flow_"):
         set_user_flow(user_key, DEFAULT_FLOW)
+        await _sync_user_settings_to_panel(user_key)
     else:
         return await call.answer("Неизвестная настройка", show_alert=True)
     await _show_user_settings(call.message, user_key, edit=True)
@@ -421,6 +475,7 @@ async def user_settings_value(message: types.Message, state: FSMContext):
         else:
             await message.answer("Неизвестная настройка.")
             return
+        await _sync_user_settings_to_panel(user_key)
     except ValueError:
         await message.answer("Некорректное значение.\n\nДля выхода введите /cancel")
         return
@@ -754,18 +809,36 @@ async def bind_tg_input(message: types.Message, state: FSMContext):
     await message.answer("✅ TG ID привязан.")
 
 
-@router.message(XuiClientNoteEdit.waiting_note)
-async def client_note_input(message: types.Message, state: FSMContext):
+@router.message(XuiNoteEdit.waiting_note)
+async def note_input(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     data = await state.get_data()
+    note_kind = str(data.get("target_note_kind") or "")
+    raw = (message.text or "").strip()
+    note = "" if raw == "-" else raw
+    if not note_kind:
+        await state.clear()
+        await message.answer("Контекст заметки не найден.")
+        return
+    if note_kind == "user":
+        user_key = str(data.get("target_user_key") or "")
+        ib_id = int(data.get("target_user_ib_id") or 0)
+        if not user_key:
+            await state.clear()
+            await message.answer("Пользователь не найден.")
+            return
+        set_user_note_key(user_key, note)
+        await state.clear()
+        await message.answer("✅ Заметка пользователя сохранена.")
+        await _show_user_after_note(message, user_key, ib_id, edit=False)
+        return
     email = str(data.get("target_client_email") or "")
     ib_id = int(data.get("target_client_ib_id") or 0)
     if not email or not ib_id:
         await state.clear()
         await message.answer("Клиент не найден.")
         return
-    note = (message.text or "").strip()
     set_client_note(ib_id, email, note)
     await state.clear()
     await message.answer("✅ Заметка сохранена.")
