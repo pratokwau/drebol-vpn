@@ -112,9 +112,9 @@ def get_tg_id_by_client(ib_id: int, email: str) -> int | None:
     return None
 
 
-def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str, limit_ip: int | None = None):
+def _add_device_to_user_key(user_key: str, ib_id: int, uuid: str, email: str, limit_ip: int | None = None):
     data = load_vpn_users()
-    key = str(tg_id)
+    key = str(user_key)
     if key not in data:
         data[key] = {
             "username": "",
@@ -144,6 +144,14 @@ def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str, limit_ip: 
         device["limit_ip"] = int(limit_ip)
     data[key]["devices"].append(device)
     save_vpn_users(data)
+
+
+def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str, limit_ip: int | None = None):
+    _add_device_to_user_key(str(tg_id), ib_id, uuid, email, limit_ip=limit_ip)
+
+
+def add_device_to_user_key(user_key: str, ib_id: int, uuid: str, email: str, limit_ip: int | None = None):
+    _add_device_to_user_key(user_key, ib_id, uuid, email, limit_ip=limit_ip)
 
 
 def remove_device_from_user(tg_id: int, ib_id: int, email: str):

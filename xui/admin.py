@@ -23,6 +23,7 @@ from xui.storage import (
     DEFAULT_LIMIT_IP,
     DEFAULT_MAX_DEVICES,
     add_device_to_user,
+    add_device_to_user_key,
     create_user_with_inbound,
     delete_user_completely,
     get_effective_user_setting,
@@ -602,8 +603,7 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer(f"❌ Не удалось создать устройство.\n<code>{result.get('msg', '')}</code>", parse_mode=ParseMode.HTML)
         return
-    if user_key.isdigit():
-        add_device_to_user(int(user_key), base_ib, client_uuid, email, limit_ip=limit_ip)
+    add_device_to_user_key(user_key, base_ib, client_uuid, email, limit_ip=limit_ip)
     await state.clear()
     await message.answer(
         f"✅ Устройство <code>{email}</code> создано.\n"
@@ -799,8 +799,8 @@ async def bind_tg_input(message: types.Message, state: FSMContext):
                     "Сначала освободите слот или увеличьте лимит устройств."
                 )
                 return
-        add_device_to_user(
-            int(new_key),
+        add_device_to_user_key(
+            new_key,
             target_client_ib_id,
             target_client_uuid or "",
             target_client_email,
