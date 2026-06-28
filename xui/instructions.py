@@ -26,7 +26,7 @@ def happ_instruction(sub_id: str | None = None, inbound_id: int | None = None) -
     if subscription_link:
         device_line = (
             "Перейдите по ссылке на устройство пользователя из панели 3x-ui:\n"
-            f"<code>{subscription_link}</code>\n"
+            f"<a href=\"{subscription_link}\">Открыть ссылку подписки</a>\n"
         )
     return (
         "📖 <b>Инструкция</b>\n\n"
@@ -36,5 +36,6 @@ def happ_instruction(sub_id: str | None = None, inbound_id: int | None = None) -
         "• <a href=\"https://apps.apple.com/au/app/happ-proxy-utility/id6504287215\">MacOS</a>\n"
         "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n\n"
         f"{device_line}"
-        "На сайте выберите ваше устройство и перейдите в приложение HAPP."
+        "На сайте выберите ваше устройство и перейдите в приложение HAPP.\n\n"
+        "🪟 <b>Для Windows</b>: сначала скопируйте ссылку подписки, затем в приложении HAPP нажмите <b>+</b> и выберите импорт из буфера обмена."
     )
