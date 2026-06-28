@@ -18,6 +18,7 @@ async def cmd_start(message: types.Message):
         "• /start — Главное меню\n"
         "• /cancel — Отмена действия"
     )
+    text += "\n• /vpn — Управление VPN"
     if is_admin(user_id):
         text += (
             "\n\n👨‍💻 <b>Администрирование</b>\n"
