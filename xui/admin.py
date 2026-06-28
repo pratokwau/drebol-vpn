@@ -15,6 +15,10 @@ from xui.api import api_add_client, api_get_client, api_get_inbounds, api_del_cl
 from xui.helpers import parse_clients
 from xui.keyboards import flow_choice_kb
 from xui.storage import (
+    DEFAULT_EXPIRY_TIME_MS,
+    DEFAULT_LIMIT_GB,
+    DEFAULT_LIMIT_IP,
+    DEFAULT_MAX_DEVICES,
     add_device_to_user,
     create_user_with_inbound,
     delete_user_completely,
@@ -318,6 +322,31 @@ async def cb_user_settings_edit(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(XuiUserSettings.waiting_value)
     await call.message.edit_text(prompt, parse_mode=ParseMode.HTML)
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("xui_def_max_"))
+@router.callback_query(F.data.startswith("xui_def_gb_"))
+@router.callback_query(F.data.startswith("xui_def_exp_"))
+@router.callback_query(F.data.startswith("xui_def_ip_"))
+async def cb_user_settings_default(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    payload = _cache_lookup(call.data.split("_", 3)[-1])
+    user_key, _ = _decode_user_payload(payload)
+    if not user_key:
+        return await call.answer("Пользователь не найден", show_alert=True)
+    if call.data.startswith("xui_def_max_"):
+        set_user_max_devices(user_key, DEFAULT_MAX_DEVICES)
+    elif call.data.startswith("xui_def_gb_"):
+        set_user_limit_gb(user_key, DEFAULT_LIMIT_GB)
+    elif call.data.startswith("xui_def_exp_"):
+        set_user_expiry_time_ms(user_key, DEFAULT_EXPIRY_TIME_MS)
+    elif call.data.startswith("xui_def_ip_"):
+        set_user_limit_ip(user_key, DEFAULT_LIMIT_IP)
+    else:
+        return await call.answer("Неизвестная настройка", show_alert=True)
+    await _show_user_settings(call.message, user_key, edit=True)
+    await call.answer("Значение по умолчанию применено")
 
 
 @router.message(XuiUserSettings.waiting_value)

@@ -202,10 +202,22 @@ def user_settings_kb(user_key: str, info: dict) -> InlineKeyboardMarkup:
     expiry_time = info.get("expiry_time_ms")
     limit_ip = info.get("limit_ip")
     rows = [
-        [InlineKeyboardButton(text=f"📱 Лимит устройств: {max_devices if max_devices is not None else DEFAULT_MAX_DEVICES}", callback_data=f"xui_set_max_{uk_h}")],
-        [InlineKeyboardButton(text=f"💾 Лимит ГБ: {limit_gb if limit_gb is not None else DEFAULT_LIMIT_GB}", callback_data=f"xui_set_gb_{uk_h}")],
-        [InlineKeyboardButton(text=f"⏳ Дата окончания: {expiry_time if expiry_time is not None else DEFAULT_EXPIRY_TIME_MS}", callback_data=f"xui_set_exp_{uk_h}")],
-        [InlineKeyboardButton(text=f"🌐 Лимит IP: {limit_ip if limit_ip is not None else DEFAULT_LIMIT_IP}", callback_data=f"xui_set_ip_{uk_h}")],
+        [
+            InlineKeyboardButton(text=f"📱 Лимит устройств: {max_devices if max_devices is not None else DEFAULT_MAX_DEVICES}", callback_data=f"xui_set_max_{uk_h}"),
+            InlineKeyboardButton(text="По дефолту", callback_data=f"xui_def_max_{uk_h}"),
+        ],
+        [
+            InlineKeyboardButton(text=f"💾 Лимит ГБ: {limit_gb if limit_gb is not None else DEFAULT_LIMIT_GB}", callback_data=f"xui_set_gb_{uk_h}"),
+            InlineKeyboardButton(text="По дефолту", callback_data=f"xui_def_gb_{uk_h}"),
+        ],
+        [
+            InlineKeyboardButton(text=f"⏳ Дата окончания: {expiry_time if expiry_time is not None else DEFAULT_EXPIRY_TIME_MS}", callback_data=f"xui_set_exp_{uk_h}"),
+            InlineKeyboardButton(text="По дефолту", callback_data=f"xui_def_exp_{uk_h}"),
+        ],
+        [
+            InlineKeyboardButton(text=f"🌐 Лимит IP: {limit_ip if limit_ip is not None else DEFAULT_LIMIT_IP}", callback_data=f"xui_set_ip_{uk_h}"),
+            InlineKeyboardButton(text="По дефолту", callback_data=f"xui_def_ip_{uk_h}"),
+        ],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"xui_usr_{uk_h}")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
