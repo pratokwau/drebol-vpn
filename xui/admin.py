@@ -222,6 +222,7 @@ async def cb_client_bind_tg(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(XuiBindTg.waiting_tg_id)
     await call.message.edit_text(
         "📱 Отправь <b>TG ID</b>, к которому нужно привязать это устройство.\n\n"
+        "Если у пользователя уже достигнут лимит устройств, привязка не выполнится.\n\n"
         "Для выхода введите /cancel",
         parse_mode=ParseMode.HTML,
     )
@@ -602,7 +603,12 @@ async def cb_bind_anon(call: types.CallbackQuery, state: FSMContext):
         return await call.answer("Пользователь не найден", show_alert=True)
     await state.update_data(target_user_key=user_key, target_ib_id=ib_id)
     await state.set_state(XuiBindTg.waiting_tg_id)
-    await call.message.edit_text("Введите TG ID для привязки.\n\nДля выхода введите /cancel", parse_mode=ParseMode.HTML)
+    await call.message.edit_text(
+        "Введите TG ID для привязки.\n\n"
+        "Если у пользователя уже достигнут лимит устройств, привязка не выполнится.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
     await call.answer()
 
 
@@ -625,13 +631,37 @@ async def bind_tg_input(message: types.Message, state: FSMContext):
             return
     new_key = raw
     if user_key:
-        if user_key in load_vpn_users():
+        users = load_vpn_users()
+        if user_key in users:
+            if new_key in users:
+                target_info = users[new_key]
+                max_devices = int(target_info.get("max_devices", 1) or 1)
+                device_count = len(target_info.get("devices", []))
+                if device_count >= max_devices:
+                    await state.clear()
+                    await message.answer(
+                        f"⛔ У пользователя уже {device_count}/{max_devices} устройств.\n"
+                        "Сначала освободите слот или увеличьте лимит устройств."
+                    )
+                    return
             rekey_user(user_key, new_key)
             data = load_vpn_users()
             if new_key in data and user_settings_ready(data[new_key]):
                 data[new_key]["has_vpn_access"] = True
                 save_vpn_users(data)
     else:
+        users = load_vpn_users()
+        if new_key in users:
+            target_info = users[new_key]
+            max_devices = int(target_info.get("max_devices", 1) or 1)
+            device_count = len(target_info.get("devices", []))
+            if device_count >= max_devices:
+                await state.clear()
+                await message.answer(
+                    f"⛔ У пользователя уже {device_count}/{max_devices} устройств.\n"
+                    "Сначала освободите слот или увеличьте лимит устройств."
+                )
+                return
         add_device_to_user(
             int(new_key),
             target_client_ib_id,
