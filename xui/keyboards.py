@@ -211,28 +211,26 @@ def user_settings_kb(user_key: str, info: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def myvpn_main_kb(devices: list, max_devices: int, admin_disabled: bool, can_add: bool, settings_ready: bool = True) -> InlineKeyboardMarkup:
+def myvpn_main_kb(devices: list, admin_disabled: bool, settings_ready: bool = True) -> InlineKeyboardMarkup:
     rows = []
     for d in devices:
         ib_id = d.get("ib_id")
         email = d.get("email", "?")
         uuid_val = d.get("uuid", "")
+        enabled = bool(d.get("enabled", True))
         h = cache(f"mvd_{ib_id}_{email}", {"email": email, "uuid": uuid_val, "ib_id": ib_id})
-        rows.append([InlineKeyboardButton(text=f"📱 {email}", callback_data=f"myvpn_dev_{h}")])
-    if can_add and settings_ready:
-        rows.append([InlineKeyboardButton(text="➕ Добавить устройство", callback_data="myvpn_add")])
+        icon = "✅" if enabled else "⏸"
+        rows.append([InlineKeyboardButton(text=f"{icon} {email}", callback_data=f"myvpn_dev_{h}")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="myvpn_refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def myvpn_device_kb(dev_hash: str, enabled: bool, admin_disabled: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="🔗 Получить VPN ссылку", callback_data=f"myvpn_link_{dev_hash}")],
         [InlineKeyboardButton(text="📖 Инструкция", callback_data=f"myvpn_inst_{dev_hash}")],
     ]
     if not admin_disabled:
         toggle_text = "⏸ Отключить" if enabled else "▶️ Включить"
         rows.append([InlineKeyboardButton(text=toggle_text, callback_data=f"myvpn_tog_{dev_hash}")])
-    rows.append([InlineKeyboardButton(text="🗑 Удалить устройство", callback_data=f"myvpn_del_{dev_hash}")])
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="myvpn_refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
