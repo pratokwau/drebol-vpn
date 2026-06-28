@@ -13,6 +13,7 @@ from aiogram.fsm.state import State, StatesGroup
 from loader import bot
 from xui.api import api_add_client, api_get_client, api_get_inbounds, api_del_client_by_email, api_update_client
 from xui.helpers import parse_clients
+from xui.instructions import happ_instruction
 from xui.keyboards import flow_choice_kb
 from xui.storage import (
     DEFAULT_EXPIRY_TIME_MS,
@@ -199,15 +200,7 @@ async def cb_client_instruction(call: types.CallbackQuery):
     if not email:
         return await call.answer("Клиент не найден", show_alert=True)
     await call.answer()
-    await call.message.answer(
-        "📖 <b>Инструкция</b>\n\n"
-        f"🔹 Устройство: <code>{email}</code>\n"
-        "1. Скопируйте конфигурацию или ссылку для подключения.\n"
-        "2. Импортируйте её в клиентское приложение.\n"
-        "3. Если что-то не подключается, проверьте срок действия и статус устройства.\n\n"
-        "Если хотите вернуться к карточке устройства, нажмите «⬅️ Назад».",
-        parse_mode=ParseMode.HTML,
-    )
+    await call.message.answer(happ_instruction(email), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
 
 @router.callback_query(F.data.startswith("xui_bind_"))
