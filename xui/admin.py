@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 import secrets
 from datetime import datetime
@@ -14,7 +15,7 @@ from loader import bot
 from xui.api import api_add_client, api_get_client, api_get_inbounds, api_del_client_by_email, api_update_client
 from xui.helpers import parse_clients
 from xui.instructions import happ_instruction
-from xui.keyboards import flow_choice_kb
+from xui.keyboards import client_actions_kb, flow_choice_kb
 from xui.inbound_settings_store import get_inbound_sub_port, set_inbound_sub_port
 from xui.storage import (
     DEFAULT_EXPIRY_TIME_MS,
@@ -43,9 +44,10 @@ from xui.storage import (
     set_user_max_devices,
     set_user_note_key,
     user_settings_ready,
+    get_client_note,
 )
 from xui.states import XuiAddUser, XuiBindTg, XuiNoteEdit, XuiUserSettings, XuiSettings as InboundSettingsState
-from xui.utils import is_admin
+from xui.utils import cache, format_bytes, is_admin
 from xui.views import _refresh_client_view, _show_user_menu, _show_user_settings, render_inbound, render_inbounds, render_inbound_settings
 
 
@@ -132,8 +134,69 @@ async def _sync_user_settings_to_panel(user_key: str) -> None:
         await api_update_client(email, client)
 
 
-async def _show_user_after_note(call_or_message, user_key: str, ib_id: int, *, edit: bool) -> None:
-    await _show_user_menu(call_or_message, user_key, ib_id, edit=edit)
+async def _show_client_details(call_or_message, email: str, ib_id: int, owner_user_key: str = "", *, edit: bool = False) -> None:
+    inbounds, _ = await api_get_inbounds()
+    inbound = next((ib for ib in inbounds if ib.get("id") == ib_id), None)
+    if not inbound:
+        text = "❌ Клиент не найден"
+        if edit:
+            await call_or_message.edit_text(text)
+        else:
+            await call_or_message.answer(text)
+        return
+    client = await api_get_client(email)
+    if not client:
+        text = "❌ Клиент не найден"
+        if edit:
+            await call_or_message.edit_text(text)
+        else:
+            await call_or_message.answer(text)
+        return
+    stats_map = {}
+    try:
+        from xui.helpers import get_client_stats_map
+
+        stats_map = get_client_stats_map(inbound)
+    except Exception:
+        stats_map = {}
+    stats = stats_map.get(email, {})
+    enabled = bool(client.get("enable", True))
+    up = format_bytes(stats.get("up", 0))
+    down = format_bytes(stats.get("down", 0))
+    total = stats.get("total", 0)
+    total_str = format_bytes(total) if total > 0 else "∞"
+    expiry = client.get("expiryTime", 0)
+    expiry_str = "∞" if not expiry or expiry == 0 else f"{expiry}"
+    note = get_client_note(ib_id, email)
+    if not owner_user_key:
+        for uk, uinfo in load_vpn_users().items():
+            for d in uinfo.get("devices", []):
+                if d.get("ib_id") == ib_id and d.get("email") == email:
+                    owner_user_key = uk
+                    break
+            if owner_user_key:
+                break
+    text = f"👤 <b>{email}</b>\n\n"
+    if owner_user_key:
+        if owner_user_key.startswith("anon_"):
+            text += "👥 Владелец: <i>без TG</i>\n"
+        else:
+            text += f"👥 Владелец: TG <code>{owner_user_key}</code>\n"
+    text += (
+        f"📌 Статус: {'✅ Активен' if enabled else '❌ Отключён'}\n"
+        f"📤 Отправлено: <b>{up}</b>\n"
+        f"📥 Получено: <b>{down}</b>\n"
+        f"💾 Лимит: <b>{total_str}</b>\n"
+        f"⏳ Срок: <b>{expiry_str}</b>"
+    )
+    if note:
+        text += f"\n📝 Заметка: <i>{html.escape(note)}</i>"
+    client_hash = cache(f"cl_{ib_id}_{email}", {"email": email, "uuid": client.get("id", ""), "ib_id": ib_id, "owner_uk": owner_user_key})
+    markup = client_actions_kb(client_hash, enabled, owner_user_key)
+    if edit:
+        await call_or_message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+    else:
+        await call_or_message.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 
 def _device_hash(ib_id: int, email: str) -> str:
@@ -148,6 +211,39 @@ async def _render_user(call_or_msg, user_key: str, ib_id: int, edit: bool = True
 
 async def _render_settings(call_or_msg, user_key: str, edit: bool = True):
     await _show_user_settings(call_or_msg, user_key, edit=edit)
+
+
+async def _restore_admin_menu(message: types.Message, kind: str, data: dict) -> None:
+    if kind == "user_settings":
+        await _show_user_settings(message, str(data.get("target_user_key") or ""), edit=False)
+        return
+    if kind == "user_menu":
+        await _show_user_menu(message, str(data.get("target_user_key") or ""), int(data.get("target_user_ib_id") or 0), edit=False)
+        return
+    if kind == "inbound_settings":
+        inbound_id = int(data.get("target_inbound_id") or 0)
+        if inbound_id:
+            inbounds, _ = await api_get_inbounds()
+            inbound = next((ib for ib in inbounds if ib.get("id") == inbound_id), None)
+            if inbound:
+                await render_inbound_settings(message, inbound)
+                return
+    if kind == "client_view":
+        await _show_client_details(
+            message,
+            str(data.get("target_client_email") or ""),
+            int(data.get("target_client_ib_id") or 0),
+            str(data.get("target_client_owner_user_key") or ""),
+            edit=False,
+        )
+        return
+    if kind == "inbound":
+        inbound_id = int(data.get("target_inbound_id") or data.get("xui_ib_id") or 0)
+        if inbound_id:
+            inbounds, _ = await api_get_inbounds()
+            inbound = next((ib for ib in inbounds if ib.get("id") == inbound_id), None)
+            if inbound:
+                await render_inbound(message, inbound)
 
 
 def _settings_back_button(user_key: str) -> str:
@@ -240,7 +336,7 @@ async def cb_inbound_subport(call: types.CallbackQuery, state: FSMContext):
     if not inbound:
         return await call.answer(f"Инбаунд не найден: {err}", show_alert=True)
     current = get_inbound_sub_port(inbound_id) or "не задан"
-    await state.update_data(target_inbound_id=int(inbound_id))
+    await state.update_data(target_inbound_id=int(inbound_id), target_return_kind="inbound_settings")
     await state.set_state(InboundSettingsState.waiting_inbound_subport)
     await call.message.edit_text(
         "📡 <b>Порт подписки</b>\n\n"
@@ -287,6 +383,8 @@ async def cb_client_bind_tg(call: types.CallbackQuery, state: FSMContext):
         target_client_email=email,
         target_client_ib_id=ib_id,
         target_client_uuid=uuid_value,
+        target_client_owner_user_key=str(payload.get("owner_uk") or ""),
+        target_return_kind="client_view",
     )
     await state.set_state(XuiBindTg.waiting_tg_id)
     await call.message.edit_text(
@@ -310,6 +408,7 @@ async def cb_client_note(call: types.CallbackQuery, state: FSMContext):
         target_note_kind="client",
         target_client_email=email,
         target_client_ib_id=ib_id,
+        target_return_kind="client_view",
     )
     await state.set_state(XuiNoteEdit.waiting_note)
     await call.message.edit_text(
@@ -333,6 +432,7 @@ async def cb_user_note(call: types.CallbackQuery, state: FSMContext):
         target_note_kind="user",
         target_user_key=user_key,
         target_user_ib_id=ib_id,
+        target_return_kind="user_menu",
     )
     await state.set_state(XuiNoteEdit.waiting_note)
     await call.message.edit_text(
@@ -410,7 +510,7 @@ async def cb_user_settings_edit(call: types.CallbackQuery, state: FSMContext):
         )
     if not field:
         return await call.answer("Неизвестная настройка", show_alert=True)
-    await state.update_data(target_user_key=user_key, target_setting_field=field)
+    await state.update_data(target_user_key=user_key, target_setting_field=field, target_return_kind="user_settings")
     await state.set_state(XuiUserSettings.waiting_value)
     await call.message.edit_text(prompt, parse_mode=ParseMode.HTML)
     await call.answer()
@@ -480,17 +580,8 @@ async def user_settings_value(message: types.Message, state: FSMContext):
     except ValueError:
         await message.answer("Некорректное значение.\n\nДля выхода введите /cancel")
         return
-    current = load_vpn_users().get(user_key, {})
     await state.clear()
-    await message.answer(
-        "✅ Настройка сохранена.",
-        reply_markup=types.InlineKeyboardMarkup(
-            inline_keyboard=[
-                [types.InlineKeyboardButton(text="⬅️ Назад", callback_data=f"xui_usetm_{_settings_back_button(user_key)}")],
-            ]
-        ),
-    )
-    await _show_user_settings(message, user_key, edit=False)
+    await _restore_admin_menu(message, str(data.get("target_return_kind") or "user_settings"), data)
 
 
 @router.callback_query(F.data.startswith("xui_adduser_"))
@@ -501,7 +592,7 @@ async def cb_add_user(call: types.CallbackQuery, state: FSMContext):
     ib_id = payload.get("id")
     if not ib_id:
         return await call.answer("Инбаунд не найден", show_alert=True)
-    await state.update_data(xui_ib_id=int(ib_id))
+    await state.update_data(xui_ib_id=int(ib_id), target_inbound_id=int(ib_id), target_return_kind="inbound")
     await state.set_state(XuiAddUser.waiting_tg_id)
     await call.message.edit_text(
         "Введите <b>TG ID</b> пользователя или <code>-</code>, если TG нет.\n\n"
@@ -527,6 +618,11 @@ async def add_user_tg_id(message: types.Message, state: FSMContext):
         return
     create_user_with_inbound(tg_id, ib_id)
     await state.clear()
+    inbounds, _ = await api_get_inbounds()
+    inbound = next((item for item in inbounds if item.get("id") == ib_id), None)
+    if inbound:
+        await render_inbound(message, inbound)
+        return
     if tg_id is None:
         await message.answer("✅ Пользователь без TG ID создан. Открой его и настрой параметры через ⚙️ Настройки.")
     else:
@@ -546,7 +642,11 @@ async def cb_user_add_device(call: types.CallbackQuery, state: FSMContext):
         return await call.answer("Сначала настройте лимиты пользователя", show_alert=True)
     if len(info.get("devices", [])) >= int(info.get("max_devices", 1) or 1):
         return await call.answer("⛔ Достигнут лимит устройств", show_alert=True)
-    await state.update_data(target_user_key=user_key, target_ib_id=ib_id_default or int(info.get("default_ib_id", 0) or 0))
+    await state.update_data(
+        target_user_key=user_key,
+        target_ib_id=ib_id_default or int(info.get("default_ib_id", 0) or 0),
+        target_return_kind="user_menu",
+    )
     await state.set_state(XuiAdminAddDevice.waiting_name)
     await call.message.edit_text(
         "Введите название устройства.\n\nДля выхода введите /cancel",
@@ -605,12 +705,6 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
         return
     add_device_to_user_key(user_key, base_ib, client_uuid, email, limit_ip=limit_ip)
     await state.clear()
-    await message.answer(
-        f"✅ Устройство <code>{email}</code> создано.\n"
-        f"Лимит IP: <b>{limit_ip}</b>\n"
-        f"Flow: <b>{flow}</b>",
-        parse_mode=ParseMode.HTML,
-    )
     await _show_user_menu(message, user_key, base_ib, edit=False)
     if tg_id:
         try:
@@ -656,7 +750,7 @@ async def cb_user_delete(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     payload = _cache_lookup(call.data[len("xui_udel_user_"):])
-    user_key, _ = _decode_user_payload(payload)
+    user_key, ib_id = _decode_user_payload(payload)
     if not user_key:
         return await call.answer("Пользователь не найден", show_alert=True)
     info = load_vpn_users().get(user_key, {})
@@ -665,10 +759,15 @@ async def cb_user_delete(call: types.CallbackQuery):
         if email:
             await api_del_client_by_email(email)
     delete_user_completely(user_key)
-    try:
-        await call.message.edit_text("✅ Пользователь удалён.")
-    except Exception:
-        await call.message.answer("✅ Пользователь удалён.")
+    inbounds, _ = await api_get_inbounds()
+    inbound = next((item for item in inbounds if item.get("id") == ib_id), None)
+    if inbound:
+        await render_inbound(call.message, inbound)
+    else:
+        try:
+            await call.message.edit_text("✅ Пользователь удалён.")
+        except Exception:
+            await call.message.answer("✅ Пользователь удалён.")
     await call.answer()
 
 
@@ -738,7 +837,7 @@ async def cb_bind_anon(call: types.CallbackQuery, state: FSMContext):
     user_key, ib_id = _decode_user_payload(payload)
     if not user_key:
         return await call.answer("Пользователь не найден", show_alert=True)
-    await state.update_data(target_user_key=user_key, target_ib_id=ib_id)
+    await state.update_data(target_user_key=user_key, target_ib_id=ib_id, target_return_kind="user_menu")
     await state.set_state(XuiBindTg.waiting_tg_id)
     await call.message.edit_text(
         "Введите TG ID для привязки.\n\n"
@@ -806,7 +905,12 @@ async def bind_tg_input(message: types.Message, state: FSMContext):
             target_client_email,
         )
     await state.clear()
-    await message.answer("✅ TG ID привязан.")
+    if target_client_email:
+        await _show_client_details(message, target_client_email, target_client_ib_id, edit=False)
+    elif user_key:
+        await _show_user_menu(message, new_key, int(data.get("target_ib_id") or 0), edit=False)
+    else:
+        await message.answer("✅ TG ID привязан.")
 
 
 @router.message(XuiNoteEdit.waiting_note)
@@ -830,8 +934,7 @@ async def note_input(message: types.Message, state: FSMContext):
             return
         set_user_note_key(user_key, note)
         await state.clear()
-        await message.answer("✅ Заметка пользователя сохранена.")
-        await _show_user_after_note(message, user_key, ib_id, edit=False)
+        await _show_user_menu(message, user_key, ib_id, edit=False)
         return
     email = str(data.get("target_client_email") or "")
     ib_id = int(data.get("target_client_ib_id") or 0)
@@ -841,7 +944,7 @@ async def note_input(message: types.Message, state: FSMContext):
         return
     set_client_note(ib_id, email, note)
     await state.clear()
-    await message.answer("✅ Заметка сохранена.")
+    await _show_client_details(message, email, ib_id, str(data.get("target_client_owner_user_key") or ""), edit=False)
 
 
 @router.message(InboundSettingsState.waiting_inbound_subport)
@@ -863,7 +966,6 @@ async def inbound_subport_input(message: types.Message, state: FSMContext):
     inbounds, err = await api_get_inbounds()
     inbound = next((ib for ib in inbounds if ib.get("id") == inbound_id), None)
     if inbound:
-        await message.answer("✅ Порт подписки сохранён.")
         await render_inbound_settings(message, inbound)
         return
     await message.answer(f"✅ Порт подписки сохранён.\n\n<code>{err}</code>", parse_mode=ParseMode.HTML)
@@ -892,7 +994,16 @@ async def cb_client_delete(call: types.CallbackQuery):
                 data[uk]["devices"] = [d for d in data[uk].get("devices", []) if not (d.get("ib_id") == ib_id and d.get("email") == email)]
                 save_vpn_users(data)
                 break
-    await call.message.edit_text("✅ Клиент удалён.")
+    owner_user_key = info.get("owner_uk", "")
+    if owner_user_key:
+        await _show_user_menu(call.message, owner_user_key, ib_id, edit=True)
+    else:
+        inbounds, _ = await api_get_inbounds()
+        inbound = next((item for item in inbounds if item.get("id") == ib_id), None)
+        if inbound:
+            await render_inbound(call.message, inbound)
+        else:
+            await call.message.edit_text("✅ Клиент удалён.")
     await call.answer()
 
 
@@ -912,5 +1023,5 @@ async def cb_client_toggle(call: types.CallbackQuery):
     result = await api_update_client(email, client)
     if not result.get("success", True):
         return await call.answer(result.get("msg", "Не удалось обновить клиента"), show_alert=True)
-    await _refresh_client_view(call, client_hash)
+    await _show_client_details(call.message, email, int(info.get("ib_id", 0) or 0), str(info.get("owner_uk") or ""), edit=True)
     await call.answer("Состояние обновлено")
