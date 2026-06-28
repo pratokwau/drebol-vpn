@@ -44,7 +44,8 @@ def inbounds_kb(inbounds: list[dict], *, show_settings: bool = True) -> InlineKe
         clients_count = len(parse_clients(ib))
         enabled = "✅" if ib.get("enable", True) else "❌"
         h = cache(f"ib_{ib_id}", {"id": ib_id})
-        rows.append([InlineKeyboardButton(text=f"{enabled} {remark} | {protocol}:{port} | 👥{clients_count}", callback_data=f"xui_ib_{h}")])
+        prefix = f"{enabled} " if show_settings else ""
+        rows.append([InlineKeyboardButton(text=f"{prefix}{remark} | {protocol}:{port} | 👥{clients_count}", callback_data=f"xui_ib_{h}")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="xui_inbounds")])
     if show_settings:
         rows.append([InlineKeyboardButton(text="⚙️ Настройки", callback_data="xui_settings")])
@@ -122,6 +123,7 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
         buttons.append(nav)
 
     buttons.append([InlineKeyboardButton(text="➕ Добавить пользователя", callback_data=f"xui_adduser_{ib_h}")])
+    buttons.append([InlineKeyboardButton(text="⚙️ Настройки инбаунда", callback_data=f"xui_ibsettings_{ib_h}")])
     buttons.append([
         InlineKeyboardButton(text="🔄 Обновить", callback_data=f"xui_ib_{ib_h}"),
         InlineKeyboardButton(text="⬅️ Назад", callback_data="xui_inbounds"),
@@ -227,6 +229,17 @@ def user_settings_kb(user_key: str, info: dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"xui_usr_{uk_h}")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def inbound_settings_kb(inbound_id: int, sub_port: str) -> InlineKeyboardMarkup:
+    ib_h = cache(f"ib_{inbound_id}", {"id": inbound_id})
+    current = sub_port or "не задан"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"📡 Порт подписки: {current}", callback_data=f"xui_ibsubport_{ib_h}")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"xui_ib_{ib_h}")],
+        ]
+    )
 
 
 def myvpn_main_kb(devices: list, admin_disabled: bool, settings_ready: bool = True) -> InlineKeyboardMarkup:

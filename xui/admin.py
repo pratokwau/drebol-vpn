@@ -15,6 +15,7 @@ from xui.api import api_add_client, api_get_client, api_get_inbounds, api_del_cl
 from xui.helpers import parse_clients
 from xui.instructions import happ_instruction
 from xui.keyboards import flow_choice_kb
+from xui.inbound_settings_store import get_inbound_sub_port, set_inbound_sub_port
 from xui.storage import (
     DEFAULT_EXPIRY_TIME_MS,
     DEFAULT_FLOW,
@@ -43,9 +44,9 @@ from xui.storage import (
     set_user_note_key,
     user_settings_ready,
 )
-from xui.states import XuiAddUser, XuiBindTg, XuiNoteEdit, XuiUserSettings
+from xui.states import XuiAddUser, XuiBindTg, XuiNoteEdit, XuiUserSettings, XuiSettings as InboundSettingsState
 from xui.utils import is_admin
-from xui.views import _refresh_client_view, _show_user_menu, _show_user_settings, render_inbound, render_inbounds
+from xui.views import _refresh_client_view, _show_user_menu, _show_user_settings, render_inbound, render_inbounds, render_inbound_settings
 
 
 router = Router()
@@ -185,6 +186,49 @@ async def cb_inbound(call: types.CallbackQuery):
     await call.answer()
 
 
+@router.callback_query(F.data.startswith("xui_ibsettings_"))
+async def cb_inbound_settings(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    ib_hash = call.data[len("xui_ibsettings_"):]
+    info = _cache_lookup(ib_hash)
+    inbound_id = info.get("id")
+    if inbound_id is None:
+        return await call.answer("Инбаунд не найден", show_alert=True)
+    inbounds, err = await api_get_inbounds()
+    inbound = next((ib for ib in inbounds if ib.get("id") == inbound_id), None)
+    if not inbound:
+        return await call.answer(f"Инбаунд не найден: {err}", show_alert=True)
+    await render_inbound_settings(call, inbound)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("xui_ibsubport_"))
+async def cb_inbound_subport(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    ib_hash = call.data[len("xui_ibsubport_"):]
+    info = _cache_lookup(ib_hash)
+    inbound_id = info.get("id")
+    if inbound_id is None:
+        return await call.answer("Инбаунд не найден", show_alert=True)
+    inbounds, err = await api_get_inbounds()
+    inbound = next((ib for ib in inbounds if ib.get("id") == inbound_id), None)
+    if not inbound:
+        return await call.answer(f"Инбаунд не найден: {err}", show_alert=True)
+    current = get_inbound_sub_port(inbound_id) or "не задан"
+    await state.update_data(target_inbound_id=int(inbound_id))
+    await state.set_state(InboundSettingsState.waiting_inbound_subport)
+    await call.message.edit_text(
+        "📡 <b>Порт подписки</b>\n\n"
+        f"Текущий порт: <code>{current}</code>\n\n"
+        "Отправь новый порт числом.\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+    await call.answer()
+
+
 @router.callback_query(F.data.startswith("xui_cl_"))
 async def cb_client(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
@@ -203,8 +247,9 @@ async def cb_client_instruction(call: types.CallbackQuery):
         return await call.answer("Клиент не найден", show_alert=True)
     client = await api_get_client(email)
     sub_id = str((client or {}).get("subId") or email)
+    inbound_id = int(payload.get("ib_id", 0) or 0)
     await call.answer()
-    await call.message.answer(happ_instruction(sub_id), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    await call.message.answer(happ_instruction(sub_id, inbound_id), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
 
 @router.callback_query(F.data.startswith("xui_bind_"))
@@ -724,6 +769,31 @@ async def client_note_input(message: types.Message, state: FSMContext):
     set_client_note(ib_id, email, note)
     await state.clear()
     await message.answer("✅ Заметка сохранена.")
+
+
+@router.message(InboundSettingsState.waiting_inbound_subport)
+async def inbound_subport_input(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("Нужен числовой порт.\n\nДля выхода введите /cancel")
+        return
+    data = await state.get_data()
+    inbound_id = int(data.get("target_inbound_id") or 0)
+    if not inbound_id:
+        await state.clear()
+        await message.answer("Инбаунд не найден.")
+        return
+    set_inbound_sub_port(inbound_id, raw)
+    await state.clear()
+    inbounds, err = await api_get_inbounds()
+    inbound = next((ib for ib in inbounds if ib.get("id") == inbound_id), None)
+    if inbound:
+        await message.answer("✅ Порт подписки сохранён.")
+        await render_inbound_settings(message, inbound)
+        return
+    await message.answer(f"✅ Порт подписки сохранён.\n\n<code>{err}</code>", parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data.startswith("xui_del_"))

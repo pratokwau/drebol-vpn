@@ -7,7 +7,8 @@ from aiogram.enums import ParseMode
 
 from xui.api import api_get_client, api_get_inbounds
 from xui.helpers import get_client_stats_map, parse_clients
-from xui.keyboards import clients_kb, inbounds_kb, myvpn_device_kb, myvpn_main_kb, user_menu_kb, client_actions_kb, user_settings_kb
+from xui.keyboards import clients_kb, inbounds_kb, inbound_settings_kb, myvpn_device_kb, myvpn_main_kb, user_menu_kb, client_actions_kb, user_settings_kb
+from xui.inbound_settings_store import get_inbound_sub_port
 from xui.storage import (
     DEFAULT_MAX_DEVICES,
     DEFAULT_LIMIT_GB,
@@ -136,6 +137,25 @@ async def render_inbound(call, inbound: dict):
         parse_mode=ParseMode.HTML,
         reply_markup=clients_kb(inbound),
     )
+
+
+async def render_inbound_settings(call_or_msg, inbound: dict):
+    inbound_id = int(inbound.get("id", 0) or 0)
+    sub_port = get_inbound_sub_port(inbound_id)
+    text = (
+        "⚙️ <b>Настройки инбаунда</b>\n\n"
+        f"📡 Инбаунд: <code>{inbound.get('remark') or inbound.get('id')}</code>\n"
+        f"🔗 Порт подписки: <b>{sub_port or 'не задан'}</b>\n\n"
+        "Нажмите на порт подписки, чтобы изменить его."
+    )
+    markup = inbound_settings_kb(inbound_id, sub_port)
+    if isinstance(call_or_msg, types.CallbackQuery):
+        try:
+            await call_or_msg.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        except Exception:
+            await call_or_msg.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        return
+    await call_or_msg.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 
 async def _show_user_menu(call_or_msg, user_key: str, ib_id_default: int = 0, edit: bool = True):

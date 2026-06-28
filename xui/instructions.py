@@ -1,14 +1,32 @@
 from __future__ import annotations
 
 from html import escape
+from urllib.parse import urlsplit
+
+from xui.config_runtime import get_xui_url
+from xui.inbound_settings_store import get_inbound_sub_port
 
 
-def happ_instruction(sub_id: str | None = None) -> str:
+def build_subscription_link(sub_id: str | None, inbound_id: int | None = None) -> str:
+    if not sub_id:
+        return ""
+    panel_url = get_xui_url().strip()
+    sub_port = get_inbound_sub_port(inbound_id) if inbound_id is not None else ""
+    if not panel_url or not sub_port:
+        return ""
+    parsed = urlsplit(panel_url)
+    scheme = parsed.scheme or "https"
+    host = parsed.hostname or parsed.path or panel_url
+    return f"{scheme}://{host}:{sub_port}/sub/{escape(str(sub_id))}"
+
+
+def happ_instruction(sub_id: str | None = None, inbound_id: int | None = None) -> str:
     device_line = ""
-    if sub_id:
+    subscription_link = build_subscription_link(sub_id, inbound_id)
+    if subscription_link:
         device_line = (
             "Перейдите по ссылке на устройство пользователя из панели 3x-ui:\n"
-            f"<code>https://vpn.drebol.ru:2096/sub/{escape(sub_id)}</code>\n"
+            f"<code>{subscription_link}</code>\n"
         )
     return (
         "📖 <b>Инструкция</b>\n\n"
