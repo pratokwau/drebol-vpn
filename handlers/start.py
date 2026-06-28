@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from xui.api import api_add_client, api_del_client_by_email, api_get_client, api_get_inbounds, api_update_client
+from xui.instructions import happ_instruction
 from xui.keyboards import myvpn_device_kb, myvpn_main_kb
 from xui.storage import (
     get_vpn_user,
@@ -170,12 +171,13 @@ async def cb_vpn_toggle(call: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("myvpn_inst_"))
 async def cb_vpn_inst(call: types.CallbackQuery):
+    user_data = get_vpn_user(call.from_user.id)
+    payload = call.data[len("myvpn_inst_"):]
+    device_label = None
+    if user_data:
+        for d in user_data.get("devices", []):
+            if _device_cache_key(int(d.get("ib_id", 0) or 0), d.get("email", "")) == payload:
+                device_label = d.get("email", "")
+                break
     await call.answer()
-    await call.message.answer(
-        "📖 <b>Инструкция</b>\n\n"
-        "1. Нажмите на нужное устройство.\n"
-        "2. Используйте кнопку включения или отключения.\n"
-        "3. При необходимости откройте это сообщение еще раз через кнопку «Инструкция».\n\n"
-        "Если устройство не подключается, напишите администратору.",
-        parse_mode=ParseMode.HTML,
-    )
+    await call.message.answer(happ_instruction(device_label), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
