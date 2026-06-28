@@ -48,6 +48,10 @@ class XuiAdminAddDevice(StatesGroup):
     waiting_name = State()
 
 
+class XuiClientNoteEdit(StatesGroup):
+    waiting_note = State()
+
+
 def _decode_user_payload(payload: dict) -> tuple[str | None, int]:
     user_key = payload.get("user_key")
     ib_id = int(payload.get("ib_id", 0) or 0)
@@ -92,6 +96,13 @@ def _cache_lookup(hash_value: str) -> dict:
     from xui.utils import _cache
 
     return dict(_cache.get(hash_value, {}) or {})
+
+
+def _decode_client_payload(payload: dict) -> tuple[str, int, str]:
+    email = str(payload.get("email", "") or "")
+    ib_id = int(payload.get("ib_id", 0) or 0)
+    uuid_value = str(payload.get("uuid", "") or "")
+    return email, ib_id, uuid_value
 
 
 def _device_hash(ib_id: int, email: str) -> str:
@@ -172,6 +183,67 @@ async def cb_client(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     await _refresh_client_view(call, call.data[len("xui_cl_"):])
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("xui_inst_"))
+async def cb_client_instruction(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    payload = _cache_lookup(call.data[len("xui_inst_"):])
+    email, _, _ = _decode_client_payload(payload)
+    if not email:
+        return await call.answer("Клиент не найден", show_alert=True)
+    await call.answer()
+    await call.message.answer(
+        "📖 <b>Инструкция</b>\n\n"
+        f"🔹 Устройство: <code>{email}</code>\n"
+        "1. Скопируйте конфигурацию или ссылку для подключения.\n"
+        "2. Импортируйте её в клиентское приложение.\n"
+        "3. Если что-то не подключается, проверьте срок действия и статус устройства.\n\n"
+        "Если хотите вернуться к карточке устройства, нажмите «⬅️ Назад».",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.callback_query(F.data.startswith("xui_bind_"))
+async def cb_client_bind_tg(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    payload = _cache_lookup(call.data[len("xui_bind_"):])
+    email, ib_id, uuid_value = _decode_client_payload(payload)
+    if not email:
+        return await call.answer("Клиент не найден", show_alert=True)
+    await state.update_data(
+        target_client_email=email,
+        target_client_ib_id=ib_id,
+        target_client_uuid=uuid_value,
+    )
+    await state.set_state(XuiBindTg.waiting_tg_id)
+    await call.message.edit_text(
+        "📱 Отправь <b>TG ID</b>, к которому нужно привязать это устройство.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("xui_clnote_"))
+async def cb_client_note(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    payload = _cache_lookup(call.data[len("xui_clnote_"):])
+    email, ib_id, _ = _decode_client_payload(payload)
+    if not email:
+        return await call.answer("Клиент не найден", show_alert=True)
+    await state.update_data(target_client_email=email, target_client_ib_id=ib_id)
+    await state.set_state(XuiClientNoteEdit.waiting_note)
+    await call.message.edit_text(
+        "📝 Отправь новую заметку для устройства.\n\n"
+        "Можно отправить пустое сообщение, чтобы очистить заметку.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
     await call.answer()
 
 
@@ -544,18 +616,47 @@ async def bind_tg_input(message: types.Message, state: FSMContext):
         return
     data = await state.get_data()
     user_key = str(data.get("target_user_key") or "")
+    target_client_email = str(data.get("target_client_email") or "")
+    target_client_ib_id = int(data.get("target_client_ib_id") or 0)
+    target_client_uuid = str(data.get("target_client_uuid") or "")
     if not user_key:
-        await message.answer("Пользователь не найден.")
-        return
+        if not target_client_email or not target_client_ib_id:
+            await message.answer("Пользователь не найден.")
+            return
     new_key = raw
-    if user_key in load_vpn_users():
-        rekey_user(user_key, new_key)
-        data = load_vpn_users()
-        if new_key in data and user_settings_ready(data[new_key]):
-            data[new_key]["has_vpn_access"] = True
-            save_vpn_users(data)
+    if user_key:
+        if user_key in load_vpn_users():
+            rekey_user(user_key, new_key)
+            data = load_vpn_users()
+            if new_key in data and user_settings_ready(data[new_key]):
+                data[new_key]["has_vpn_access"] = True
+                save_vpn_users(data)
+    else:
+        add_device_to_user(
+            int(new_key),
+            target_client_ib_id,
+            target_client_uuid or "",
+            target_client_email,
+        )
     await state.clear()
     await message.answer("✅ TG ID привязан.")
+
+
+@router.message(XuiClientNoteEdit.waiting_note)
+async def client_note_input(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    email = str(data.get("target_client_email") or "")
+    ib_id = int(data.get("target_client_ib_id") or 0)
+    if not email or not ib_id:
+        await state.clear()
+        await message.answer("Клиент не найден.")
+        return
+    note = (message.text or "").strip()
+    set_client_note(ib_id, email, note)
+    await state.clear()
+    await message.answer("✅ Заметка сохранена.")
 
 
 @router.callback_query(F.data.startswith("xui_del_"))
