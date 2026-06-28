@@ -178,6 +178,8 @@ async def cb_vpn_inst(call: types.CallbackQuery):
         for d in user_data.get("devices", []):
             if _device_cache_key(int(d.get("ib_id", 0) or 0), d.get("email", "")) == payload:
                 device_label = d.get("email", "")
+                client = await api_get_client(device_label)
+                device_label = str((client or {}).get("subId") or device_label)
                 break
     await call.answer()
     await call.message.answer(happ_instruction(device_label), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
