@@ -182,9 +182,12 @@ def create_user(tg_id: int | None, max_devices: int = DEFAULT_MAX_DEVICES, note:
     return key
 
 
-def create_user_with_inbound(tg_id: int, ib_id: int, note: str = "") -> str:
+def create_user_with_inbound(tg_id: int | None, ib_id: int, note: str = "") -> str:
     data = load_vpn_users()
-    key = str(tg_id)
+    if tg_id is None:
+        key = f"anon_{secrets.token_hex(4)}"
+    else:
+        key = str(tg_id)
     if key not in data:
         data[key] = {
             "username": "",

@@ -374,7 +374,7 @@ async def cb_add_user(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(xui_ib_id=int(ib_id))
     await state.set_state(XuiAddUser.waiting_tg_id)
     await call.message.edit_text(
-        "Введите <b>TG ID</b> пользователя.\n\n"
+        "Введите <b>TG ID</b> пользователя или <code>-</code>, если TG нет.\n\n"
         "Для выхода введите /cancel",
         parse_mode=ParseMode.HTML,
     )
@@ -386,15 +386,21 @@ async def add_user_tg_id(message: types.Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     raw = (message.text or "").strip()
-    if not raw.isdigit():
-        await message.answer("Нужен числовой TG ID.\n\nДля выхода введите /cancel")
-        return
     data = await state.get_data()
-    tg_id = int(raw)
     ib_id = int(data.get("xui_ib_id", 0))
+    if raw == "-":
+        tg_id = None
+    elif raw.isdigit():
+        tg_id = int(raw)
+    else:
+        await message.answer("Нужен числовой TG ID или <code>-</code>.\n\nДля выхода введите /cancel", parse_mode=ParseMode.HTML)
+        return
     create_user_with_inbound(tg_id, ib_id)
     await state.clear()
-    await message.answer("✅ Пользователь создан. Открой его и настрой параметры через ⚙️ Настройки.")
+    if tg_id is None:
+        await message.answer("✅ Пользователь без TG ID создан. Открой его и настрой параметры через ⚙️ Настройки.")
+    else:
+        await message.answer("✅ Пользователь создан. Открой его и настрой параметры через ⚙️ Настройки.")
 
 
 @router.callback_query(F.data.startswith("xui_uadd_"))
