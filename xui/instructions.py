@@ -3,10 +3,13 @@ from __future__ import annotations
 from html import escape
 
 
-def happ_instruction(device_label: str | None = None) -> str:
+def happ_instruction(sub_id: str | None = None) -> str:
     device_line = ""
-    if device_label:
-        device_line = f"Перейдите по ссылке на устройство <code>{escape(device_label)}</code>.\n"
+    if sub_id:
+        device_line = (
+            "Перейдите по ссылке на устройство пользователя из панели 3x-ui:\n"
+            f"<code>https://vpn.drebol.ru:2096/sub/{escape(sub_id)}</code>\n"
+        )
     return (
         "📖 <b>Инструкция</b>\n\n"
         "Установите приложение HAPP:\n"

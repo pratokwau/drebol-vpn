@@ -17,6 +17,7 @@ from xui.instructions import happ_instruction
 from xui.keyboards import flow_choice_kb
 from xui.storage import (
     DEFAULT_EXPIRY_TIME_MS,
+    DEFAULT_FLOW,
     DEFAULT_LIMIT_GB,
     DEFAULT_LIMIT_IP,
     DEFAULT_MAX_DEVICES,
@@ -34,6 +35,7 @@ from xui.storage import (
     set_admin_disabled_key,
     set_client_note,
     set_user_expiry_time_ms,
+    set_user_flow,
     set_user_limit_gb,
     set_user_limit_ip,
     set_user_max_devices,
@@ -199,8 +201,10 @@ async def cb_client_instruction(call: types.CallbackQuery):
     email, _, _ = _decode_client_payload(payload)
     if not email:
         return await call.answer("Клиент не найден", show_alert=True)
+    client = await api_get_client(email)
+    sub_id = str((client or {}).get("subId") or email)
     await call.answer()
-    await call.message.answer(happ_instruction(email), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    await call.message.answer(happ_instruction(sub_id), parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
 
 @router.callback_query(F.data.startswith("xui_bind_"))
@@ -321,6 +325,7 @@ async def cb_user_settings_edit(call: types.CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("xui_def_gb_"))
 @router.callback_query(F.data.startswith("xui_def_exp_"))
 @router.callback_query(F.data.startswith("xui_def_ip_"))
+@router.callback_query(F.data.startswith("xui_def_flow_"))
 async def cb_user_settings_default(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
@@ -336,6 +341,8 @@ async def cb_user_settings_default(call: types.CallbackQuery):
         set_user_expiry_time_ms(user_key, DEFAULT_EXPIRY_TIME_MS)
     elif call.data.startswith("xui_def_ip_"):
         set_user_limit_ip(user_key, DEFAULT_LIMIT_IP)
+    elif call.data.startswith("xui_def_flow_"):
+        set_user_flow(user_key, DEFAULT_FLOW)
     else:
         return await call.answer("Неизвестная настройка", show_alert=True)
     await _show_user_settings(call.message, user_key, edit=True)
@@ -481,12 +488,13 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
     expiry_time_ms = int(info.get("expiry_time_ms") or 2523456000000)
     limit_gb = float(info.get("limit_gb") or 0.0)
     limit_ip = int(info.get("limit_ip") or 2)
+    flow = str(info.get("flow") or DEFAULT_FLOW)
     result, client_uuid = await api_add_client(
         base_ib,
         email,
         0,
         limit_gb,
-        "",
+        flow,
         expiry_time_ms=expiry_time_ms,
         limit_ip=limit_ip,
     )
@@ -499,7 +507,8 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
         f"✅ Устройство <code>{email}</code> создано.\n"
-        f"Лимит IP: <b>{limit_ip}</b>",
+        f"Лимит IP: <b>{limit_ip}</b>\n"
+        f"Flow: <b>{flow}</b>",
         parse_mode=ParseMode.HTML,
     )
     await _show_user_menu(message, user_key, base_ib, edit=False)

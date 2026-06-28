@@ -5,6 +5,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from xui.helpers import get_client_stats_map, parse_clients
 from xui.storage import (
     DEFAULT_EXPIRY_TIME_MS,
+    DEFAULT_FLOW,
     DEFAULT_LIMIT_GB,
     DEFAULT_LIMIT_IP,
     DEFAULT_MAX_DEVICES,
@@ -201,6 +202,7 @@ def user_settings_kb(user_key: str, info: dict) -> InlineKeyboardMarkup:
     limit_gb = info.get("limit_gb")
     expiry_time = info.get("expiry_time_ms")
     limit_ip = info.get("limit_ip")
+    flow = info.get("flow")
     rows = [
         [
             InlineKeyboardButton(text=f"📱 Лимит устройств: {max_devices if max_devices is not None else DEFAULT_MAX_DEVICES}", callback_data=f"xui_set_max_{uk_h}"),
@@ -217,6 +219,10 @@ def user_settings_kb(user_key: str, info: dict) -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text=f"🌐 Лимит IP: {limit_ip if limit_ip is not None else DEFAULT_LIMIT_IP}", callback_data=f"xui_set_ip_{uk_h}"),
             InlineKeyboardButton(text="По дефолту", callback_data=f"xui_def_ip_{uk_h}"),
+        ],
+        [
+            InlineKeyboardButton(text=f"⚡ Flow: {flow if flow is not None else DEFAULT_FLOW}", callback_data=f"xui_def_flow_{uk_h}"),
+            InlineKeyboardButton(text="По дефолту", callback_data=f"xui_def_flow_{uk_h}"),
         ],
         [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"xui_usr_{uk_h}")],
     ]

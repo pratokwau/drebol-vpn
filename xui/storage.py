@@ -11,6 +11,7 @@ DEFAULT_MAX_DEVICES = 1
 DEFAULT_LIMIT_IP = 2
 DEFAULT_LIMIT_GB = 0.0
 DEFAULT_EXPIRY_TIME_MS = 2523456000000
+DEFAULT_FLOW = "xtls-rprx-vision"
 
 
 def _ensure_parent(path: Path) -> None:
@@ -50,6 +51,7 @@ def _migrate_vpn_users(data: dict) -> dict:
                 "limit_gb": None,
                 "expiry_time_ms": None,
                 "limit_ip": None,
+                "flow": DEFAULT_FLOW,
                 "settings_ready": False,
                 "admin_disabled": False,
                 "has_vpn_access": False,
@@ -64,6 +66,7 @@ def _migrate_vpn_users(data: dict) -> dict:
         info.setdefault("limit_gb", None)
         info.setdefault("expiry_time_ms", None)
         info.setdefault("limit_ip", None)
+        info.setdefault("flow", DEFAULT_FLOW)
         info.setdefault("settings_ready", bool(info.get("devices")) or bool(info.get("has_vpn_access")))
         info.setdefault("admin_disabled", False)
         info.setdefault("has_vpn_access", False)
@@ -121,6 +124,7 @@ def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str, limit_ip: 
             "limit_gb": None,
             "expiry_time_ms": None,
             "limit_ip": None,
+            "flow": DEFAULT_FLOW,
             "settings_ready": False,
             "admin_disabled": False,
             "has_vpn_access": False,
@@ -197,6 +201,7 @@ def create_user_with_inbound(tg_id: int | None, ib_id: int, note: str = "") -> s
             "limit_gb": None,
             "expiry_time_ms": None,
             "limit_ip": None,
+            "flow": DEFAULT_FLOW,
             "settings_ready": False,
             "admin_disabled": False,
             "has_vpn_access": False,
@@ -224,7 +229,7 @@ def _recompute_user_settings_ready(user_key: str) -> bool:
     info = data.get(key)
     if not info:
         return False
-    ready = all(info.get(field) is not None for field in ("max_devices", "limit_gb", "expiry_time_ms", "limit_ip"))
+    ready = all(info.get(field) is not None for field in ("max_devices", "limit_gb", "expiry_time_ms", "limit_ip", "flow"))
     info["settings_ready"] = ready
     if ready:
         info["has_vpn_access"] = True
@@ -256,6 +261,11 @@ def set_user_limit_ip(user_key: str | int, value: int | None) -> None:
     _recompute_user_settings_ready(str(user_key))
 
 
+def set_user_flow(user_key: str | int, value: str | None) -> None:
+    _set_user_field(str(user_key), "flow", DEFAULT_FLOW if not value else str(value))
+    _recompute_user_settings_ready(str(user_key))
+
+
 def set_user_settings_ready(user_key: str | int, value: bool) -> None:
     _set_user_field(str(user_key), "settings_ready", bool(value))
     if value:
@@ -275,6 +285,9 @@ def get_effective_user_setting(info: dict, field: str):
     if field == "limit_ip":
         value = info.get("limit_ip")
         return DEFAULT_LIMIT_IP if value in (None, "") else int(value)
+    if field == "flow":
+        value = info.get("flow")
+        return DEFAULT_FLOW if value in (None, "") else str(value)
     if field == "default_ib_id":
         value = info.get("default_ib_id")
         return int(value or 0)
@@ -283,7 +296,7 @@ def get_effective_user_setting(info: dict, field: str):
 
 def user_settings_ready(info: dict) -> bool:
     return bool(info.get("settings_ready")) and all(
-        info.get(field) is not None for field in ("max_devices", "limit_gb", "expiry_time_ms", "limit_ip")
+        info.get(field) is not None for field in ("max_devices", "limit_gb", "expiry_time_ms", "limit_ip", "flow")
     )
 
 

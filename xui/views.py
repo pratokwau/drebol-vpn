@@ -13,6 +13,7 @@ from xui.storage import (
     DEFAULT_LIMIT_GB,
     DEFAULT_LIMIT_IP,
     DEFAULT_EXPIRY_TIME_MS,
+    DEFAULT_FLOW,
     get_client_note,
     get_effective_user_setting,
     get_vpn_user,
@@ -212,6 +213,7 @@ async def _show_user_menu(call_or_msg, user_key: str, ib_id_default: int = 0, ed
             f"• Лимит ГБ: <code>{info.get('limit_gb', DEFAULT_LIMIT_GB)}</code>\n"
             f"• Дата окончания: <code>{info.get('expiry_time_ms', DEFAULT_EXPIRY_TIME_MS)}</code>\n"
             f"• Лимит IP: <code>{info.get('limit_ip', DEFAULT_LIMIT_IP)}</code>\n"
+            f"• Flow: <code>{info.get('flow', DEFAULT_FLOW)}</code>\n"
             f"• Лимит устройств: <code>{info.get('max_devices', DEFAULT_MAX_DEVICES)}</code>"
         )
     elif devs_in_ib:
@@ -235,7 +237,8 @@ async def _show_user_settings(call_or_msg, user_key: str, edit: bool = True):
         f"📱 Лимит устройств: <b>{get_effective_user_setting(info, 'max_devices')}</b>\n"
         f"💾 Лимит ГБ: <b>{_format_limit_gb(info.get('limit_gb', DEFAULT_LIMIT_GB))}</b>\n"
         f"⏳ Дата окончания: <b>{_format_expiry_time(info.get('expiry_time_ms', DEFAULT_EXPIRY_TIME_MS))}</b>\n"
-        f"🌐 Лимит IP: <b>{info.get('limit_ip', DEFAULT_LIMIT_IP)}</b>"
+        f"🌐 Лимит IP: <b>{info.get('limit_ip', DEFAULT_LIMIT_IP)}</b>\n"
+        f"⚡ Flow: <b>{info.get('flow', DEFAULT_FLOW)}</b>"
     )
     kb = user_settings_kb(user_key, info)
     if edit:
