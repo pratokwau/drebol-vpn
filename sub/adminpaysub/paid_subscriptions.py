@@ -42,18 +42,18 @@ from sub.adminpaysub.paid_storage import (
     set_paid_subscription,
 )
 from sub.states import PaidSubSettings
-from sub.adminsub.storage import (
+from sub.adminpaysub.storage import (
     add_device_to_user_key,
     create_user_with_inbound,
+    delete_user_completely,
     get_users_by_subscription_type,
     load_vpn_users,
-    set_user_note,
-    set_user_max_devices,
+    set_user_flow,
     set_user_limit_gb,
     set_user_limit_ip,
-    set_user_flow,
+    set_user_max_devices,
+    set_user_note,
     set_user_username,
-    delete_user_completely,
 )
 from sub.utils import is_admin
 from sub.api import api_add_client, api_del_client_by_email, api_get_client, api_get_inbounds, api_update_client
@@ -499,7 +499,6 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     set_user_flow(user_key, flow)
     set_user_username(user_id, username)
     set_user_note(user_id, display_name)
-    slug = f"trial_{request.get('request_id') or user_id}"
     email = display_name
     result, client_uuid = await api_add_client(
         inbound_id,
