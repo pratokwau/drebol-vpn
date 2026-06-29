@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 from aiogram.types import BotCommand
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -99,7 +100,9 @@ async def _notify_about_paid_subscriptions() -> None:
                             "Доступ сохранён ещё на 36 часов.\n"
                             "Если за это время не оплатить, доступ будет удалён.\n"
                             "Открой /sub и нажми «Продлить подписку».",
+                            parse_mode="HTML",
                         )
+                        refreshed["trial_expired_notified_at"] = int(time.time())
                     elif event == "payment_expired":
                         await bot.send_message(
                             user_id,
@@ -107,14 +110,18 @@ async def _notify_about_paid_subscriptions() -> None:
                             "У тебя есть 36 часов, чтобы продлить оплату.\n"
                             + (f"🔗 Оплата: <b>{payment_url}</b>\n" if payment_url else "")
                             + "Открой /sub и нажми «Продлить подписку».",
+                            parse_mode="HTML",
                         )
+                        refreshed["payment_expired_notified_at"] = int(time.time())
                     elif event == "grace_expired":
                         await _revoke_paid_user_access(user_id)
                         await bot.send_message(
                             user_id,
                             "⛔ <b>Период продления закончился.</b>\n\n"
                             "Подписка удалена. Чтобы вернуть доступ, нужно оформить её заново.",
+                            parse_mode="HTML",
                         )
+                        refreshed["grace_expired_notified_at"] = int(time.time())
                 changed = True
             if changed:
                 save_paid_subscriptions(subscriptions)
