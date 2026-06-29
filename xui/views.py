@@ -133,12 +133,19 @@ async def render_inbounds(message_or_call, *, show_settings: bool = True):
     await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 
-async def render_inbound(call, inbound: dict):
-    await call.message.edit_text(
-        inbound_text(inbound),
-        parse_mode=ParseMode.HTML,
-        reply_markup=clients_kb(inbound),
-    )
+async def render_inbound(message_or_call, inbound: dict):
+    text = inbound_text(inbound)
+    markup = clients_kb(inbound)
+    if isinstance(message_or_call, types.CallbackQuery):
+        try:
+            await message_or_call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        except Exception:
+            await message_or_call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        return
+    try:
+        await message_or_call.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+    except Exception:
+        await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 
 async def render_inbound_settings(call_or_msg, inbound: dict):
