@@ -91,6 +91,30 @@ def _format_limit_gb(value) -> str:
     return "∞" if number <= 0 else str(number)
 
 
+def _plural_ru(value: int, one: str, few: str, many: str) -> str:
+    value = abs(int(value))
+    if value % 10 == 1 and value % 100 != 11:
+        return one
+    if value % 10 in {2, 3, 4} and value % 100 not in {12, 13, 14}:
+        return few
+    return many
+
+
+def _format_trial_remaining(subscription: dict) -> str:
+    ends_at = int(subscription.get("trial_ends_at") or 0)
+    now = int(datetime.now(tz=timezone.utc).timestamp())
+    remaining = max(0, ends_at - now)
+    days, remainder = divmod(remaining, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return (
+        f"{days} {_plural_ru(days, 'день', 'дня', 'дней')} "
+        f"{hours} {_plural_ru(hours, 'час', 'часа', 'часов')} "
+        f"{minutes} {_plural_ru(minutes, 'минута', 'минуты', 'минут')} "
+        f"{seconds} {_plural_ru(seconds, 'секунда', 'секунды', 'секунд')}"
+    )
+
+
 def _subscription_status_ru(subscription: dict) -> str:
     status = paid_subscription_status(subscription)
     labels = {
@@ -140,7 +164,6 @@ def _paid_subscriptions_kb(users: dict) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text=label, callback_data=f"paidsub_{user_key}")])
     rows.append([
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="adminpaysub_settings"),
-        InlineKeyboardButton(text="🔄 Обновить", callback_data="adminpaysub_refresh"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -282,7 +305,7 @@ async def render_paid_subscriptions(message_or_call):
 def _subscription_summary(subscription: dict) -> str:
     return (
         f"📌 Статус подписки: <b>{_subscription_status_ru(subscription)}</b>\n"
-        f"🧪 Пробный период: <b>{_format_remaining_or_duration(subscription.get('trial_ends_at'), subscription.get('trial_seconds'))}</b>\n"
+        f"🧪 Пробный период: <b>осталось {_format_trial_remaining(subscription)}</b>\n"
         f"⏳ Срок подписки после оплаты: <b>{format_duration(subscription.get('payment_seconds'))}</b>\n"
         f"💰 Сумма: <b>{subscription.get('payment_amount', 'не задана')} ₽</b>\n"
         f"🕒 Время на продление: <b>{format_duration(subscription.get('grace_seconds'))}</b>\n"
@@ -305,7 +328,6 @@ def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None 
         rows.append([InlineKeyboardButton(text="💳 Продлить подписку", callback_data=f"paiduser_renew_{user_id}")])
     if request:
         rows = [[InlineKeyboardButton(text="⏳ Заявка уже отправлена", callback_data="paiduser_wait")]]
-    rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="paiduser_refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -313,7 +335,6 @@ def _paid_user_info_kb(user_id: int, subscription: dict | None) -> InlineKeyboar
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="paiduser_back")],
-            [InlineKeyboardButton(text="🔄 Обновить", callback_data="paiduser_refresh")],
         ]
     )
 
@@ -554,7 +575,7 @@ async def cb_paid_user_info(call: types.CallbackQuery):
         (
             "ℹ️ <b>Информация о вашей подписке</b>\n\n"
             f"📌 Статус подписки: <b>{_subscription_status_ru(subscription)}</b>\n"
-            f"🧪 Пробный период: <b>{_format_remaining_or_duration(subscription.get('trial_ends_at'), subscription.get('trial_seconds'))}</b>\n"
+            f"🧪 Пробный период: <b>осталось {_format_trial_remaining(subscription)}</b>\n"
             f"⏳ Срок подписки после оплаты: <b>{format_duration(subscription.get('payment_seconds'))}</b>\n"
             f"💰 Сумма: <b>{subscription.get('payment_amount', 'не задана')} ₽</b>\n"
             f"🕒 Время на продление: <b>{format_duration(subscription.get('grace_seconds'))}</b>\n"
