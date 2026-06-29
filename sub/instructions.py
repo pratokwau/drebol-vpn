@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from html import escape
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from sub.config_runtime import get_xui_url
-from sub.adminsub.inbound_settings_store import get_inbound_sub_port
+from sub.adminsub.inbound_settings_store import get_any_inbound_sub_port, get_inbound_sub_port
 
 
 def build_subscription_link(sub_id: str | None, inbound_id: int | None = None) -> str:
@@ -12,12 +12,14 @@ def build_subscription_link(sub_id: str | None, inbound_id: int | None = None) -
         return ""
     panel_url = get_xui_url().strip()
     sub_port = get_inbound_sub_port(inbound_id) if inbound_id is not None else ""
+    if not sub_port:
+        sub_port = get_any_inbound_sub_port()
     if not panel_url or not sub_port:
         return ""
     parsed = urlsplit(panel_url)
     scheme = parsed.scheme or "https"
     host = parsed.hostname or parsed.path or panel_url
-    return f"{scheme}://{host}:{sub_port}/sub/{escape(str(sub_id))}"
+    return f"{scheme}://{host}:{sub_port}/sub/{quote(str(sub_id), safe='')}"
 
 
 def happ_instruction(sub_id: str | None = None, inbound_id: int | None = None) -> str:

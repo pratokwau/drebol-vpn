@@ -49,10 +49,16 @@ def _format_expiry_time(value) -> str:
         return str(value)
 
 
+def _is_paid_user(user_key: str, info: dict) -> bool:
+    return str(user_key).startswith("paid_") or str(info.get("subscription_type", "")).lower() == "paid"
+
+
 async def sync_user_devices_with_panel(user_key: str) -> bool:
     data = load_vpn_users()
     info = data.get(user_key)
     if not info:
+        return False
+    if _is_paid_user(user_key, info):
         return False
 
     devices = info.get("devices", [])
@@ -173,6 +179,9 @@ async def _show_user_menu(call_or_msg, user_key: str, ib_id_default: int = 0, ed
     if not info:
         text = "❌ Пользователь не найден"
         return await call_or_msg.edit_text(text) if edit else await call_or_msg.answer(text)
+    if _is_paid_user(user_key, info):
+        text = "❌ Пользователь не найден"
+        return await call_or_msg.edit_text(text) if edit else await call_or_msg.answer(text)
 
     devices = info.get("devices", [])
     if devices:
@@ -258,6 +267,9 @@ async def _show_user_settings(call_or_msg, user_key: str, edit: bool = True):
     data = load_vpn_users()
     info = data.get(user_key)
     if not info:
+        text = "❌ Пользователь не найден"
+        return await call_or_msg.edit_text(text) if edit else await call_or_msg.answer(text)
+    if _is_paid_user(user_key, info):
         text = "❌ Пользователь не найден"
         return await call_or_msg.edit_text(text) if edit else await call_or_msg.answer(text)
     text = (

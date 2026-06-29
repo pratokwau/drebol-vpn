@@ -62,6 +62,8 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
     bound_emails = set()
 
     for user_key, info in vpn_users.items():
+        if str(user_key).startswith("paid_") or str(info.get("subscription_type", "")).lower() == "paid":
+            continue
         user_in_this_ib = any(d.get("ib_id") == ib_id for d in info.get("devices", []))
         no_devices = not info.get("devices")
         if user_in_this_ib or no_devices:
@@ -89,6 +91,8 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
 
     for cl in singles:
         email = cl.get("email", "?")
+        if str(email).startswith("paid_"):
+            continue
         enabled = cl.get("enable", True)
         stats = stats_map.get(email, {})
         up = format_bytes(stats.get("up", 0))
@@ -105,6 +109,8 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
 
     items = []
     for user_key, info in sorted(grouped.items()):
+        if str(user_key).startswith("paid_") or str(info.get("subscription_type", "")).lower() == "paid":
+            continue
         username = info.get("username", "")
         note = info.get("note", "")
         n_devices = len([d for d in info.get("devices", []) if d.get("ib_id") == ib_id])
