@@ -80,6 +80,14 @@ def _parse_limit_gb(raw: str | None) -> float:
     return float(text)
 
 
+def _format_limit_gb(value) -> str:
+    try:
+        number = float(value or 0)
+    except Exception:
+        number = 0.0
+    return "∞" if number <= 0 else str(number)
+
+
 def _parse_limit_ip(raw: str | None) -> int:
     text = (raw or "").strip()
     if not text or text == "-":
@@ -146,7 +154,7 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="По дефолту", callback_data="paiddef_max_devices"),
             ],
             [
-                InlineKeyboardButton(text=f"💾 Лимит ГБ: {settings['limit_gb']}", callback_data="paidset_limit_gb"),
+                InlineKeyboardButton(text=f"💾 Лимит ГБ: {_format_limit_gb(settings['limit_gb'])}", callback_data="paidset_limit_gb"),
                 InlineKeyboardButton(text="По дефолту", callback_data="paiddef_limit_gb"),
             ],
             [
@@ -216,7 +224,7 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
         f"🕒 Grace: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"🔗 Ссылка: <b>{'задана' if settings['payment_url'] else 'не задана'}</b>\n"
         f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
-        f"💾 Лимит ГБ: <b>{settings['limit_gb']}</b>\n"
+        f"💾 Лимит ГБ: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
         f"⏳ Дата окончания: <b>{settings['expiry_time_ms']}</b>\n"
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
         f"⚡ Flow: <b>{settings['flow']}</b>"
@@ -261,7 +269,7 @@ def _subscription_summary(subscription: dict) -> str:
         f"💰 Сумма: <b>{subscription.get('payment_amount', 'не задана')} ₽</b>\n"
         f"🕒 Grace: <b>{format_duration(subscription.get('grace_seconds'))}</b>\n"
         f"📱 Лимит устройств: <b>{subscription.get('max_devices', 'не задан')}</b>\n"
-        f"💾 Лимит ГБ: <b>{subscription.get('limit_gb', 'не задан')}</b>\n"
+        f"💾 Лимит ГБ: <b>{_format_limit_gb(subscription.get('limit_gb'))}</b>\n"
         f"⏳ Дата окончания: <b>{subscription.get('expiry_time_ms', 'не задан')}</b>\n"
         f"🌐 Лимит IP: <b>{subscription.get('limit_ip', 'не задан')}</b>\n"
         f"⚡ Flow: <b>{subscription.get('flow', 'не задан')}</b>\n"
@@ -298,7 +306,7 @@ def _admin_paid_request_text(request: dict, settings: dict, title: str) -> str:
         f"💰 Сумма: <b>{settings['payment_amount']} ₽</b>\n"
         f"🕒 Grace: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
-        f"💾 Лимит ГБ: <b>{settings['limit_gb']}</b>\n"
+        f"💾 Лимит ГБ: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
         f"⏳ Дата окончания: <b>{settings['expiry_time_ms']}</b>\n"
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
         f"⚡ Flow: <b>{settings['flow']}</b>\n"
