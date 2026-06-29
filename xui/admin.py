@@ -763,13 +763,16 @@ async def cb_user_delete(call: types.CallbackQuery):
     inbounds, _ = await api_get_inbounds()
     inbound = next((item for item in inbounds if item.get("id") == ib_id), None)
     if inbound:
-        await render_inbound(call.message, inbound)
+        try:
+            await render_inbound(call, inbound)
+        except Exception:
+            await call.message.answer("✅ Пользователь удалён.")
     else:
         try:
             await call.message.edit_text("✅ Пользователь удалён.")
         except Exception:
             await call.message.answer("✅ Пользователь удалён.")
-    await call.answer()
+    await call.answer("✅ Пользователь удалён")
 
 
 @router.callback_query(F.data.startswith("xui_ublk_"))
@@ -1002,15 +1005,21 @@ async def cb_client_delete(call: types.CallbackQuery):
                 break
     owner_user_key = info.get("owner_uk", "") or get_user_key_by_client(ib_id, email) or ""
     if owner_user_key:
-        await _show_user_menu(call.message, owner_user_key, ib_id, edit=True)
+        try:
+            await _show_user_menu(call.message, owner_user_key, ib_id, edit=True)
+        except Exception:
+            await call.message.answer("✅ Клиент удалён.")
     else:
         inbounds, _ = await api_get_inbounds()
         inbound = next((item for item in inbounds if item.get("id") == ib_id), None)
         if inbound:
-            await render_inbound(call.message, inbound)
+            try:
+                await render_inbound(call, inbound)
+            except Exception:
+                await call.message.answer("✅ Клиент удалён.")
         else:
             await call.message.edit_text("✅ Клиент удалён.")
-    await call.answer()
+    await call.answer("✅ Клиент удалён")
 
 
 @router.callback_query(F.data.startswith("xui_tog_"))
