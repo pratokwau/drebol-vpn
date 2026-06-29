@@ -124,12 +124,34 @@ def _format_trial_remaining(subscription: dict) -> str:
     days, remainder = divmod(remaining, 86400)
     hours, remainder = divmod(remainder, 3600)
     minutes, seconds = divmod(remainder, 60)
-    return (
-        f"{days} {_plural_ru(days, 'день', 'дня', 'дней')} "
-        f"{hours} {_plural_ru(hours, 'час', 'часа', 'часов')} "
-        f"{minutes} {_plural_ru(minutes, 'минута', 'минуты', 'минут')} "
-        f"{seconds} {_plural_ru(seconds, 'секунда', 'секунды', 'секунд')}"
-    )
+    clock = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{days} дн {clock}" if days else clock
+
+
+def _format_duration_ru(seconds: int | None) -> str:
+    total = int(seconds or 0)
+    if total <= 0:
+        return "не задано"
+    units = [
+        (365 * 24 * 3600, "год", "года", "лет"),
+        (30 * 24 * 3600, "месяц", "месяца", "месяцев"),
+        (24 * 3600, "день", "дня", "дней"),
+        (3600, "час", "часа", "часов"),
+        (60, "минута", "минуты", "минут"),
+        (1, "секунда", "секунды", "секунд"),
+    ]
+    for unit_seconds, one, few, many in units:
+        if total % unit_seconds == 0:
+            value = total // unit_seconds
+            return f"{value} {_plural_ru(value, one, few, many)}"
+    return f"{total} сек"
+
+
+def _format_short_dt(ts: int | None) -> str:
+    value = int(ts or 0)
+    if value <= 0:
+        return "Не активирован"
+    return datetime.fromtimestamp(value, tz=timezone.utc).astimezone().strftime("%d.%m.%Y • %H:%M")
 
 
 def _subscription_status_ru(subscription: dict) -> str:
@@ -322,19 +344,40 @@ async def render_paid_subscriptions(message_or_call):
 
 
 def _subscription_summary(subscription: dict) -> str:
+    status = paid_subscription_status(subscription)
+    plan_label = "Пробный доступ" if status == "trial" else "Платный доступ"
+    remaining = _format_trial_remaining(subscription)
+    payment_seconds = _format_duration_ru(subscription.get("payment_seconds"))
+    grace_seconds = _format_duration_ru(subscription.get("grace_seconds"))
+    payment_amount = int(subscription.get("payment_amount") or 0)
+    max_devices = int(subscription.get("max_devices") or 1)
+    limit_ip = int(subscription.get("limit_ip") or 2)
+    limit_gb = _format_limit_gb(subscription.get("limit_gb"))
+    trial_ends = _format_short_dt(subscription.get("trial_ends_at"))
+    paid_ends = _format_short_dt(subscription.get("paid_ends_at"))
+    grace_ends = _format_short_dt(subscription.get("grace_ends_at"))
     return (
-        f"📌 Статус подписки: <b>{_subscription_status_ru(subscription)}</b>\n"
-        f"🧪 Пробный период: <b>осталось {_format_trial_remaining(subscription)}</b>\n"
-        f"⏳ Срок подписки после оплаты: <b>{format_duration(subscription.get('payment_seconds'))}</b>\n"
-        f"💰 Сумма: <b>{subscription.get('payment_amount', 'не задана')} ₽</b>\n"
-        f"🕒 Время на продление: <b>{format_duration(subscription.get('grace_seconds'))}</b>\n"
-        f"📱 Лимит устройств: <b>{subscription.get('max_devices', 'не задан')}</b>\n"
-        f"💾 Лимит трафика: <b>{_format_limit_gb(subscription.get('limit_gb'))}</b>\n"
-        f"🌐 Лимит IP: <b>{subscription.get('limit_ip', 'не задан')}</b>\n"
-        f"⚡ Параметр подключения: <b>{subscription.get('flow', 'не задан')}</b>\n"
-        f"📅 Пробный доступ до: <b>{_format_dt(subscription.get('trial_ends_at'))}</b>\n"
-        f"📅 Подписка до: <b>{_format_dt(subscription.get('paid_ends_at'))}</b>\n"
-        f"📅 Доступ до (trial + продление): <b>{_format_dt(subscription.get('grace_ends_at'))}</b>"
+        "🛡️ VPN Subscription\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🟢 План\n"
+        f"{plan_label}\n\n"
+        "⏳ Осталось\n"
+        f"{remaining}\n\n"
+        "💎 После покупки\n"
+        f"• Стоимость: {payment_amount} ₽\n"
+        f"• Срок: {payment_seconds}\n"
+        f"• Продление: {grace_seconds}\n\n"
+        "⚙️ Возможности\n"
+        f"📱 До {max_devices} устройства\n"
+        f"🌐 До {limit_ip} IP одновременно\n"
+        f"♾ Безлимитный трафик\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "📅 Trial до\n"
+        f"{trial_ends}\n\n"
+        "📅 Premium до\n"
+        f"{paid_ends}\n\n"
+        "📅 Доступ действует до\n"
+        f"{grace_ends}"
     )
 
 
@@ -706,20 +749,7 @@ async def cb_paid_user_info(call: types.CallbackQuery):
     await call.answer()
     subscription = get_paid_subscription(call.from_user.id) or {}
     await call.message.edit_text(
-        (
-            "ℹ️ <b>Информация о вашей подписке</b>\n\n"
-            f"📌 Статус подписки: <b>{_subscription_status_ru(subscription)}</b>\n"
-            f"🧪 Пробный период: <b>осталось {_format_trial_remaining(subscription)}</b>\n"
-            f"⏳ Срок подписки после оплаты: <b>{format_duration(subscription.get('payment_seconds'))}</b>\n"
-            f"💰 Сумма: <b>{subscription.get('payment_amount', 'не задана')} ₽</b>\n"
-            f"🕒 Время на продление: <b>{format_duration(subscription.get('grace_seconds'))}</b>\n"
-            f"📱 Лимит устройств: <b>{subscription.get('max_devices', 'не задан')}</b>\n"
-            f"💾 Лимит трафика: <b>{_format_limit_gb(subscription.get('limit_gb'))}</b>\n"
-            f"🌐 Лимит IP: <b>{subscription.get('limit_ip', 'не задан')}</b>\n"
-            f"📅 Пробный доступ до: <b>{_format_dt(subscription.get('trial_ends_at'))}</b>\n"
-            f"📅 Подписка до: <b>{_format_dt(subscription.get('paid_ends_at'))}</b>\n"
-            f"📅 Доступ до (trial + продление): <b>{_format_dt(subscription.get('grace_ends_at'))}</b>"
-        ),
+        "ℹ️ <b>Информация о вашей подписке</b>\n\n" + _subscription_summary(subscription),
         parse_mode=ParseMode.HTML,
         reply_markup=_paid_user_info_kb(call.from_user.id, subscription),
     )
