@@ -20,6 +20,7 @@ DEFAULT_PAID_PAYMENT_SECONDS = 30 * DAY
 DEFAULT_PAID_PAYMENT_AMOUNT = 70
 DEFAULT_PAID_GRACE_SECONDS = 36 * HOUR
 DEFAULT_PAID_MAX_DEVICES = 1
+DEFAULT_PAID_LIMIT_IP = 2
 DEFAULT_PAID_PAYMENT_URL = ""
 
 
@@ -149,6 +150,7 @@ def load_paid_settings() -> dict:
         "payment_amount": int(raw.get("payment_amount", DEFAULT_PAID_PAYMENT_AMOUNT) or DEFAULT_PAID_PAYMENT_AMOUNT),
         "grace_seconds": int(grace_seconds or DEFAULT_PAID_GRACE_SECONDS),
         "max_devices": int(raw.get("max_devices", DEFAULT_PAID_MAX_DEVICES) or DEFAULT_PAID_MAX_DEVICES),
+        "limit_ip": int(raw.get("limit_ip", DEFAULT_PAID_LIMIT_IP) or DEFAULT_PAID_LIMIT_IP),
         "payment_url": str(raw.get("payment_url", DEFAULT_PAID_PAYMENT_URL) or ""),
     }
 
@@ -160,6 +162,7 @@ def save_paid_settings(data: dict) -> None:
         "payment_amount": int(data.get("payment_amount", DEFAULT_PAID_PAYMENT_AMOUNT) or DEFAULT_PAID_PAYMENT_AMOUNT),
         "grace_seconds": int(data.get("grace_seconds", DEFAULT_PAID_GRACE_SECONDS) or DEFAULT_PAID_GRACE_SECONDS),
         "max_devices": int(data.get("max_devices", DEFAULT_PAID_MAX_DEVICES) or DEFAULT_PAID_MAX_DEVICES),
+        "limit_ip": int(data.get("limit_ip", DEFAULT_PAID_LIMIT_IP) or DEFAULT_PAID_LIMIT_IP),
         "payment_url": str(data.get("payment_url", DEFAULT_PAID_PAYMENT_URL) or ""),
     }
     _write_json(PAID_SETTINGS_FILE, payload)

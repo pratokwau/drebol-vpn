@@ -167,6 +167,7 @@ def build_paid_subscription(settings: dict, *, kind: str = "access", source: dic
     grace_seconds = int(settings.get("grace_seconds") or 0)
     payment_amount = int(settings.get("payment_amount") or 0)
     max_devices = int(settings.get("max_devices") or 0)
+    limit_ip = int(settings.get("limit_ip") or 0)
     payment_url = str(settings.get("payment_url") or "")
     source = source or {}
     return {
@@ -177,6 +178,7 @@ def build_paid_subscription(settings: dict, *, kind: str = "access", source: dic
         "payment_seconds": payment_seconds,
         "payment_amount": payment_amount,
         "max_devices": max_devices,
+        "limit_ip": limit_ip,
         "payment_url": payment_url,
         "grace_seconds": grace_seconds,
         "created_at": now,
@@ -195,6 +197,7 @@ def extend_paid_subscription(info: dict, settings: dict, *, from_now: bool = Fal
     payment_seconds = int(settings.get("payment_seconds") or 0)
     grace_seconds = int(settings.get("grace_seconds") or 0)
     info["max_devices"] = int(settings.get("max_devices") or info.get("max_devices") or 0)
+    info["limit_ip"] = int(settings.get("limit_ip") or info.get("limit_ip") or 0)
     info["status"] = "active"
     info["active"] = True
     info["paid_ends_at"] = base + payment_seconds if payment_seconds else base
