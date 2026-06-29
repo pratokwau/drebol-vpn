@@ -284,19 +284,11 @@ def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None 
 
 
 def _paid_user_text(subscription: dict, payment_url: str) -> str:
-    status = paid_subscription_status(subscription) if subscription else "none"
-    text = (
+    _ = payment_url
+    return (
         "💳 <b>Меню управления подпиской</b>\n\n"
-        f"{_subscription_summary(subscription)}\n"
-        f"🔗 Оплата: <b>{html.escape(str(payment_url)) if payment_url else 'не задана'}</b>\n\n"
+        "Для управления используйте кнопки ниже"
     )
-    if status == "trial":
-        text += "Сейчас идёт пробный период. После его окончания будет доступно продление."
-    elif status in {"expired", "grace", "pending_payment"}:
-        text += "Подписка требует продления. Нажми «Продлить подписку»."
-    else:
-        text += "Подписка активна. Здесь можно посмотреть информацию или продлить её заранее."
-    return text
 
 
 def _admin_paid_request_text(request: dict, settings: dict, title: str) -> str:
