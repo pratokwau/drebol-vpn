@@ -17,8 +17,7 @@ router = Router()
 def _has_admin_vpn_access(user_data: dict | None) -> bool:
     return bool(
         user_data
-        and user_settings_ready(user_data)
-        and str(user_data.get("subscription_type", "")).lower() == "admin"
+        and str(user_data.get("subscription_type", "")).lower() != "paid"
     )
 
 
