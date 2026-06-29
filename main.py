@@ -55,7 +55,7 @@ async def _notify_about_updates() -> None:
                     save_update_state(state)
         except Exception:
             pass
-        await asyncio.sleep(60)
+        await asyncio.sleep(10)
 
 
 async def main() -> None:
