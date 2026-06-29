@@ -37,7 +37,15 @@ def load_vpn_users() -> dict:
     raw = _read_json(VPN_USERS_FILE, {})
     if not isinstance(raw, dict):
         return {}
-    return _migrate_vpn_users(raw)
+    migrated = _migrate_vpn_users(raw)
+    cleaned = {
+        user_key: info
+        for user_key, info in migrated.items()
+        if not str(user_key).startswith("paid_") and str(getattr(info, "get", lambda *_: "")("subscription_type", "")).lower() != "paid"
+    }
+    if cleaned != migrated:
+        save_vpn_users(cleaned)
+    return cleaned
 
 
 def _migrate_vpn_users(data: dict) -> dict:
