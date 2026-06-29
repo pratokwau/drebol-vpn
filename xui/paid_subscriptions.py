@@ -69,22 +69,10 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
     settings = load_paid_settings()
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text=f"🧪 Trial: {format_duration(settings['trial_seconds'])}", callback_data="paidset_trial_seconds"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_trial_seconds"),
-            ],
-            [
-                InlineKeyboardButton(text=f"⏳ Оплата: {format_duration(settings['payment_seconds'])}", callback_data="paidset_payment_seconds"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_payment_seconds"),
-            ],
-            [
-                InlineKeyboardButton(text=f"💰 Сумма: {settings['payment_amount']} ₽", callback_data="paidset_payment_amount"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_payment_amount"),
-            ],
-            [
-                InlineKeyboardButton(text=f"🕒 Grace: {format_duration(settings['grace_seconds'])}", callback_data="paidset_grace_seconds"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_grace_seconds"),
-            ],
+            [InlineKeyboardButton(text=f"🧪 Trial: {format_duration(settings['trial_seconds'])}", callback_data="paidset_trial_seconds")],
+            [InlineKeyboardButton(text=f"⏳ Оплата: {format_duration(settings['payment_seconds'])}", callback_data="paidset_payment_seconds")],
+            [InlineKeyboardButton(text=f"💰 Сумма: {settings['payment_amount']} ₽", callback_data="paidset_payment_amount")],
+            [InlineKeyboardButton(text=f"🕒 Grace: {format_duration(settings['grace_seconds'])}", callback_data="paidset_grace_seconds")],
             [InlineKeyboardButton(text=f"🔗 Оплата: {'задана' if settings['payment_url'] else 'не задана'}", callback_data="paidset_payment_url")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_back")],
         ]
@@ -248,27 +236,6 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
         parse_mode=ParseMode.HTML,
     )
     await call.answer()
-
-
-@router.callback_query(F.data.startswith("paiddef_"))
-async def cb_paid_settings_default(call: types.CallbackQuery):
-    if not is_admin(call.from_user.id):
-        return await call.answer("Нет доступа", show_alert=True)
-    field = call.data[len("paiddef_"):]
-    settings = load_paid_settings()
-    if field == "trial_seconds":
-        settings["trial_seconds"] = DEFAULT_PAID_TRIAL_SECONDS
-    elif field == "payment_seconds":
-        settings["payment_seconds"] = DEFAULT_PAID_PAYMENT_SECONDS
-    elif field == "payment_amount":
-        settings["payment_amount"] = DEFAULT_PAID_PAYMENT_AMOUNT
-    elif field == "grace_seconds":
-        settings["grace_seconds"] = DEFAULT_PAID_GRACE_SECONDS
-    else:
-        return await call.answer("Неизвестная настройка", show_alert=True)
-    save_paid_settings(settings)
-    await call.answer("Применено")
-    await _show_paid_settings(call, edit=True)
 
 
 @router.message(PaidSubSettings.waiting_value)
