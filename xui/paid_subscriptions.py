@@ -300,6 +300,65 @@ def _paid_user_text(subscription: dict, payment_url: str) -> str:
     )
 
 
+async def render_paid_user_menu(message_or_call, *, user_id: int, username: str = "", first_name: str = "", last_name: str = "", edit: bool = False) -> None:
+    subscription = get_paid_subscription(user_id) or {}
+    request = get_paid_request(user_id)
+    if not subscription and not request:
+        request_id, _ = create_paid_request(
+            user_id,
+            username=username,
+            first_name=first_name,
+            last_name=last_name,
+            kind="access",
+        )
+        text = (
+            "✅ <b>Ваша заявка на триал доступ отправлена.</b>\n\n"
+            "Ожидайте подтверждения от администратора."
+        )
+        if edit:
+            await message_or_call.edit_text(text, parse_mode=ParseMode.HTML)
+        else:
+            await message_or_call.answer(text, parse_mode=ParseMode.HTML)
+        settings = load_paid_settings()
+        if ADMIN_ID:
+            await bot.send_message(
+                ADMIN_ID,
+                _admin_paid_request_text(
+                    {
+                        "user_id": user_id,
+                        "username": username,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "request_id": request_id,
+                        "kind": "access",
+                    },
+                    settings,
+                    "Новая заявка на первичный триал доступ",
+                ),
+                parse_mode=ParseMode.HTML,
+                reply_markup=_paid_request_kb(request_id),
+            )
+        return
+    if request and not subscription:
+        text = (
+            "⏳ <b>Ваша заявка на триал доступ уже отправлена.</b>\n\n"
+            "Ожидайте подтверждения от администратора."
+        )
+        if edit:
+            await message_or_call.edit_text(text, parse_mode=ParseMode.HTML)
+        else:
+            await message_or_call.answer(text, parse_mode=ParseMode.HTML)
+        return
+
+    payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
+    text = _paid_user_text(subscription, payment_url)
+    markup = _paid_user_kb(user_id, subscription, request)
+    if edit:
+        await message_or_call.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+    else:
+        await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+
+
 def _admin_paid_request_text(request: dict, settings: dict, title: str) -> str:
     user_id = int(request.get("user_id") or 0)
     kind = str(request.get("kind") or "access")
@@ -414,78 +473,33 @@ async def _sync_paid_user_devices_expiry(
 
 @router.message(Command("sub"))
 async def cmd_sub(message: types.Message):
-    user_id = message.from_user.id
-    subscription = get_paid_subscription(user_id) or {}
-    request = get_paid_request(user_id)
-    if not subscription and not request:
-        request_id, _ = create_paid_request(
-            user_id,
-            username=message.from_user.username or "",
-            first_name=message.from_user.first_name or "",
-            last_name=message.from_user.last_name or "",
-            kind="access",
-        )
-        await message.answer(
-            "✅ <b>Ваша заявка на триал доступ отправлена.</b>\n\n"
-            "Ожидайте подтверждения от администратора.",
-            parse_mode=ParseMode.HTML,
-        )
-        settings = load_paid_settings()
-        if ADMIN_ID:
-            await bot.send_message(
-                ADMIN_ID,
-                _admin_paid_request_text(
-                    {
-                        "user_id": user_id,
-                        "username": message.from_user.username or "",
-                        "first_name": message.from_user.first_name or "",
-                        "last_name": message.from_user.last_name or "",
-                        "request_id": request_id,
-                        "kind": "access",
-                    },
-                    settings,
-                    "Новая заявка на первичный триал доступ",
-                ),
-                parse_mode=ParseMode.HTML,
-                reply_markup=_paid_request_kb(request_id),
-            )
-        return
-    if request and not subscription:
-        await message.answer(
-            "⏳ <b>Ваша заявка на триал доступ уже отправлена.</b>\n\n"
-            "Ожидайте подтверждения от администратора.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
-
-    status = paid_subscription_status(subscription) if subscription else "none"
-    payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
-    text = _paid_user_text(subscription, payment_url)
-    await message.answer(
-        text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=_paid_user_kb(user_id, subscription, request),
+    await render_paid_user_menu(
+        message,
+        user_id=message.from_user.id,
+        username=message.from_user.username or "",
+        first_name=message.from_user.first_name or "",
+        last_name=message.from_user.last_name or "",
     )
 
 
 @router.callback_query(F.data == "paiduser_refresh")
 async def cb_paid_user_refresh(call: types.CallbackQuery):
-    subscription = get_paid_subscription(call.from_user.id) or {}
-    request = get_paid_request(call.from_user.id)
-    payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
     await call.answer()
-    await call.message.edit_text(
-        _paid_user_text(subscription, payment_url),
-        parse_mode=ParseMode.HTML,
-        reply_markup=_paid_user_kb(call.from_user.id, subscription, request),
+    await render_paid_user_menu(
+        call.message,
+        user_id=call.from_user.id,
+        username=call.from_user.username or "",
+        first_name=call.from_user.first_name or "",
+        last_name=call.from_user.last_name or "",
+        edit=True,
     )
 
 
 @router.callback_query(F.data == "paiduser_info")
 async def cb_paid_user_info(call: types.CallbackQuery):
+    await call.answer()
     subscription = get_paid_subscription(call.from_user.id) or {}
     payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
-    await call.answer()
     await call.message.edit_text(
         (
             "ℹ️ <b>Информация о вашей подписке</b>\n\n"
@@ -500,6 +514,7 @@ async def cb_paid_user_info(call: types.CallbackQuery):
             f"📅 Пробный доступ до: <b>{_format_dt(subscription.get('trial_ends_at'))}</b>\n"
             f"📅 Подписка до: <b>{_format_dt(subscription.get('paid_ends_at'))}</b>\n"
             f"📅 Время на продление до: <b>{_format_dt(subscription.get('grace_ends_at'))}</b>\n\n"
+            f"🔗 Ссылка для оплаты: <b>{html.escape(str(payment_url)) if payment_url else 'не задана'}</b>\n\n"
             "Здесь показаны только основные данные, которые нужны для управления подпиской."
         ),
         parse_mode=ParseMode.HTML,
