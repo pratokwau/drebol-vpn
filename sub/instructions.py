@@ -3,7 +3,7 @@ from __future__ import annotations
 from html import escape
 from urllib.parse import quote, urlsplit
 
-from sub.config_runtime import get_xui_url
+from sub.config_runtime import get_xui_sub_port, get_xui_url
 from sub.adminsub.inbound_settings_store import get_any_inbound_sub_port, get_inbound_sub_port
 
 
@@ -12,6 +12,8 @@ def build_subscription_link(sub_id: str | None, inbound_id: int | None = None) -
         return ""
     panel_url = get_xui_url().strip()
     sub_port = get_inbound_sub_port(inbound_id) if inbound_id is not None else ""
+    if not sub_port:
+        sub_port = get_xui_sub_port().strip()
     if not sub_port:
         sub_port = get_any_inbound_sub_port()
     if not sub_port:

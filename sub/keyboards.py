@@ -30,6 +30,7 @@ def settings_kb() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🌐 Изменить URL", callback_data="xui_set_url")],
             [InlineKeyboardButton(text="🔐 Изменить токен", callback_data="xui_set_token")],
+            [InlineKeyboardButton(text="📡 Порт подписки", callback_data="xui_set_sub_port")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="xui_back")],
         ]
     )
