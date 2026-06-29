@@ -14,6 +14,14 @@ from xui.utils import is_admin
 router = Router()
 
 
+def _has_admin_vpn_access(user_data: dict | None) -> bool:
+    return bool(
+        user_data
+        and user_settings_ready(user_data)
+        and str(user_data.get("subscription_type", "")).lower() == "admin"
+    )
+
+
 def _device_cache_key(ib_id: int, email: str) -> str:
     from xui.utils import cache
 
@@ -60,7 +68,7 @@ async def _render_vpn(message: types.Message, user_data: dict):
 @router.message(Command("vpn"))
 async def cmd_vpn(message: types.Message):
     user_data = get_vpn_user(message.from_user.id)
-    if not user_data or not user_settings_ready(user_data):
+    if not _has_admin_vpn_access(user_data):
         await message.answer("⛔ У вас пока нет доступа к /vpn. Администратор должен сначала настроить профиль.")
         return
     if user_data.get("admin_disabled"):
@@ -72,7 +80,7 @@ async def cmd_vpn(message: types.Message):
 @router.callback_query(F.data == "myvpn_refresh")
 async def cb_vpn_refresh(call: types.CallbackQuery):
     user_data = get_vpn_user(call.from_user.id)
-    if not user_data or not user_settings_ready(user_data):
+    if not _has_admin_vpn_access(user_data):
         return await call.answer("Нет доступа", show_alert=True)
     if user_data.get("admin_disabled"):
         return await call.answer("Доступ отключён администратором", show_alert=True)
@@ -83,7 +91,7 @@ async def cb_vpn_refresh(call: types.CallbackQuery):
 @router.callback_query(F.data.startswith("myvpn_dev_"))
 async def cb_vpn_device(call: types.CallbackQuery):
     user_data = get_vpn_user(call.from_user.id)
-    if not user_data or not user_data.get("has_vpn_access"):
+    if not _has_admin_vpn_access(user_data) or not user_data.get("has_vpn_access"):
         return await call.answer("Нет доступа", show_alert=True)
     if user_data.get("admin_disabled"):
         return await call.answer("Доступ отключён администратором", show_alert=True)
@@ -111,7 +119,7 @@ async def cb_vpn_device(call: types.CallbackQuery):
 @router.callback_query(F.data.startswith("myvpn_tog_"))
 async def cb_vpn_toggle(call: types.CallbackQuery):
     user_data = get_vpn_user(call.from_user.id)
-    if not user_data or not user_data.get("has_vpn_access"):
+    if not _has_admin_vpn_access(user_data) or not user_data.get("has_vpn_access"):
         return await call.answer("Нет доступа", show_alert=True)
     if user_data.get("admin_disabled"):
         return await call.answer("Доступ отключён администратором", show_alert=True)
@@ -136,6 +144,8 @@ async def cb_vpn_toggle(call: types.CallbackQuery):
 @router.callback_query(F.data.startswith("myvpn_inst_"))
 async def cb_vpn_inst(call: types.CallbackQuery):
     user_data = get_vpn_user(call.from_user.id)
+    if not _has_admin_vpn_access(user_data):
+        return await call.answer("Нет доступа", show_alert=True)
     payload = call.data[len("myvpn_inst_"):]
     sub_id = None
     inbound_id = None

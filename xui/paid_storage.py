@@ -202,10 +202,12 @@ def build_paid_subscription(settings: dict, *, kind: str = "access", source: dic
     max_devices = int(settings.get("max_devices") or 0)
     limit_ip = int(settings.get("limit_ip") or 0)
     limit_gb = float(settings.get("limit_gb") or 0)
-    expiry_time_ms = int(settings.get("expiry_time_ms") or DEFAULT_PAID_EXPIRY_TIME_MS)
     flow = str(settings.get("flow") or "")
     payment_url = str(settings.get("payment_url") or "")
     source = source or {}
+    expiry_time_ms = int((now + max(1, trial_seconds)) * 1000) if kind == "access" else int(
+        settings.get("expiry_time_ms") or DEFAULT_PAID_EXPIRY_TIME_MS
+    )
     return {
         "subscription_type": "paid",
         "status": "trial" if kind == "access" else "active",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 from datetime import datetime, timezone
+import time
 
 from aiogram import F, Router, types
 from aiogram.enums import ParseMode
@@ -395,12 +396,13 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     user_key = str(user_id)
     current = load_vpn_users().get(user_key, {})
     trial_seconds = int(settings.get("trial_seconds") or DEFAULT_PAID_TRIAL_SECONDS)
+    trial_expiry_time_ms = int((time.time() + max(1, trial_seconds)) * 1000)
     limit_gb = float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB)
-    expiry_time_ms = DEFAULT_PAID_EXPIRY_TIME_MS
+    expiry_time_ms = trial_expiry_time_ms
     limit_ip = int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP)
     flow = str(settings.get("flow") or DEFAULT_PAID_FLOW)
     username = str(request.get("username") or "").strip()
-    display_name = f"{user_id} - {username or 'без username'}"
+    display_name = f"{user_id} - {username or 'без юзернейма'}"
     if current.get("devices"):
         set_user_subscription_type(user_key, "paid")
         set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
@@ -427,6 +429,10 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     if not inbound:
         create_user_with_inbound(user_id, 0, note=display_name, subscription_type="paid")
         set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
+        set_user_limit_gb(user_key, limit_gb)
+        set_user_expiry_time_ms(user_key, expiry_time_ms)
+        set_user_limit_ip(user_key, limit_ip)
+        set_user_flow(user_key, flow)
         set_user_subscription_type(user_key, "paid")
         set_user_username(user_id, username)
         set_user_note(user_id, display_name)
