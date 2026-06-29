@@ -32,6 +32,7 @@ from xui.paid_storage import (
     build_paid_subscription,
     create_paid_request,
     delete_paid_request,
+    delete_paid_subscription,
     extend_paid_subscription,
     get_paid_request,
     get_paid_request_by_id,
@@ -54,9 +55,10 @@ from xui.storage import (
     set_user_flow,
     set_user_username,
     set_user_subscription_type,
+    delete_user_completely,
 )
 from xui.utils import is_admin
-from xui.api import api_add_client, api_get_client, api_get_inbounds, api_update_client
+from xui.api import api_add_client, api_del_client_by_email, api_get_client, api_get_inbounds, api_update_client
 
 
 router = Router()
@@ -485,6 +487,19 @@ async def _sync_paid_user_devices_expiry(
             client["limitIp"] = target_limit_ip
             client["flow"] = target_flow
             await api_update_client(email, client)
+
+
+async def _revoke_paid_user_access(user_id: int) -> None:
+    info = load_vpn_users().get(str(user_id), {})
+    for device in list(info.get("devices", [])):
+        email = str(device.get("email") or "")
+        if email:
+            try:
+                await api_del_client_by_email(email)
+            except Exception:
+                pass
+    delete_user_completely(str(user_id))
+    delete_paid_subscription(user_id)
 
 
 @router.message(Command("sub"))

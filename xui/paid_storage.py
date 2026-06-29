@@ -193,6 +193,14 @@ def set_paid_subscription(user_id: int, data: dict) -> None:
     save_paid_subscriptions(all_data)
 
 
+def delete_paid_subscription(user_id: int) -> None:
+    all_data = load_paid_subscriptions()
+    key = str(user_id)
+    if key in all_data:
+        all_data.pop(key, None)
+        save_paid_subscriptions(all_data)
+
+
 def build_paid_subscription(settings: dict, *, kind: str = "access", source: dict | None = None) -> dict:
     now = int(time.time())
     trial_seconds = int(settings.get("trial_seconds") or 0)
