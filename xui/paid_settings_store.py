@@ -155,7 +155,6 @@ def load_paid_settings() -> dict:
         "max_devices": int(raw.get("max_devices", DEFAULT_PAID_MAX_DEVICES) or DEFAULT_PAID_MAX_DEVICES),
         "limit_ip": int(raw.get("limit_ip", DEFAULT_PAID_LIMIT_IP) or DEFAULT_PAID_LIMIT_IP),
         "limit_gb": float(raw.get("limit_gb", DEFAULT_PAID_LIMIT_GB) or DEFAULT_PAID_LIMIT_GB),
-        "expiry_time_ms": int(raw.get("expiry_time_ms", DEFAULT_PAID_EXPIRY_TIME_MS) or DEFAULT_PAID_EXPIRY_TIME_MS),
         "flow": str(raw.get("flow", DEFAULT_PAID_FLOW) or DEFAULT_PAID_FLOW),
         "payment_url": str(raw.get("payment_url", DEFAULT_PAID_PAYMENT_URL) or ""),
     }
@@ -170,7 +169,6 @@ def save_paid_settings(data: dict) -> None:
         "max_devices": int(data.get("max_devices", DEFAULT_PAID_MAX_DEVICES) or DEFAULT_PAID_MAX_DEVICES),
         "limit_ip": int(data.get("limit_ip", DEFAULT_PAID_LIMIT_IP) or DEFAULT_PAID_LIMIT_IP),
         "limit_gb": float(data.get("limit_gb", DEFAULT_PAID_LIMIT_GB) or DEFAULT_PAID_LIMIT_GB),
-        "expiry_time_ms": int(data.get("expiry_time_ms", DEFAULT_PAID_EXPIRY_TIME_MS) or DEFAULT_PAID_EXPIRY_TIME_MS),
         "flow": str(data.get("flow", DEFAULT_PAID_FLOW) or DEFAULT_PAID_FLOW),
         "payment_url": str(data.get("payment_url", DEFAULT_PAID_PAYMENT_URL) or ""),
     }

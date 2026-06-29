@@ -158,10 +158,6 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="По дефолту", callback_data="paiddef_limit_gb"),
             ],
             [
-                InlineKeyboardButton(text=f"⏳ Дата окончания: {settings['expiry_time_ms']}", callback_data="paidset_expiry_time_ms"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_expiry_time_ms"),
-            ],
-            [
                 InlineKeyboardButton(text=f"🌐 Лимит IP: {settings['limit_ip']}", callback_data="paidset_limit_ip"),
                 InlineKeyboardButton(text="По дефолту", callback_data="paiddef_limit_ip"),
             ],
@@ -189,8 +185,6 @@ def _paid_setting_prompt(field: str) -> str:
         return "Введите лимит устройств или <code>-</code> для значения по умолчанию."
     if field == "limit_gb":
         return "Введите лимит ГБ или <code>-</code> для значения по умолчанию."
-    if field == "expiry_time_ms":
-        return "Введите дату окончания в формате <code>дд.мм.гггг</code> или <code>-</code>."
     if field == "limit_ip":
         return "Введите лимит IP или <code>-</code> для значения по умолчанию."
     if field == "flow":
@@ -206,7 +200,6 @@ def _paid_setting_default(field: str):
         "grace_seconds": DEFAULT_PAID_GRACE_SECONDS,
         "max_devices": DEFAULT_PAID_MAX_DEVICES,
         "limit_gb": DEFAULT_PAID_LIMIT_GB,
-        "expiry_time_ms": DEFAULT_PAID_EXPIRY_TIME_MS,
         "limit_ip": DEFAULT_PAID_LIMIT_IP,
         "flow": DEFAULT_PAID_FLOW,
         "payment_url": DEFAULT_PAID_PAYMENT_URL,
@@ -225,7 +218,6 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
         f"🔗 Ссылка: <b>{'задана' if settings['payment_url'] else 'не задана'}</b>\n"
         f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
         f"💾 Лимит ГБ: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
-        f"⏳ Дата окончания: <b>{settings['expiry_time_ms']}</b>\n"
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
         f"⚡ Flow: <b>{settings['flow']}</b>"
     )
@@ -270,7 +262,6 @@ def _subscription_summary(subscription: dict) -> str:
         f"🕒 Grace: <b>{format_duration(subscription.get('grace_seconds'))}</b>\n"
         f"📱 Лимит устройств: <b>{subscription.get('max_devices', 'не задан')}</b>\n"
         f"💾 Лимит ГБ: <b>{_format_limit_gb(subscription.get('limit_gb'))}</b>\n"
-        f"⏳ Дата окончания: <b>{subscription.get('expiry_time_ms', 'не задан')}</b>\n"
         f"🌐 Лимит IP: <b>{subscription.get('limit_ip', 'не задан')}</b>\n"
         f"⚡ Flow: <b>{subscription.get('flow', 'не задан')}</b>\n"
         f"📅 Trial до: <b>{_format_dt(subscription.get('trial_ends_at'))}</b>\n"
@@ -307,7 +298,6 @@ def _admin_paid_request_text(request: dict, settings: dict, title: str) -> str:
         f"🕒 Grace: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
         f"💾 Лимит ГБ: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
-        f"⏳ Дата окончания: <b>{settings['expiry_time_ms']}</b>\n"
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
         f"⚡ Flow: <b>{settings['flow']}</b>\n"
         f"🆔 Request: <code>{html.escape(str(request.get('request_id') or ''))}</code>"
@@ -319,7 +309,7 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     current = load_vpn_users().get(user_key, {})
     trial_seconds = int(settings.get("trial_seconds") or DEFAULT_PAID_TRIAL_SECONDS)
     limit_gb = float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB)
-    expiry_time_ms = int(settings.get("expiry_time_ms") or DEFAULT_PAID_EXPIRY_TIME_MS)
+    expiry_time_ms = DEFAULT_PAID_EXPIRY_TIME_MS
     limit_ip = int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP)
     flow = str(settings.get("flow") or DEFAULT_PAID_FLOW)
     if current.get("devices"):
@@ -599,7 +589,7 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     field = call.data[len("paidset_"):]
-    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "grace_seconds", "payment_url", "max_devices", "limit_gb", "expiry_time_ms", "limit_ip", "flow"}:
+    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "grace_seconds", "payment_url", "max_devices", "limit_gb", "limit_ip", "flow"}:
         return await call.answer("Неизвестная настройка", show_alert=True)
     await state.update_data(target_paid_setting_field=field)
     await state.set_state(PaidSubSettings.waiting_value)
@@ -616,7 +606,7 @@ async def cb_paid_settings_default(call: types.CallbackQuery):
         return await call.answer("Нет доступа", show_alert=True)
     field = call.data[len("paiddef_"):]
     settings = load_paid_settings()
-    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "max_devices", "limit_gb", "expiry_time_ms", "limit_ip", "flow", "grace_seconds", "payment_url"}:
+    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "max_devices", "limit_gb", "limit_ip", "flow", "grace_seconds", "payment_url"}:
         return await call.answer("Неизвестная настройка", show_alert=True)
     settings[field] = _paid_setting_default(field)
     save_paid_settings(settings)
@@ -636,7 +626,7 @@ async def paid_settings_value(message: types.Message, state):
     raw = (message.text or "").strip()
     settings = load_paid_settings()
     try:
-        if field in {"trial_seconds", "payment_seconds", "payment_amount", "max_devices", "limit_gb", "expiry_time_ms", "limit_ip", "flow", "grace_seconds"}:
+        if field in {"trial_seconds", "payment_seconds", "payment_amount", "max_devices", "limit_gb", "limit_ip", "flow", "grace_seconds"}:
             if raw == "-":
                 defaults = {
                     "trial_seconds": DEFAULT_PAID_TRIAL_SECONDS,
@@ -644,7 +634,6 @@ async def paid_settings_value(message: types.Message, state):
                     "payment_amount": DEFAULT_PAID_PAYMENT_AMOUNT,
                     "max_devices": DEFAULT_PAID_MAX_DEVICES,
                     "limit_gb": DEFAULT_PAID_LIMIT_GB,
-                    "expiry_time_ms": DEFAULT_PAID_EXPIRY_TIME_MS,
                     "limit_ip": DEFAULT_PAID_LIMIT_IP,
                     "flow": DEFAULT_PAID_FLOW,
                     "grace_seconds": DEFAULT_PAID_GRACE_SECONDS,
@@ -656,8 +645,6 @@ async def paid_settings_value(message: types.Message, state):
                 settings[field] = _parse_max_devices(raw)
             elif field == "limit_gb":
                 settings[field] = _parse_limit_gb(raw)
-            elif field == "expiry_time_ms":
-                settings[field] = _parse_expiry_date(raw)
             elif field == "limit_ip":
                 settings[field] = _parse_limit_ip(raw)
             elif field == "flow":
@@ -723,7 +710,6 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
         updated["max_devices"] = int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES)
         updated["limit_ip"] = int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP)
         updated["limit_gb"] = float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB)
-        updated["expiry_time_ms"] = int(settings.get("expiry_time_ms") or DEFAULT_PAID_EXPIRY_TIME_MS)
         updated["flow"] = str(settings.get("flow") or DEFAULT_PAID_FLOW)
         set_paid_subscription(user_id, updated)
         await _sync_paid_user_devices_expiry(
@@ -798,7 +784,6 @@ async def cb_paid_payment_ok(call: types.CallbackQuery):
     updated["max_devices"] = int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES)
     updated["limit_ip"] = int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP)
     updated["limit_gb"] = float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB)
-    updated["expiry_time_ms"] = int(settings.get("expiry_time_ms") or DEFAULT_PAID_EXPIRY_TIME_MS)
     updated["flow"] = str(settings.get("flow") or DEFAULT_PAID_FLOW)
     set_paid_subscription(user_id, updated)
     await _sync_paid_user_devices_expiry(

@@ -5,7 +5,7 @@ import secrets
 import time
 from pathlib import Path
 
-from xui.paid_settings_store import DAY, HOUR
+from xui.paid_settings_store import DAY, HOUR, DEFAULT_PAID_EXPIRY_TIME_MS
 
 PAID_SUBSCRIPTIONS_FILE = Path("data/paid_subscriptions.json")
 PAID_REQUESTS_FILE = Path("data/paid_requests.json")
@@ -169,7 +169,7 @@ def build_paid_subscription(settings: dict, *, kind: str = "access", source: dic
     max_devices = int(settings.get("max_devices") or 0)
     limit_ip = int(settings.get("limit_ip") or 0)
     limit_gb = float(settings.get("limit_gb") or 0)
-    expiry_time_ms = int(settings.get("expiry_time_ms") or 0)
+    expiry_time_ms = int(settings.get("expiry_time_ms") or DEFAULT_PAID_EXPIRY_TIME_MS)
     flow = str(settings.get("flow") or "")
     payment_url = str(settings.get("payment_url") or "")
     source = source or {}
@@ -205,7 +205,7 @@ def extend_paid_subscription(info: dict, settings: dict, *, from_now: bool = Fal
     info["max_devices"] = int(settings.get("max_devices") or info.get("max_devices") or 0)
     info["limit_ip"] = int(settings.get("limit_ip") or info.get("limit_ip") or 0)
     info["limit_gb"] = float(settings.get("limit_gb") or info.get("limit_gb") or 0)
-    info["expiry_time_ms"] = int(settings.get("expiry_time_ms") or info.get("expiry_time_ms") or 0)
+    info["expiry_time_ms"] = int(settings.get("expiry_time_ms") or info.get("expiry_time_ms") or DEFAULT_PAID_EXPIRY_TIME_MS)
     info["flow"] = str(settings.get("flow") or info.get("flow") or "")
     info["status"] = "active"
     info["active"] = True
