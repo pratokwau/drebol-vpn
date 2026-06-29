@@ -641,6 +641,7 @@ async def _sync_paid_user_devices_expiry(
             client["expiryTime"] = int(expiry_time_ms)
             client["limitIp"] = target_limit_ip
             client["flow"] = target_flow
+            client["enable"] = True
             await api_update_client(email, client)
 
 
