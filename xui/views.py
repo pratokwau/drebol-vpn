@@ -310,7 +310,8 @@ async def _refresh_client_view(call: types.CallbackQuery, cl_h: str):
             owner_user_key = ensure_anon_user_for_client(int(ib_id or 0), str(client.get("id", "") or ""), email)
 
     note = get_client_note(ib_id, email)
-    text = f"👤 <b>{email}</b>\n\n"
+    title = str(client.get("comment") or note or email)
+    text = f"👤 <b>{html.escape(title)}</b>\n\n"
     if owner_user_key:
         if owner_user_key.startswith("anon_"):
             text += "👥 Владелец: <i>без TG</i>\n"

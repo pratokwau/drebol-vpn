@@ -292,7 +292,7 @@ def _subscription_summary(subscription: dict) -> str:
         f"⚡ Параметр подключения: <b>{subscription.get('flow', 'не задан')}</b>\n"
         f"📅 Пробный доступ до: <b>{_format_dt(subscription.get('trial_ends_at'))}</b>\n"
         f"📅 Подписка до: <b>{_format_dt(subscription.get('paid_ends_at'))}</b>\n"
-        f"📅 Время на продление до: <b>{_format_dt(subscription.get('grace_ends_at'))}</b>"
+        f"📅 Доступ до (trial + продление): <b>{_format_dt(subscription.get('grace_ends_at'))}</b>"
     )
 
 
@@ -419,7 +419,8 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     user_key = str(user_id)
     current = load_vpn_users().get(user_key, {})
     trial_seconds = int(settings.get("trial_seconds") or DEFAULT_PAID_TRIAL_SECONDS)
-    trial_expiry_time_ms = int((time.time() + max(1, trial_seconds)) * 1000)
+    grace_seconds = int(settings.get("grace_seconds") or DEFAULT_PAID_GRACE_SECONDS)
+    trial_expiry_time_ms = int((time.time() + max(1, trial_seconds) + max(0, grace_seconds)) * 1000)
     limit_gb = float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB)
     expiry_time_ms = trial_expiry_time_ms
     limit_ip = int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP)
@@ -477,9 +478,10 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
         flow,
         expiry_time_ms=expiry_time_ms,
         limit_ip=limit_ip,
+        comment=display_name,
     )
     if result.get("success"):
-        add_device_to_user_key(user_key, inbound_id, client_uuid, email, limit_ip=limit_ip)
+        add_device_to_user_key(user_key, inbound_id, client_uuid, email, limit_ip=limit_ip, label=display_name)
 
 
 async def _sync_paid_user_devices_expiry(
@@ -561,7 +563,7 @@ async def cb_paid_user_info(call: types.CallbackQuery):
             f"🌐 Лимит IP: <b>{subscription.get('limit_ip', 'не задан')}</b>\n"
             f"📅 Пробный доступ до: <b>{_format_dt(subscription.get('trial_ends_at'))}</b>\n"
             f"📅 Подписка до: <b>{_format_dt(subscription.get('paid_ends_at'))}</b>\n"
-            f"📅 Время на продление до: <b>{_format_dt(subscription.get('grace_ends_at'))}</b>"
+            f"📅 Доступ до (trial + продление): <b>{_format_dt(subscription.get('grace_ends_at'))}</b>"
         ),
         parse_mode=ParseMode.HTML,
         reply_markup=_paid_user_info_kb(call.from_user.id, subscription),

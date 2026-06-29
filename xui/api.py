@@ -143,6 +143,7 @@ async def api_add_client(
     *,
     expiry_time_ms: int | None = None,
     limit_ip: int = 0,
+    comment: str = "",
 ) -> tuple[dict, str]:
     import time
     import uuid as uuid_lib
@@ -164,6 +165,8 @@ async def api_add_client(
         "tgId": 0,
         "reset": 0,
     }
+    if comment:
+        client["comment"] = comment
     result = await xui_post("/panel/api/clients/add", data={"client": client, "inboundIds": [ib_id]})
     return result, client_uuid
 

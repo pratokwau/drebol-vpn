@@ -213,7 +213,7 @@ def build_paid_subscription(settings: dict, *, kind: str = "access", source: dic
     flow = str(settings.get("flow") or "")
     payment_url = str(settings.get("payment_url") or "")
     source = source or {}
-    expiry_time_ms = int((now + max(1, trial_seconds)) * 1000) if kind == "access" else int(
+    expiry_time_ms = int((now + max(1, trial_seconds) + (grace_seconds if kind == "access" else 0)) * 1000) if kind == "access" else int(
         settings.get("expiry_time_ms") or DEFAULT_PAID_EXPIRY_TIME_MS
     )
     return {

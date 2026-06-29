@@ -78,12 +78,13 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
         note = info.get("note", "")
         n_devices = len([d for d in info.get("devices", []) if d.get("ib_id") == ib_id])
         prefix = "🚫" if info.get("admin_disabled", False) else "👤"
+        label_name = next((d.get("label") for d in info.get("devices", []) if d.get("ib_id") == ib_id and d.get("label")), "")
         if user_key.startswith("anon_"):
             id_part = "Без TG ID"
         else:
             username_part = f" @{username}" if username else " (без username)"
             id_part = f"{user_key}{username_part}"
-        note_suffix = f" • 📝{note[:15]}" if note else ""
+        note_suffix = f" • 📝{(label_name or note)[:15]}" if (label_name or note) else ""
         items.append(("user", user_key, f"{prefix} {id_part} ({n_devices} устр.){note_suffix}"))
 
     for cl in singles:
@@ -108,12 +109,13 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
         note = info.get("note", "")
         n_devices = len([d for d in info.get("devices", []) if d.get("ib_id") == ib_id])
         prefix = "🚫" if info.get("admin_disabled", False) else "👤"
+        label_name = next((d.get("label") for d in info.get("devices", []) if d.get("ib_id") == ib_id and d.get("label")), "")
         if user_key.startswith("anon_"):
             id_part = "Без TG ID"
         else:
             username_part = f" @{username}" if username else " (без username)"
             id_part = f"{user_key}{username_part}"
-        note_suffix = f" • 📝{note[:15]}" if note else ""
+        note_suffix = f" • 📝{(label_name or note)[:15]}" if (label_name or note) else ""
         items.append(("user", user_key, f"{prefix} {id_part} ({n_devices} устр.){note_suffix}"))
     total = len(items)
     total_pages = (total + CLIENTS_PAGE_SIZE - 1) // CLIENTS_PAGE_SIZE or 1
@@ -268,11 +270,12 @@ def myvpn_main_kb(devices: list, admin_disabled: bool, settings_ready: bool = Tr
     for d in devices:
         ib_id = d.get("ib_id")
         email = d.get("email", "?")
+        label = d.get("label") or email
         uuid_val = d.get("uuid", "")
         enabled = bool(d.get("enabled", True))
         h = cache(f"mvd_{ib_id}_{email}", {"email": email, "uuid": uuid_val, "ib_id": ib_id})
         icon = "✅" if enabled else "⏸"
-        rows.append([InlineKeyboardButton(text=f"{icon} {email}", callback_data=f"myvpn_dev_{h}")])
+        rows.append([InlineKeyboardButton(text=f"{icon} {label}", callback_data=f"myvpn_dev_{h}")])
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="myvpn_refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

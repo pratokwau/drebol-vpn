@@ -134,11 +134,11 @@ def ensure_anon_user_for_client(ib_id: int, uuid: str, email: str, limit_ip: int
     if existing_key:
         return existing_key
     key = _anon_user_key(ib_id, email)
-    add_device_to_user_key(key, ib_id, uuid, email, limit_ip=limit_ip)
+    add_device_to_user_key(key, ib_id, uuid, email, limit_ip=limit_ip, label=email)
     return key
 
 
-def _add_device_to_user_key(user_key: str, ib_id: int, uuid: str, email: str, limit_ip: int | None = None):
+def _add_device_to_user_key(user_key: str, ib_id: int, uuid: str, email: str, limit_ip: int | None = None, label: str = ""):
     data = load_vpn_users()
     key = str(user_key)
     if key not in data:
@@ -164,21 +164,25 @@ def _add_device_to_user_key(user_key: str, ib_id: int, uuid: str, email: str, li
             d["uuid"] = uuid
             if limit_ip is not None:
                 d["limit_ip"] = int(limit_ip)
+            if label:
+                d["label"] = label[:NOTE_MAX_LEN]
             save_vpn_users(data)
             return
     device = {"ib_id": ib_id, "uuid": uuid, "email": email}
     if limit_ip is not None:
         device["limit_ip"] = int(limit_ip)
+    if label:
+        device["label"] = label[:NOTE_MAX_LEN]
     data[key]["devices"].append(device)
     save_vpn_users(data)
 
 
-def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str, limit_ip: int | None = None):
-    _add_device_to_user_key(str(tg_id), ib_id, uuid, email, limit_ip=limit_ip)
+def add_device_to_user(tg_id: int, ib_id: int, uuid: str, email: str, limit_ip: int | None = None, label: str = ""):
+    _add_device_to_user_key(str(tg_id), ib_id, uuid, email, limit_ip=limit_ip, label=label)
 
 
-def add_device_to_user_key(user_key: str, ib_id: int, uuid: str, email: str, limit_ip: int | None = None):
-    _add_device_to_user_key(user_key, ib_id, uuid, email, limit_ip=limit_ip)
+def add_device_to_user_key(user_key: str, ib_id: int, uuid: str, email: str, limit_ip: int | None = None, label: str = ""):
+    _add_device_to_user_key(user_key, ib_id, uuid, email, limit_ip=limit_ip, label=label)
 
 
 def remove_device_from_user(tg_id: int, ib_id: int, email: str):
