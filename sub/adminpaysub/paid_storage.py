@@ -100,37 +100,30 @@ def refresh_paid_subscription_state(info: dict, *, now: int | None = None) -> tu
     paid_is_expired = bool(paid_ends_at and now >= paid_ends_at)
     grace_is_expired = bool(grace_ends_at and now >= grace_ends_at)
 
-    if trial_is_expired and not info.get("trial_expired_notified_at"):
+    if status == "trial" and trial_is_expired and not info.get("trial_expired_notified_at"):
         events.append("trial_expired")
-
-    if paid_is_expired and status in {"active", "pending_payment"} and not info.get("payment_expired_notified_at"):
+    elif status in {"active", "pending_payment"} and paid_is_expired and not info.get("payment_expired_notified_at"):
         events.append("payment_expired")
+    elif status == "grace" and grace_is_expired and not info.get("grace_expired_notified_at"):
+        events.append("grace_expired")
 
-    if trial_is_expired or (status == "grace" and not paid_ends_at):
+    if status == "trial" and trial_is_expired:
         if grace_ends_at and not grace_is_expired:
             info["status"] = "grace"
             info["active"] = True
         else:
             info["status"] = "expired"
             info["active"] = False
-            if grace_ends_at and grace_is_expired and not info.get("grace_expired_notified_at"):
-                events.append("grace_expired")
-
-    if paid_is_expired and status in {"active", "pending_payment"}:
+    elif status in {"active", "pending_payment"} and paid_is_expired:
         if grace_ends_at and not grace_is_expired:
             info["status"] = "grace"
             info["active"] = True
         else:
             info["status"] = "expired"
             info["active"] = False
-            if grace_ends_at and grace_is_expired and not info.get("grace_expired_notified_at"):
-                events.append("grace_expired")
-
-    if status == "grace" and grace_is_expired:
+    elif status == "grace" and grace_is_expired:
         info["status"] = "expired"
         info["active"] = False
-        if not info.get("grace_expired_notified_at"):
-            events.append("grace_expired")
 
     return info, events
 

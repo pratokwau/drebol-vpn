@@ -361,6 +361,19 @@ def _paid_user_info_kb(user_id: int, subscription: dict | None) -> InlineKeyboar
     )
 
 
+def _paid_payment_info_kb(user_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Оплатил", callback_data=f"paiduser_paid_{user_id}"),
+            ],
+            [
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="paiduser_back"),
+            ],
+        ]
+    )
+
+
 def _paid_instruction_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -374,6 +387,22 @@ def _paid_user_text(subscription: dict, payment_url: str) -> str:
     return (
         "💳 <b>Меню управления подпиской</b>\n\n"
         "Нажмите кнопку ниже, чтобы посмотреть информацию о подписке или продлить её."
+    )
+
+
+def _paid_payment_text(subscription: dict, payment_url: str) -> str:
+    payment_seconds = int(subscription.get("payment_seconds") or 0)
+    payment_amount = int(subscription.get("payment_amount") or 0)
+    payment_label = format_duration(payment_seconds)
+    link = html.escape(str(payment_url or ""))
+    link_html = f'<a href="{link}">{link}</a>' if link else "не задана"
+    return (
+        "💳 <b>Оплата подписки</b>\n\n"
+        f"⏳ Срок после оплаты: <b>{payment_label}</b>\n"
+        f"💰 Сумма: <b>{payment_amount} ₽</b>\n\n"
+        "Перейди по ссылке ниже, в комментарии укажи свой TG ID или username.\n"
+        "После оплаты нажми <b>«Оплатил»</b> — в течение 24 часов мы проверим платёж и выдадим подписку.\n\n"
+        f"🔗 Ссылка на оплату: {link_html}"
     )
 
 
@@ -761,40 +790,13 @@ async def cb_paid_user_renew(call: types.CallbackQuery):
     subscription = get_paid_subscription(user_id) or {}
     if not subscription:
         return await call.answer("Подписки нет", show_alert=True)
-    if get_paid_request(user_id):
-        return await call.answer("Заявка уже отправлена", show_alert=True)
-    request_id, _ = create_paid_request(
-        user_id,
-        username=call.from_user.username or "",
-        first_name=call.from_user.first_name or "",
-        last_name=call.from_user.last_name or "",
-        kind="renew",
-    )
-    settings = load_paid_settings()
-    if ADMIN_ID:
-        await bot.send_message(
-            ADMIN_ID,
-            _admin_paid_request_text(
-                {
-                    "user_id": user_id,
-                    "username": call.from_user.username or "",
-                    "first_name": call.from_user.first_name or "",
-                    "last_name": call.from_user.last_name or "",
-                    "request_id": request_id,
-                    "kind": "renew",
-                },
-                settings,
-                "Пользователь хочет продлить подписку",
-            ),
-            parse_mode=ParseMode.HTML,
-            reply_markup=_paid_request_kb(request_id),
-        )
-    await call.answer("Запрос отправлен")
+    payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
+    await call.answer()
     await call.message.edit_text(
-        "✅ <b>Запрос на продление отправлен админу.</b>\n\n"
-        "После проверки подписка будет продлена.",
+        _paid_payment_text(subscription, payment_url),
         parse_mode=ParseMode.HTML,
-        reply_markup=_paid_user_kb(user_id, subscription, get_paid_request(user_id)),
+        disable_web_page_preview=True,
+        reply_markup=_paid_payment_info_kb(user_id),
     )
 
 
@@ -814,7 +816,6 @@ async def cb_paid_user_paid(call: types.CallbackQuery):
         kind="payment_check",
     )
     settings = load_paid_settings()
-    payment_url = subscription.get("payment_url") or settings.get("payment_url") or DEFAULT_PAID_PAYMENT_URL
     if ADMIN_ID:
         await bot.send_message(
             ADMIN_ID,
@@ -836,8 +837,7 @@ async def cb_paid_user_paid(call: types.CallbackQuery):
     await call.answer("Запрос отправлен")
     await call.message.edit_text(
         "✅ <b>Заявка на проверку оплаты отправлена админу.</b>\n\n"
-        f"🔗 Оплата: <b>{html.escape(str(payment_url)) if payment_url else 'не задана'}</b>\n"
-        "После проверки подписка будет продлена.",
+        "Мы проверим платёж в течение 24 часов и продлим подписку после подтверждения.",
         parse_mode=ParseMode.HTML,
         reply_markup=_paid_user_kb(user_id, subscription, get_paid_request(user_id)),
     )
