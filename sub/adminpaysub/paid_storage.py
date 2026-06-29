@@ -239,7 +239,6 @@ def extend_paid_subscription(info: dict, settings: dict, *, from_now: bool = Fal
     base = now if from_now or current_end < now else current_end
     payment_seconds = int(settings.get("payment_seconds") or 0)
     grace_seconds = int(settings.get("grace_seconds") or 0)
-    info.pop("trial_expired_notified_at", None)
     info.pop("payment_expired_notified_at", None)
     info.pop("grace_expired_notified_at", None)
     info["max_devices"] = int(settings.get("max_devices") or info.get("max_devices") or 0)
