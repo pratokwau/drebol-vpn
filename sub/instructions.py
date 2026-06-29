@@ -14,6 +14,9 @@ def build_subscription_link(sub_id: str | None, inbound_id: int | None = None) -
     sub_port = get_inbound_sub_port(inbound_id) if inbound_id is not None else ""
     if not sub_port:
         sub_port = get_any_inbound_sub_port()
+    if not sub_port:
+        parsed_for_port = urlsplit(panel_url) if panel_url else None
+        sub_port = str(parsed_for_port.port or "") if parsed_for_port else ""
     if not panel_url or not sub_port:
         return ""
     parsed = urlsplit(panel_url)
