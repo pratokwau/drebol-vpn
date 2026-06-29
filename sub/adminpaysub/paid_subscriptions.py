@@ -518,6 +518,20 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
         limit_ip=limit_ip,
         comment=display_name,
     )
+    if not result.get("success"):
+        fallback_email = f"paid_{user_id}"
+        result, client_uuid = await api_add_client(
+            inbound_id,
+            fallback_email,
+            0,
+            limit_gb,
+            flow,
+            expiry_time_ms=expiry_time_ms,
+            limit_ip=limit_ip,
+            comment=display_name,
+        )
+        if result.get("success"):
+            email = fallback_email
     if result.get("success"):
         add_device_to_user_key(user_key, inbound_id, client_uuid, email, limit_ip=limit_ip, label=display_name)
 
