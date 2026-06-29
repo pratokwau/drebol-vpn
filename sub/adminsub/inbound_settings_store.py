@@ -28,6 +28,15 @@ def get_inbound_sub_port(inbound_id) -> str:
     return str(_load().get(str(inbound_id), "")).strip()
 
 
+def get_any_inbound_sub_port() -> str:
+    data = _load()
+    for value in data.values():
+        sub_port = str(value).strip()
+        if sub_port:
+            return sub_port
+    return ""
+
+
 def set_inbound_sub_port(inbound_id, sub_port: str) -> None:
     data = _load()
     data[str(inbound_id)] = str(sub_port).strip()
