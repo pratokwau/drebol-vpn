@@ -18,6 +18,7 @@ router = Router()
 class XuiSettings(StatesGroup):
     url = State()
     token = State()
+    sub_port = State()
 
 
 def _admin_kb() -> types.InlineKeyboardMarkup:
@@ -60,10 +61,12 @@ async def cb_admin_xui_settings(call: types.CallbackQuery):
     data = load_xui_settings()
     url = data.get("XUI_URL") or "не задан"
     token = data.get("XUI_TOKEN") or "не задан"
+    sub_port = data.get("XUI_SUB_PORT") or "не задан"
     await call.message.edit_text(
         "⚙️ <b>Настройки XUI</b>\n\n"
         f"URL: <code>{url}</code>\n"
         f"Токен: <code>{token}</code>\n\n"
+        f"Порт подписки: <code>{sub_port}</code>\n\n"
         "Нажми кнопку ниже, чтобы изменить значение.",
         parse_mode=ParseMode.HTML,
         reply_markup=settings_kb(),
@@ -78,10 +81,12 @@ async def cb_xui_settings(call: types.CallbackQuery):
     data = load_xui_settings()
     url = data.get("XUI_URL") or "не задан"
     token = data.get("XUI_TOKEN") or "не задан"
+    sub_port = data.get("XUI_SUB_PORT") or "не задан"
     await call.message.edit_text(
         "⚙️ <b>Настройки XUI</b>\n\n"
         f"URL: <code>{url}</code>\n"
         f"Токен: <code>{token}</code>\n\n"
+        f"Порт подписки: <code>{sub_port}</code>\n\n"
         "Нажми кнопку ниже, чтобы изменить значение.",
         parse_mode=ParseMode.HTML,
         reply_markup=settings_kb(),
@@ -116,6 +121,20 @@ async def cb_xui_set_token(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+@router.callback_query(F.data == "xui_set_sub_port")
+async def cb_xui_set_sub_port(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    await state.set_state(XuiSettings.sub_port)
+    await call.message.edit_text(
+        "Отправь <b>порт подписки</b> следующим сообщением.\n\n"
+        "Пример: <code>2096</code>\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+    await call.answer()
+
+
 @router.callback_query(F.data == "xui_back")
 async def cb_xui_back(call: types.CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
@@ -124,10 +143,12 @@ async def cb_xui_back(call: types.CallbackQuery, state: FSMContext):
     data = load_xui_settings()
     url = data.get("XUI_URL") or "не задан"
     token = data.get("XUI_TOKEN") or "не задан"
+    sub_port = data.get("XUI_SUB_PORT") or "не задан"
     await call.message.edit_text(
         "⚙️ <b>Настройки XUI</b>\n\n"
         f"URL: <code>{url}</code>\n"
         f"Токен: <code>{token}</code>\n\n"
+        f"Порт подписки: <code>{sub_port}</code>\n\n"
         "Нажми кнопку ниже, чтобы изменить значение.",
         parse_mode=ParseMode.HTML,
         reply_markup=settings_kb(),
@@ -163,6 +184,21 @@ async def xui_token_input(message: types.Message, state: FSMContext):
     save_xui_settings(data)
     await state.clear()
     await message.answer("✅ API токен сохранён.")
+
+
+@router.message(XuiSettings.sub_port)
+async def xui_sub_port_input(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    sub_port = (message.text or "").strip()
+    if not sub_port or not sub_port.isdigit():
+        await message.answer("Порт должен быть числом.")
+        return
+    data = load_xui_settings()
+    data["XUI_SUB_PORT"] = sub_port
+    save_xui_settings(data)
+    await state.clear()
+    await message.answer("✅ Порт подписки сохранён.")
 
 
 @router.callback_query(F.data == "app_update_check")
