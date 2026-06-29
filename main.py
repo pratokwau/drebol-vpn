@@ -19,7 +19,7 @@ from sub.adminpaysub.paid_storage import (
     refresh_paid_subscription_state,
     save_paid_subscriptions,
 )
-from sub.adminpaysub.paid_subscriptions import _revoke_paid_user_access, _sync_paid_user_devices_expiry
+from sub.adminpaysub.paid_subscriptions import _sync_paid_user_devices_expiry
 from sub import router as xui_router
 from sub.adminpaysub.paid_settings_store import format_duration
 
@@ -117,11 +117,11 @@ async def _notify_about_paid_subscriptions() -> None:
                         )
                         refreshed["payment_expired_notified_at"] = int(time.time())
                     elif event == "grace_expired":
-                        await _revoke_paid_user_access(user_id)
                         await bot.send_message(
                             user_id,
                             "⛔ <b>Период продления закончился.</b>\n\n"
-                            "Подписка удалена. Чтобы вернуть доступ, нужно оформить её заново.",
+                            "Подписка сохранена в системе.\n"
+                            "Чтобы вернуть доступ, нажми /sub и продли подписку.",
                             parse_mode="HTML",
                         )
                         refreshed["grace_expired_notified_at"] = int(time.time())
