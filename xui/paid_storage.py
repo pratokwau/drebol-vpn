@@ -4,6 +4,8 @@ import json
 import secrets
 from pathlib import Path
 
+from xui.paid_settings_store import DAY, HOUR
+
 PAID_SUBSCRIPTIONS_FILE = Path("data/paid_subscriptions.json")
 PAID_REQUESTS_FILE = Path("data/paid_requests.json")
 
@@ -28,7 +30,24 @@ def _write_json(path: Path, value) -> None:
 
 def load_paid_subscriptions() -> dict:
     raw = _read_json(PAID_SUBSCRIPTIONS_FILE, {})
-    return raw if isinstance(raw, dict) else {}
+    if not isinstance(raw, dict):
+        return {}
+    changed = False
+    for info in raw.values():
+        if not isinstance(info, dict):
+            continue
+        if "trial_seconds" not in info and info.get("trial_days") is not None:
+            info["trial_seconds"] = int(info.get("trial_days") or 0) * DAY
+            changed = True
+        if "payment_seconds" not in info and info.get("payment_days") is not None:
+            info["payment_seconds"] = int(info.get("payment_days") or 0) * DAY
+            changed = True
+        if "grace_seconds" not in info and info.get("grace_hours") is not None:
+            info["grace_seconds"] = int(info.get("grace_hours") or 0) * HOUR
+            changed = True
+    if changed:
+        save_paid_subscriptions(raw)
+    return raw
 
 
 def save_paid_subscriptions(data: dict) -> None:

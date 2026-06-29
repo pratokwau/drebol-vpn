@@ -11,12 +11,14 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from config import ADMIN_ID
 from loader import bot
 from xui.paid_settings_store import (
-    DEFAULT_PAID_GRACE_HOURS,
+    DEFAULT_PAID_GRACE_SECONDS,
     DEFAULT_PAID_PAYMENT_AMOUNT,
-    DEFAULT_PAID_PAYMENT_DAYS,
     DEFAULT_PAID_PAYMENT_URL,
-    DEFAULT_PAID_TRIAL_DAYS,
+    DEFAULT_PAID_PAYMENT_SECONDS,
+    DEFAULT_PAID_TRIAL_SECONDS,
+    format_duration,
     load_paid_settings,
+    parse_duration_to_seconds,
     save_paid_settings,
 )
 from xui.paid_storage import (
@@ -68,20 +70,20 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text=f"🧪 Trial: {settings['trial_days']} дней", callback_data="paidset_trial_days"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_trial_days"),
+                InlineKeyboardButton(text=f"🧪 Trial: {format_duration(settings['trial_seconds'])}", callback_data="paidset_trial_seconds"),
+                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_trial_seconds"),
             ],
             [
-                InlineKeyboardButton(text=f"⏳ Оплата: {settings['payment_days']} дней", callback_data="paidset_payment_days"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_payment_days"),
+                InlineKeyboardButton(text=f"⏳ Оплата: {format_duration(settings['payment_seconds'])}", callback_data="paidset_payment_seconds"),
+                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_payment_seconds"),
             ],
             [
                 InlineKeyboardButton(text=f"💰 Сумма: {settings['payment_amount']} ₽", callback_data="paidset_payment_amount"),
                 InlineKeyboardButton(text="По дефолту", callback_data="paiddef_payment_amount"),
             ],
             [
-                InlineKeyboardButton(text=f"🕒 Grace: {settings['grace_hours']} ч", callback_data="paidset_grace_hours"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_grace_hours"),
+                InlineKeyboardButton(text=f"🕒 Grace: {format_duration(settings['grace_seconds'])}", callback_data="paidset_grace_seconds"),
+                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_grace_seconds"),
             ],
             [InlineKeyboardButton(text=f"🔗 Оплата: {'задана' if settings['payment_url'] else 'не задана'}", callback_data="paidset_payment_url")],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_back")],
@@ -90,14 +92,14 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
 
 
 def _paid_setting_prompt(field: str) -> str:
-    if field == "trial_days":
-        return "Введите длительность trial в днях или <code>-</code> для значения по умолчанию."
-    if field == "payment_days":
-        return "Введите срок платной подписки в днях или <code>-</code> для значения по умолчанию."
+    if field == "trial_seconds":
+        return "Введите длительность trial любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>1 месяц</code>. Можно <code>-</code> для значения по умолчанию."
+    if field == "payment_seconds":
+        return "Введите срок платной подписки любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>1 месяц</code>. Можно <code>-</code> для значения по умолчанию."
     if field == "payment_amount":
         return "Введите сумму оплаты в рублях или <code>-</code> для значения по умолчанию."
-    if field == "grace_hours":
-        return "Введите время на оплату после окончания trial в часах или <code>-</code>."
+    if field == "grace_seconds":
+        return "Введите время на оплату любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>36 часов</code>. Можно <code>-</code> для значения по умолчанию."
     if field == "payment_url":
         return "Введите ссылку на оплату или <code>-</code>, чтобы очистить её."
     return "Введите значение."
@@ -107,10 +109,10 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
     settings = load_paid_settings()
     text = (
         "⚙️ <b>Настройки платных подписок</b>\n\n"
-        f"🧪 Trial: <b>{settings['trial_days']} дней</b>\n"
-        f"⏳ Оплата: <b>{settings['payment_days']} дней</b>\n"
+        f"🧪 Trial: <b>{format_duration(settings['trial_seconds'])}</b>\n"
+        f"⏳ Оплата: <b>{format_duration(settings['payment_seconds'])}</b>\n"
         f"💰 Сумма: <b>{settings['payment_amount']} ₽</b>\n"
-        f"🕒 Grace: <b>{settings['grace_hours']} ч</b>\n"
+        f"🕒 Grace: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"🔗 Ссылка: <b>{'задана' if settings['payment_url'] else 'не задана'}</b>"
     )
     markup = _paid_settings_kb()
@@ -184,16 +186,14 @@ async def cmd_sub(message: types.Message):
             )
         return
     status = str(subscription.get("status") or "active").capitalize()
-    trial_days = subscription.get("trial_days")
-    payment_days = subscription.get("payment_days")
     amount = subscription.get("payment_amount")
     paid_until = subscription.get("paid_until")
     payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
     await message.answer(
         "💳 <b>Платная подписка</b>\n\n"
         f"📌 Статус: <b>{status}</b>\n"
-        f"🧪 Trial: <b>{trial_days if trial_days is not None else 'не задан'}</b>\n"
-        f"⏳ Продление: <b>{payment_days if payment_days is not None else 'не задано'}</b>\n"
+        f"🧪 Trial: <b>{format_duration(subscription.get('trial_seconds'))}</b>\n"
+        f"⏳ Продление: <b>{format_duration(subscription.get('payment_seconds'))}</b>\n"
         f"💰 Сумма: <b>{amount if amount is not None else 'не задана'}</b>\n"
         f"🔗 Оплата: <b>{html.escape(str(payment_url)) if payment_url else 'не задана'}</b>\n"
         f"📅 Активна до: <b>{paid_until if paid_until is not None else 'не задано'}</b>\n\n"
@@ -239,7 +239,7 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     field = call.data[len("paidset_"):]
-    if field not in {"trial_days", "payment_days", "payment_amount", "grace_hours", "payment_url"}:
+    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "grace_seconds", "payment_url"}:
         return await call.answer("Неизвестная настройка", show_alert=True)
     await state.update_data(target_paid_setting_field=field)
     await state.set_state(PaidSubSettings.waiting_value)
@@ -256,14 +256,14 @@ async def cb_paid_settings_default(call: types.CallbackQuery):
         return await call.answer("Нет доступа", show_alert=True)
     field = call.data[len("paiddef_"):]
     settings = load_paid_settings()
-    if field == "trial_days":
-        settings["trial_days"] = DEFAULT_PAID_TRIAL_DAYS
-    elif field == "payment_days":
-        settings["payment_days"] = DEFAULT_PAID_PAYMENT_DAYS
+    if field == "trial_seconds":
+        settings["trial_seconds"] = DEFAULT_PAID_TRIAL_SECONDS
+    elif field == "payment_seconds":
+        settings["payment_seconds"] = DEFAULT_PAID_PAYMENT_SECONDS
     elif field == "payment_amount":
         settings["payment_amount"] = DEFAULT_PAID_PAYMENT_AMOUNT
-    elif field == "grace_hours":
-        settings["grace_hours"] = DEFAULT_PAID_GRACE_HOURS
+    elif field == "grace_seconds":
+        settings["grace_seconds"] = DEFAULT_PAID_GRACE_SECONDS
     else:
         return await call.answer("Неизвестная настройка", show_alert=True)
     save_paid_settings(settings)
@@ -283,17 +283,19 @@ async def paid_settings_value(message: types.Message, state):
     raw = (message.text or "").strip()
     settings = load_paid_settings()
     try:
-        if field in {"trial_days", "payment_days", "payment_amount", "grace_hours"}:
+        if field in {"trial_seconds", "payment_seconds", "payment_amount", "grace_seconds"}:
             if raw == "-":
                 defaults = {
-                    "trial_days": DEFAULT_PAID_TRIAL_DAYS,
-                    "payment_days": DEFAULT_PAID_PAYMENT_DAYS,
+                    "trial_seconds": DEFAULT_PAID_TRIAL_SECONDS,
+                    "payment_seconds": DEFAULT_PAID_PAYMENT_SECONDS,
                     "payment_amount": DEFAULT_PAID_PAYMENT_AMOUNT,
-                    "grace_hours": DEFAULT_PAID_GRACE_HOURS,
+                    "grace_seconds": DEFAULT_PAID_GRACE_SECONDS,
                 }
                 settings[field] = defaults[field]
-            else:
+            elif field == "payment_amount":
                 settings[field] = int(raw)
+            else:
+                settings[field] = parse_duration_to_seconds(raw)
         elif field == "payment_url":
             settings[field] = "" if raw == "-" else raw
         else:
@@ -347,11 +349,11 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
             "subscription_type": "paid",
             "status": "trial",
             "active": True,
-            "trial_days": int(settings["trial_days"]),
-            "payment_days": int(settings["payment_days"]),
+            "trial_seconds": int(settings["trial_seconds"]),
+            "payment_seconds": int(settings["payment_seconds"]),
             "payment_amount": int(settings["payment_amount"]),
             "payment_url": str(settings["payment_url"]),
-            "grace_hours": int(settings["grace_hours"]),
+            "grace_seconds": int(settings["grace_seconds"]),
             "paid_until": "",
         },
     )
