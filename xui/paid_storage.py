@@ -99,7 +99,6 @@ def refresh_paid_subscription_state(info: dict, *, now: int | None = None) -> tu
     if status == "trial" and trial_ends_at and now >= trial_ends_at:
         if not info.get("trial_expired_notified_at"):
             events.append("trial_expired")
-            info["trial_expired_notified_at"] = now
         if grace_ends_at and now < grace_ends_at:
             info["status"] = "grace"
             info["active"] = True
@@ -108,12 +107,10 @@ def refresh_paid_subscription_state(info: dict, *, now: int | None = None) -> tu
             info["active"] = False
             if grace_ends_at and not info.get("grace_expired_notified_at"):
                 events.append("grace_expired")
-                info["grace_expired_notified_at"] = now
 
     if status in {"active", "pending_payment"} and paid_ends_at and now >= paid_ends_at:
         if not info.get("payment_expired_notified_at"):
             events.append("payment_expired")
-            info["payment_expired_notified_at"] = now
         if grace_ends_at and now < grace_ends_at:
             info["status"] = "grace"
             info["active"] = True
@@ -122,12 +119,10 @@ def refresh_paid_subscription_state(info: dict, *, now: int | None = None) -> tu
             info["active"] = False
             if grace_ends_at and not info.get("grace_expired_notified_at"):
                 events.append("grace_expired")
-                info["grace_expired_notified_at"] = now
 
     if status == "grace" and grace_ends_at and now >= grace_ends_at:
         if not info.get("grace_expired_notified_at"):
             events.append("grace_expired")
-            info["grace_expired_notified_at"] = now
         info["status"] = "expired"
         info["active"] = False
 
