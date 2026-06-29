@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 from datetime import datetime, timezone
 import time
 
@@ -65,6 +66,12 @@ router = Router()
 
 def _paid_user_key(user_id: int) -> str:
     return f"paid_{int(user_id)}"
+
+
+def _sanitize_email_slug(text: str) -> str:
+    slug = re.sub(r"[^\w-]+", "_", (text or "").strip().lower())
+    slug = slug.strip("_")
+    return slug or "paid"
 
 
 def _format_dt(ts: int | None) -> str:
@@ -499,7 +506,8 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     set_user_flow(user_key, flow)
     set_user_username(user_id, username)
     set_user_note(user_id, display_name)
-    email = f"paid_{user_id}"
+    email_slug = _sanitize_email_slug(username or "paid")
+    email = f"{user_id}_{email_slug}"
     result, client_uuid = await api_add_client(
         inbound_id,
         email,
