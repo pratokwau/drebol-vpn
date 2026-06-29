@@ -283,6 +283,15 @@ def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None 
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _paid_user_info_kb(user_id: int, subscription: dict | None) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="paiduser_back")],
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="paiduser_refresh")],
+        ]
+    )
+
+
 def _paid_user_text(subscription: dict, payment_url: str) -> str:
     _ = payment_url
     return (
@@ -458,9 +467,26 @@ async def cb_paid_user_info(call: types.CallbackQuery):
     payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
     await call.answer()
     await call.message.edit_text(
+        (
+            "ℹ️ <b>Информация о подписке</b>\n\n"
+            f"{_subscription_summary(subscription)}\n"
+            f"🔗 Оплата: <b>{html.escape(str(payment_url)) if payment_url else 'не задана'}</b>"
+        ),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_user_info_kb(call.from_user.id, subscription),
+    )
+
+
+@router.callback_query(F.data == "paiduser_back")
+async def cb_paid_user_back(call: types.CallbackQuery):
+    subscription = get_paid_subscription(call.from_user.id) or {}
+    request = get_paid_request(call.from_user.id)
+    payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
+    await call.answer()
+    await call.message.edit_text(
         _paid_user_text(subscription, payment_url),
         parse_mode=ParseMode.HTML,
-        reply_markup=_paid_user_kb(call.from_user.id, subscription, get_paid_request(call.from_user.id)),
+        reply_markup=_paid_user_kb(call.from_user.id, subscription, request),
     )
 
 
