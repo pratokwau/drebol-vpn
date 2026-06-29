@@ -168,6 +168,9 @@ def build_paid_subscription(settings: dict, *, kind: str = "access", source: dic
     payment_amount = int(settings.get("payment_amount") or 0)
     max_devices = int(settings.get("max_devices") or 0)
     limit_ip = int(settings.get("limit_ip") or 0)
+    limit_gb = float(settings.get("limit_gb") or 0)
+    expiry_time_ms = int(settings.get("expiry_time_ms") or 0)
+    flow = str(settings.get("flow") or "")
     payment_url = str(settings.get("payment_url") or "")
     source = source or {}
     return {
@@ -179,6 +182,9 @@ def build_paid_subscription(settings: dict, *, kind: str = "access", source: dic
         "payment_amount": payment_amount,
         "max_devices": max_devices,
         "limit_ip": limit_ip,
+        "limit_gb": limit_gb,
+        "expiry_time_ms": expiry_time_ms,
+        "flow": flow,
         "payment_url": payment_url,
         "grace_seconds": grace_seconds,
         "created_at": now,
@@ -198,6 +204,9 @@ def extend_paid_subscription(info: dict, settings: dict, *, from_now: bool = Fal
     grace_seconds = int(settings.get("grace_seconds") or 0)
     info["max_devices"] = int(settings.get("max_devices") or info.get("max_devices") or 0)
     info["limit_ip"] = int(settings.get("limit_ip") or info.get("limit_ip") or 0)
+    info["limit_gb"] = float(settings.get("limit_gb") or info.get("limit_gb") or 0)
+    info["expiry_time_ms"] = int(settings.get("expiry_time_ms") or info.get("expiry_time_ms") or 0)
+    info["flow"] = str(settings.get("flow") or info.get("flow") or "")
     info["status"] = "active"
     info["active"] = True
     info["paid_ends_at"] = base + payment_seconds if payment_seconds else base
