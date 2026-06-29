@@ -83,7 +83,6 @@ async def _notify_about_paid_subscriptions() -> None:
                 if not events:
                     continue
                 user_id = int(user_key)
-                payment_url = str(refreshed.get("payment_url") or DEFAULT_PAID_PAYMENT_URL)
                 for event in events:
                     if event == "trial_expired":
                         grace_ends_at = int(refreshed.get("grace_ends_at") or 0)
@@ -111,7 +110,6 @@ async def _notify_about_paid_subscriptions() -> None:
                             user_id,
                             "⏳ <b>Срок подписки истёк.</b>\n\n"
                             f"У тебя есть {grace_text}, чтобы продлить оплату.\n"
-                            + (f"🔗 Оплата: <b>{payment_url}</b>\n" if payment_url else "")
                             + "Открой /sub и нажми «Продлить подписку».",
                             parse_mode="HTML",
                         )
