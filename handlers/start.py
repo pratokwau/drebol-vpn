@@ -8,7 +8,8 @@ from xui.paid_storage import has_paid_subscription
 from xui.storage import get_vpn_user, user_settings_ready
 from xui.utils import is_admin
 from xui.vpn import _render_vpn
-from xui.admin import cmd_admin, cmd_adminsub
+from handlers.admin import cmd_admin
+from xui.admin import cmd_adminsub
 from xui.paid_subscriptions import cmd_adminpaysub, cmd_sub
 
 
