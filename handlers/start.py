@@ -36,9 +36,10 @@ def _start_kb(*, has_admin_sub: bool, has_paid_sub: bool, is_admin_user: bool) -
 async def _render_start(message: types.Message) -> None:
     user_id = message.from_user.id
     vpn_user = get_vpn_user(user_id)
+    subscription_type = str(vpn_user.get("subscription_type", "")).lower() if vpn_user else ""
     has_admin_sub = bool(
         vpn_user
-        and str(vpn_user.get("subscription_type", "")).lower() == "admin"
+        and subscription_type != "paid"
         and not vpn_user.get("admin_disabled")
     )
     has_paid_sub = has_paid_subscription(user_id)
@@ -67,10 +68,10 @@ async def cmd_start(message: types.Message):
 @router.callback_query(F.data == "start_vpn")
 async def cb_start_vpn(call: types.CallbackQuery):
     user_data = get_vpn_user(call.from_user.id)
+    subscription_type = str(user_data.get("subscription_type", "")).lower() if user_data else ""
     if (
         not user_data
-        or not user_settings_ready(user_data)
-        or str(user_data.get("subscription_type", "")).lower() != "admin"
+        or subscription_type == "paid"
     ):
         return await call.answer("⛔ У вас пока нет доступа к VPN", show_alert=True)
     if user_data.get("admin_disabled"):
