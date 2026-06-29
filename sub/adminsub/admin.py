@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import html
 import re
-import secrets
 from datetime import datetime
 
 from aiogram import F, Router, types
@@ -687,7 +686,7 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
         await message.answer("⛔ Достигнут лимит устройств.")
         return
     slug = _sanitize_slug(name)
-    email = f"{user_key}_{slug}"
+    email = f"anon_{slug}" if user_key.startswith("anon_") else f"{user_key}_{slug}"
     expiry_time_ms = int(info.get("expiry_time_ms") or 2523456000000)
     limit_gb = float(info.get("limit_gb") or 0.0)
     limit_ip = int(info.get("limit_ip") or 2)
@@ -705,7 +704,7 @@ async def admin_add_device_name(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer(f"❌ Не удалось создать устройство.\n<code>{result.get('msg', '')}</code>", parse_mode=ParseMode.HTML)
         return
-    add_device_to_user_key(user_key, base_ib, client_uuid, email, limit_ip=limit_ip)
+    add_device_to_user_key(user_key, base_ib, client_uuid, email, limit_ip=limit_ip, label=name)
     await state.clear()
     await _show_user_menu(message, user_key, base_ib, edit=False)
     if tg_id:
@@ -828,7 +827,13 @@ async def cb_user_unbind(call: types.CallbackQuery):
     user_key, ib_id = _decode_user_payload(payload)
     if not user_key or not user_key.isdigit():
         return await call.answer("Нельзя отвязать", show_alert=True)
-    anon_key = f"anon_{secrets.token_hex(4)}"
+    suffix = ""
+    if "_" in user_key:
+        suffix = user_key.split("_", 1)[1].strip("_")
+    if not suffix:
+        info = load_vpn_users().get(user_key, {})
+        suffix = str(info.get("note") or info.get("username") or "user").strip()
+    anon_key = f"anon_{_sanitize_slug(suffix)}"
     rekey_user(user_key, anon_key)
     await _show_user_menu(call.message, anon_key, ib_id, edit=True)
     await call.answer("TG отвязан")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
-import secrets
+import re
 from pathlib import Path
 
 VPN_USERS_FILE = Path("data/vpn_users.json")
@@ -41,7 +41,9 @@ def load_vpn_users() -> dict:
     cleaned = {
         user_key: info
         for user_key, info in migrated.items()
-        if not str(user_key).startswith("paid_") and str(getattr(info, "get", lambda *_: "")("subscription_type", "")).lower() != "paid"
+        if isinstance(info, dict)
+        and not str(user_key).startswith("paid_")
+        and str(info.get("subscription_type", "")).lower() != "paid"
     }
     if cleaned != migrated:
         save_vpn_users(cleaned)
@@ -132,16 +134,36 @@ def get_user_key_by_client(ib_id: int, email: str) -> str | None:
     return None
 
 
-def _anon_user_key(ib_id: int, email: str) -> str:
-    digest = hashlib.sha1(f"{ib_id}:{email}".encode("utf-8")).hexdigest()[:10]
-    return f"anon_{digest}"
+def resolve_user_key_by_email(email: str) -> str | None:
+    data = load_vpn_users()
+    email = str(email or "")
+    best_key = None
+    for user_key, info in data.items():
+        if str(user_key).startswith("paid_") or str(info.get("subscription_type", "")).lower() == "paid":
+            continue
+        key = str(user_key)
+        if not key:
+            continue
+        if email == key or email.startswith(f"{key}_"):
+            if best_key is None or len(key) > len(best_key):
+                best_key = key
+    return best_key
+
+
+def _slugify(text: str) -> str:
+    slug = re.sub(r"[^\w-]+", "_", (text or "").strip().lower(), flags=re.UNICODE)
+    return slug.strip("_") or "user"
+
+
+def _anon_user_key(label: str) -> str:
+    return f"anon_{_slugify(label)}"
 
 
 def ensure_anon_user_for_client(ib_id: int, uuid: str, email: str, limit_ip: int | None = None) -> str:
     existing_key = get_user_key_by_client(ib_id, email)
     if existing_key:
         return existing_key
-    key = _anon_user_key(ib_id, email)
+    key = _anon_user_key(email)
     add_device_to_user_key(key, ib_id, uuid, email, limit_ip=limit_ip, label=email)
     return key
 
@@ -215,7 +237,7 @@ def create_user(tg_id: int | None, max_devices: int = DEFAULT_MAX_DEVICES, note:
             save_vpn_users(data)
             return key
     else:
-        key = f"anon_{secrets.token_hex(4)}"
+        key = _anon_user_key(note or "user")
     data[key] = {
         "subscription_type": "admin",
         "username": "",
@@ -237,7 +259,7 @@ def create_user(tg_id: int | None, max_devices: int = DEFAULT_MAX_DEVICES, note:
 def create_user_with_inbound(tg_id: int | None, ib_id: int, note: str = "", subscription_type: str = "admin") -> str:
     data = load_vpn_users()
     if tg_id is None:
-        key = f"anon_{secrets.token_hex(4)}"
+        key = _anon_user_key(note or f"inbound_{ib_id}")
     else:
         key = str(tg_id)
     if key not in data:
@@ -406,7 +428,25 @@ def rekey_user(old_key: str, new_key: str) -> bool:
     new_key = str(new_key)
     if old_key not in data:
         return False
+    if old_key.startswith("anon_") and new_key.isdigit():
+        suffix = old_key[len("anon_"):].strip("_")
+        if suffix:
+            new_key = f"{new_key}_{suffix}"
     payload = data.pop(old_key)
+    def _rename_device_email(email: str) -> str:
+        email = str(email or "")
+        if email == old_key:
+            return new_key
+        if email.startswith(f"{old_key}_"):
+            return new_key + email[len(old_key):]
+        if old_key.startswith("anon_") and email.startswith("anon_") and new_key.isdigit():
+            suffix = email[len("anon_"):].lstrip("_")
+            return f"{new_key}_{suffix}" if suffix else new_key
+        return email
+    payload["devices"] = [
+        {**device, "email": _rename_device_email(device.get("email", ""))}
+        for device in payload.get("devices", [])
+    ]
     if new_key in data:
         existing = data[new_key]
         existing_devices = existing.get("devices", [])
