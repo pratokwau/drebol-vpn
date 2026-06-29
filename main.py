@@ -11,6 +11,13 @@ from handlers.start import router as start_router
 from loader import bot, dp
 from storage import clear_update_state, load_update_state
 from updater import get_remote_head, get_local_head
+from xui.paid_settings_store import DEFAULT_PAID_PAYMENT_URL
+from xui.paid_storage import (
+    load_paid_subscriptions,
+    paid_subscription_status,
+    refresh_paid_subscription_state,
+    save_paid_subscriptions,
+)
 from xui import router as xui_router
 
 
@@ -58,6 +65,53 @@ async def _notify_about_updates() -> None:
         await asyncio.sleep(10)
 
 
+async def _notify_about_paid_subscriptions() -> None:
+    while True:
+        try:
+            subscriptions = load_paid_subscriptions()
+            changed = False
+            for user_key, info in list(subscriptions.items()):
+                if not isinstance(info, dict) or not str(user_key).isdigit():
+                    continue
+                refreshed, events = refresh_paid_subscription_state(info)
+                if refreshed is not info:
+                    subscriptions[user_key] = refreshed
+                    changed = True
+                if not events:
+                    continue
+                user_id = int(user_key)
+                payment_url = str(refreshed.get("payment_url") or DEFAULT_PAID_PAYMENT_URL)
+                for event in events:
+                    if event == "trial_expired":
+                        await bot.send_message(
+                            user_id,
+                            "🧪 <b>Пробный период истёк.</b>\n\n"
+                            "У тебя есть 36 часов, чтобы продлить подписку.\n"
+                            + (f"🔗 Оплата: <b>{payment_url}</b>\n" if payment_url else "")
+                            + "Открой /sub и нажми «Продлить подписку».",
+                        )
+                    elif event == "payment_expired":
+                        await bot.send_message(
+                            user_id,
+                            "⏳ <b>Срок подписки истёк.</b>\n\n"
+                            "У тебя есть 36 часов, чтобы продлить оплату.\n"
+                            + (f"🔗 Оплата: <b>{payment_url}</b>\n" if payment_url else "")
+                            + "Открой /sub и нажми «Продлить подписку».",
+                        )
+                    elif event == "grace_expired":
+                        await bot.send_message(
+                            user_id,
+                            "⛔ <b>Период продления закончился.</b>\n\n"
+                            "Подписка отключена. Чтобы вернуть доступ, открой /sub и отправь запрос на продление.",
+                        )
+                changed = True
+            if changed:
+                save_paid_subscriptions(subscriptions)
+        except Exception:
+            pass
+        await asyncio.sleep(10)
+
+
 async def main() -> None:
     dp.include_router(cancel_router)
     dp.include_router(start_router)
@@ -84,6 +138,7 @@ async def main() -> None:
 
     asyncio.create_task(notify_update_success())
     asyncio.create_task(_notify_about_updates())
+    asyncio.create_task(_notify_about_paid_subscriptions())
     await dp.start_polling(bot)
 
 
