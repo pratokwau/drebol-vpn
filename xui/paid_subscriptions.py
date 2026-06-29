@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import time
 from datetime import datetime, timezone
 
 from aiogram import F, Router, types
@@ -16,6 +17,7 @@ from xui.paid_settings_store import (
     DEFAULT_PAID_PAYMENT_AMOUNT,
     DEFAULT_PAID_PAYMENT_URL,
     DEFAULT_PAID_PAYMENT_SECONDS,
+    DEFAULT_PAID_MAX_DEVICES,
     DEFAULT_PAID_TRIAL_SECONDS,
     format_duration,
     load_paid_settings,
@@ -35,8 +37,16 @@ from xui.paid_storage import (
     set_paid_subscription,
 )
 from xui.states import PaidSubSettings
-from xui.storage import get_users_by_subscription_type, load_vpn_users
+from xui.storage import (
+    add_device_to_user_key,
+    create_user_with_inbound,
+    get_users_by_subscription_type,
+    load_vpn_users,
+    set_user_max_devices,
+    set_user_subscription_type,
+)
 from xui.utils import is_admin
+from xui.api import api_add_client, api_get_client, api_get_inbounds, api_update_client
 
 
 router = Router()
@@ -91,11 +101,30 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
     settings = load_paid_settings()
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"🧪 Trial: {format_duration(settings['trial_seconds'])}", callback_data="paidset_trial_seconds")],
-            [InlineKeyboardButton(text=f"⏳ Оплата: {format_duration(settings['payment_seconds'])}", callback_data="paidset_payment_seconds")],
-            [InlineKeyboardButton(text=f"💰 Сумма: {settings['payment_amount']} ₽", callback_data="paidset_payment_amount")],
-            [InlineKeyboardButton(text=f"🕒 Grace: {format_duration(settings['grace_seconds'])}", callback_data="paidset_grace_seconds")],
-            [InlineKeyboardButton(text=f"🔗 Оплата: {'задана' if settings['payment_url'] else 'не задана'}", callback_data="paidset_payment_url")],
+            [
+                InlineKeyboardButton(text=f"🧪 Trial: {format_duration(settings['trial_seconds'])}", callback_data="paidset_trial_seconds"),
+                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_trial_seconds"),
+            ],
+            [
+                InlineKeyboardButton(text=f"⏳ Оплата: {format_duration(settings['payment_seconds'])}", callback_data="paidset_payment_seconds"),
+                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_payment_seconds"),
+            ],
+            [
+                InlineKeyboardButton(text=f"💰 Сумма: {settings['payment_amount']} ₽", callback_data="paidset_payment_amount"),
+                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_payment_amount"),
+            ],
+            [
+                InlineKeyboardButton(text=f"📱 Лимит устройств: {settings['max_devices']}", callback_data="paidset_max_devices"),
+                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_max_devices"),
+            ],
+            [
+                InlineKeyboardButton(text=f"🕒 Grace: {format_duration(settings['grace_seconds'])}", callback_data="paidset_grace_seconds"),
+                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_grace_seconds"),
+            ],
+            [
+                InlineKeyboardButton(text=f"🔗 Оплата: {'задана' if settings['payment_url'] else 'не задана'}", callback_data="paidset_payment_url"),
+                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_payment_url"),
+            ],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_back")],
         ]
     )
@@ -108,11 +137,25 @@ def _paid_setting_prompt(field: str) -> str:
         return "Введите срок платной подписки любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>1 месяц</code>. Можно <code>-</code> для значения по умолчанию."
     if field == "payment_amount":
         return "Введите сумму оплаты в рублях или <code>-</code> для значения по умолчанию."
+    if field == "max_devices":
+        return "Введите лимит устройств или <code>-</code> для значения по умолчанию."
     if field == "grace_seconds":
         return "Введите время на оплату любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>36 часов</code>. Можно <code>-</code> для значения по умолчанию."
     if field == "payment_url":
         return "Введите ссылку на оплату или <code>-</code>, чтобы очистить её."
     return "Введите значение."
+
+
+def _paid_setting_default(field: str):
+    defaults = {
+        "trial_seconds": DEFAULT_PAID_TRIAL_SECONDS,
+        "payment_seconds": DEFAULT_PAID_PAYMENT_SECONDS,
+        "payment_amount": DEFAULT_PAID_PAYMENT_AMOUNT,
+        "max_devices": DEFAULT_PAID_MAX_DEVICES,
+        "grace_seconds": DEFAULT_PAID_GRACE_SECONDS,
+        "payment_url": DEFAULT_PAID_PAYMENT_URL,
+    }
+    return defaults.get(field)
 
 
 async def _show_paid_settings(call_or_message, *, edit: bool = True):
@@ -122,6 +165,7 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
         f"🧪 Trial: <b>{format_duration(settings['trial_seconds'])}</b>\n"
         f"⏳ Оплата: <b>{format_duration(settings['payment_seconds'])}</b>\n"
         f"💰 Сумма: <b>{settings['payment_amount']} ₽</b>\n"
+        f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
         f"🕒 Grace: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"🔗 Ссылка: <b>{'задана' if settings['payment_url'] else 'не задана'}</b>"
     )
@@ -163,6 +207,7 @@ def _subscription_summary(subscription: dict) -> str:
         f"🧪 Trial: <b>{format_duration(subscription.get('trial_seconds'))}</b>\n"
         f"⏳ Платёжный период: <b>{format_duration(subscription.get('payment_seconds'))}</b>\n"
         f"💰 Сумма: <b>{subscription.get('payment_amount', 'не задана')} ₽</b>\n"
+        f"📱 Лимит устройств: <b>{subscription.get('max_devices', 'не задан')}</b>\n"
         f"🕒 Grace: <b>{format_duration(subscription.get('grace_seconds'))}</b>\n"
         f"📅 Trial до: <b>{_format_dt(subscription.get('trial_ends_at'))}</b>\n"
         f"📅 Платёж до: <b>{_format_dt(subscription.get('paid_ends_at'))}</b>\n"
@@ -195,9 +240,68 @@ def _admin_paid_request_text(request: dict, settings: dict, title: str) -> str:
         f"🧪 Trial: <b>{format_duration(settings['trial_seconds'])}</b>\n"
         f"⏳ Платёжный период: <b>{format_duration(settings['payment_seconds'])}</b>\n"
         f"💰 Сумма: <b>{settings['payment_amount']} ₽</b>\n"
+        f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
         f"🕒 Grace: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"🆔 Request: <code>{html.escape(str(request.get('request_id') or ''))}</code>"
     )
+
+
+async def _create_paid_device_for_user(user_id: int, settings: dict, request: dict) -> None:
+    user_key = str(user_id)
+    current = load_vpn_users().get(user_key, {})
+    trial_seconds = int(settings.get("trial_seconds") or DEFAULT_PAID_TRIAL_SECONDS)
+    expiry_time_ms = int((time.time() + trial_seconds) * 1000)
+    if current.get("devices"):
+        set_user_subscription_type(user_key, "paid")
+        set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
+        for device in current.get("devices", []):
+            email = str(device.get("email") or "")
+            if not email:
+                continue
+            client = await api_get_client(email)
+            if client:
+                client["expiryTime"] = expiry_time_ms
+                await api_update_client(email, client)
+        return
+    inbounds, _ = await api_get_inbounds()
+    inbound = next((item for item in inbounds if item.get("id") is not None), None)
+    if not inbound:
+        create_user_with_inbound(user_id, 0, subscription_type="paid")
+        set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
+        set_user_subscription_type(user_key, "paid")
+        return
+    inbound_id = int(inbound.get("id") or 0)
+    create_user_with_inbound(user_id, inbound_id, subscription_type="paid")
+    set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
+    set_user_subscription_type(user_key, "paid")
+    slug = f"trial_{request.get('request_id') or user_id}"
+    email = f"paid_{user_id}_{slug}"
+    limit_gb = 0.0
+    expiry_time_ms = 0
+    flow = "xtls-rprx-vision"
+    result, client_uuid = await api_add_client(
+        inbound_id,
+        email,
+        0,
+        limit_gb,
+        flow,
+        expiry_time_ms=expiry_time_ms,
+        limit_ip=0,
+    )
+    if result.get("success"):
+        add_device_to_user_key(user_key, inbound_id, client_uuid, email, limit_ip=0)
+
+
+async def _sync_paid_user_devices_expiry(user_id: int, expiry_time_ms: int) -> None:
+    info = load_vpn_users().get(str(user_id), {})
+    for device in info.get("devices", []):
+        email = str(device.get("email") or "")
+        if not email:
+            continue
+        client = await api_get_client(email)
+        if client:
+            client["expiryTime"] = int(expiry_time_ms)
+            await api_update_client(email, client)
 
 
 @router.message(Command("sub"))
@@ -293,6 +397,11 @@ async def cb_paid_user_request(call: types.CallbackQuery):
         parse_mode=ParseMode.HTML,
         reply_markup=_paid_user_kb(user_id, None, get_paid_request(user_id)),
     )
+
+
+@router.callback_query(F.data == "paiduser_wait")
+async def cb_paid_user_wait(call: types.CallbackQuery):
+    await call.answer("Заявка уже отправлена", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("paiduser_renew_"))
@@ -398,7 +507,7 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     field = call.data[len("paidset_"):]
-    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "grace_seconds", "payment_url"}:
+    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "max_devices", "grace_seconds", "payment_url"}:
         return await call.answer("Неизвестная настройка", show_alert=True)
     await state.update_data(target_paid_setting_field=field)
     await state.set_state(PaidSubSettings.waiting_value)
@@ -407,6 +516,20 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
         parse_mode=ParseMode.HTML,
     )
     await call.answer()
+
+
+@router.callback_query(F.data.startswith("paiddef_"))
+async def cb_paid_settings_default(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    field = call.data[len("paiddef_"):]
+    settings = load_paid_settings()
+    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "max_devices", "grace_seconds", "payment_url"}:
+        return await call.answer("Неизвестная настройка", show_alert=True)
+    settings[field] = _paid_setting_default(field)
+    save_paid_settings(settings)
+    await call.answer("Применено")
+    await _show_paid_settings(call, edit=True)
 
 
 @router.message(PaidSubSettings.waiting_value)
@@ -421,16 +544,17 @@ async def paid_settings_value(message: types.Message, state):
     raw = (message.text or "").strip()
     settings = load_paid_settings()
     try:
-        if field in {"trial_seconds", "payment_seconds", "payment_amount", "grace_seconds"}:
+        if field in {"trial_seconds", "payment_seconds", "payment_amount", "max_devices", "grace_seconds"}:
             if raw == "-":
                 defaults = {
                     "trial_seconds": DEFAULT_PAID_TRIAL_SECONDS,
                     "payment_seconds": DEFAULT_PAID_PAYMENT_SECONDS,
                     "payment_amount": DEFAULT_PAID_PAYMENT_AMOUNT,
+                    "max_devices": DEFAULT_PAID_MAX_DEVICES,
                     "grace_seconds": DEFAULT_PAID_GRACE_SECONDS,
                 }
                 settings[field] = defaults[field]
-            elif field == "payment_amount":
+            elif field in {"payment_amount", "max_devices"}:
                 settings[field] = int(raw)
             else:
                 settings[field] = parse_duration_to_seconds(raw)
@@ -491,12 +615,14 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
         updated["subscription_type"] = "paid"
         updated["payment_url"] = str(settings["payment_url"])
         set_paid_subscription(user_id, updated)
+        await _sync_paid_user_devices_expiry(user_id, int(updated.get("paid_ends_at") or 0) * 1000)
         user_message = (
             "✅ <b>Твоя платная подписка продлена.</b>\n\n"
             f"Новый срок окончания: <b>{_format_dt(updated.get('paid_ends_at'))}</b>\n"
             "Зайди в /sub, чтобы посмотреть статус."
         )
     else:
+        await _create_paid_device_for_user(user_id, settings, request)
         set_paid_subscription(user_id, build_paid_subscription(settings, kind="access", source=request))
         user_message = (
             "✅ <b>Твоя платная подписка выдана.</b>\n\n"
@@ -553,6 +679,7 @@ async def cb_paid_payment_ok(call: types.CallbackQuery):
     updated["payment_url"] = str(settings["payment_url"])
     updated["status"] = "active"
     set_paid_subscription(user_id, updated)
+    await _sync_paid_user_devices_expiry(user_id, int(updated.get("paid_ends_at") or 0) * 1000)
     delete_paid_request(user_id)
     await bot.send_message(
         user_id,
