@@ -273,8 +273,9 @@ async def _ensure_user_owner_key(user_key: str) -> str:
     return user_key
 
 
+@router.message(Command("adminsub"))
 @router.message(Command("adminxui"))
-async def cmd_adminxui(message: types.Message):
+async def cmd_adminsub(message: types.Message):
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещён.")
         return
