@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -126,7 +127,7 @@ async def api_get_inbounds() -> tuple[list[dict[str, Any]], str]:
 
 
 async def api_get_client(email: str) -> dict | None:
-    result = await xui_get(f"/panel/api/clients/get/{email}")
+    result = await xui_get(f"/panel/api/clients/get/{quote(email, safe='')}")
     if not result.get("success"):
         return None
     obj = _extract_obj(result)
@@ -172,7 +173,7 @@ async def api_add_client(
 
 
 async def api_del_client_by_email(email: str) -> dict:
-    return await xui_post(f"/panel/api/clients/del/{email}")
+    return await xui_post(f"/panel/api/clients/del/{quote(email, safe='')}")
 
 
 async def api_update_client(email: str, client_obj: dict) -> dict:
@@ -180,8 +181,8 @@ async def api_update_client(email: str, client_obj: dict) -> dict:
     payload = {k: v for k, v in client_obj.items() if k in allowed}
     if "id" in payload and isinstance(payload["id"], int):
         payload.pop("id", None)
-    return await xui_post(f"/panel/api/clients/update/{email}", data=payload)
+    return await xui_post(f"/panel/api/clients/update/{quote(email, safe='')}", data=payload)
 
 
 async def api_reset_client_traffic(email: str) -> dict:
-    return await xui_post(f"/panel/api/clients/resetTraffic/{email}")
+    return await xui_post(f"/panel/api/clients/resetTraffic/{quote(email, safe='')}")

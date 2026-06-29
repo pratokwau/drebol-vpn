@@ -57,6 +57,7 @@ from xui.storage import (
 )
 from xui.utils import is_admin
 from xui.api import api_add_client, api_del_client_by_email, api_get_client, api_get_inbounds, api_update_client
+from xui.instructions import happ_instruction
 
 
 router = Router()
@@ -326,6 +327,9 @@ def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None 
     else:
         rows.append([InlineKeyboardButton(text="ℹ️ Информация о подписке", callback_data="paiduser_info")])
         rows.append([InlineKeyboardButton(text="💳 Продлить подписку", callback_data=f"paiduser_renew_{user_id}")])
+        user_info = load_vpn_users().get(str(user_id), {})
+        if user_info.get("devices"):
+            rows.append([InlineKeyboardButton(text="📖 Инструкция", callback_data="paiduser_inst")])
     if request:
         rows = [[InlineKeyboardButton(text="⏳ Заявка уже отправлена", callback_data="paiduser_wait")]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -490,7 +494,7 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     set_user_username(user_id, username)
     set_user_note(user_id, display_name)
     slug = f"trial_{request.get('request_id') or user_id}"
-    email = f"paid_{user_id}_{slug}"
+    email = display_name
     result, client_uuid = await api_add_client(
         inbound_id,
         email,
@@ -564,6 +568,23 @@ async def cb_paid_user_refresh(call: types.CallbackQuery):
         first_name=call.from_user.first_name or "",
         last_name=call.from_user.last_name or "",
         edit=True,
+    )
+
+
+@router.callback_query(F.data == "paiduser_inst")
+async def cb_paid_user_inst(call: types.CallbackQuery):
+    await call.answer()
+    user_info = load_vpn_users().get(str(call.from_user.id), {})
+    device = next((item for item in user_info.get("devices", []) if item.get("ib_id") is not None), None)
+    if not device:
+        return await call.message.answer("⛔ Инструкция пока недоступна.")
+    inbound_id = int(device.get("ib_id", 0) or 0)
+    client = await api_get_client(str(device.get("email", "")))
+    sub_id = str((client or {}).get("subId") or device.get("email", ""))
+    await call.message.answer(
+        happ_instruction(sub_id, inbound_id),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )
 
 
