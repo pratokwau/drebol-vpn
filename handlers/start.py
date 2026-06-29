@@ -22,8 +22,8 @@ def _start_kb(*, has_admin_sub: bool, has_paid_sub: bool, is_admin_user: bool) -
         rows.append([InlineKeyboardButton(text="🔐 Мой VPN", callback_data="start_vpn")])
     if has_paid_sub:
         rows.append([InlineKeyboardButton(text="💳 Моя подписка", callback_data="start_sub")])
-    if not has_admin_sub and not has_paid_sub:
-        rows.append([InlineKeyboardButton(text="💳 Запросить триал", callback_data="start_sub")])
+    else:
+        rows.append([InlineKeyboardButton(text="💳 Моя подписка", callback_data="start_sub")])
     if is_admin_user:
         rows.append([
             InlineKeyboardButton(text="⚙️ Админка", callback_data="start_admin"),
@@ -86,23 +86,17 @@ async def cb_start_sub(call: types.CallbackQuery):
 
 @router.callback_query(F.data == "start_admin")
 async def cb_start_admin(call: types.CallbackQuery):
-    if not is_admin(call.from_user.id):
-        return await call.answer("⛔ Доступ запрещён", show_alert=True)
     await call.answer()
     await render_admin_menu(call.message, call.from_user.id, edit=True)
 
 
 @router.callback_query(F.data == "start_adminsub")
 async def cb_start_adminsub(call: types.CallbackQuery):
-    if not is_admin(call.from_user.id):
-        return await call.answer("⛔ Доступ запрещён", show_alert=True)
     await call.answer()
     await render_inbounds(call.message, show_settings=False)
 
 
 @router.callback_query(F.data == "start_adminpaysub")
 async def cb_start_adminpaysub(call: types.CallbackQuery):
-    if not is_admin(call.from_user.id):
-        return await call.answer("⛔ Доступ запрещён", show_alert=True)
     await call.answer()
     await render_paid_subscriptions(call.message)
