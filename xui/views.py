@@ -15,9 +15,11 @@ from xui.storage import (
     DEFAULT_LIMIT_IP,
     DEFAULT_EXPIRY_TIME_MS,
     DEFAULT_FLOW,
+    ensure_anon_user_for_client,
     get_client_note,
     get_effective_user_setting,
     get_vpn_user,
+    get_user_key_by_client,
     load_vpn_users,
     refresh_username,
     save_vpn_users,
@@ -296,13 +298,9 @@ async def _refresh_client_view(call: types.CallbackQuery, cl_h: str):
     status = "✅ Активен" if enabled else "❌ Отключён"
 
     if not owner_user_key:
-        for uk, uinfo in load_vpn_users().items():
-            for d in uinfo.get("devices", []):
-                if d.get("ib_id") == ib_id and d.get("email") == email:
-                    owner_user_key = uk
-                    break
-            if owner_user_key:
-                break
+        owner_user_key = get_user_key_by_client(int(ib_id or 0), email) or ""
+        if not owner_user_key:
+            owner_user_key = ensure_anon_user_for_client(int(ib_id or 0), str(client.get("id", "") or ""), email)
 
     note = get_client_note(ib_id, email)
     text = f"👤 <b>{email}</b>\n\n"

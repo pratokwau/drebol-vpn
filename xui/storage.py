@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import secrets
 from pathlib import Path
 
@@ -110,6 +111,29 @@ def get_tg_id_by_client(ib_id: int, email: str) -> int | None:
                 except ValueError:
                     return None
     return None
+
+
+def get_user_key_by_client(ib_id: int, email: str) -> str | None:
+    data = load_vpn_users()
+    for user_key, info in data.items():
+        for d in info.get("devices", []):
+            if d.get("ib_id") == ib_id and d.get("email") == email:
+                return str(user_key)
+    return None
+
+
+def _anon_user_key(ib_id: int, email: str) -> str:
+    digest = hashlib.sha1(f"{ib_id}:{email}".encode("utf-8")).hexdigest()[:10]
+    return f"anon_{digest}"
+
+
+def ensure_anon_user_for_client(ib_id: int, uuid: str, email: str, limit_ip: int | None = None) -> str:
+    existing_key = get_user_key_by_client(ib_id, email)
+    if existing_key:
+        return existing_key
+    key = _anon_user_key(ib_id, email)
+    add_device_to_user_key(key, ib_id, uuid, email, limit_ip=limit_ip)
+    return key
 
 
 def _add_device_to_user_key(user_key: str, ib_id: int, uuid: str, email: str, limit_ip: int | None = None):

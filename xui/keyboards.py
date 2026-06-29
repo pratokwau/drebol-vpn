@@ -9,6 +9,7 @@ from xui.storage import (
     DEFAULT_LIMIT_GB,
     DEFAULT_LIMIT_IP,
     DEFAULT_MAX_DEVICES,
+    ensure_anon_user_for_client,
     load_vpn_users,
 )
 from xui.utils import cache, format_bytes, CLIENTS_PAGE_SIZE, _cache
@@ -92,8 +93,28 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
         up = format_bytes(stats.get("up", 0))
         down = format_bytes(stats.get("down", 0))
         status = "🟢" if enabled else "🔴"
-        items.append(("single", email, f"{status} {email} ↑{up} ↓{down}"))
+        anon_key = ensure_anon_user_for_client(int(ib_id or 0), str(cl.get("id", "") or ""), email)
+        if anon_key not in grouped:
+            grouped[anon_key] = {"username": "", "note": "", "admin_disabled": False, "devices": []}
+        grouped[anon_key]["devices"] = [
+            d for d in grouped[anon_key].get("devices", [])
+            if not (d.get("ib_id") == ib_id and d.get("email") == email)
+        ]
+        grouped[anon_key].setdefault("devices", []).append({"ib_id": ib_id, "uuid": cl.get("id", ""), "email": email})
 
+    items = []
+    for user_key, info in sorted(grouped.items()):
+        username = info.get("username", "")
+        note = info.get("note", "")
+        n_devices = len([d for d in info.get("devices", []) if d.get("ib_id") == ib_id])
+        prefix = "🚫" if info.get("admin_disabled", False) else "👤"
+        if user_key.startswith("anon_"):
+            id_part = "Без TG ID"
+        else:
+            username_part = f" @{username}" if username else " (без username)"
+            id_part = f"{user_key}{username_part}"
+        note_suffix = f" • 📝{note[:15]}" if note else ""
+        items.append(("user", user_key, f"{prefix} {id_part} ({n_devices} устр.){note_suffix}"))
     total = len(items)
     total_pages = (total + CLIENTS_PAGE_SIZE - 1) // CLIENTS_PAGE_SIZE or 1
     page = max(0, min(page, total_pages - 1))

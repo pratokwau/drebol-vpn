@@ -28,6 +28,7 @@ from xui.storage import (
     create_user_with_inbound,
     delete_user_completely,
     get_effective_user_setting,
+    get_user_key_by_client,
     get_tg_id_by_client,
     get_vpn_user,
     load_vpn_users,
@@ -988,13 +989,18 @@ async def cb_client_delete(call: types.CallbackQuery):
     if owner_key is not None:
         remove_device_from_user(owner_key, ib_id, email)
     else:
+        owner_user_key = get_user_key_by_client(ib_id, email)
+        if owner_user_key and owner_user_key.isdigit():
+            remove_device_from_user(int(owner_user_key), ib_id, email)
+        else:
+            owner_user_key = owner_user_key or ""
         for uk, uinfo in load_vpn_users().items():
             if any(d.get("ib_id") == ib_id and d.get("email") == email for d in uinfo.get("devices", [])):
                 data = load_vpn_users()
                 data[uk]["devices"] = [d for d in data[uk].get("devices", []) if not (d.get("ib_id") == ib_id and d.get("email") == email)]
                 save_vpn_users(data)
                 break
-    owner_user_key = info.get("owner_uk", "")
+    owner_user_key = info.get("owner_uk", "") or get_user_key_by_client(ib_id, email) or ""
     if owner_user_key:
         await _show_user_menu(call.message, owner_user_key, ib_id, edit=True)
     else:
