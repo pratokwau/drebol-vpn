@@ -49,6 +49,7 @@ from sub.adminpaysub.storage import (
     delete_user_completely,
     get_users_by_subscription_type,
     load_vpn_users,
+    save_vpn_users,
     set_user_flow,
     set_user_limit_gb,
     set_user_limit_ip,
@@ -487,19 +488,36 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
         set_user_flow(user_key, flow)
         set_user_username(user_id, username)
         set_user_note(user_id, display_name)
+        updated_any = False
+        valid_devices = []
         for device in current.get("devices", []):
             email = str(device.get("email") or "")
             if not email:
                 continue
             client = await api_get_client(email)
             if client:
+                updated_any = True
+                valid_devices.append(device)
                 client["totalGB"] = 0 if limit_gb <= 0 else int(limit_gb * 1024 ** 3)
                 client["expiryTime"] = expiry_time_ms
                 client["limitIp"] = limit_ip
                 client["flow"] = flow
                 _log_paid(f"updating existing device email={email!r} expiry={expiry_time_ms} limit_ip={limit_ip}")
                 await api_update_client(email, client)
-        return
+            else:
+                _log_paid(f"stale local device without XUI record email={email!r}")
+        if updated_any:
+            if len(valid_devices) != len(current.get("devices", [])):
+                data = load_vpn_users()
+                if user_key in data:
+                    data[user_key]["devices"] = valid_devices
+                    save_vpn_users(data)
+            return
+        _log_paid(f"no live XUI devices found for user_key={user_key}, recreating device")
+        data = load_vpn_users()
+        if user_key in data:
+            data[user_key]["devices"] = []
+            save_vpn_users(data)
     inbounds, _ = await api_get_inbounds()
     _log_paid(f"inbounds loaded count={len(inbounds)}")
     inbound = next((item for item in inbounds if item.get("id") is not None), None)
