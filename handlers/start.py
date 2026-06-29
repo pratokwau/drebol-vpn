@@ -4,11 +4,11 @@ from aiogram import F, Router, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from handlers.admin import cmd_admin
 from xui.paid_storage import has_paid_subscription
 from xui.storage import get_vpn_user, user_settings_ready
 from xui.utils import is_admin
 from xui.vpn import _render_vpn
-from handlers.admin import cmd_admin
 from xui.admin import cmd_adminsub
 from xui.paid_subscriptions import cmd_adminpaysub, cmd_sub
 
@@ -25,12 +25,11 @@ def _start_kb(*, has_admin_sub: bool, has_paid_sub: bool, is_admin_user: bool) -
     if not has_admin_sub and not has_paid_sub:
         rows.append([InlineKeyboardButton(text="💳 Запросить триал", callback_data="start_sub")])
     if is_admin_user:
-        rows.append([InlineKeyboardButton(text="⚙️ Админ-панель", callback_data="start_admin")])
         rows.append([
+            InlineKeyboardButton(text="⚙️ Админка", callback_data="start_admin"),
             InlineKeyboardButton(text="📡 Админская подписка", callback_data="start_adminsub"),
-            InlineKeyboardButton(text="💳 Платные подписки", callback_data="start_adminpaysub"),
         ])
-    rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="start_refresh")])
+        rows.append([InlineKeyboardButton(text="💳 Платные подписки", callback_data="start_adminpaysub")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -42,29 +41,23 @@ async def _render_start(message: types.Message) -> None:
     is_admin_user = is_admin(user_id)
     text = (
         "👋 <b>Добро пожаловать в Drebol VPN</b>\n\n"
-        "Здесь можно открыть свой VPN, посмотреть подписку или зайти в админ-раздел.\n\n"
+        "Здесь можно открыть свой VPN или посмотреть подписку.\n\n"
         "Выберите действие кнопкой ниже:"
     )
     await message.answer(
         text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=_start_kb(
-            has_admin_sub=has_admin_sub,
-            has_paid_sub=has_paid_sub,
-            is_admin_user=is_admin_user,
-        ),
-    )
+            parse_mode=ParseMode.HTML,
+            reply_markup=_start_kb(
+                has_admin_sub=has_admin_sub,
+                has_paid_sub=has_paid_sub,
+                is_admin_user=is_admin_user,
+            ),
+        )
 
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     await _render_start(message)
-
-
-@router.callback_query(F.data == "start_refresh")
-async def cb_start_refresh(call: types.CallbackQuery):
-    await call.answer()
-    await _render_start(call.message)
 
 
 @router.callback_query(F.data == "start_vpn")
