@@ -506,22 +506,16 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     set_user_flow(user_key, flow)
     set_user_username(user_id, username)
     set_user_note(user_id, display_name)
-    email = f"{user_key}_{_sanitize_email_slug(username or display_name)}"
-    result, client_uuid = await api_add_client(
-        inbound_id,
-        email,
-        0,
-        limit_gb,
-        flow,
-        expiry_time_ms=expiry_time_ms,
-        limit_ip=limit_ip,
-        comment=display_name,
-    )
-    if not result.get("success"):
-        fallback_email = f"paid_{user_id}"
+    email_candidates = [
+        f"{user_key}_{_sanitize_email_slug(username or display_name)}",
+        f"paid_{user_id}_{_sanitize_email_slug(username or 'paid')}",
+        f"paid_{user_id}",
+    ]
+    last_result: dict = {}
+    for email in email_candidates:
         result, client_uuid = await api_add_client(
             inbound_id,
-            fallback_email,
+            email,
             0,
             limit_gb,
             flow,
@@ -529,10 +523,24 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
             limit_ip=limit_ip,
             comment=display_name,
         )
+        last_result = result
         if result.get("success"):
-            email = fallback_email
-    if result.get("success"):
-        add_device_to_user_key(user_key, inbound_id, client_uuid, email, limit_ip=limit_ip, label=display_name)
+            add_device_to_user_key(user_key, inbound_id, client_uuid, email, limit_ip=limit_ip, label=display_name)
+            return
+    error_msg = str(last_result.get("msg") or "Неизвестная ошибка XUI")
+    if ADMIN_ID:
+        try:
+            await bot.send_message(
+                ADMIN_ID,
+                "❌ <b>Не удалось создать trial-устройство.</b>\n\n"
+                f"TG: <code>{user_id}</code>\n"
+                f"Имя: <code>{html.escape(display_name)}</code>\n"
+                f"Ошибка: <code>{html.escape(error_msg)}</code>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+    raise RuntimeError(error_msg)
 
 
 async def _sync_paid_user_devices_expiry(
@@ -960,7 +968,17 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
             "Зайди в /sub, чтобы посмотреть статус."
         )
     else:
-        await _create_paid_device_for_user(user_id, settings, request)
+        try:
+            await _create_paid_device_for_user(user_id, settings, request)
+        except Exception as exc:
+            await call.answer("Не удалось создать устройство", show_alert=True)
+            await call.message.edit_text(
+                "❌ <b>Не удалось создать trial-устройство</b>\n\n"
+                f"Пользователь: <code>{html.escape(str(user_id))}</code>\n"
+                f"Ошибка: <code>{html.escape(str(exc))}</code>",
+                parse_mode=ParseMode.HTML,
+            )
+            return
         set_paid_subscription(user_id, build_paid_subscription(settings, kind="access", source=request))
         user_message = (
             "✅ <b>Твой триал доступ выдан.</b>\n\n"
