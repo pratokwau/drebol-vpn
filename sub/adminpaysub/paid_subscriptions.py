@@ -506,7 +506,7 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     set_user_flow(user_key, flow)
     set_user_username(user_id, username)
     set_user_note(user_id, display_name)
-    email = display_name
+    email = f"{user_key}_{_sanitize_email_slug(username or display_name)}"
     result, client_uuid = await api_add_client(
         inbound_id,
         email,
