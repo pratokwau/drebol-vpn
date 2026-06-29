@@ -63,22 +63,9 @@ def has_paid_subscription(tg_id: int) -> bool:
     info = get_paid_subscription(tg_id)
     if not info:
         return False
-    status = str(info.get("status", "") or "").lower()
-    if status in {"blocked", "disabled", "cancelled", "canceled"}:
+    status = paid_subscription_status(info)
+    if status in {"blocked", "disabled", "cancelled", "canceled", "expired"}:
         return False
-    now = int(time.time())
-    trial_ends_at = int(info.get("trial_ends_at") or 0)
-    paid_ends_at = int(info.get("paid_ends_at") or 0)
-    grace_ends_at = int(info.get("grace_ends_at") or 0)
-    if status == "trial" and trial_ends_at and now > trial_ends_at:
-        if grace_ends_at and now <= grace_ends_at:
-            status = "grace"
-        else:
-            status = "expired"
-    if status == "pending_payment" and grace_ends_at and now > grace_ends_at:
-        status = "expired"
-    if status == "expired":
-        return bool(paid_ends_at and now <= paid_ends_at)
     return bool(info.get("active", True)) or status in {"trial", "active", "grace", "pending_payment"}
 
 
@@ -99,6 +86,52 @@ def paid_subscription_status(info: dict) -> str:
             return "grace"
         return "expired"
     return status
+
+
+def refresh_paid_subscription_state(info: dict, *, now: int | None = None) -> tuple[dict, list[str]]:
+    now = int(time.time() if now is None else now)
+    events: list[str] = []
+    status = paid_subscription_status(info)
+    trial_ends_at = int(info.get("trial_ends_at") or 0)
+    paid_ends_at = int(info.get("paid_ends_at") or 0)
+    grace_ends_at = int(info.get("grace_ends_at") or 0)
+
+    if status == "trial" and trial_ends_at and now >= trial_ends_at:
+        if not info.get("trial_expired_notified_at"):
+            events.append("trial_expired")
+            info["trial_expired_notified_at"] = now
+        if grace_ends_at and now < grace_ends_at:
+            info["status"] = "grace"
+            info["active"] = True
+        else:
+            info["status"] = "expired"
+            info["active"] = False
+            if grace_ends_at and not info.get("grace_expired_notified_at"):
+                events.append("grace_expired")
+                info["grace_expired_notified_at"] = now
+
+    if status in {"active", "pending_payment"} and paid_ends_at and now >= paid_ends_at:
+        if not info.get("payment_expired_notified_at"):
+            events.append("payment_expired")
+            info["payment_expired_notified_at"] = now
+        if grace_ends_at and now < grace_ends_at:
+            info["status"] = "grace"
+            info["active"] = True
+        else:
+            info["status"] = "expired"
+            info["active"] = False
+            if grace_ends_at and not info.get("grace_expired_notified_at"):
+                events.append("grace_expired")
+                info["grace_expired_notified_at"] = now
+
+    if status == "grace" and grace_ends_at and now >= grace_ends_at:
+        if not info.get("grace_expired_notified_at"):
+            events.append("grace_expired")
+            info["grace_expired_notified_at"] = now
+        info["status"] = "expired"
+        info["active"] = False
+
+    return info, events
 
 
 def load_paid_requests() -> dict:

@@ -424,6 +424,8 @@ async def cmd_sub(message: types.Message):
     )
     if request:
         text += "⏳ <b>Заявка уже отправлена админу.</b>\n"
+    elif status == "trial":
+        text += "Сейчас идёт пробный период. После его окончания у тебя будет 36 часов на продление."
     elif status in {"expired", "grace", "pending_payment"}:
         text += "Чтобы продлить подписку, нажми «Продлить подписку», а после оплаты — «Я оплатил»."
     else:
