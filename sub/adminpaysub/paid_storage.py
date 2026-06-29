@@ -100,7 +100,7 @@ def refresh_paid_subscription_state(info: dict, *, now: int | None = None) -> tu
     paid_is_expired = bool(paid_ends_at and now >= paid_ends_at)
     grace_is_expired = bool(grace_ends_at and now >= grace_ends_at)
 
-    if status == "trial" and trial_is_expired and not info.get("trial_expired_notified_at"):
+    if trial_is_expired and not info.get("trial_expired_notified_at"):
         events.append("trial_expired")
     if paid_is_expired and status in {"active", "pending_payment"} and not info.get("payment_expired_notified_at"):
         events.append("payment_expired")
