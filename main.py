@@ -16,10 +16,6 @@ async def setup_commands() -> None:
     await bot.set_my_commands(
         [
             BotCommand(command="start", description="Главное меню"),
-            BotCommand(command="vpn", description="Админская подписка"),
-            BotCommand(command="sub", description="Платная подписка"),
-            BotCommand(command="adminsub", description="Админская подписка"),
-            BotCommand(command="adminpaysub", description="Платные подписки"),
         ]
     )
 
