@@ -31,20 +31,26 @@ def _admin_kb() -> types.InlineKeyboardMarkup:
     return types.InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+async def render_admin_menu(message_or_call, user_id: int, *, edit: bool = False) -> None:
+    status = "есть обновление" if update_available() else "обновлений нет"
+    text = (
+        f"⚙️ <b>Админ-панель</b>\n\n"
+        f"Статус обновления: <b>{status}</b>\n"
+        f"Пользователь: <code>{user_id}</code>"
+    )
+    markup = _admin_kb()
+    if edit:
+        await message_or_call.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        return
+    await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+
+
 @router.message(Command("admin"))
 async def cmd_admin(message: types.Message):
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Доступ запрещён.")
         return
-
-    status = "есть обновление" if update_available() else "обновлений нет"
-    await message.answer(
-        f"⚙️ <b>Админ-панель</b>\n\n"
-        f"Статус обновления: <b>{status}</b>\n"
-        f"Пользователь: <code>{message.from_user.id}</code>",
-        parse_mode=ParseMode.HTML,
-        reply_markup=_admin_kb(),
-    )
+    await render_admin_menu(message, message.from_user.id)
 
 
 @router.callback_query(F.data == "admin_xui_settings")

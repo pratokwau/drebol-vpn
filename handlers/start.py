@@ -4,13 +4,13 @@ from aiogram import F, Router, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from handlers.admin import cmd_admin
+from handlers.admin import render_admin_menu
 from xui.paid_storage import has_paid_subscription
 from xui.storage import get_vpn_user, user_settings_ready
 from xui.utils import is_admin
 from xui.vpn import _render_vpn
-from xui.admin import cmd_adminsub
-from xui.paid_subscriptions import cmd_adminpaysub, cmd_sub
+from xui.admin import render_inbounds
+from xui.paid_subscriptions import render_paid_subscriptions, render_paid_user_menu
 
 
 router = Router()
@@ -74,7 +74,14 @@ async def cb_start_vpn(call: types.CallbackQuery):
 @router.callback_query(F.data == "start_sub")
 async def cb_start_sub(call: types.CallbackQuery):
     await call.answer()
-    await cmd_sub(call.message)
+    await render_paid_user_menu(
+        call.message,
+        user_id=call.from_user.id,
+        username=call.from_user.username or "",
+        first_name=call.from_user.first_name or "",
+        last_name=call.from_user.last_name or "",
+        edit=True,
+    )
 
 
 @router.callback_query(F.data == "start_admin")
@@ -82,7 +89,7 @@ async def cb_start_admin(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("⛔ Доступ запрещён", show_alert=True)
     await call.answer()
-    await cmd_admin(call.message)
+    await render_admin_menu(call.message, call.from_user.id, edit=True)
 
 
 @router.callback_query(F.data == "start_adminsub")
@@ -90,7 +97,7 @@ async def cb_start_adminsub(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("⛔ Доступ запрещён", show_alert=True)
     await call.answer()
-    await cmd_adminsub(call.message)
+    await render_inbounds(call.message, show_settings=False)
 
 
 @router.callback_query(F.data == "start_adminpaysub")
@@ -98,4 +105,4 @@ async def cb_start_adminpaysub(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("⛔ Доступ запрещён", show_alert=True)
     await call.answer()
-    await cmd_adminpaysub(call.message)
+    await render_paid_subscriptions(call.message)
