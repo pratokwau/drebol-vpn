@@ -92,6 +92,30 @@ def _format_limit_gb(value) -> str:
     return "∞" if number <= 0 else str(number)
 
 
+def _subscription_status_ru(subscription: dict) -> str:
+    status = paid_subscription_status(subscription)
+    labels = {
+        "trial": "Пробный",
+        "active": "Активна",
+        "grace": "На продлении",
+        "expired": "Истекла",
+        "pending_payment": "Ожидает оплаты",
+        "blocked": "Заблокирована",
+        "disabled": "Отключена",
+        "cancelled": "Отменена",
+        "canceled": "Отменена",
+    }
+    return labels.get(status, status.capitalize() or "Неизвестно")
+
+
+def _format_remaining_or_duration(ends_at: int | None, duration_seconds: int | None) -> str:
+    now = int(datetime.now(tz=timezone.utc).timestamp())
+    ends_value = int(ends_at or 0)
+    if ends_value > now:
+        return format_duration(max(0, ends_value - now))
+    return format_duration(duration_seconds)
+
+
 def _parse_limit_ip(raw: str | None) -> int:
     text = (raw or "").strip()
     if not text or text == "-":
@@ -257,10 +281,9 @@ async def render_paid_subscriptions(message_or_call):
 
 
 def _subscription_summary(subscription: dict) -> str:
-    status = paid_subscription_status(subscription).capitalize()
     return (
-        f"📌 Статус подписки: <b>{status}</b>\n"
-        f"🧪 Пробный период: <b>{format_duration(subscription.get('trial_seconds'))}</b>\n"
+        f"📌 Статус подписки: <b>{_subscription_status_ru(subscription)}</b>\n"
+        f"🧪 Пробный период: <b>{_format_remaining_or_duration(subscription.get('trial_ends_at'), subscription.get('trial_seconds'))}</b>\n"
         f"⏳ Срок подписки после оплаты: <b>{format_duration(subscription.get('payment_seconds'))}</b>\n"
         f"💰 Сумма: <b>{subscription.get('payment_amount', 'не задана')} ₽</b>\n"
         f"🕒 Время на продление: <b>{format_duration(subscription.get('grace_seconds'))}</b>\n"
@@ -529,12 +552,11 @@ async def cb_paid_user_refresh(call: types.CallbackQuery):
 async def cb_paid_user_info(call: types.CallbackQuery):
     await call.answer()
     subscription = get_paid_subscription(call.from_user.id) or {}
-    payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
     await call.message.edit_text(
         (
             "ℹ️ <b>Информация о вашей подписке</b>\n\n"
-            f"📌 Статус подписки: <b>{paid_subscription_status(subscription).capitalize()}</b>\n"
-            f"🧪 Пробный период: <b>{format_duration(subscription.get('trial_seconds'))}</b>\n"
+            f"📌 Статус подписки: <b>{_subscription_status_ru(subscription)}</b>\n"
+            f"🧪 Пробный период: <b>{_format_remaining_or_duration(subscription.get('trial_ends_at'), subscription.get('trial_seconds'))}</b>\n"
             f"⏳ Срок подписки после оплаты: <b>{format_duration(subscription.get('payment_seconds'))}</b>\n"
             f"💰 Сумма: <b>{subscription.get('payment_amount', 'не задана')} ₽</b>\n"
             f"🕒 Время на продление: <b>{format_duration(subscription.get('grace_seconds'))}</b>\n"
@@ -543,9 +565,7 @@ async def cb_paid_user_info(call: types.CallbackQuery):
             f"🌐 Лимит IP: <b>{subscription.get('limit_ip', 'не задан')}</b>\n"
             f"📅 Пробный доступ до: <b>{_format_dt(subscription.get('trial_ends_at'))}</b>\n"
             f"📅 Подписка до: <b>{_format_dt(subscription.get('paid_ends_at'))}</b>\n"
-            f"📅 Время на продление до: <b>{_format_dt(subscription.get('grace_ends_at'))}</b>\n\n"
-            f"🔗 Ссылка для оплаты: <b>{html.escape(str(payment_url)) if payment_url else 'не задана'}</b>\n\n"
-            "Здесь показаны только основные данные, которые нужны для управления подпиской."
+            f"📅 Время на продление до: <b>{_format_dt(subscription.get('grace_ends_at'))}</b>"
         ),
         parse_mode=ParseMode.HTML,
         reply_markup=_paid_user_info_kb(call.from_user.id, subscription),
