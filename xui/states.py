@@ -37,3 +37,7 @@ class XuiSettings(StatesGroup):
     waiting_token = State()
     waiting_subport = State()
     waiting_inbound_subport = State()
+
+
+class PaidSubSettings(StatesGroup):
+    waiting_value = State()
