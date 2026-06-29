@@ -38,7 +38,6 @@ async def _render_start(message: types.Message) -> None:
     vpn_user = get_vpn_user(user_id)
     has_admin_sub = bool(
         vpn_user
-        and user_settings_ready(vpn_user)
         and str(vpn_user.get("subscription_type", "")).lower() == "admin"
         and not vpn_user.get("admin_disabled")
     )
