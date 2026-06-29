@@ -64,6 +64,10 @@ from sub.instructions import happ_instruction
 router = Router()
 
 
+def _log_paid(message: str) -> None:
+    print(f"[PAID SUB] {message}")
+
+
 def _paid_user_key(user_id: int) -> str:
     return f"paid_{int(user_id)}"
 
@@ -465,10 +469,18 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     flow = str(settings.get("flow") or DEFAULT_PAID_FLOW)
     username = str(request.get("username") or "").strip()
     display_name = f"{user_id} - {username or 'без юзернейма'}"
+    _log_paid(
+        "create_device start "
+        f"user_id={user_id} user_key={user_key} "
+        f"username={username!r} display_name={display_name!r} "
+        f"trial={trial_seconds}s grace={grace_seconds}s "
+        f"limit_gb={limit_gb} limit_ip={limit_ip} flow={flow!r}"
+    )
     subscription_type = str(current.get("subscription_type") or "paid").lower()
     if subscription_type not in {"admin", "paid"}:
         subscription_type = "paid"
     if current.get("devices"):
+        _log_paid(f"existing devices found user_key={user_key} count={len(current.get('devices', []))}")
         set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
         set_user_limit_gb(user_key, limit_gb)
         set_user_limit_ip(user_key, limit_ip)
@@ -485,11 +497,14 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
                 client["expiryTime"] = expiry_time_ms
                 client["limitIp"] = limit_ip
                 client["flow"] = flow
+                _log_paid(f"updating existing device email={email!r} expiry={expiry_time_ms} limit_ip={limit_ip}")
                 await api_update_client(email, client)
         return
     inbounds, _ = await api_get_inbounds()
+    _log_paid(f"inbounds loaded count={len(inbounds)}")
     inbound = next((item for item in inbounds if item.get("id") is not None), None)
     if not inbound:
+        _log_paid("no inbound found, creating local user only")
         create_user_with_inbound(user_id, 0, note=display_name, subscription_type=subscription_type)
         set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
         set_user_limit_gb(user_key, limit_gb)
@@ -499,6 +514,7 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
         set_user_note(user_id, display_name)
         return
     inbound_id = int(inbound.get("id") or 0)
+    _log_paid(f"inbound selected inbound_id={inbound_id}")
     create_user_with_inbound(user_id, inbound_id, note=display_name, subscription_type=subscription_type)
     set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
     set_user_limit_gb(user_key, limit_gb)
@@ -511,8 +527,10 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
         f"paid_{user_id}_{_sanitize_email_slug(username or 'paid')}",
         f"paid_{user_id}",
     ]
+    _log_paid(f"email candidates={email_candidates!r}")
     last_result: dict = {}
     for email in email_candidates:
+        _log_paid(f"api_add_client try email={email!r} inbound_id={inbound_id} expiry_time_ms={expiry_time_ms}")
         result, client_uuid = await api_add_client(
             inbound_id,
             email,
@@ -524,10 +542,13 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
             comment=display_name,
         )
         last_result = result
+        _log_paid(f"api_add_client result email={email!r} success={result.get('success')} msg={result.get('msg')!r} uuid={client_uuid!r}")
         if result.get("success"):
+            _log_paid(f"device created email={email!r} uuid={client_uuid!r}")
             add_device_to_user_key(user_key, inbound_id, client_uuid, email, limit_ip=limit_ip, label=display_name)
             return
     error_msg = str(last_result.get("msg") or "Неизвестная ошибка XUI")
+    _log_paid(f"device creation failed user_id={user_id} error={error_msg!r}")
     if ADMIN_ID:
         try:
             await bot.send_message(
@@ -945,6 +966,7 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
     user_id = int(request.get("user_id") or 0)
     kind = str(request.get("kind") or "access")
     settings = load_paid_settings()
+    _log_paid(f"request approved by admin={call.from_user.id} user_id={user_id} kind={kind!r} request_id={request_id!r}")
     if kind in {"renew", "payment_check"}:
         existing = get_paid_subscription(user_id) or {}
         updated = extend_paid_subscription(existing, settings, from_now=(kind == "renew"))
@@ -971,6 +993,7 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
         try:
             await _create_paid_device_for_user(user_id, settings, request)
         except Exception as exc:
+            _log_paid(f"trial creation exception user_id={user_id} exc={exc!r}")
             await call.answer("Не удалось создать устройство", show_alert=True)
             await call.message.edit_text(
                 "❌ <b>Не удалось создать trial-устройство</b>\n\n"
@@ -980,12 +1003,14 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
             )
             return
         set_paid_subscription(user_id, build_paid_subscription(settings, kind="access", source=request))
+        _log_paid(f"trial subscription saved user_id={user_id}")
         user_message = (
             "✅ <b>Твой триал доступ выдан.</b>\n\n"
             "Сейчас доступ активирован на trial-период.\n"
             "Зайди в /sub, чтобы посмотреть статус."
         )
     delete_paid_request(user_id)
+    _log_paid(f"request removed user_id={user_id}")
     await bot.send_message(user_id, user_message, parse_mode=ParseMode.HTML)
     await call.message.edit_text(
         "✅ <b>Заявка одобрена</b>\n\n"
@@ -1004,6 +1029,7 @@ async def cb_paid_request_no(call: types.CallbackQuery):
     if not request:
         return await call.answer("Заявка не найдена", show_alert=True)
     user_id = int(request.get("user_id") or 0)
+    _log_paid(f"request denied by admin={call.from_user.id} user_id={user_id} kind={request.get('kind')!r}")
     delete_paid_request(user_id)
     try:
         await call.answer("Заявка отклонена")
@@ -1033,6 +1059,7 @@ async def cb_paid_payment_ok(call: types.CallbackQuery):
         return await call.answer("Заявка не найдена", show_alert=True)
     user_id = int(request.get("user_id") or 0)
     settings = load_paid_settings()
+    _log_paid(f"payment confirmed by admin={call.from_user.id} user_id={user_id} request_id={request_id!r}")
     existing = get_paid_subscription(user_id) or {}
     updated = extend_paid_subscription(existing, settings, from_now=True)
     updated["subscription_type"] = "paid"
