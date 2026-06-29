@@ -361,6 +361,14 @@ def _paid_user_info_kb(user_id: int, subscription: dict | None) -> InlineKeyboar
     )
 
 
+def _paid_instruction_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="paiduser_back")],
+        ]
+    )
+
+
 def _paid_user_text(subscription: dict, payment_url: str) -> str:
     _ = payment_url
     return (
@@ -659,6 +667,7 @@ async def cb_paid_user_inst(call: types.CallbackQuery):
         happ_instruction(sub_id, inbound_id),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
+        reply_markup=_paid_instruction_kb(),
     )
 
 

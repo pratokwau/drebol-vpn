@@ -96,35 +96,41 @@ def refresh_paid_subscription_state(info: dict, *, now: int | None = None) -> tu
     paid_ends_at = int(info.get("paid_ends_at") or 0)
     grace_ends_at = int(info.get("grace_ends_at") or 0)
 
-    if status == "trial" and trial_ends_at and now >= trial_ends_at:
-        if not info.get("trial_expired_notified_at"):
-            events.append("trial_expired")
-        if grace_ends_at and now < grace_ends_at:
+    trial_is_expired = bool(trial_ends_at and now >= trial_ends_at)
+    paid_is_expired = bool(paid_ends_at and now >= paid_ends_at)
+    grace_is_expired = bool(grace_ends_at and now >= grace_ends_at)
+
+    if trial_is_expired and not info.get("trial_expired_notified_at"):
+        events.append("trial_expired")
+
+    if paid_is_expired and status in {"active", "pending_payment"} and not info.get("payment_expired_notified_at"):
+        events.append("payment_expired")
+
+    if trial_is_expired or (status == "grace" and not paid_ends_at):
+        if grace_ends_at and not grace_is_expired:
             info["status"] = "grace"
             info["active"] = True
         else:
             info["status"] = "expired"
             info["active"] = False
-            if grace_ends_at and not info.get("grace_expired_notified_at"):
+            if grace_ends_at and grace_is_expired and not info.get("grace_expired_notified_at"):
                 events.append("grace_expired")
 
-    if status in {"active", "pending_payment"} and paid_ends_at and now >= paid_ends_at:
-        if not info.get("payment_expired_notified_at"):
-            events.append("payment_expired")
-        if grace_ends_at and now < grace_ends_at:
+    if paid_is_expired and status in {"active", "pending_payment"}:
+        if grace_ends_at and not grace_is_expired:
             info["status"] = "grace"
             info["active"] = True
         else:
             info["status"] = "expired"
             info["active"] = False
-            if grace_ends_at and not info.get("grace_expired_notified_at"):
+            if grace_ends_at and grace_is_expired and not info.get("grace_expired_notified_at"):
                 events.append("grace_expired")
 
-    if status == "grace" and grace_ends_at and now >= grace_ends_at:
-        if not info.get("grace_expired_notified_at"):
-            events.append("grace_expired")
+    if status == "grace" and grace_is_expired:
         info["status"] = "expired"
         info["active"] = False
+        if not info.get("grace_expired_notified_at"):
+            events.append("grace_expired")
 
     return info, events
 
