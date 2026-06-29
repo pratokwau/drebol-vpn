@@ -45,6 +45,7 @@ def _migrate_vpn_users(data: dict) -> dict:
     for tg_id, info in data.items():
         if not isinstance(info, dict):
             data[tg_id] = {
+                "subscription_type": "admin",
                 "username": "",
                 "note": "",
                 "default_ib_id": 0,
@@ -60,6 +61,7 @@ def _migrate_vpn_users(data: dict) -> dict:
             }
             changed = True
             continue
+        info.setdefault("subscription_type", "admin")
         info.setdefault("username", "")
         info.setdefault("note", "")
         info.setdefault("default_ib_id", 0)
@@ -141,6 +143,7 @@ def _add_device_to_user_key(user_key: str, ib_id: int, uuid: str, email: str, li
     key = str(user_key)
     if key not in data:
         data[key] = {
+            "subscription_type": "admin",
             "username": "",
             "note": "",
             "default_ib_id": int(ib_id or 0),
@@ -202,6 +205,7 @@ def create_user(tg_id: int | None, max_devices: int = DEFAULT_MAX_DEVICES, note:
     else:
         key = f"anon_{secrets.token_hex(4)}"
     data[key] = {
+        "subscription_type": "admin",
         "username": "",
         "default_ib_id": 0,
         "note": note[:NOTE_MAX_LEN],
@@ -218,7 +222,7 @@ def create_user(tg_id: int | None, max_devices: int = DEFAULT_MAX_DEVICES, note:
     return key
 
 
-def create_user_with_inbound(tg_id: int | None, ib_id: int, note: str = "") -> str:
+def create_user_with_inbound(tg_id: int | None, ib_id: int, note: str = "", subscription_type: str = "admin") -> str:
     data = load_vpn_users()
     if tg_id is None:
         key = f"anon_{secrets.token_hex(4)}"
@@ -226,6 +230,7 @@ def create_user_with_inbound(tg_id: int | None, ib_id: int, note: str = "") -> s
         key = str(tg_id)
     if key not in data:
         data[key] = {
+            "subscription_type": subscription_type,
             "username": "",
             "default_ib_id": int(ib_id or 0),
             "note": note[:NOTE_MAX_LEN],
@@ -241,6 +246,7 @@ def create_user_with_inbound(tg_id: int | None, ib_id: int, note: str = "") -> s
         }
     else:
         data[key]["default_ib_id"] = int(ib_id or 0)
+        data[key]["subscription_type"] = subscription_type
         if note:
             data[key]["note"] = note[:NOTE_MAX_LEN]
     save_vpn_users(data)
@@ -346,6 +352,24 @@ def set_user_vpn_access_key(user_key: str, value: bool = True):
     if key in data:
         data[key]["has_vpn_access"] = bool(value)
         save_vpn_users(data)
+
+
+def set_user_subscription_type(user_key: str | int, subscription_type: str) -> None:
+    data = load_vpn_users()
+    key = str(user_key)
+    if key in data:
+        data[key]["subscription_type"] = str(subscription_type or "admin")
+        save_vpn_users(data)
+
+
+def get_users_by_subscription_type(subscription_type: str) -> dict:
+    data = load_vpn_users()
+    wanted = str(subscription_type or "").lower()
+    return {
+        user_key: info
+        for user_key, info in data.items()
+        if str(info.get("subscription_type", "admin")).lower() == wanted
+    }
 
 
 def set_admin_disabled_key(user_key: str, value: bool):
