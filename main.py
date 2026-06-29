@@ -18,6 +18,7 @@ from xui.paid_storage import (
     refresh_paid_subscription_state,
     save_paid_subscriptions,
 )
+from xui.paid_subscriptions import _revoke_paid_user_access, _sync_paid_user_devices_expiry
 from xui import router as xui_router
 
 
@@ -83,10 +84,20 @@ async def _notify_about_paid_subscriptions() -> None:
                 payment_url = str(refreshed.get("payment_url") or DEFAULT_PAID_PAYMENT_URL)
                 for event in events:
                     if event == "trial_expired":
+                        grace_ends_at = int(refreshed.get("grace_ends_at") or 0)
+                        if grace_ends_at:
+                            await _sync_paid_user_devices_expiry(
+                                user_id,
+                                grace_ends_at * 1000,
+                                limit_ip=int(refreshed.get("limit_ip") or 0),
+                                limit_gb=float(refreshed.get("limit_gb") or 0),
+                                flow=str(refreshed.get("flow") or ""),
+                            )
                         await bot.send_message(
                             user_id,
                             "🧪 <b>Пробный период истёк.</b>\n\n"
-                            "У тебя есть 36 часов, чтобы продлить подписку.\n"
+                            "Подписка продлена ещё на 36 часов.\n"
+                            "Если за это время не оплатить, доступ будет удалён.\n"
                             + (f"🔗 Оплата: <b>{payment_url}</b>\n" if payment_url else "")
                             + "Открой /sub и нажми «Продлить подписку».",
                         )
@@ -99,10 +110,11 @@ async def _notify_about_paid_subscriptions() -> None:
                             + "Открой /sub и нажми «Продлить подписку».",
                         )
                     elif event == "grace_expired":
+                        await _revoke_paid_user_access(user_id)
                         await bot.send_message(
                             user_id,
                             "⛔ <b>Период продления закончился.</b>\n\n"
-                            "Подписка отключена. Чтобы вернуть доступ, открой /sub и отправь запрос на продление.",
+                            "Подписка удалена. Чтобы вернуть доступ, нужно оформить её заново.",
                         )
                 changed = True
             if changed:
