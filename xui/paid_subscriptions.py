@@ -275,12 +275,28 @@ def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None 
     if not subscription:
         rows.append([InlineKeyboardButton(text="💳 Получить подписку", callback_data="paiduser_request")])
     else:
+        rows.append([InlineKeyboardButton(text="ℹ️ Информация о подписке", callback_data="paiduser_info")])
         rows.append([InlineKeyboardButton(text="💳 Продлить подписку", callback_data=f"paiduser_renew_{user_id}")])
-        rows.append([InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"paiduser_paid_{user_id}")])
     if request:
-        rows.insert(0, [InlineKeyboardButton(text="⏳ Заявка уже отправлена", callback_data="paiduser_wait")])
+        rows = [[InlineKeyboardButton(text="⏳ Заявка уже отправлена", callback_data="paiduser_wait")]]
     rows.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="paiduser_refresh")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _paid_user_text(subscription: dict, payment_url: str) -> str:
+    status = paid_subscription_status(subscription) if subscription else "none"
+    text = (
+        "💳 <b>Меню управления подпиской</b>\n\n"
+        f"{_subscription_summary(subscription)}\n"
+        f"🔗 Оплата: <b>{html.escape(str(payment_url)) if payment_url else 'не задана'}</b>\n\n"
+    )
+    if status == "trial":
+        text += "Сейчас идёт пробный период. После его окончания будет доступно продление."
+    elif status in {"expired", "grace", "pending_payment"}:
+        text += "Подписка требует продления. Нажми «Продлить подписку»."
+    else:
+        text += "Подписка активна. Здесь можно посмотреть информацию или продлить её заранее."
+    return text
 
 
 def _admin_paid_request_text(request: dict, settings: dict, title: str) -> str:
@@ -400,36 +416,30 @@ async def cmd_sub(message: types.Message):
             kind="access",
         )
         await message.answer(
-            "✅ <b>Заявка на платную подписку отправлена админу.</b>\n\n"
-            "Ожидай подтверждения, я сообщу тебе, когда доступ будет выдан.",
+            "✅ <b>Ваша заявка на триал доступ отправлена.</b>\n\n"
+            "Ожидайте подтверждения от администратора.",
             parse_mode=ParseMode.HTML,
-            reply_markup=_paid_user_kb(user_id, None, get_paid_request(user_id)),
         )
         settings = load_paid_settings()
         if ADMIN_ID:
             await bot.send_message(
                 ADMIN_ID,
-                _admin_paid_request_text({"user_id": user_id, "username": message.from_user.username or "", "request_id": request_id, "kind": "access"}, settings, "Новая заявка на платную подписку"),
+                _admin_paid_request_text({"user_id": user_id, "username": message.from_user.username or "", "request_id": request_id, "kind": "access"}, settings, "Новая заявка на первичный триал доступ"),
                 parse_mode=ParseMode.HTML,
                 reply_markup=_paid_request_kb(request_id),
             )
         return
+    if request and not subscription:
+        await message.answer(
+            "⏳ <b>Ваша заявка на триал доступ уже отправлена.</b>\n\n"
+            "Ожидайте подтверждения от администратора.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
 
     status = paid_subscription_status(subscription) if subscription else "none"
     payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
-    text = (
-        "💳 <b>Платная подписка</b>\n\n"
-        f"{_subscription_summary(subscription)}\n"
-        f"🔗 Оплата: <b>{html.escape(str(payment_url)) if payment_url else 'не задана'}</b>\n\n"
-    )
-    if request:
-        text += "⏳ <b>Заявка уже отправлена админу.</b>\n"
-    elif status == "trial":
-        text += "Сейчас идёт пробный период. После его окончания у тебя будет 36 часов на продление."
-    elif status in {"expired", "grace", "pending_payment"}:
-        text += "Чтобы продлить подписку, нажми «Продлить подписку», а после оплаты — «Я оплатил»."
-    else:
-        text += "Подписка активна. Если нужно, можно заранее отправить запрос на продление."
+    text = _paid_user_text(subscription, payment_url)
     await message.answer(
         text,
         parse_mode=ParseMode.HTML,
@@ -444,11 +454,21 @@ async def cb_paid_user_refresh(call: types.CallbackQuery):
     payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
     await call.answer()
     await call.message.edit_text(
-        "💳 <b>Платная подписка</b>\n\n"
-        f"{_subscription_summary(subscription)}\n"
-        f"🔗 Оплата: <b>{html.escape(str(payment_url)) if payment_url else 'не задана'}</b>",
+        _paid_user_text(subscription, payment_url),
         parse_mode=ParseMode.HTML,
         reply_markup=_paid_user_kb(call.from_user.id, subscription, request),
+    )
+
+
+@router.callback_query(F.data == "paiduser_info")
+async def cb_paid_user_info(call: types.CallbackQuery):
+    subscription = get_paid_subscription(call.from_user.id) or {}
+    payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
+    await call.answer()
+    await call.message.edit_text(
+        _paid_user_text(subscription, payment_url),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_user_kb(call.from_user.id, subscription, get_paid_request(call.from_user.id)),
     )
 
 
@@ -507,7 +527,7 @@ async def cb_paid_user_renew(call: types.CallbackQuery):
     if ADMIN_ID:
         await bot.send_message(
             ADMIN_ID,
-            _admin_paid_request_text({"user_id": user_id, "username": call.from_user.username or "", "request_id": request_id, "kind": "renew"}, settings, "Пользователь хочет продлить платную подписку"),
+            _admin_paid_request_text({"user_id": user_id, "username": call.from_user.username or "", "request_id": request_id, "kind": "renew"}, settings, "Пользователь хочет продлить подписку"),
             parse_mode=ParseMode.HTML,
             reply_markup=_paid_request_kb(request_id),
         )
@@ -730,7 +750,7 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
         await _create_paid_device_for_user(user_id, settings, request)
         set_paid_subscription(user_id, build_paid_subscription(settings, kind="access", source=request))
         user_message = (
-            "✅ <b>Твоя платная подписка выдана.</b>\n\n"
+            "✅ <b>Твой триал доступ выдан.</b>\n\n"
             "Сейчас доступ активирован на trial-период.\n"
             "Зайди в /sub, чтобы посмотреть статус."
         )
