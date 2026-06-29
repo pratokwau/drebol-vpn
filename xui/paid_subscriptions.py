@@ -45,11 +45,13 @@ from xui.storage import (
     create_user_with_inbound,
     get_users_by_subscription_type,
     load_vpn_users,
+    set_user_note,
     set_user_max_devices,
     set_user_limit_gb,
     set_user_expiry_time_ms,
     set_user_limit_ip,
     set_user_flow,
+    set_user_username,
     set_user_subscription_type,
 )
 from xui.utils import is_admin
@@ -397,6 +399,8 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     expiry_time_ms = DEFAULT_PAID_EXPIRY_TIME_MS
     limit_ip = int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP)
     flow = str(settings.get("flow") or DEFAULT_PAID_FLOW)
+    username = str(request.get("username") or "").strip()
+    display_name = f"{user_id} - {username or 'без username'}"
     if current.get("devices"):
         set_user_subscription_type(user_key, "paid")
         set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
@@ -404,6 +408,8 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
         set_user_expiry_time_ms(user_key, expiry_time_ms)
         set_user_limit_ip(user_key, limit_ip)
         set_user_flow(user_key, flow)
+        set_user_username(user_id, username)
+        set_user_note(user_id, display_name)
         for device in current.get("devices", []):
             email = str(device.get("email") or "")
             if not email:
@@ -419,18 +425,22 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     inbounds, _ = await api_get_inbounds()
     inbound = next((item for item in inbounds if item.get("id") is not None), None)
     if not inbound:
-        create_user_with_inbound(user_id, 0, subscription_type="paid")
+        create_user_with_inbound(user_id, 0, note=display_name, subscription_type="paid")
         set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
         set_user_subscription_type(user_key, "paid")
+        set_user_username(user_id, username)
+        set_user_note(user_id, display_name)
         return
     inbound_id = int(inbound.get("id") or 0)
-    create_user_with_inbound(user_id, inbound_id, subscription_type="paid")
+    create_user_with_inbound(user_id, inbound_id, note=display_name, subscription_type="paid")
     set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
     set_user_limit_gb(user_key, limit_gb)
     set_user_expiry_time_ms(user_key, expiry_time_ms)
     set_user_limit_ip(user_key, limit_ip)
     set_user_flow(user_key, flow)
     set_user_subscription_type(user_key, "paid")
+    set_user_username(user_id, username)
+    set_user_note(user_id, display_name)
     slug = f"trial_{request.get('request_id') or user_id}"
     email = f"paid_{user_id}_{slug}"
     result, client_uuid = await api_add_client(
