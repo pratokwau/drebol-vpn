@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from sub.helpers import get_client_stats_map, parse_clients
+from sub.helpers import parse_clients
 from sub.adminsub.storage import (
     DEFAULT_EXPIRY_TIME_MS,
     DEFAULT_FLOW,
@@ -12,7 +12,7 @@ from sub.adminsub.storage import (
     ensure_anon_user_for_client,
     load_vpn_users,
 )
-from sub.utils import cache, format_bytes, CLIENTS_PAGE_SIZE, _cache
+from sub.utils import cache, CLIENTS_PAGE_SIZE, _cache
 
 
 def admin_menu_kb(configured: bool) -> InlineKeyboardMarkup:
@@ -56,57 +56,40 @@ def inbounds_kb(inbounds: list[dict], *, show_settings: bool = True) -> InlineKe
 
 def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
     ib_id = inbound.get("id")
-    clients = parse_clients(inbound)
-    stats_map = get_client_stats_map(inbound)
+    clients = [
+        cl for cl in parse_clients(inbound)
+        if not str(cl.get("email", "")).startswith("paid_")
+    ]
+    current_emails = {str(cl.get("email", "")).strip() for cl in clients if str(cl.get("email", "")).strip()}
     vpn_users = load_vpn_users()
-    grouped = {}
+    grouped: dict[str, dict] = {}
     bound_emails = set()
 
     for user_key, info in vpn_users.items():
         if str(user_key).startswith("paid_") or str(info.get("subscription_type", "")).lower() == "paid":
             continue
-        user_in_this_ib = any(d.get("ib_id") == ib_id for d in info.get("devices", []))
-        no_devices = not info.get("devices")
-        if user_in_this_ib or no_devices:
-            grouped[user_key] = info
-            for d in info.get("devices", []):
-                if d.get("ib_id") == ib_id:
-                    bound_emails.add(d.get("email"))
-
-    singles = [cl for cl in clients if cl.get("email") not in bound_emails]
-    items = []
-
-    for user_key, info in sorted(grouped.items()):
-        username = info.get("username", "")
-        note = info.get("note", "")
-        n_devices = len([d for d in info.get("devices", []) if d.get("ib_id") == ib_id])
-        prefix = "🚫" if info.get("admin_disabled", False) else "👤"
-        label_name = next((d.get("label") for d in info.get("devices", []) if d.get("ib_id") == ib_id and d.get("label")), "")
-        if user_key.startswith("anon_"):
-            id_part = "Без TG ID"
-        else:
-            username_part = f" @{username}" if username else " (без username)"
-            id_part = f"{user_key}{username_part}"
-        note_suffix = f" • 📝{(label_name or note)[:15]}" if (label_name or note) else ""
-        items.append(("user", user_key, f"{prefix} {id_part} ({n_devices} устр.){note_suffix}"))
-
-    for cl in singles:
-        email = cl.get("email", "?")
-        if str(email).startswith("paid_"):
+        current_devices = [
+            dict(device)
+            for device in info.get("devices", [])
+            if int(device.get("ib_id", 0) or 0) == int(ib_id or 0) and device.get("email") in current_emails
+        ]
+        if not current_devices:
             continue
-        enabled = cl.get("enable", True)
-        stats = stats_map.get(email, {})
-        up = format_bytes(stats.get("up", 0))
-        down = format_bytes(stats.get("down", 0))
-        status = "🟢" if enabled else "🔴"
+        grouped[str(user_key)] = {**info, "devices": current_devices}
+        bound_emails.update(device.get("email") for device in current_devices if device.get("email"))
+
+    for cl in clients:
+        email = str(cl.get("email", "") or "").strip()
+        if not email or email in bound_emails:
+            continue
         anon_key = ensure_anon_user_for_client(int(ib_id or 0), str(cl.get("id", "") or ""), email)
-        if anon_key not in grouped:
-            grouped[anon_key] = {"username": "", "note": "", "admin_disabled": False, "devices": []}
-        grouped[anon_key]["devices"] = [
-            d for d in grouped[anon_key].get("devices", [])
+        entry = grouped.setdefault(anon_key, {"subscription_type": "admin", "username": "", "note": "", "admin_disabled": False, "devices": []})
+        entry["devices"] = [
+            d for d in entry.get("devices", [])
             if not (d.get("ib_id") == ib_id and d.get("email") == email)
         ]
-        grouped[anon_key].setdefault("devices", []).append({"ib_id": ib_id, "uuid": cl.get("id", ""), "email": email})
+        entry["devices"].append({"ib_id": ib_id, "uuid": cl.get("id", ""), "email": email})
+        bound_emails.add(email)
 
     items = []
     for user_key, info in sorted(grouped.items()):
@@ -133,14 +116,8 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
 
     buttons = []
     for item_type, key, label in page_items:
-        if item_type == "user":
-            uk_hash = cache(f"uk_{key}", {"user_key": key, "ib_id": ib_id})
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"xui_usr_{uk_hash}")])
-        else:
-            cl = next((c for c in singles if c.get("email") == key), None)
-            uuid_val = cl.get("id", "") if cl else ""
-            h = cache(f"cl_{ib_id}_{key}", {"email": key, "uuid": uuid_val, "ib_id": ib_id})
-            buttons.append([InlineKeyboardButton(text=label, callback_data=f"xui_cl_{h}")])
+        uk_hash = cache(f"uk_{key}", {"user_key": key, "ib_id": ib_id})
+        buttons.append([InlineKeyboardButton(text=label, callback_data=f"xui_usr_{uk_hash}")])
 
     ib_h = cache(f"ib_{ib_id}", {"id": ib_id})
     if total_pages > 1:

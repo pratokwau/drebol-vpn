@@ -22,6 +22,7 @@ from sub.adminsub.storage import (
     get_user_key_by_client,
     load_vpn_users,
     refresh_username,
+    resolve_user_key_by_email,
     save_vpn_users,
     set_user_username,
     user_settings_ready,
@@ -61,36 +62,58 @@ async def sync_user_devices_with_panel(user_key: str) -> bool:
     if _is_paid_user(user_key, info):
         return False
 
-    devices = info.get("devices", [])
-    if not devices:
-        return False
-
     try:
-        panel_emails = set()
-        page = 1
-        while True:
-            res = await api_get_inbounds()
-            if not res:
-                break
-            inbounds, _ = res
-            for ib in inbounds:
-                for c in parse_clients(ib):
-                    if c.get("email"):
-                        panel_emails.add(c.get("email"))
-            break
+        inbounds, _ = await api_get_inbounds()
     except Exception:
         return False
 
-    if not panel_emails:
+    if not inbounds:
         return False
 
-    clean = [d for d in devices if d.get("email") in panel_emails]
-    if len(clean) == len(devices):
+    current_devices = []
+    known_emails = set()
+    for ib in inbounds:
+        ib_id = int(ib.get("id", 0) or 0)
+        for client in parse_clients(ib):
+            email = str(client.get("email") or "").strip()
+            if not email or email.startswith("paid_"):
+                continue
+            owner_key = get_user_key_by_client(ib_id, email) or resolve_user_key_by_email(email)
+            if owner_key != user_key:
+                continue
+            current_devices.append(
+                {
+                    "ib_id": ib_id,
+                    "uuid": str(client.get("id", "") or ""),
+                    "email": email,
+                    "label": str(client.get("comment") or "").strip()[:50] or "",
+                    "enabled": bool(client.get("enable", True)),
+                }
+            )
+            known_emails.add(email)
+
+    devices = info.get("devices", [])
+    if sorted((d.get("email"), d.get("ib_id")) for d in devices) == sorted((d.get("email"), d.get("ib_id")) for d in current_devices):
         return False
 
-    data[user_key]["devices"] = clean
+    data[user_key]["devices"] = current_devices
     save_vpn_users(data)
     return True
+
+
+async def sync_inbound_users_with_panel(inbound_id: int) -> None:
+    data = load_vpn_users()
+    targets = [
+        user_key
+        for user_key, info in data.items()
+        if not _is_paid_user(user_key, info)
+        and any(int(device.get("ib_id", 0) or 0) == int(inbound_id) for device in info.get("devices", []))
+    ]
+    for user_key in targets:
+        try:
+            await sync_user_devices_with_panel(str(user_key))
+        except Exception:
+            pass
 
 
 def inbound_text(inbound: dict) -> str:
@@ -140,6 +163,10 @@ async def render_inbounds(message_or_call, *, show_settings: bool = True):
 
 
 async def render_inbound(message_or_call, inbound: dict):
+    try:
+        await sync_inbound_users_with_panel(int(inbound.get("id", 0) or 0))
+    except Exception:
+        pass
     text = inbound_text(inbound)
     markup = clients_kb(inbound)
     if isinstance(message_or_call, types.CallbackQuery):
@@ -182,6 +209,14 @@ async def _show_user_menu(call_or_msg, user_key: str, ib_id_default: int = 0, ed
     if _is_paid_user(user_key, info):
         text = "❌ Пользователь не найден"
         return await call_or_msg.edit_text(text) if edit else await call_or_msg.answer(text)
+
+    if not _is_paid_user(user_key, info):
+        try:
+            if await sync_user_devices_with_panel(user_key):
+                data = load_vpn_users()
+                info = data.get(user_key, info)
+        except Exception:
+            pass
 
     devices = info.get("devices", [])
     if devices:
