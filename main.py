@@ -21,6 +21,7 @@ from sub.adminpaysub.paid_storage import (
 )
 from sub.adminpaysub.paid_subscriptions import _revoke_paid_user_access, _sync_paid_user_devices_expiry
 from sub import router as xui_router
+from sub.adminpaysub.paid_settings_store import format_duration
 
 
 async def setup_commands() -> None:
@@ -86,6 +87,7 @@ async def _notify_about_paid_subscriptions() -> None:
                 for event in events:
                     if event == "trial_expired":
                         grace_ends_at = int(refreshed.get("grace_ends_at") or 0)
+                        grace_text = format_duration(refreshed.get("grace_seconds"))
                         if grace_ends_at:
                             await _sync_paid_user_devices_expiry(
                                 user_id,
@@ -97,17 +99,18 @@ async def _notify_about_paid_subscriptions() -> None:
                         await bot.send_message(
                             user_id,
                             "🧪 <b>Пробный период истёк.</b>\n\n"
-                            "Доступ сохранён ещё на 36 часов.\n"
+                            f"Доступ сохранён ещё на {grace_text}.\n"
                             "Если за это время не оплатить, доступ будет удалён.\n"
                             "Открой /sub и нажми «Продлить подписку».",
                             parse_mode="HTML",
                         )
                         refreshed["trial_expired_notified_at"] = int(time.time())
                     elif event == "payment_expired":
+                        grace_text = format_duration(refreshed.get("grace_seconds"))
                         await bot.send_message(
                             user_id,
                             "⏳ <b>Срок подписки истёк.</b>\n\n"
-                            "У тебя есть 36 часов, чтобы продлить оплату.\n"
+                            f"У тебя есть {grace_text}, чтобы продлить оплату.\n"
                             + (f"🔗 Оплата: <b>{payment_url}</b>\n" if payment_url else "")
                             + "Открой /sub и нажми «Продлить подписку».",
                             parse_mode="HTML",
