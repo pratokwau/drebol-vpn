@@ -3,6 +3,8 @@ from __future__ import annotations
 from aiogram import Router, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
+from xui.paid_storage import has_paid_subscription
+from xui.storage import get_vpn_user, user_settings_ready
 from xui.utils import is_admin
 
 
@@ -12,14 +14,19 @@ router = Router()
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
+    vpn_user = get_vpn_user(user_id)
+    has_admin_sub = bool(vpn_user and user_settings_ready(vpn_user) and not vpn_user.get("admin_disabled"))
+    has_paid_sub = has_paid_subscription(user_id)
 
     text = (
         "<b>drebol-vpn</b> приветствует вас!\n\n"
         "• /start — Главное меню\n"
         "• /cancel — Отмена действия"
     )
-    text += "\n• /vpn — Админская подписка"
-    text += "\n• /sub — Платная подписка"
+    if has_admin_sub:
+        text += "\n• /vpn — Админская подписка"
+    if has_paid_sub:
+        text += "\n• /sub — Платная подписка"
     if is_admin(user_id):
         text += (
             "\n\n👨‍💻 <b>Администрирование</b>\n"
