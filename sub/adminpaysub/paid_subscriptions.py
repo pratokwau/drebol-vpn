@@ -433,6 +433,59 @@ def _subscription_summary(subscription: dict) -> str:
     )
 
 
+def _paid_user_info_text(subscription: dict) -> str:
+    status = paid_subscription_status(subscription)
+    is_premium = status in {"active", "grace", "pending_payment"}
+    tariff_icon = "👑" if is_premium else "🟢"
+    tariff_label = "Premium" if is_premium else "Пробный доступ"
+    if is_premium:
+        remaining = _format_active_remaining(subscription)
+        remaining_title = "До окончания"
+    elif status == "expired":
+        remaining = "00:00:00"
+        remaining_title = "Осталось"
+        tariff_label = "Требует продления"
+        tariff_icon = "🟢"
+    else:
+        remaining = _format_trial_remaining(subscription)
+        remaining_title = "Осталось"
+    payment_amount = int(subscription.get("payment_amount") or 0)
+    payment_seconds = _format_duration_ru(subscription.get("payment_seconds"))
+    grace_seconds = _format_duration_ru(subscription.get("grace_seconds"))
+    max_devices = int(subscription.get("max_devices") or 1)
+    limit_ip = int(subscription.get("limit_ip") or 2)
+    trial_ends = _format_short_dt(subscription.get("trial_ends_at"))
+    paid_ends = _format_short_dt(subscription.get("paid_ends_at"))
+    grace_ends = _format_short_dt(subscription.get("grace_ends_at"))
+    return (
+        f"<b>ℹ️ Информация о вашей подписке</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>{tariff_icon} Текущий тариф</b>\n"
+        f"{tariff_label}\n\n"
+        f"<b>⏳ {remaining_title}</b>\n"
+        f"{remaining}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>💎 Параметры тарифа</b>\n\n"
+        f"💰 Стоимость: {payment_amount} ₽\n"
+        f"🗓 Срок подписки: {payment_seconds}\n"
+        f"🔄 Продление: {grace_seconds}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>⚡ Возможности</b>\n\n"
+        f"📱 До {max_devices} устройства\n"
+        f"🌐 До {limit_ip} IP одновременно\n"
+        "♾ Безлимитный трафик\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>📅 Пробный доступ</b>\n"
+        f"{trial_ends}\n\n"
+        f"<b>👑 Платная подписка</b>\n"
+        f"{paid_ends}\n\n"
+        f"<b>🕒 Доступ действует до</b>\n"
+        f"{grace_ends}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>💙 Спасибо, что пользуетесь нашим VPN!</b>"
+    )
+
+
 def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None = None) -> InlineKeyboardMarkup:
     rows = []
     paid_user = load_vpn_users().get(_paid_user_key(user_id), {})
@@ -801,7 +854,7 @@ async def cb_paid_user_info(call: types.CallbackQuery):
     await call.answer()
     subscription = get_paid_subscription(call.from_user.id) or {}
     await call.message.edit_text(
-        "ℹ️ <b>Информация о вашей подписке</b>\n\n" + _subscription_summary(subscription),
+        _paid_user_info_text(subscription),
         parse_mode=ParseMode.HTML,
         reply_markup=_paid_user_info_kb(call.from_user.id, subscription),
     )
