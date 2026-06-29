@@ -128,6 +128,24 @@ def _format_trial_remaining(subscription: dict) -> str:
     return f"{days} дн {clock}" if days else clock
 
 
+def _format_active_remaining(subscription: dict) -> str:
+    ends_at = int(subscription.get("paid_ends_at") or 0)
+    now = int(datetime.now(tz=timezone.utc).timestamp())
+    remaining = max(0, ends_at - now)
+    days, remainder = divmod(remaining, 86400)
+    hours, _ = divmod(remainder, 3600)
+    if days and hours:
+        return f"{days} {_plural_ru(days, 'день', 'дня', 'дней')} {hours} {_plural_ru(hours, 'час', 'часа', 'часов')}"
+    if days:
+        return f"{days} {_plural_ru(days, 'день', 'дня', 'дней')}"
+    if hours:
+        return f"{hours} {_plural_ru(hours, 'час', 'часа', 'часов')}"
+    minutes = max(0, remainder // 60)
+    if minutes:
+        return f"{minutes} {_plural_ru(minutes, 'минута', 'минуты', 'минут')}"
+    return "менее минуты"
+
+
 def _format_duration_ru(seconds: int | None) -> str:
     total = int(seconds or 0)
     if total <= 0:
@@ -152,6 +170,24 @@ def _format_short_dt(ts: int | None) -> str:
     if value <= 0:
         return "Не активирован"
     return datetime.fromtimestamp(value, tz=timezone.utc).astimezone().strftime("%d.%m.%Y • %H:%M")
+
+
+def _current_tariff_label(subscription: dict) -> str:
+    status = paid_subscription_status(subscription)
+    if status in {"active", "grace", "pending_payment"}:
+        return "Premium"
+    if status == "expired":
+        return "Требует продления"
+    return "Пробный доступ"
+
+
+def _current_tariff_icon(subscription: dict) -> str:
+    status = paid_subscription_status(subscription)
+    if status in {"active", "grace", "pending_payment"}:
+        return "👑"
+    if status == "expired":
+        return "⚪"
+    return "🟢"
 
 
 def _subscription_status_ru(subscription: dict) -> str:
@@ -345,39 +381,55 @@ async def render_paid_subscriptions(message_or_call):
 
 def _subscription_summary(subscription: dict) -> str:
     status = paid_subscription_status(subscription)
-    plan_label = "Пробный доступ" if status == "trial" else "Платный доступ"
-    remaining = _format_trial_remaining(subscription)
-    payment_seconds = _format_duration_ru(subscription.get("payment_seconds"))
-    grace_seconds = _format_duration_ru(subscription.get("grace_seconds"))
-    payment_amount = int(subscription.get("payment_amount") or 0)
-    max_devices = int(subscription.get("max_devices") or 1)
-    limit_ip = int(subscription.get("limit_ip") or 2)
-    limit_gb = _format_limit_gb(subscription.get("limit_gb"))
+    is_premium = status in {"active", "grace", "pending_payment"}
+    plan_label = _current_tariff_label(subscription)
+    remaining = _format_active_remaining(subscription) if is_premium else _format_trial_remaining(subscription)
     trial_ends = _format_short_dt(subscription.get("trial_ends_at"))
     paid_ends = _format_short_dt(subscription.get("paid_ends_at"))
     grace_ends = _format_short_dt(subscription.get("grace_ends_at"))
+    if is_premium:
+        return (
+            "🔐 Ваша VPN-подписка\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "👑 Текущий тариф\n"
+            f"{plan_label}\n\n"
+            "⏳ До окончания\n"
+            f"{remaining}\n\n"
+            "📅 Действует до\n"
+            f"{paid_ends}"
+        )
+    payment_amount = int(subscription.get("payment_amount") or 0)
+    payment_seconds = _format_duration_ru(subscription.get("payment_seconds"))
+    grace_seconds = _format_duration_ru(subscription.get("grace_seconds"))
+    max_devices = int(subscription.get("max_devices") or 1)
+    limit_ip = int(subscription.get("limit_ip") or 2)
+    limit_gb = _format_limit_gb(subscription.get("limit_gb"))
     return (
-        "🛡️ VPN Subscription\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🟢 План\n"
+        "🔐 Ваша VPN-подписка\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🟢 Текущий тариф\n"
         f"{plan_label}\n\n"
         "⏳ Осталось\n"
         f"{remaining}\n\n"
-        "💎 После покупки\n"
-        f"• Стоимость: {payment_amount} ₽\n"
-        f"• Срок: {payment_seconds}\n"
-        f"• Продление: {grace_seconds}\n\n"
-        "⚙️ Возможности\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "💎 Параметры тарифа\n\n"
+        f"💰 Стоимость: {payment_amount} ₽\n"
+        f"🗓 Срок подписки: {payment_seconds}\n"
+        f"🔄 Продление: {grace_seconds}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "⚡ Возможности\n\n"
         f"📱 До {max_devices} устройства\n"
         f"🌐 До {limit_ip} IP одновременно\n"
         f"♾ Безлимитный трафик\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📅 Trial до\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "📅 Пробный доступ\n"
         f"{trial_ends}\n\n"
-        "📅 Premium до\n"
+        "👑 Платная подписка\n"
         f"{paid_ends}\n\n"
-        "📅 Доступ действует до\n"
-        f"{grace_ends}"
+        "🕒 Доступ действует до\n"
+        f"{grace_ends}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "💙 Спасибо, что пользуетесь нашим VPN!"
     )
 
 
