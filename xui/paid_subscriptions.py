@@ -50,7 +50,6 @@ from xui.storage import (
     set_user_note,
     set_user_max_devices,
     set_user_limit_gb,
-    set_user_expiry_time_ms,
     set_user_limit_ip,
     set_user_flow,
     set_user_username,
@@ -433,7 +432,6 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     if current.get("devices"):
         set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
         set_user_limit_gb(user_key, limit_gb)
-        set_user_expiry_time_ms(user_key, expiry_time_ms)
         set_user_limit_ip(user_key, limit_ip)
         set_user_flow(user_key, flow)
         set_user_username(user_id, username)
@@ -456,7 +454,6 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
         create_user_with_inbound(user_id, 0, note=display_name, subscription_type=subscription_type)
         set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
         set_user_limit_gb(user_key, limit_gb)
-        set_user_expiry_time_ms(user_key, expiry_time_ms)
         set_user_limit_ip(user_key, limit_ip)
         set_user_flow(user_key, flow)
         set_user_username(user_id, username)
@@ -466,7 +463,6 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     create_user_with_inbound(user_id, inbound_id, note=display_name, subscription_type=subscription_type)
     set_user_max_devices(user_key, int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES))
     set_user_limit_gb(user_key, limit_gb)
-    set_user_expiry_time_ms(user_key, expiry_time_ms)
     set_user_limit_ip(user_key, limit_ip)
     set_user_flow(user_key, flow)
     set_user_username(user_id, username)
