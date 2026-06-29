@@ -98,8 +98,7 @@ async def _notify_about_paid_subscriptions() -> None:
                             "🧪 <b>Пробный период истёк.</b>\n\n"
                             "Доступ сохранён ещё на 36 часов.\n"
                             "Если за это время не оплатить, доступ будет удалён.\n"
-                            + (f"🔗 Оплата: <b>{payment_url}</b>\n" if payment_url else "")
-                            + "Открой /sub и нажми «Продлить подписку».",
+                            "Открой /sub и нажми «Продлить подписку».",
                         )
                     elif event == "payment_expired":
                         await bot.send_message(
