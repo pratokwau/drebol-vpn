@@ -53,7 +53,9 @@ def load_xui_settings() -> dict[str, str]:
     raw = _read_json(Path(XUI_SETTINGS_FILE), {})
     if not isinstance(raw, dict):
         return {}
-    return {str(k): str(v) for k, v in raw.items()}
+    settings = {str(k): str(v) for k, v in raw.items()}
+    settings.setdefault("XUI_SUB_PORT", "")
+    return settings
 
 
 def save_xui_settings(data: dict[str, str]) -> None:
