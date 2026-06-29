@@ -302,21 +302,30 @@ def _paid_user_text(subscription: dict, payment_url: str) -> str:
 
 def _admin_paid_request_text(request: dict, settings: dict, title: str) -> str:
     user_id = int(request.get("user_id") or 0)
-    username = str(request.get("username") or "").strip() or "нет"
     kind = str(request.get("kind") or "access")
+    first_name = str(request.get("first_name") or "").strip()
+    last_name = str(request.get("last_name") or "").strip()
+    username = str(request.get("username") or "").strip()
+    full_name = " ".join(part for part in [first_name, last_name] if part).strip() or "не указано"
+    kind_label = {
+        "access": "первичный триал доступ",
+        "renew": "продление подписки",
+        "payment_check": "проверка оплаты",
+    }.get(kind, kind)
     return (
         f"💳 <b>{title}</b>\n\n"
         f"👤 TG: <code>{user_id}</code>\n"
-        f"👤 Username: <code>{html.escape(username)}</code>\n"
-        f"🧾 Тип: <b>{html.escape(kind)}</b>\n"
-        f"🧪 Trial: <b>{format_duration(settings['trial_seconds'])}</b>\n"
-        f"⏳ Платёжный период: <b>{format_duration(settings['payment_seconds'])}</b>\n"
+        f"👤 Имя: <code>{html.escape(full_name)}</code>\n"
+        f"👤 Юзернейм: <code>{html.escape('@' + username) if username else 'не указан'}</code>\n"
+        f"🧾 Тип заявки: <b>{html.escape(kind_label)}</b>\n"
+        f"🧪 Пробный период: <b>{format_duration(settings['trial_seconds'])}</b>\n"
+        f"⏳ Срок после оплаты: <b>{format_duration(settings['payment_seconds'])}</b>\n"
         f"💰 Сумма: <b>{settings['payment_amount']} ₽</b>\n"
-        f"🕒 Grace: <b>{format_duration(settings['grace_seconds'])}</b>\n"
+        f"🕒 Время на продление: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
-        f"💾 Лимит ГБ: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
+        f"💾 Лимит трафика: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
-        f"⚡ Flow: <b>{settings['flow']}</b>\n"
+        f"⚡ Параметр подключения: <b>{settings['flow']}</b>\n"
         f"🆔 Request: <code>{html.escape(str(request.get('request_id') or ''))}</code>"
     )
 
@@ -425,7 +434,18 @@ async def cmd_sub(message: types.Message):
         if ADMIN_ID:
             await bot.send_message(
                 ADMIN_ID,
-                _admin_paid_request_text({"user_id": user_id, "username": message.from_user.username or "", "request_id": request_id, "kind": "access"}, settings, "Новая заявка на первичный триал доступ"),
+                _admin_paid_request_text(
+                    {
+                        "user_id": user_id,
+                        "username": message.from_user.username or "",
+                        "first_name": message.from_user.first_name or "",
+                        "last_name": message.from_user.last_name or "",
+                        "request_id": request_id,
+                        "kind": "access",
+                    },
+                    settings,
+                    "Новая заявка на первичный триал доступ",
+                ),
                 parse_mode=ParseMode.HTML,
                 reply_markup=_paid_request_kb(request_id),
             )
@@ -518,7 +538,18 @@ async def cb_paid_user_request(call: types.CallbackQuery):
     if ADMIN_ID:
         await bot.send_message(
             ADMIN_ID,
-            _admin_paid_request_text({"user_id": user_id, "username": call.from_user.username or "", "request_id": request_id, "kind": "access"}, settings, "Новая заявка на платную подписку"),
+            _admin_paid_request_text(
+                {
+                    "user_id": user_id,
+                    "username": call.from_user.username or "",
+                    "first_name": call.from_user.first_name or "",
+                    "last_name": call.from_user.last_name or "",
+                    "request_id": request_id,
+                    "kind": "access",
+                },
+                settings,
+                "Новая заявка на платную подписку",
+            ),
             parse_mode=ParseMode.HTML,
             reply_markup=_paid_request_kb(request_id),
         )
@@ -555,7 +586,18 @@ async def cb_paid_user_renew(call: types.CallbackQuery):
     if ADMIN_ID:
         await bot.send_message(
             ADMIN_ID,
-            _admin_paid_request_text({"user_id": user_id, "username": call.from_user.username or "", "request_id": request_id, "kind": "renew"}, settings, "Пользователь хочет продлить подписку"),
+            _admin_paid_request_text(
+                {
+                    "user_id": user_id,
+                    "username": call.from_user.username or "",
+                    "first_name": call.from_user.first_name or "",
+                    "last_name": call.from_user.last_name or "",
+                    "request_id": request_id,
+                    "kind": "renew",
+                },
+                settings,
+                "Пользователь хочет продлить подписку",
+            ),
             parse_mode=ParseMode.HTML,
             reply_markup=_paid_request_kb(request_id),
         )
@@ -588,7 +630,18 @@ async def cb_paid_user_paid(call: types.CallbackQuery):
     if ADMIN_ID:
         await bot.send_message(
             ADMIN_ID,
-            _admin_paid_request_text({"user_id": user_id, "username": call.from_user.username or "", "request_id": request_id, "kind": "payment_check"}, settings, "Пользователь сообщил об оплате"),
+            _admin_paid_request_text(
+                {
+                    "user_id": user_id,
+                    "username": call.from_user.username or "",
+                    "first_name": call.from_user.first_name or "",
+                    "last_name": call.from_user.last_name or "",
+                    "request_id": request_id,
+                    "kind": "payment_check",
+                },
+                settings,
+                "Пользователь сообщил об оплате",
+            ),
             parse_mode=ParseMode.HTML,
             reply_markup=_paid_payment_kb(request_id),
         )
@@ -802,18 +855,22 @@ async def cb_paid_request_no(call: types.CallbackQuery):
         return await call.answer("Заявка не найдена", show_alert=True)
     user_id = int(request.get("user_id") or 0)
     delete_paid_request(user_id)
+    try:
+        await call.answer("Заявка отклонена")
+    except Exception:
+        pass
     await bot.send_message(
         user_id,
-        "⛔ <b>Заявка на платную подписку отклонена.</b>\n\n"
-        "Если нужно, попробуй ещё раз позже.",
+        "⛔ <b>Ваша заявка отклонена.</b>\n\n"
+        "Если нужно, попробуйте отправить её ещё раз позже.",
         parse_mode=ParseMode.HTML,
     )
     await call.message.edit_text(
         "❌ <b>Заявка отклонена</b>\n\n"
-        f"Пользователь: <code>{html.escape(str(user_id))}</code>",
+        f"Пользователь: <code>{html.escape(str(user_id))}</code>\n"
+        f"Тип: <b>{html.escape(str(request.get('kind') or 'access'))}</b>",
         parse_mode=ParseMode.HTML,
     )
-    await call.answer("Заявка отклонена")
 
 
 @router.callback_query(F.data.startswith("paidpay_ok_"))
