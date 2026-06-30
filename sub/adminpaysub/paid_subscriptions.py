@@ -926,6 +926,15 @@ async def cb_paid_user_renew(call: types.CallbackQuery):
     subscription = get_paid_subscription(user_id) or {}
     if not subscription:
         return await call.answer("Подписки нет", show_alert=True)
+    if paid_subscription_status(subscription) in {"active", "grace", "pending_payment"}:
+        await call.answer()
+        await call.message.edit_text(
+            "✅ <b>Продление не требуется.</b>\n\n"
+            "Подписка уже активна.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=_paid_user_info_kb(user_id, subscription),
+        )
+        return
     payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
     await call.answer()
     await call.message.edit_text(
@@ -942,6 +951,8 @@ async def cb_paid_user_paid(call: types.CallbackQuery):
     subscription = get_paid_subscription(user_id) or {}
     if not subscription:
         return await call.answer("Подписки нет", show_alert=True)
+    if paid_subscription_status(subscription) in {"active", "grace", "pending_payment"}:
+        return await call.answer("Продление не требуется", show_alert=True)
     if get_paid_request(user_id):
         return await call.answer("Заявка уже отправлена", show_alert=True)
     request_id, _ = create_paid_request(
