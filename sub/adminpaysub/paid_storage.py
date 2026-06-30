@@ -106,16 +106,26 @@ def refresh_paid_subscription_state(info: dict, *, now: int | None = None) -> tu
     trial_ends_at = int(info.get("trial_ends_at") or 0)
     paid_ends_at = int(info.get("paid_ends_at") or 0)
     grace_ends_at = int(info.get("grace_ends_at") or 0)
+    trial_started_at = int(info.get("trial_expired_notification_started_at") or 0)
+    payment_started_at = int(info.get("payment_expired_notification_started_at") or 0)
+    grace_started_at = int(info.get("grace_expired_notification_started_at") or 0)
+    retry_after = 120
 
     trial_is_expired = bool(trial_ends_at and now >= trial_ends_at)
     paid_is_expired = bool(paid_ends_at and now >= paid_ends_at)
     grace_is_expired = bool(grace_ends_at and now >= grace_ends_at)
 
-    if trial_is_expired and not info.get("trial_expired_notified_at"):
+    if trial_is_expired and not info.get("trial_expired_notified_at") and (
+        not trial_started_at or now - trial_started_at >= retry_after
+    ):
         events.append("trial_expired")
-    if paid_ends_at and paid_is_expired and not info.get("payment_expired_notified_at"):
+    if paid_ends_at and paid_is_expired and not info.get("payment_expired_notified_at") and (
+        not payment_started_at or now - payment_started_at >= retry_after
+    ):
         events.append("payment_expired")
-    if grace_is_expired and not info.get("grace_expired_notified_at") and status in {"trial", "grace", "expired"}:
+    if grace_is_expired and not info.get("grace_expired_notified_at") and status in {"trial", "grace", "expired"} and (
+        not grace_started_at or now - grace_started_at >= retry_after
+    ):
         events.append("grace_expired")
 
     if status == "frozen":
