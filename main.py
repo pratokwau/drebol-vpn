@@ -4,7 +4,6 @@ import asyncio
 import time
 
 from aiogram.types import BotCommand
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from config import ADMIN_ID
 from handlers.admin import router as admin_router
 from handlers.cancel import router as cancel_router
@@ -12,7 +11,6 @@ from handlers.start import router as start_router
 from handlers.tickets import router as tickets_router
 from loader import bot, dp
 from storage import clear_update_state, load_update_state
-from updater import get_remote_head, get_local_head
 from sub.adminpaysub.paid_settings_store import DEFAULT_PAID_PAYMENT_URL
 from sub.adminpaysub.paid_storage import (
     load_paid_subscriptions,
@@ -47,42 +45,6 @@ async def setup_commands() -> None:
             BotCommand(command="start", description="Главное меню"),
         ]
     )
-
-
-def _update_notice_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="⬆️ Обновиться", callback_data="app_update_apply")],
-            [InlineKeyboardButton(text="🔄 Проверить обновление", callback_data="app_update_check")],
-        ]
-    )
-
-
-async def _notify_about_updates() -> None:
-    while True:
-        try:
-            local_head = get_local_head()
-            remote_head = get_remote_head()
-            if local_head and remote_head and local_head != remote_head:
-                state = load_update_state()
-                if state.get("notified_remote_head") != remote_head:
-                    await bot.send_message(
-                        ADMIN_ID,
-                        "📦 <b>Доступно новое обновление</b>\n\n"
-                        f"Локальная версия: <code>{local_head[:8] or 'unknown'}</code>\n"
-                        f"Новая версия: <code>{remote_head[:8]}</code>\n\n"
-                        "Нажми кнопку ниже, чтобы обновить бота.",
-                        parse_mode="HTML",
-                        reply_markup=_update_notice_kb(),
-                    )
-                    state["notified_remote_head"] = remote_head
-                    state["status"] = state.get("status", "idle")
-                    from storage import save_update_state
-
-                    save_update_state(state)
-        except Exception:
-            pass
-        await asyncio.sleep(10)
 
 
 async def _notify_about_paid_subscriptions() -> None:
@@ -202,7 +164,6 @@ async def main() -> None:
             clear_update_state()
 
     asyncio.create_task(notify_update_success())
-    asyncio.create_task(_notify_about_updates())
     asyncio.create_task(_notify_about_paid_subscriptions())
     await dp.start_polling(bot)
 
