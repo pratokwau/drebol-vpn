@@ -9,6 +9,7 @@ from sub.adminpaysub.paid_settings_store import DAY, HOUR, DEFAULT_PAID_EXPIRY_T
 
 PAID_SUBSCRIPTIONS_FILE = Path("data/paid_subscriptions.json")
 PAID_REQUESTS_FILE = Path("data/paid_requests.json")
+PAID_REQUEST_BLOCKS_FILE = Path("data/paid_request_blocks.json")
 
 
 def _ensure_parent(path: Path) -> None:
@@ -159,6 +160,90 @@ def load_paid_requests() -> dict:
 
 def save_paid_requests(data: dict) -> None:
     _write_json(PAID_REQUESTS_FILE, data)
+
+
+def load_paid_request_blocks() -> dict:
+    raw = _read_json(PAID_REQUEST_BLOCKS_FILE, {})
+    return raw if isinstance(raw, dict) else {}
+
+
+def save_paid_request_blocks(data: dict) -> None:
+    _write_json(PAID_REQUEST_BLOCKS_FILE, data)
+
+
+def _paid_request_block_key(user_id: int, kind: str) -> str:
+    return f"{int(user_id)}:{_normalize_paid_request_block_kind(kind)}"
+
+
+def _normalize_paid_request_block_kind(kind: str) -> str:
+    value = str(kind or "access").lower()
+    if value in {"renew", "payment", "payment_check"}:
+        return "payment_check"
+    return "access" if value != "payment_check" else "payment_check"
+
+
+def get_paid_request_block(user_id: int, kind: str) -> dict | None:
+    kind = _normalize_paid_request_block_kind(kind)
+    blocks = load_paid_request_blocks()
+    entry = blocks.get(_paid_request_block_key(user_id, kind))
+    if not isinstance(entry, dict):
+        return None
+    until = int(entry.get("until_at") or 0)
+    if until and until <= int(time.time()):
+        blocks.pop(_paid_request_block_key(user_id, kind), None)
+        save_paid_request_blocks(blocks)
+        return None
+    return entry
+
+
+def list_paid_request_blocks() -> dict:
+    blocks = load_paid_request_blocks()
+    now = int(time.time())
+    cleaned = {}
+    changed = False
+    for key, entry in blocks.items():
+        if not isinstance(entry, dict):
+            changed = True
+            continue
+        until = int(entry.get("until_at") or 0)
+        if until and until <= now:
+            changed = True
+            continue
+        cleaned[key] = entry
+    if changed:
+        save_paid_request_blocks(cleaned)
+    return cleaned
+
+
+def set_paid_request_block(user_id: int, kind: str, until_at: int, *, admin_id: int | None = None, note: str = "") -> dict:
+    kind = _normalize_paid_request_block_kind(kind)
+    blocks = load_paid_request_blocks()
+    key = _paid_request_block_key(user_id, kind)
+    payload = {
+        "user_id": int(user_id),
+        "kind": str(kind or "access").lower(),
+        "until_at": int(until_at),
+        "blocked_at": int(time.time()),
+        "blocked_by": int(admin_id or 0),
+        "note": str(note or ""),
+    }
+    blocks[key] = payload
+    save_paid_request_blocks(blocks)
+    return payload
+
+
+def clear_paid_request_block(user_id: int, kind: str) -> None:
+    kind = _normalize_paid_request_block_kind(kind)
+    blocks = load_paid_request_blocks()
+    key = _paid_request_block_key(user_id, kind)
+    if key in blocks:
+        blocks.pop(key, None)
+        save_paid_request_blocks(blocks)
+
+
+def is_paid_request_blocked(user_id: int, kind: str) -> tuple[bool, dict | None]:
+    block = get_paid_request_block(user_id, kind)
+    return (block is not None), block
 
 
 def get_paid_request(user_id: int) -> dict | None:

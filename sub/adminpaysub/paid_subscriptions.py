@@ -35,14 +35,18 @@ from sub.adminpaysub.paid_storage import (
     delete_paid_request,
     delete_paid_subscription,
     extend_paid_subscription,
+    clear_paid_request_block,
     get_paid_request,
     get_paid_request_by_id,
+    get_paid_request_block,
     get_paid_subscription,
     has_paid_subscription,
     load_paid_subscriptions,
+    list_paid_request_blocks,
     paid_subscription_status,
     load_paid_requests,
     save_paid_subscriptions,
+    set_paid_request_block,
     shift_paid_subscription_timeline,
     set_paid_subscription,
 )
@@ -304,18 +308,23 @@ def _paid_subscriptions_kb(users: dict) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text=label, callback_data=f"paidsub_{user_key}")])
     rows.append([
         InlineKeyboardButton(text="📥 Запросы", callback_data="adminpaysub_requests"),
+        InlineKeyboardButton(text="🔇 Заглушки", callback_data="adminpaysub_blocks"),
+    ])
+    rows.append([
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="adminpaysub_settings"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _paid_request_kb(request_id: str) -> InlineKeyboardMarkup:
+def _paid_request_kb(request_id: str, block: dict | None = None) -> InlineKeyboardMarkup:
+    mute_label = "🔊 Разблокировать" if block else "🔇 Заглушить"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="✅ Выдать", callback_data=f"paidreq_ok_{request_id}"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data=f"paidreq_no_{request_id}"),
             ],
+            [InlineKeyboardButton(text=mute_label, callback_data=f"paidreq_mute_{request_id}")],
             [InlineKeyboardButton(text="⬅️ К запросам", callback_data="adminpaysub_requests")],
         ]
     )
@@ -337,6 +346,21 @@ def _paid_request_label(request: dict) -> str:
     elif full_name:
         base += f" {full_name}"
     return base
+
+
+def _paid_request_kind_label(kind: str) -> str:
+    return {
+        "access": "триал",
+        "renew": "продление",
+        "payment_check": "оплата",
+    }.get(str(kind or "").lower(), str(kind or "запрос"))
+
+
+def _paid_block_label(block: dict) -> str:
+    user_id = int(block.get("user_id") or 0)
+    kind = _paid_request_kind_label(block.get("kind") or "access")
+    until_at = _format_short_dt(block.get("until_at"))
+    return f"{user_id} • {kind} • до {until_at}"
 
 
 def _paid_requests_overview_kb(requests: dict) -> InlineKeyboardMarkup:
@@ -365,13 +389,40 @@ def _paid_requests_list_kb(requests: dict, *, kind: str) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _paid_payment_kb(request_id: str) -> InlineKeyboardMarkup:
+def _paid_blocks_overview_kb(blocks: dict) -> InlineKeyboardMarkup:
+    trial_count = sum(1 for block in blocks.values() if str(block.get("kind") or "") == "access")
+    payment_count = sum(1 for block in blocks.values() if str(block.get("kind") or "") in {"renew", "payment_check"})
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"🧪 Блок триала ({trial_count})", callback_data="adminpaysub_blocks_trial")],
+            [InlineKeyboardButton(text=f"💳 Блок оплаты ({payment_count})", callback_data="adminpaysub_blocks_payment")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_back")],
+        ]
+    )
+
+
+def _paid_blocks_list_kb(blocks: dict, *, kind: str) -> InlineKeyboardMarkup:
+    rows = []
+    for block in sorted(blocks.values(), key=lambda item: int(item.get("until_at") or 0), reverse=True):
+        if str(block.get("kind") or "") != kind:
+            continue
+        user_id = int(block.get("user_id") or 0)
+        if not user_id:
+            continue
+        rows.append([InlineKeyboardButton(text=f"🔇 {_paid_block_label(block)}", callback_data=f"paidblock_view_{user_id}_{kind}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_blocks")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _paid_payment_kb(request_id: str, block: dict | None = None) -> InlineKeyboardMarkup:
+    mute_label = "🔊 Разблокировать" if block else "🔇 Заглушить"
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="✅ Оплата проверена", callback_data=f"paidpay_ok_{request_id}"),
                 InlineKeyboardButton(text="❌ Оплата не найдена", callback_data=f"paidpay_no_{request_id}"),
             ],
+            [InlineKeyboardButton(text=mute_label, callback_data=f"paidreq_mute_{request_id}")],
             [InlineKeyboardButton(text="⬅️ К запросам", callback_data="adminpaysub_requests")],
         ]
     )
@@ -534,12 +585,92 @@ async def _show_paid_request_details(call: types.CallbackQuery, request_id: str)
         await call.answer("Запрос не найден", show_alert=True)
         return
     kind = str(request.get("kind") or "access")
+    user_id = int(request.get("user_id") or 0)
     settings = load_paid_settings()
     title = "Новая заявка на первичный триал доступ" if kind == "access" else "Пользователь сообщил об оплате"
+    block = get_paid_request_block(user_id, kind)
     text = _admin_paid_request_text(request, settings, title)
-    markup = _paid_request_kb(request_id) if kind == "access" else _paid_payment_kb(request_id)
+    if block:
+        text += "\n\n" + _paid_request_block_text(user_id, kind, block)
+    markup = _paid_request_kb(request_id, block) if kind == "access" else _paid_payment_kb(request_id, block)
     await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
     await call.answer()
+
+
+def _paid_request_block_text(user_id: int, kind: str, block: dict | None) -> str:
+    title = "триала" if kind == "access" else "оплаты"
+    if block:
+        until_at = _format_short_dt(block.get("until_at"))
+        admin_id = int(block.get("blocked_by") or 0)
+        return (
+            f"🔇 <b>Заглушка {title}</b>\n\n"
+            f"Пользователь: <code>{user_id}</code>\n"
+            f"Действует до: <b>{until_at}</b>\n"
+            + (f"Заглушил: <code>{admin_id}</code>\n" if admin_id else "")
+            + "\nПока заглушка активна, пользователь не сможет отправить этот запрос."
+        )
+    return (
+        f"🔇 <b>Заглушка {title}</b>\n\n"
+        f"Пользователь: <code>{user_id}</code>\n"
+        "Сейчас запрос не заглушен.\n"
+        "Нажмите кнопку ниже, чтобы временно заблокировать отправку."
+    )
+
+
+def _paid_request_block_kb(user_id: int, kind: str, block: dict | None) -> InlineKeyboardMarkup:
+    rows = []
+    if block:
+        rows.append([InlineKeyboardButton(text="🔊 Разблокировать", callback_data=f"paidblock_clear_{user_id}_{kind}")])
+    else:
+        rows.append([InlineKeyboardButton(text="🔇 Заглушить", callback_data=f"paidblock_mute_{user_id}_{kind}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_requests")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _paid_block_remaining(block: dict | None) -> str:
+    if not block:
+        return "не задано"
+    return _format_remaining_verbose(int(block.get("until_at") or 0) - int(time.time()))
+
+
+def _paid_block_user_message(kind: str, block: dict | None) -> str:
+    title = "триал" if kind == "access" else "оплата"
+    if not block:
+        return "⛔ <b>Запрос временно заглушен.</b>"
+    return (
+        f"⛔ <b>Запрос на {title} временно заглушен.</b>\n\n"
+        f"Осталось: <b>{_paid_block_remaining(block)}</b>\n"
+        "Попробуй позже."
+    )
+
+
+def _paid_block_alert_text(kind: str, block: dict | None) -> str:
+    title = "триал" if kind == "access" else "оплата"
+    if not block:
+        return f"Запрос на {title} временно заглушен"
+    return f"Запрос на {title} заглушен ещё { _paid_block_remaining(block) }"
+
+
+async def _open_paid_request_block_prompt(call: types.CallbackQuery, user_id: int, kind: str) -> None:
+    await call.message.edit_text(
+        f"🔇 <b>Заглушить {_paid_request_kind_label(kind)}</b>\n\n"
+        f"Пользователь: <code>{user_id}</code>\n\n"
+        "Отправь время блокировки любым форматом: <code>2 минуты</code>, <code>5 дней</code>, <code>1 час</code>.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+def _parse_paid_request_block_target(data: str) -> tuple[int, str]:
+    parts = str(data or "").split("_")
+    if len(parts) < 4:
+        return 0, "access"
+    try:
+        user_id = int(parts[2])
+    except Exception:
+        user_id = 0
+    kind = "_".join(parts[3:]) or "access"
+    return user_id, kind
 
 
 async def _sync_paid_subscription_devices(
@@ -825,15 +956,23 @@ def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None 
     rows = []
     paid_user = load_vpn_users().get(_paid_user_key(user_id), {})
     request_kind = str((request or {}).get("kind") or "").lower()
+    access_block = get_paid_request_block(user_id, "access")
+    payment_block = get_paid_request_block(user_id, "payment_check") or get_paid_request_block(user_id, "renew")
     renew_requested = request is not None and subscription is not None and request_kind in {"renew", "payment_check"}
     if not subscription:
-        rows.append([InlineKeyboardButton(text="💳 Получить подписку", callback_data="paiduser_request")])
+        if access_block:
+            rows.append([InlineKeyboardButton(text="🔇 Триал заглушен", callback_data="paiduser_blocked_access")])
+        else:
+            rows.append([InlineKeyboardButton(text="💳 Получить подписку", callback_data="paiduser_request")])
     else:
         rows.append([InlineKeyboardButton(text="ℹ️ Информация о подписке", callback_data="paiduser_info")])
         if renew_requested:
             rows.append([InlineKeyboardButton(text="⏳ Заявка на продление отправлена", callback_data="paiduser_wait")])
         else:
-            rows.append([InlineKeyboardButton(text="💳 Продлить подписку", callback_data=f"paiduser_renew_{user_id}")])
+            if payment_block and paid_subscription_status(subscription) not in {"trial", "active", "grace", "pending_payment"}:
+                rows.append([InlineKeyboardButton(text="🔇 Продление заглушено", callback_data="paiduser_blocked_payment")])
+            else:
+                rows.append([InlineKeyboardButton(text="💳 Продлить подписку", callback_data=f"paiduser_renew_{user_id}")])
         if paid_user.get("devices"):
             rows.append([InlineKeyboardButton(text="📖 Инструкция", callback_data="paiduser_inst")])
     if request:
@@ -898,7 +1037,16 @@ def _paid_payment_text(subscription: dict, payment_url: str) -> str:
 async def render_paid_user_menu(message_or_call, *, user_id: int, username: str = "", first_name: str = "", last_name: str = "", edit: bool = False) -> None:
     subscription = get_paid_subscription(user_id) or {}
     request = get_paid_request(user_id)
+    access_block = get_paid_request_block(user_id, "access")
+    payment_block = get_paid_request_block(user_id, "payment_check") or get_paid_request_block(user_id, "renew")
     if not subscription and not request:
+        if access_block:
+            text = _paid_block_user_message("access", access_block)
+            if edit:
+                await message_or_call.edit_text(text, parse_mode=ParseMode.HTML)
+            else:
+                await message_or_call.answer(text, parse_mode=ParseMode.HTML)
+            return
         request_id, _ = create_paid_request(
             user_id,
             username=username,
@@ -946,7 +1094,13 @@ async def render_paid_user_menu(message_or_call, *, user_id: int, username: str 
         return
 
     payment_url = subscription.get("payment_url") or load_paid_settings().get("payment_url") or DEFAULT_PAID_PAYMENT_URL
+    if payment_block and paid_subscription_status(subscription) not in {"trial", "active", "grace", "pending_payment"}:
+        payment_url = payment_url
     text = _paid_user_text(subscription, payment_url)
+    if not subscription and access_block:
+        text += f"\n\n⛔ <b>Триал временно заглушен.</b>\nОсталось: <b>{_paid_block_remaining(access_block)}</b>"
+    elif subscription and payment_block and paid_subscription_status(subscription) not in {"trial", "active", "grace", "pending_payment"}:
+        text += f"\n\n⛔ <b>Продление временно заглушено.</b>\nОсталось: <b>{_paid_block_remaining(payment_block)}</b>"
     markup = _paid_user_kb(user_id, subscription, request)
     if edit:
         await message_or_call.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
@@ -1218,6 +1372,10 @@ async def cb_paid_user_back(call: types.CallbackQuery):
 @router.callback_query(F.data == "paiduser_request")
 async def cb_paid_user_request(call: types.CallbackQuery):
     user_id = call.from_user.id
+    access_block = get_paid_request_block(user_id, "access")
+    if access_block:
+        await call.answer(_paid_block_alert_text("access", access_block), show_alert=True)
+        return
     if has_paid_subscription(user_id):
         return await call.answer("Подписка уже есть", show_alert=True)
     if get_paid_request(user_id):
@@ -1262,12 +1420,40 @@ async def cb_paid_user_wait(call: types.CallbackQuery):
     await call.answer("Заявка уже отправлена", show_alert=True)
 
 
+@router.callback_query(F.data == "paiduser_blocked_access")
+async def cb_paid_user_blocked_access(call: types.CallbackQuery):
+    block = get_paid_request_block(call.from_user.id, "access")
+    await call.answer("Запрос заглушен", show_alert=True)
+    if block:
+        await call.message.edit_text(
+            _paid_block_user_message("access", block),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_paid_user_kb(call.from_user.id, None, get_paid_request(call.from_user.id)),
+        )
+
+
+@router.callback_query(F.data == "paiduser_blocked_payment")
+async def cb_paid_user_blocked_payment(call: types.CallbackQuery):
+    block = get_paid_request_block(call.from_user.id, "payment_check") or get_paid_request_block(call.from_user.id, "renew")
+    await call.answer("Продление заглушено", show_alert=True)
+    if block:
+        subscription = get_paid_subscription(call.from_user.id) or {}
+        await call.message.edit_text(
+            _paid_block_user_message("payment_check", block),
+            parse_mode=ParseMode.HTML,
+            reply_markup=_paid_user_kb(call.from_user.id, subscription, get_paid_request(call.from_user.id)),
+        )
+
+
 @router.callback_query(F.data.startswith("paiduser_renew_"))
 async def cb_paid_user_renew(call: types.CallbackQuery):
     user_id = call.from_user.id
     subscription = get_paid_subscription(user_id) or {}
     if not subscription:
         return await call.answer("Подписки нет", show_alert=True)
+    payment_block = get_paid_request_block(user_id, "payment_check") or get_paid_request_block(user_id, "renew")
+    if payment_block and paid_subscription_status(subscription) not in {"trial", "active", "grace", "pending_payment"}:
+        return await call.answer(_paid_block_alert_text("payment_check", payment_block), show_alert=True)
     if paid_subscription_status(subscription) in {"trial", "active"}:
         await call.answer()
         await call.message.edit_text(
@@ -1293,6 +1479,9 @@ async def cb_paid_user_paid(call: types.CallbackQuery):
     subscription = get_paid_subscription(user_id) or {}
     if not subscription:
         return await call.answer("Подписки нет", show_alert=True)
+    payment_block = get_paid_request_block(user_id, "payment_check") or get_paid_request_block(user_id, "renew")
+    if payment_block and paid_subscription_status(subscription) not in {"trial", "active", "grace", "pending_payment"}:
+        return await call.answer(_paid_block_alert_text("payment_check", payment_block), show_alert=True)
     if paid_subscription_status(subscription) in {"trial", "active"}:
         return await call.answer("Продление не требуется", show_alert=True)
     if get_paid_request(user_id):
@@ -1398,6 +1587,68 @@ async def cb_adminpaysub_requests_payment(call: types.CallbackQuery):
     )
 
 
+@router.callback_query(F.data == "adminpaysub_blocks")
+async def cb_adminpaysub_blocks(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    blocks = list_paid_request_blocks()
+    await call.message.edit_text(
+        "🔇 <b>Заглушки заявок</b>\n\n"
+        f"Активных заглушек: <b>{len(blocks)}</b>\n\n"
+        "Выберите раздел:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_blocks_overview_kb(blocks),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "adminpaysub_blocks_trial")
+async def cb_adminpaysub_blocks_trial(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    blocks = list_paid_request_blocks()
+    await call.message.edit_text(
+        "🔇 <b>Заглушки триала</b>\n\n"
+        "Нажмите на нужную запись, чтобы снять блокировку.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_blocks_list_kb(blocks, kind="access"),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data == "adminpaysub_blocks_payment")
+async def cb_adminpaysub_blocks_payment(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    blocks = list_paid_request_blocks()
+    await call.message.edit_text(
+        "🔇 <b>Заглушки оплаты</b>\n\n"
+        "Нажмите на нужную запись, чтобы снять блокировку.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_blocks_list_kb(blocks, kind="payment_check"),
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("paidblock_view_"))
+async def cb_paid_block_view(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    payload = call.data[len("paidblock_view_"):]
+    parts = payload.split("_")
+    if len(parts) < 2 or not parts[0].isdigit():
+        return await call.answer("Заглушка не найдена", show_alert=True)
+    user_id = int(parts[0])
+    kind = "_".join(parts[1:]) or "access"
+    block = get_paid_request_block(user_id, kind)
+    await call.message.edit_text(
+        _paid_request_block_text(user_id, kind, block),
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_request_block_kb(user_id, kind, block),
+    )
+    await call.answer()
+
+
 @router.callback_query(F.data == "adminpaysub_back")
 async def cb_adminpaysub_back(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
@@ -1471,6 +1722,31 @@ async def cb_paid_sub_addtime(call: types.CallbackQuery, state: FSMContext):
     await call.answer()
 
 
+@router.message(PaidSubSettings.waiting_request_mute_value)
+async def paid_request_mute_value(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    user_id = int(data.get("target_paid_request_mute_user_id") or 0)
+    kind = str(data.get("target_paid_request_mute_kind") or "access")
+    if not user_id:
+        await message.answer("Пользователь не найден.")
+        return
+    raw = (message.text or "").strip()
+    try:
+        seconds = parse_duration_to_seconds(raw)
+    except ValueError:
+        await message.answer("Некорректное значение.\n\nПример: <code>2 минуты</code>, <code>5 дней</code>, <code>1 час</code>.", parse_mode=ParseMode.HTML)
+        return
+    until_at = int(time.time()) + seconds
+    block = set_paid_request_block(user_id, kind, until_at, admin_id=message.from_user.id)
+    await state.clear()
+    await message.answer(
+        f"✅ Заглушка установлена до <b>{_format_short_dt(block.get('until_at'))}</b>.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
 @router.callback_query(F.data.startswith("paidsub_freeze_"))
 async def cb_paid_sub_freeze(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
@@ -1533,6 +1809,78 @@ async def cb_paid_request_view(call: types.CallbackQuery):
         return await call.answer("Нет доступа", show_alert=True)
     request_id = call.data[len("paidreq_view_"):]
     await _show_paid_request_details(call, request_id)
+
+
+@router.callback_query(F.data.startswith("paidreq_mute_"))
+async def cb_paid_request_mute(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    request_id = call.data[len("paidreq_mute_"):]
+    request = get_paid_request_by_id(request_id)
+    if not request:
+        block_match = None
+        for block in list_paid_request_blocks().values():
+            if str(block.get("request_id") or "") == request_id:
+                block_match = block
+                break
+        if block_match:
+            user_id = int(block_match.get("user_id") or 0)
+            kind = str(block_match.get("kind") or "access")
+        else:
+            return await call.answer("Запрос не найден", show_alert=True)
+    else:
+        user_id = int(request.get("user_id") or 0)
+        kind = str(request.get("kind") or "access")
+
+    block = get_paid_request_block(user_id, kind)
+    if block:
+        clear_paid_request_block(user_id, kind)
+        await call.answer("Заглушка снята")
+        if request:
+            await _show_paid_request_details(call, request_id)
+        else:
+            blocks = list_paid_request_blocks()
+            await call.message.edit_text(
+                "🔇 <b>Заглушки заявок</b>\n\nБлокировка снята.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_paid_blocks_overview_kb(blocks),
+            )
+        return
+
+    await state.update_data(target_paid_request_mute_user_id=user_id, target_paid_request_mute_kind=kind)
+    await state.set_state(PaidSubSettings.waiting_request_mute_value)
+    await _open_paid_request_block_prompt(call, user_id, kind)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("paidblock_mute_"))
+async def cb_paid_block_mute(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    user_id, kind = _parse_paid_request_block_target(call.data[len("paidblock_mute_"):])
+    if not user_id:
+        return await call.answer("Пользователь не найден", show_alert=True)
+    await state.update_data(target_paid_request_mute_user_id=user_id, target_paid_request_mute_kind=kind)
+    await state.set_state(PaidSubSettings.waiting_request_mute_value)
+    await _open_paid_request_block_prompt(call, user_id, kind)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("paidblock_clear_"))
+async def cb_paid_block_clear(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    user_id, kind = _parse_paid_request_block_target(call.data[len("paidblock_clear_"):])
+    if not user_id:
+        return await call.answer("Пользователь не найден", show_alert=True)
+    clear_paid_request_block(user_id, kind)
+    await call.answer("Заглушка снята")
+    blocks = list_paid_request_blocks()
+    await call.message.edit_text(
+        "🔇 <b>Заглушки заявок</b>\n\nБлокировка снята.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_blocks_overview_kb(blocks),
+    )
 
 
 @router.callback_query(F.data.startswith("paidset_"))
