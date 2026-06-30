@@ -240,6 +240,7 @@ def _paid_subscriptions_kb(users: dict) -> InlineKeyboardMarkup:
             label = f"💳 {display_name or user_key}"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"paidsub_{user_key}")])
     rows.append([
+        InlineKeyboardButton(text="📥 Запросы", callback_data="adminpaysub_requests"),
         InlineKeyboardButton(text="⚙️ Настройки", callback_data="adminpaysub_settings"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -251,9 +252,54 @@ def _paid_request_kb(request_id: str) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="✅ Выдать", callback_data=f"paidreq_ok_{request_id}"),
                 InlineKeyboardButton(text="❌ Отмена", callback_data=f"paidreq_no_{request_id}"),
-            ]
+            ],
+            [InlineKeyboardButton(text="⬅️ К запросам", callback_data="adminpaysub_requests")],
         ]
     )
+
+
+def _paid_requests_data() -> dict:
+    return load_paid_requests()
+
+
+def _paid_request_label(request: dict) -> str:
+    user_id = int(request.get("user_id") or 0)
+    username = str(request.get("username") or "").strip()
+    first_name = str(request.get("first_name") or "").strip()
+    last_name = str(request.get("last_name") or "").strip()
+    full_name = " ".join(part for part in [first_name, last_name] if part).strip()
+    base = f"{user_id}"
+    if username:
+        base += f" @{username}"
+    elif full_name:
+        base += f" {full_name}"
+    return base
+
+
+def _paid_requests_overview_kb(requests: dict) -> InlineKeyboardMarkup:
+    trial_count = sum(1 for request in requests.values() if str(request.get("kind") or "access") == "access")
+    payment_count = sum(1 for request in requests.values() if str(request.get("kind") or "") == "payment_check")
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"🧪 Триал-запросы ({trial_count})", callback_data="adminpaysub_requests_trial")],
+            [InlineKeyboardButton(text=f"💳 Запросы оплаты ({payment_count})", callback_data="adminpaysub_requests_payment")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_back")],
+        ]
+    )
+
+
+def _paid_requests_list_kb(requests: dict, *, kind: str) -> InlineKeyboardMarkup:
+    rows = []
+    for request in sorted(requests.values(), key=lambda item: int(item.get("user_id") or 0), reverse=True):
+        if str(request.get("kind") or "access") != kind:
+            continue
+        request_id = str(request.get("request_id") or "")
+        if not request_id:
+            continue
+        prefix = "🧪" if kind == "access" else "💳"
+        rows.append([InlineKeyboardButton(text=f"{prefix} {_paid_request_label(request)}", callback_data=f"paidreq_view_{request_id}")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_requests")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _paid_payment_kb(request_id: str) -> InlineKeyboardMarkup:
@@ -262,7 +308,8 @@ def _paid_payment_kb(request_id: str) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="✅ Оплата проверена", callback_data=f"paidpay_ok_{request_id}"),
                 InlineKeyboardButton(text="❌ Оплата не найдена", callback_data=f"paidpay_no_{request_id}"),
-            ]
+            ],
+            [InlineKeyboardButton(text="⬅️ К запросам", callback_data="adminpaysub_requests")],
         ]
     )
 
@@ -377,6 +424,20 @@ async def render_paid_subscriptions(message_or_call):
             await message_or_call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
         return
     await message_or_call.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+
+
+async def _show_paid_request_details(call: types.CallbackQuery, request_id: str) -> None:
+    request = get_paid_request_by_id(request_id)
+    if not request:
+        await call.answer("Запрос не найден", show_alert=True)
+        return
+    kind = str(request.get("kind") or "access")
+    settings = load_paid_settings()
+    title = "Новая заявка на первичный триал доступ" if kind == "access" else "Пользователь сообщил об оплате"
+    text = _admin_paid_request_text(request, settings, title)
+    markup = _paid_request_kb(request_id) if kind == "access" else _paid_payment_kb(request_id)
+    await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+    await call.answer()
 
 
 def _subscription_summary(subscription: dict) -> str:
@@ -1014,12 +1075,62 @@ async def cb_adminpaysub_settings(call: types.CallbackQuery):
     await _show_paid_settings(call, edit=True)
 
 
+@router.callback_query(F.data == "adminpaysub_requests")
+async def cb_adminpaysub_requests(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    requests = _paid_requests_data()
+    await call.answer()
+    await call.message.edit_text(
+        "📥 <b>Запросы платных подписок</b>\n\n"
+        "Выбери, что посмотреть: триал-запросы или запросы на оплату.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_requests_overview_kb(requests),
+    )
+
+
+@router.callback_query(F.data == "adminpaysub_requests_trial")
+async def cb_adminpaysub_requests_trial(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    requests = _paid_requests_data()
+    await call.answer()
+    await call.message.edit_text(
+        "🧪 <b>Триал-запросы</b>\n\n"
+        "Ниже показаны все неподтверждённые запросы на первичный триал доступ.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_requests_list_kb(requests, kind="access"),
+    )
+
+
+@router.callback_query(F.data == "adminpaysub_requests_payment")
+async def cb_adminpaysub_requests_payment(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    requests = _paid_requests_data()
+    await call.answer()
+    await call.message.edit_text(
+        "💳 <b>Запросы на оплату</b>\n\n"
+        "Ниже показаны все неподтверждённые запросы на проверку оплаты.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_requests_list_kb(requests, kind="payment_check"),
+    )
+
+
 @router.callback_query(F.data == "adminpaysub_back")
 async def cb_adminpaysub_back(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     await call.answer()
     await render_paid_subscriptions(call)
+
+
+@router.callback_query(F.data.startswith("paidreq_view_"))
+async def cb_paid_request_view(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    request_id = call.data[len("paidreq_view_"):]
+    await _show_paid_request_details(call, request_id)
 
 
 @router.callback_query(F.data.startswith("paidset_"))
