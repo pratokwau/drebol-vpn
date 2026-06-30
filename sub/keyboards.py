@@ -257,6 +257,10 @@ def inbound_settings_kb(inbound_id: int, sub_port: str) -> InlineKeyboardMarkup:
 
 def myvpn_main_kb(devices: list, admin_disabled: bool, settings_ready: bool = True) -> InlineKeyboardMarkup:
     rows = []
+    rows.append([
+        InlineKeyboardButton(text="ℹ️ Информация", callback_data="myvpn_info"),
+        InlineKeyboardButton(text="📖 Инструкция", callback_data="myvpn_inst_main"),
+    ])
     for d in devices:
         ib_id = d.get("ib_id")
         email = d.get("email", "?")

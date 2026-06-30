@@ -132,6 +132,48 @@ async def _render_vpn(message: types.Message, user_data: dict):
     )
 
 
+async def _render_vpn_info(call_or_msg, user_data: dict):
+    devices = user_data.get("devices", [])
+    admin_disabled = bool(user_data.get("admin_disabled", False))
+    settings_ready = user_settings_ready(user_data)
+    max_devices = int(user_data.get("max_devices") or 1)
+    limit_ip = int(user_data.get("limit_ip") or 2)
+    limit_gb = user_data.get("limit_gb")
+    flow = str(user_data.get("flow") or "xtls-rprx-vision")
+    expiry_time_ms = int(user_data.get("expiry_time_ms") or 0)
+    remaining = _format_remaining_vpn(expiry_time_ms)
+    expiry_text = _format_short_dt(expiry_time_ms)
+    traffic_text = "∞" if limit_gb in (None, "", 0, 0.0) else str(limit_gb)
+    text = (
+        "🔐 <b>Мой VPN</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>👑 Текущий тариф</b>\n"
+        "Админский доступ\n\n"
+        "<b>⏳ Осталось</b>\n"
+        f"{remaining}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>💎 Параметры тарифа</b>\n\n"
+        f"📱 До {max_devices} устройств\n"
+        f"🌐 До {limit_ip} IP одновременно\n"
+        f"♾ {'Безлимитный' if traffic_text == '∞' else traffic_text + ' ГБ'} трафик\n"
+        f"⚡ Flow: <b>{flow}</b>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>📅 Доступ до</b>\n"
+        f"{expiry_text}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>📱 Устройства</b>\n"
+        f"{len(devices)} подключено\n"
+    )
+    markup = myvpn_main_kb(devices, admin_disabled, settings_ready=settings_ready)
+    if isinstance(call_or_msg, types.CallbackQuery):
+        try:
+            await call_or_msg.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        except Exception:
+            await call_or_msg.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+    else:
+        await call_or_msg.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+
+
 @router.message(Command("vpn"))
 async def cmd_vpn(message: types.Message):
     user_data = await _load_synced_user_data(message.from_user.id)
@@ -153,6 +195,39 @@ async def cb_vpn_refresh(call: types.CallbackQuery):
         return await call.answer("Доступ отключён администратором", show_alert=True)
     await call.answer()
     await _render_vpn(call.message, user_data)
+
+
+@router.callback_query(F.data == "myvpn_info")
+async def cb_vpn_info(call: types.CallbackQuery):
+    user_data = await _load_synced_user_data(call.from_user.id)
+    if not _has_admin_vpn_access(user_data):
+        return await call.answer("Нет доступа", show_alert=True)
+    if user_data.get("admin_disabled"):
+        return await call.answer("Доступ отключён администратором", show_alert=True)
+    await call.answer()
+    await _render_vpn_info(call, user_data)
+
+
+@router.callback_query(F.data == "myvpn_inst_main")
+async def cb_vpn_inst_main(call: types.CallbackQuery):
+    user_data = await _load_synced_user_data(call.from_user.id)
+    if not _has_admin_vpn_access(user_data):
+        return await call.answer("Нет доступа", show_alert=True)
+    if user_data.get("admin_disabled"):
+        return await call.answer("Доступ отключён администратором", show_alert=True)
+    device = next((item for item in user_data.get("devices", []) if item.get("ib_id") is not None), None)
+    if not device:
+        return await call.answer("⛔ Инструкция пока недоступна.", show_alert=True)
+    inbound_id = int(device.get("ib_id", 0) or 0)
+    client = await api_get_client(str(device.get("email", "")))
+    sub_id = str((client or {}).get("subId") or device.get("email", ""))
+    await call.answer()
+    await call.message.edit_text(
+        happ_instruction(sub_id, inbound_id),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+        reply_markup=myvpn_main_kb(user_data.get("devices", []), bool(user_data.get("admin_disabled", False)), settings_ready=user_settings_ready(user_data)),
+    )
 
 
 @router.callback_query(F.data.startswith("myvpn_dev_"))
