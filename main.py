@@ -9,6 +9,7 @@ from config import ADMIN_ID
 from handlers.admin import router as admin_router
 from handlers.cancel import router as cancel_router
 from handlers.start import router as start_router
+from handlers.tickets import router as tickets_router
 from loader import bot, dp
 from storage import clear_update_state, load_update_state
 from updater import get_remote_head, get_local_head
@@ -134,6 +135,7 @@ async def _notify_about_paid_subscriptions() -> None:
 async def main() -> None:
     dp.include_router(cancel_router)
     dp.include_router(start_router)
+    dp.include_router(tickets_router)
     dp.include_router(admin_router)
     dp.include_router(xui_router)
     await setup_commands()
