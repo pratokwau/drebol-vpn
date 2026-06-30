@@ -319,26 +319,26 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
     settings = load_paid_settings()
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"🧪 Trial: {format_duration(settings['trial_seconds'])}", callback_data="paidset_trial_seconds")],
-            [InlineKeyboardButton(text=f"⏳ Оплата: {format_duration(settings['payment_seconds'])}", callback_data="paidset_payment_seconds")],
+            [InlineKeyboardButton(text=f"🧪 Пробный период: {format_duration(settings['trial_seconds'])}", callback_data="paidset_trial_seconds")],
+            [InlineKeyboardButton(text=f"⏳ Период оплаты: {format_duration(settings['payment_seconds'])}", callback_data="paidset_payment_seconds")],
             [InlineKeyboardButton(text=f"💰 Сумма: {settings['payment_amount']} ₽", callback_data="paidset_payment_amount")],
-            [InlineKeyboardButton(text=f"🕒 Grace: {format_duration(settings['grace_seconds'])}", callback_data="paidset_grace_seconds")],
-            [InlineKeyboardButton(text=f"🔗 Оплата: {'задана' if settings['payment_url'] else 'не задана'}", callback_data="paidset_payment_url")],
+            [InlineKeyboardButton(text=f"🕒 Время на продление: {format_duration(settings['grace_seconds'])}", callback_data="paidset_grace_seconds")],
+            [InlineKeyboardButton(text=f"🔗 Ссылка на оплату: {'задана' if settings['payment_url'] else 'не задана'}", callback_data="paidset_payment_url")],
             [
                 InlineKeyboardButton(text=f"📱 Лимит устройств: {settings['max_devices']}", callback_data="paidset_max_devices"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_max_devices"),
+                InlineKeyboardButton(text="По умолчанию", callback_data="paiddef_max_devices"),
             ],
             [
                 InlineKeyboardButton(text=f"💾 Лимит ГБ: {_format_limit_gb(settings['limit_gb'])}", callback_data="paidset_limit_gb"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_limit_gb"),
+                InlineKeyboardButton(text="По умолчанию", callback_data="paiddef_limit_gb"),
             ],
             [
                 InlineKeyboardButton(text=f"🌐 Лимит IP: {settings['limit_ip']}", callback_data="paidset_limit_ip"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_limit_ip"),
+                InlineKeyboardButton(text="По умолчанию", callback_data="paiddef_limit_ip"),
             ],
             [
-                InlineKeyboardButton(text=f"⚡ Flow: {settings['flow']}", callback_data="paidset_flow"),
-                InlineKeyboardButton(text="По дефолту", callback_data="paiddef_flow"),
+                InlineKeyboardButton(text=f"⚡ Параметр flow: {settings['flow']}", callback_data="paidset_flow"),
+                InlineKeyboardButton(text="По умолчанию", callback_data="paiddef_flow"),
             ],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_back")],
         ]
@@ -347,13 +347,13 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
 
 def _paid_setting_prompt(field: str) -> str:
     if field == "trial_seconds":
-        return "Введите длительность trial любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>1 месяц</code>. Можно <code>-</code> для значения по умолчанию."
+        return "Введите длительность пробного периода любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>1 месяц</code>. Можно <code>-</code> для значения по умолчанию."
     if field == "payment_seconds":
         return "Введите срок платной подписки любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>1 месяц</code>. Можно <code>-</code> для значения по умолчанию."
     if field == "payment_amount":
         return "Введите сумму оплаты в рублях или <code>-</code> для значения по умолчанию."
     if field == "grace_seconds":
-        return "Введите время на оплату любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>36 часов</code>. Можно <code>-</code> для значения по умолчанию."
+        return "Введите время на продление любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>36 часов</code>. Можно <code>-</code> для значения по умолчанию."
     if field == "payment_url":
         return "Введите ссылку на оплату или <code>-</code>, чтобы очистить её."
     if field == "max_devices":
@@ -386,15 +386,15 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
     settings = load_paid_settings()
     text = (
         "⚙️ <b>Настройки платных подписок</b>\n\n"
-        f"🧪 Trial: <b>{format_duration(settings['trial_seconds'])}</b>\n"
-        f"⏳ Оплата: <b>{format_duration(settings['payment_seconds'])}</b>\n"
+        f"🧪 Пробный период: <b>{format_duration(settings['trial_seconds'])}</b>\n"
+        f"⏳ Период оплаты: <b>{format_duration(settings['payment_seconds'])}</b>\n"
         f"💰 Сумма: <b>{settings['payment_amount']} ₽</b>\n"
-        f"🕒 Grace: <b>{format_duration(settings['grace_seconds'])}</b>\n"
-        f"🔗 Ссылка: <b>{'задана' if settings['payment_url'] else 'не задана'}</b>\n"
+        f"🕒 Время на продление: <b>{format_duration(settings['grace_seconds'])}</b>\n"
+        f"🔗 Ссылка на оплату: <b>{'задана' if settings['payment_url'] else 'не задана'}</b>\n"
         f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
         f"💾 Лимит ГБ: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
-        f"⚡ Flow: <b>{settings['flow']}</b>"
+        f"⚡ Параметр flow: <b>{settings['flow']}</b>"
     )
     markup = _paid_settings_kb()
     if edit and isinstance(call_or_message, types.CallbackQuery):
