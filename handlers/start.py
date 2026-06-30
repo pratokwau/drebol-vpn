@@ -29,7 +29,10 @@ def _start_kb(*, has_admin_sub: bool, has_paid_sub: bool, is_admin_user: bool) -
             InlineKeyboardButton(text="⚙️ Админка", callback_data="start_admin"),
             InlineKeyboardButton(text="📡 Админская подписка", callback_data="start_adminsub"),
         ])
-        rows.append([InlineKeyboardButton(text="💳 Платные подписки", callback_data="start_adminpaysub")])
+        rows.append([
+            InlineKeyboardButton(text="💳 Платные подписки", callback_data="start_adminpaysub"),
+            InlineKeyboardButton(text="🎫 Тикеты", callback_data="start_tickets"),
+        ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -115,3 +118,11 @@ async def cb_start_adminsub(call: types.CallbackQuery):
 async def cb_start_adminpaysub(call: types.CallbackQuery):
     await call.answer()
     await render_paid_subscriptions(call.message)
+
+
+@router.callback_query(F.data == "start_tickets")
+async def cb_start_tickets(call: types.CallbackQuery, state: FSMContext):
+    await call.answer()
+    from handlers.tickets import cb_admin_tickets
+
+    await cb_admin_tickets(call, state)

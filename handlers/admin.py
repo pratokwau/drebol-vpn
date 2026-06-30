@@ -26,6 +26,7 @@ def _admin_kb() -> types.InlineKeyboardMarkup:
     rows = [
         [types.InlineKeyboardButton(text="🔄 Проверить обновление", callback_data="app_update_check")],
         [types.InlineKeyboardButton(text="⚙️ Настроить XUI", callback_data="admin_xui_settings")],
+        [types.InlineKeyboardButton(text="🎫 Тикеты", callback_data="admin_tickets")],
     ]
     if configured:
         rows[0] = [types.InlineKeyboardButton(text="⬆️ Обновить бота", callback_data="app_update_apply")]
