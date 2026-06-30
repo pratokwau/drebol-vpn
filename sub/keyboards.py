@@ -68,12 +68,17 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
     for user_key, info in vpn_users.items():
         if str(user_key).startswith("paid_") or str(info.get("subscription_type", "")).lower() == "paid":
             continue
-        current_devices = [
+        stored_devices = [
             dict(device)
             for device in info.get("devices", [])
+        ]
+        current_devices = [
+            device
+            for device in stored_devices
             if int(device.get("ib_id", 0) or 0) == int(ib_id or 0) and device.get("email") in current_emails
         ]
-        if not current_devices:
+        should_show_user = bool(current_devices) or int(info.get("default_ib_id", 0) or 0) == int(ib_id or 0)
+        if not should_show_user:
             continue
         grouped[str(user_key)] = {**info, "devices": current_devices}
         bound_emails.update(device.get("email") for device in current_devices if device.get("email"))
@@ -106,7 +111,8 @@ def clients_kb(inbound: dict, page: int = 0) -> InlineKeyboardMarkup:
             username_part = f" @{username}" if username else " (без username)"
             id_part = f"{user_key}{username_part}"
         note_suffix = f" • 📝{(label_name or note)[:15]}" if (label_name or note) else ""
-        items.append(("user", user_key, f"{prefix} {id_part} ({n_devices} устр.){note_suffix}"))
+        device_suffix = f" ({n_devices} устр.)" if n_devices else " (0 устр.)"
+        items.append(("user", user_key, f"{prefix} {id_part}{device_suffix}{note_suffix}"))
     total = len(items)
     total_pages = (total + CLIENTS_PAGE_SIZE - 1) // CLIENTS_PAGE_SIZE or 1
     page = max(0, min(page, total_pages - 1))
