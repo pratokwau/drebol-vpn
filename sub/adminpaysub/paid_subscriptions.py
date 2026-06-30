@@ -824,15 +824,21 @@ def _paid_user_info_text(subscription: dict) -> str:
 def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None = None) -> InlineKeyboardMarkup:
     rows = []
     paid_user = load_vpn_users().get(_paid_user_key(user_id), {})
+    request_kind = str((request or {}).get("kind") or "").lower()
+    renew_requested = request is not None and subscription is not None and request_kind in {"renew", "payment_check"}
     if not subscription:
         rows.append([InlineKeyboardButton(text="💳 Получить подписку", callback_data="paiduser_request")])
     else:
         rows.append([InlineKeyboardButton(text="ℹ️ Информация о подписке", callback_data="paiduser_info")])
-        rows.append([InlineKeyboardButton(text="💳 Продлить подписку", callback_data=f"paiduser_renew_{user_id}")])
+        if renew_requested:
+            rows.append([InlineKeyboardButton(text="⏳ Заявка на продление отправлена", callback_data="paiduser_wait")])
+        else:
+            rows.append([InlineKeyboardButton(text="💳 Продлить подписку", callback_data=f"paiduser_renew_{user_id}")])
         if paid_user.get("devices"):
             rows.append([InlineKeyboardButton(text="📖 Инструкция", callback_data="paiduser_inst")])
     if request:
-        rows = [[InlineKeyboardButton(text="⏳ Заявка уже отправлена", callback_data="paiduser_wait")]]
+        if not subscription:
+            rows = [[InlineKeyboardButton(text="⏳ Заявка уже отправлена", callback_data="paiduser_wait")]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -1173,11 +1179,11 @@ async def cb_paid_user_inst(call: types.CallbackQuery):
     user_info = load_vpn_users().get(_paid_user_key(call.from_user.id), {})
     device = next((item for item in user_info.get("devices", []) if item.get("ib_id") is not None), None)
     if not device:
-        return await call.message.answer("⛔ Инструкция пока недоступна.")
+        return await call.answer("⛔ Инструкция пока недоступна.", show_alert=True)
     inbound_id = int(device.get("ib_id", 0) or 0)
     client = await api_get_client(str(device.get("email", "")))
     sub_id = str((client or {}).get("subId") or device.get("email", ""))
-    await call.message.answer(
+    await call.message.edit_text(
         happ_instruction(sub_id, inbound_id),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
