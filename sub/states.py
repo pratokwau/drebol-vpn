@@ -42,3 +42,4 @@ class XuiSettings(StatesGroup):
 class PaidSubSettings(StatesGroup):
     waiting_value = State()
     waiting_action_value = State()
+    waiting_subscription_value = State()
