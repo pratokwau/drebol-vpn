@@ -3,8 +3,10 @@ from __future__ import annotations
 from aiogram import F, Router, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from handlers.admin import render_admin_menu
+from handlers.tickets import open_support_flow
 from sub.adminpaysub.paid_storage import has_paid_subscription
 from sub.adminsub.storage import get_vpn_user, user_settings_ready
 from sub.utils import is_admin
@@ -20,10 +22,8 @@ def _start_kb(*, has_admin_sub: bool, has_paid_sub: bool, is_admin_user: bool) -
     rows = []
     if has_admin_sub:
         rows.append([InlineKeyboardButton(text="🔐 Мой VPN", callback_data="start_vpn")])
-    if has_paid_sub:
-        rows.append([InlineKeyboardButton(text="💳 Моя подписка", callback_data="start_sub")])
-    else:
-        rows.append([InlineKeyboardButton(text="💳 Моя подписка", callback_data="start_sub")])
+    rows.append([InlineKeyboardButton(text="💳 Моя подписка", callback_data="start_sub")])
+    rows.append([InlineKeyboardButton(text="🆘 Поддержка", callback_data="start_support")])
     if is_admin_user:
         rows.append([
             InlineKeyboardButton(text="⚙️ Админка", callback_data="start_admin"),
@@ -51,13 +51,13 @@ async def _render_start(message: types.Message) -> None:
     )
     await message.answer(
         text,
-            parse_mode=ParseMode.HTML,
-            reply_markup=_start_kb(
-                has_admin_sub=has_admin_sub,
-                has_paid_sub=has_paid_sub,
-                is_admin_user=is_admin_user,
-            ),
-        )
+        parse_mode=ParseMode.HTML,
+        reply_markup=_start_kb(
+            has_admin_sub=has_admin_sub,
+            has_paid_sub=has_paid_sub,
+            is_admin_user=is_admin_user,
+        ),
+    )
 
 
 @router.message(Command("start"))
@@ -91,6 +91,12 @@ async def cb_start_sub(call: types.CallbackQuery):
         last_name=call.from_user.last_name or "",
         edit=True,
     )
+
+
+@router.callback_query(F.data == "start_support")
+async def cb_start_support(call: types.CallbackQuery, state: FSMContext):
+    await call.answer()
+    await open_support_flow(call, state, edit=True)
 
 
 @router.callback_query(F.data == "start_admin")
