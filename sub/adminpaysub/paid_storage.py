@@ -268,6 +268,7 @@ def extend_paid_subscription(info: dict, settings: dict, *, from_now: bool = Fal
     info["active"] = True
     info["paid_ends_at"] = base + payment_seconds if payment_seconds else base
     info["grace_ends_at"] = info["paid_ends_at"] + grace_seconds if grace_seconds else info["paid_ends_at"]
+    info["expiry_time_ms"] = int(info["grace_ends_at"] * 1000) if info.get("grace_ends_at") else int(info["paid_ends_at"] * 1000)
     info["last_activity_at"] = now
     return info
 

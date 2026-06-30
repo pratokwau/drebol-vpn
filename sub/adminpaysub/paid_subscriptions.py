@@ -1106,6 +1106,7 @@ async def _sync_paid_user_devices_expiry(
     user_id: int,
     expiry_time_ms: int,
     *,
+    enabled: bool = True,
     limit_ip: int | None = None,
     limit_gb: float | None = None,
     flow: str | None = None,
@@ -1124,7 +1125,7 @@ async def _sync_paid_user_devices_expiry(
             client["expiryTime"] = int(expiry_time_ms)
             client["limitIp"] = target_limit_ip
             client["flow"] = target_flow
-            client["enable"] = True
+            client["enable"] = bool(enabled)
             await api_update_client(email, client)
 
 
@@ -1776,9 +1777,10 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
         updated["total_paid_amount"] = int(updated.get("total_paid_amount") or 0) + int(settings.get("payment_amount") or DEFAULT_PAID_PAYMENT_AMOUNT)
         updated["last_activity_at"] = int(time.time())
         set_paid_subscription(user_id, updated)
+        device_expiry_ms = int(updated.get("grace_ends_at") or updated.get("paid_ends_at") or 0) * 1000
         await _sync_paid_user_devices_expiry(
             user_id,
-            int(updated.get("paid_ends_at") or 0) * 1000,
+            device_expiry_ms,
             limit_ip=int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP),
             limit_gb=float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB),
             flow=str(settings.get("flow") or DEFAULT_PAID_FLOW),
@@ -1872,9 +1874,10 @@ async def cb_paid_payment_ok(call: types.CallbackQuery):
     updated["total_paid_amount"] = int(updated.get("total_paid_amount") or 0) + int(settings.get("payment_amount") or DEFAULT_PAID_PAYMENT_AMOUNT)
     updated["last_activity_at"] = int(time.time())
     set_paid_subscription(user_id, updated)
+    device_expiry_ms = int(updated.get("grace_ends_at") or updated.get("paid_ends_at") or 0) * 1000
     await _sync_paid_user_devices_expiry(
         user_id,
-        int(updated.get("paid_ends_at") or 0) * 1000,
+        device_expiry_ms,
         limit_ip=int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP),
         limit_gb=float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB),
         flow=str(settings.get("flow") or DEFAULT_PAID_FLOW),
