@@ -5,6 +5,7 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command
 
 from sub.api import api_get_client, api_update_client
+from sub.adminpaysub.paid_settings_store import format_duration
 from sub.instructions import happ_instruction
 from sub.keyboards import myvpn_device_kb, myvpn_main_kb
 from sub.adminsub.storage import get_vpn_user, user_settings_ready
@@ -27,6 +28,43 @@ def _device_cache_key(ib_id: int, email: str) -> str:
     return cache(f"mvd_{ib_id}_{email}", {"email": email, "ib_id": ib_id})
 
 
+def _format_short_dt(ts: int | None) -> str:
+    from datetime import datetime
+
+    if not ts:
+        return "Не задано"
+    try:
+        return datetime.fromtimestamp(int(ts) / 1000).strftime("%d.%m.%Y • %H:%M")
+    except Exception:
+        return "Не задано"
+
+
+def _format_remaining_vpn(expiry_time_ms: int | None) -> str:
+    from datetime import datetime
+
+    if not expiry_time_ms or int(expiry_time_ms) >= 2523456000000:
+        return "∞"
+    remaining = max(0, int(expiry_time_ms) - int(datetime.now().timestamp() * 1000))
+    if remaining <= 0:
+        return "00:00:00"
+    return format_duration(max(0, remaining // 1000))
+
+
+async def _load_synced_user_data(user_id: int) -> dict | None:
+    user_data = get_vpn_user(user_id)
+    if not user_data:
+        return None
+    if _has_admin_vpn_access(user_data):
+        try:
+            from sub.views import sync_user_devices_with_panel
+
+            if await sync_user_devices_with_panel(str(user_id)):
+                user_data = get_vpn_user(user_id) or user_data
+        except Exception:
+            pass
+    return user_data
+
+
 def _find_device(user_data: dict, dev_hash: str) -> dict | None:
     for d in user_data.get("devices", []):
         if _device_cache_key(int(d.get("ib_id", 0) or 0), d.get("email", "")) == dev_hash:
@@ -38,22 +76,52 @@ async def _render_vpn(message: types.Message, user_data: dict):
     devices = user_data.get("devices", [])
     admin_disabled = bool(user_data.get("admin_disabled", False))
     settings_ready = user_settings_ready(user_data)
-    lines = ["🔐 <b>Ваш VPN</b>", ""]
+    max_devices = int(user_data.get("max_devices") or 1)
+    limit_ip = int(user_data.get("limit_ip") or 2)
+    limit_gb = user_data.get("limit_gb")
+    flow = str(user_data.get("flow") or "xtls-rprx-vision")
+    expiry_time_ms = int(user_data.get("expiry_time_ms") or 0)
+    remaining = _format_remaining_vpn(expiry_time_ms)
+    expiry_text = _format_short_dt(expiry_time_ms)
+    traffic_text = "∞" if limit_gb in (None, "", 0, 0.0) else str(limit_gb)
+    lines = [
+        "🔐 <b>Информация о вашем VPN</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "<b>👑 Текущий тариф</b>",
+        "Админский доступ",
+        "",
+        "<b>⏳ Осталось</b>",
+        remaining,
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "<b>💎 Параметры тарифа</b>",
+        "",
+        f"📱 До {max_devices} устройств",
+        f"🌐 До {limit_ip} IP одновременно",
+        f"♾ {'Безлимитный' if traffic_text == '∞' else traffic_text + ' ГБ'} трафик",
+        f"⚡ Flow: <b>{flow}</b>",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "<b>📅 Доступ до</b>",
+        expiry_text,
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+    ]
     if not settings_ready:
-        lines.append("⚙️ Сначала администратор должен настроить ваш профиль.")
+        lines.extend(["⚙️ Профиль ещё не настроен администратором.", ""])
     elif not devices:
-        lines.append("У вас пока нет подключённых устройств.")
+        lines.extend(["Пока нет подключённых устройств.", ""])
     else:
-        active_count = sum(1 for device in devices if device.get("enabled", True))
-        lines.append(f"📱 Устройств: <b>{len(devices)}</b>")
-        lines.append(f"✅ Активных: <b>{active_count}</b>")
-        lines.append("")
+        lines.extend(["Выберите устройство ниже, чтобы открыть управление.", ""])
         for idx, device in enumerate(devices, 1):
             state = "включено" if device.get("enabled", True) else "выключено"
-            lines.append(f"{idx}. <code>{device.get('email', '?')}</code> — {state}")
-    if settings_ready:
+            label = device.get("label") or device.get("email") or "устройство"
+            lines.append(f"{idx}. <b>{label}</b> — {state}")
         lines.append("")
-        lines.append("Выберите устройство ниже, чтобы открыть управление.")
+    lines.extend(["💙 Спасибо, что пользуетесь нашим VPN!"])
     if admin_disabled:
         lines.append("")
         lines.append("🚫 Доступ сейчас отключён администратором.")
@@ -66,7 +134,7 @@ async def _render_vpn(message: types.Message, user_data: dict):
 
 @router.message(Command("vpn"))
 async def cmd_vpn(message: types.Message):
-    user_data = get_vpn_user(message.from_user.id)
+    user_data = await _load_synced_user_data(message.from_user.id)
     if not _has_admin_vpn_access(user_data):
         await message.answer("⛔ У вас пока нет доступа к /vpn. Администратор должен сначала настроить профиль.")
         return
@@ -78,7 +146,7 @@ async def cmd_vpn(message: types.Message):
 
 @router.callback_query(F.data == "myvpn_refresh")
 async def cb_vpn_refresh(call: types.CallbackQuery):
-    user_data = get_vpn_user(call.from_user.id)
+    user_data = await _load_synced_user_data(call.from_user.id)
     if not _has_admin_vpn_access(user_data):
         return await call.answer("Нет доступа", show_alert=True)
     if user_data.get("admin_disabled"):
@@ -89,7 +157,7 @@ async def cb_vpn_refresh(call: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("myvpn_dev_"))
 async def cb_vpn_device(call: types.CallbackQuery):
-    user_data = get_vpn_user(call.from_user.id)
+    user_data = await _load_synced_user_data(call.from_user.id)
     if not _has_admin_vpn_access(user_data) or not user_data.get("has_vpn_access"):
         return await call.answer("Нет доступа", show_alert=True)
     if user_data.get("admin_disabled"):
@@ -117,7 +185,7 @@ async def cb_vpn_device(call: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("myvpn_tog_"))
 async def cb_vpn_toggle(call: types.CallbackQuery):
-    user_data = get_vpn_user(call.from_user.id)
+    user_data = await _load_synced_user_data(call.from_user.id)
     if not _has_admin_vpn_access(user_data) or not user_data.get("has_vpn_access"):
         return await call.answer("Нет доступа", show_alert=True)
     if user_data.get("admin_disabled"):
@@ -142,7 +210,7 @@ async def cb_vpn_toggle(call: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("myvpn_inst_"))
 async def cb_vpn_inst(call: types.CallbackQuery):
-    user_data = get_vpn_user(call.from_user.id)
+    user_data = await _load_synced_user_data(call.from_user.id)
     if not _has_admin_vpn_access(user_data):
         return await call.answer("Нет доступа", show_alert=True)
     payload = call.data[len("myvpn_inst_"):]
