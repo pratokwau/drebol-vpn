@@ -40,6 +40,7 @@ from sub.adminpaysub.paid_storage import (
     get_paid_subscription,
     has_paid_subscription,
     paid_subscription_status,
+    load_paid_requests,
     set_paid_subscription,
 )
 from sub.states import PaidSubSettings
