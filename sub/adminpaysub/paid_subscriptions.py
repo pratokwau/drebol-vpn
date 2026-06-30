@@ -39,8 +39,11 @@ from sub.adminpaysub.paid_storage import (
     get_paid_request_by_id,
     get_paid_subscription,
     has_paid_subscription,
+    load_paid_subscriptions,
     paid_subscription_status,
     load_paid_requests,
+    save_paid_subscriptions,
+    shift_paid_subscription_timeline,
     set_paid_subscription,
 )
 from sub.states import PaidSubSettings
@@ -175,6 +178,8 @@ def _format_short_dt(ts: int | None) -> str:
 
 def _current_tariff_label(subscription: dict) -> str:
     status = paid_subscription_status(subscription)
+    if status == "frozen":
+        return "Заморожена"
     if status in {"active", "grace", "pending_payment"}:
         return "Premium"
     if status == "expired":
@@ -184,6 +189,8 @@ def _current_tariff_label(subscription: dict) -> str:
 
 def _current_tariff_icon(subscription: dict) -> str:
     status = paid_subscription_status(subscription)
+    if status == "frozen":
+        return "❄️"
     if status in {"active", "grace", "pending_payment"}:
         return "👑"
     if status == "expired":
@@ -197,6 +204,7 @@ def _subscription_status_ru(subscription: dict) -> str:
         "trial": "Пробный",
         "active": "Активна",
         "grace": "На продлении",
+        "frozen": "Заморожена",
         "expired": "Истекла",
         "pending_payment": "Ожидает оплаты",
         "blocked": "Заблокирована",
@@ -311,6 +319,23 @@ def _paid_payment_kb(request_id: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="❌ Оплата не найдена", callback_data=f"paidpay_no_{request_id}"),
             ],
             [InlineKeyboardButton(text="⬅️ К запросам", callback_data="adminpaysub_requests")],
+        ]
+    )
+
+
+def _paid_subscription_actions_kb(user_key: str, subscription: dict) -> InlineKeyboardMarkup:
+    is_frozen = paid_subscription_status(subscription) == "frozen"
+    freeze_label = "❄️ Разморозить" if is_frozen else "❄️ Заморозить"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_back"),
+                InlineKeyboardButton(text="⚙️ Настройки", callback_data="adminpaysub_settings"),
+            ],
+            [
+                InlineKeyboardButton(text="➕ Добавить срок", callback_data=f"paidsub_addtime_{user_key}"),
+                InlineKeyboardButton(text=freeze_label, callback_data=f"paidsub_freeze_{user_key}"),
+            ],
         ]
     )
 
@@ -441,8 +466,132 @@ async def _show_paid_request_details(call: types.CallbackQuery, request_id: str)
     await call.answer()
 
 
+async def _sync_paid_subscription_devices(
+    user_id: int,
+    subscription: dict,
+    *,
+    enabled: bool,
+    expire_from_subscription: bool = True,
+) -> None:
+    user_key = _paid_user_key(user_id)
+    info = load_vpn_users().get(user_key, {})
+    expiry_time_ms = int(subscription.get("expiry_time_ms") or 0)
+    if expire_from_subscription and not expiry_time_ms:
+        for field in ("grace_ends_at", "paid_ends_at", "trial_ends_at"):
+            value = int(subscription.get(field) or 0)
+            if value > 0:
+                expiry_time_ms = value * 1000
+                break
+    for device in info.get("devices", []):
+        email = str(device.get("email") or "")
+        if not email:
+            continue
+        client = await api_get_client(email)
+        if not client:
+            continue
+        if expiry_time_ms > 0:
+            client["expiryTime"] = expiry_time_ms
+        client["enable"] = bool(enabled)
+        await api_update_client(email, client)
+
+
+def _subscription_action_target(subscription: dict) -> tuple[str, int]:
+    status = paid_subscription_status(subscription)
+    if status == "trial":
+        base = int(subscription.get("trial_ends_at") or 0)
+    else:
+        base = int(subscription.get("paid_ends_at") or 0)
+    if base <= 0:
+        base = int(subscription.get("grace_ends_at") or 0)
+    return status, base
+
+
+def _apply_paid_subscription_extension(subscription: dict, seconds: int) -> dict:
+    delta = max(0, int(seconds))
+    if delta <= 0:
+        return subscription
+    status = paid_subscription_status(subscription)
+    now = int(time.time())
+    if status == "trial":
+        current_end = int(subscription.get("trial_ends_at") or 0)
+        base = current_end if current_end > now else now
+        subscription["trial_ends_at"] = base + delta
+        if int(subscription.get("grace_ends_at") or 0) > 0:
+            subscription["grace_ends_at"] = int(subscription["grace_ends_at"]) + delta
+        if int(subscription.get("paid_ends_at") or 0) > 0:
+            subscription["paid_ends_at"] = int(subscription["paid_ends_at"]) + delta
+    elif status in {"active", "grace", "pending_payment", "frozen"}:
+        current_end = int(subscription.get("paid_ends_at") or 0)
+        base = current_end if current_end > now else now
+        if current_end <= 0:
+            base = now
+        subscription["paid_ends_at"] = base + delta
+        if int(subscription.get("grace_ends_at") or 0) > 0:
+            subscription["grace_ends_at"] = int(subscription.get("grace_ends_at") or 0) + delta
+        else:
+            grace_seconds = int(subscription.get("grace_seconds") or 0)
+            subscription["grace_ends_at"] = subscription["paid_ends_at"] + grace_seconds if grace_seconds else subscription["paid_ends_at"]
+        if int(subscription.get("trial_ends_at") or 0) > 0 and status == "frozen":
+            subscription["trial_ends_at"] = int(subscription["trial_ends_at"]) + delta
+    else:
+        subscription["paid_ends_at"] = now + delta
+        grace_seconds = int(subscription.get("grace_seconds") or 0)
+        subscription["grace_ends_at"] = subscription["paid_ends_at"] + grace_seconds if grace_seconds else subscription["paid_ends_at"]
+        if int(subscription.get("trial_ends_at") or 0) > 0:
+            subscription["trial_ends_at"] = int(subscription["trial_ends_at"]) + delta
+        subscription["status"] = "active"
+        subscription["active"] = True
+    return subscription
+
+
+def _paid_subscription_detail_payload(user_key: str) -> tuple[str, InlineKeyboardMarkup] | None:
+    info = load_vpn_users().get(user_key)
+    if not info or str(info.get("subscription_type", "")).lower() != "paid":
+        return None
+    username = str(info.get("username") or "").strip()
+    note = str(info.get("note") or "").strip()
+    subscription = get_paid_subscription(int(user_key)) if str(user_key).isdigit() else info
+    display_name = note or username or user_key
+    text = (
+        "💳 <b>Платная подписка</b>\n\n"
+        f"👤 Пользователь: <code>{html.escape(display_name)}</code>\n"
+        f"📦 Тип: <b>{info.get('subscription_type', 'paid')}</b>\n"
+        f"📱 Устройств: <b>{len(info.get('devices', []))}</b>"
+    )
+    if subscription:
+        text += "\n\n" + _subscription_summary(subscription)
+    if note:
+        text += f"\n📝 Заметка: <i>{html.escape(note)}</i>"
+    return text, _paid_subscription_actions_kb(user_key, subscription or info)
+
+
+async def _render_paid_subscription_detail(call: types.CallbackQuery, user_key: str) -> None:
+    payload = _paid_subscription_detail_payload(user_key)
+    if not payload:
+        await call.answer("Подписка не найдена", show_alert=True)
+        return
+    text, markup = payload
+    await call.message.edit_text(
+        text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=markup,
+    )
+    await call.answer()
+
+
 def _subscription_summary(subscription: dict) -> str:
     status = paid_subscription_status(subscription)
+    if status == "frozen":
+        return (
+            "🔐 Ваша VPN-подписка\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "❄️ Текущий тариф\n"
+            "Заморожена\n\n"
+            "⏳ Статус\n"
+            "Доступ временно приостановлен\n\n"
+            "📅 Текущий срок\n"
+            f"{_format_short_dt(subscription.get('paid_ends_at') or subscription.get('trial_ends_at'))}"
+        )
     is_premium = status in {"active", "grace", "pending_payment"}
     plan_label = _current_tariff_label(subscription)
     remaining = _format_active_remaining(subscription) if is_premium else _format_trial_remaining(subscription)
@@ -1126,6 +1275,65 @@ async def cb_adminpaysub_back(call: types.CallbackQuery):
     await render_paid_subscriptions(call)
 
 
+@router.callback_query(F.data.startswith("paidsub_addtime_"))
+async def cb_paid_sub_addtime(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    user_key = call.data[len("paidsub_addtime_"):]
+    info = load_vpn_users().get(user_key)
+    if not info or str(info.get("subscription_type", "")).lower() != "paid":
+        return await call.answer("Подписка не найдена", show_alert=True)
+    await state.update_data(target_paid_action_key=user_key, target_paid_action_type="addtime")
+    await state.set_state(PaidSubSettings.waiting_action_value)
+    await call.message.edit_text(
+        "➕ <b>Добавить срок подписке</b>\n\n"
+        "Отправь, сколько нужно добавить: например <code>1 день</code>, <code>12 часов</code>, <code>30 минут</code>.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("paidsub_freeze_"))
+async def cb_paid_sub_freeze(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    user_key = call.data[len("paidsub_freeze_"):]
+    info = load_vpn_users().get(user_key)
+    if not info or str(info.get("subscription_type", "")).lower() != "paid":
+        return await call.answer("Подписка не найдена", show_alert=True)
+    if not user_key.isdigit():
+        return await call.answer("Для этой подписки действие недоступно", show_alert=True)
+    user_id = int(user_key)
+    subscription = get_paid_subscription(user_id) or {}
+    if not subscription:
+        return await call.answer("Подписка не найдена", show_alert=True)
+    now = int(time.time())
+    current_status = paid_subscription_status(subscription)
+    data = load_paid_subscriptions()
+    current = data.get(str(user_id), subscription)
+    if current_status == "frozen":
+        frozen_at = int(current.get("frozen_at") or now)
+        delta = max(0, now - frozen_at)
+        shift_paid_subscription_timeline(current, delta)
+        current["status"] = str(current.get("frozen_prev_status") or "active")
+        current["active"] = True
+        current.pop("frozen_at", None)
+        current.pop("frozen_prev_status", None)
+        save_paid_subscriptions(data)
+        await _sync_paid_subscription_devices(user_id, current, enabled=True)
+        await call.answer("Подписка разморожена")
+    else:
+        current["frozen_at"] = now
+        current["frozen_prev_status"] = current_status
+        current["status"] = "frozen"
+        current["active"] = False
+        save_paid_subscriptions(data)
+        await _sync_paid_subscription_devices(user_id, current, enabled=False)
+        await call.answer("Подписка заморожена")
+    await _render_paid_subscription_detail(call, user_key)
+
+
 @router.callback_query(F.data.startswith("paidreq_view_"))
 async def cb_paid_request_view(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
@@ -1214,31 +1422,62 @@ async def paid_settings_value(message: types.Message, state):
     await _show_paid_settings(message, edit=False)
 
 
+@router.message(PaidSubSettings.waiting_action_value)
+async def paid_subscription_action_value(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    action_type = str(data.get("target_paid_action_type") or "")
+    user_key = str(data.get("target_paid_action_key") or "")
+    if action_type != "addtime" or not user_key:
+        await message.answer("Действие не найдено.")
+        return
+    if not user_key.isdigit():
+        await message.answer("Для этой подписки действие недоступно.")
+        return
+    raw = (message.text or "").strip()
+    try:
+        seconds = parse_duration_to_seconds(raw)
+    except ValueError:
+        await message.answer("Некорректный срок. Пример: <code>1 день</code>, <code>12 часов</code>, <code>30 минут</code>.")
+        return
+
+    user_id = int(user_key)
+    all_data = load_paid_subscriptions()
+    subscription = all_data.get(user_key)
+    if not subscription:
+        await message.answer("Подписка не найдена.")
+        await state.clear()
+        return
+
+    subscription = _apply_paid_subscription_extension(subscription, seconds)
+    all_data[user_key] = subscription
+    save_paid_subscriptions(all_data)
+
+    await _sync_paid_subscription_devices(
+        user_id,
+        subscription,
+        enabled=paid_subscription_status(subscription) != "frozen",
+    )
+    await state.clear()
+    payload = _paid_subscription_detail_payload(user_key)
+    if not payload:
+        await message.answer("✅ Действие выполнено.")
+        return
+    text, markup = payload
+    await message.answer(
+        f"✅ Добавлено: <b>{format_duration(seconds)}</b>\n\n{text}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=markup,
+    )
+
+
 @router.callback_query(F.data.startswith("paidsub_"))
 async def cb_paid_sub_details(call: types.CallbackQuery):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     user_key = call.data[len("paidsub_"):]
-    info = load_vpn_users().get(user_key)
-    if not info or str(info.get("subscription_type", "")).lower() != "paid":
-        return await call.answer("Подписка не найдена", show_alert=True)
-    username = str(info.get("username") or "").strip()
-    note = str(info.get("note") or "").strip()
-    subscription = get_paid_subscription(int(user_key)) if str(user_key).isdigit() else info
-    display_name = note or username or user_key
-    text = (
-        "💳 <b>Платная подписка</b>\n\n"
-        f"👤 Пользователь: <code>{html.escape(display_name)}</code>"
-        + "\n"
-        f"📦 Тип: <b>{info.get('subscription_type', 'paid')}</b>\n"
-        f"📱 Устройств: <b>{len(info.get('devices', []))}</b>"
-    )
-    if subscription:
-        text += "\n\n" + _subscription_summary(subscription)
-    if note:
-        text += f"\n📝 Заметка: <i>{html.escape(note)}</i>"
-    await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=_paid_subscriptions_kb(get_users_by_subscription_type("paid")))
-    await call.answer()
+    await _render_paid_subscription_detail(call, user_key)
 
 
 @router.callback_query(F.data.startswith("paidreq_ok_"))

@@ -64,7 +64,7 @@ def has_paid_subscription(tg_id: int) -> bool:
     if not info:
         return False
     status = paid_subscription_status(info)
-    if status in {"blocked", "disabled", "cancelled", "canceled", "expired"}:
+    if status in {"blocked", "disabled", "cancelled", "canceled", "expired", "frozen"}:
         return False
     return bool(info.get("active", True)) or status in {"trial", "active", "grace", "pending_payment"}
 
@@ -77,6 +77,8 @@ def paid_subscription_status(info: dict) -> str:
     grace_ends_at = int(info.get("grace_ends_at") or 0)
     if status in {"blocked", "disabled", "cancelled", "canceled"}:
         return "blocked"
+    if status == "frozen":
+        return "frozen"
     if status == "trial" and trial_ends_at and now > trial_ends_at:
         if grace_ends_at and now <= grace_ends_at:
             return "grace"
@@ -106,6 +108,9 @@ def refresh_paid_subscription_state(info: dict, *, now: int | None = None) -> tu
         events.append("payment_expired")
     if grace_is_expired and not info.get("grace_expired_notified_at") and status in {"trial", "grace", "expired"}:
         events.append("grace_expired")
+
+    if status == "frozen":
+        return info, events
 
     if status == "trial" and trial_is_expired:
         if grace_ends_at and not grace_is_expired:
@@ -251,4 +256,18 @@ def extend_paid_subscription(info: dict, settings: dict, *, from_now: bool = Fal
     info["active"] = True
     info["paid_ends_at"] = base + payment_seconds if payment_seconds else base
     info["grace_ends_at"] = info["paid_ends_at"] + grace_seconds if grace_seconds else info["paid_ends_at"]
+    return info
+
+
+def shift_paid_subscription_timeline(info: dict, seconds: int) -> dict:
+    delta = int(seconds or 0)
+    if delta == 0:
+        return info
+    for field in ("trial_ends_at", "paid_ends_at", "grace_ends_at"):
+        value = int(info.get(field) or 0)
+        if value > 0:
+            info[field] = value + delta
+    expiry_time_ms = int(info.get("expiry_time_ms") or 0)
+    if expiry_time_ms > 0:
+        info["expiry_time_ms"] = expiry_time_ms + delta * 1000
     return info
