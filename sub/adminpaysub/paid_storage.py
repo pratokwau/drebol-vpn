@@ -46,6 +46,15 @@ def load_paid_subscriptions() -> dict:
         if "grace_seconds" not in info and info.get("grace_hours") is not None:
             info["grace_seconds"] = int(info.get("grace_hours") or 0) * HOUR
             changed = True
+        if "renewals_count" not in info:
+            info["renewals_count"] = 0
+            changed = True
+        if "total_paid_amount" not in info:
+            info["total_paid_amount"] = 0
+            changed = True
+        if "last_activity_at" not in info:
+            info["last_activity_at"] = int(info.get("created_at") or 0)
+            changed = True
     if changed:
         save_paid_subscriptions(raw)
     return raw
@@ -235,6 +244,9 @@ def build_paid_subscription(settings: dict, *, kind: str = "access", source: dic
         "grace_ends_at": now + trial_seconds + grace_seconds if trial_seconds and grace_seconds else 0,
         "last_request_kind": str(kind or "access"),
         "source_request_id": str(source.get("request_id") or ""),
+        "renewals_count": 0,
+        "total_paid_amount": 0,
+        "last_activity_at": now,
     }
 
 
@@ -256,6 +268,7 @@ def extend_paid_subscription(info: dict, settings: dict, *, from_now: bool = Fal
     info["active"] = True
     info["paid_ends_at"] = base + payment_seconds if payment_seconds else base
     info["grace_ends_at"] = info["paid_ends_at"] + grace_seconds if grace_seconds else info["paid_ends_at"]
+    info["last_activity_at"] = now
     return info
 
 
