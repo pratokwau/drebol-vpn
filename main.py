@@ -92,6 +92,7 @@ async def _notify_about_paid_subscriptions() -> None:
                             await _sync_paid_user_devices_expiry(
                                 user_id,
                                 grace_ends_at * 1000,
+                                enabled=True,
                                 limit_ip=int(refreshed.get("limit_ip") or 0),
                                 limit_gb=float(refreshed.get("limit_gb") or 0),
                                 flow=str(refreshed.get("flow") or ""),
@@ -107,6 +108,16 @@ async def _notify_about_paid_subscriptions() -> None:
                         refreshed["trial_expired_notified_at"] = int(time.time())
                     elif event == "payment_expired":
                         grace_text = format_duration(refreshed.get("grace_seconds"))
+                        grace_ends_at = int(refreshed.get("grace_ends_at") or 0)
+                        if grace_ends_at:
+                            await _sync_paid_user_devices_expiry(
+                                user_id,
+                                grace_ends_at * 1000,
+                                enabled=False,
+                                limit_ip=int(refreshed.get("limit_ip") or 0),
+                                limit_gb=float(refreshed.get("limit_gb") or 0),
+                                flow=str(refreshed.get("flow") or ""),
+                            )
                         await bot.send_message(
                             user_id,
                             "⏳ <b>Срок подписки истёк.</b>\n\n"
@@ -116,6 +127,15 @@ async def _notify_about_paid_subscriptions() -> None:
                         )
                         refreshed["payment_expired_notified_at"] = int(time.time())
                     elif event == "grace_expired":
+                        grace_ends_at = int(refreshed.get("grace_ends_at") or 0)
+                        if grace_ends_at:
+                            await _sync_paid_user_devices_expiry(
+                                user_id,
+                                grace_ends_at * 1000,
+                                limit_ip=int(refreshed.get("limit_ip") or 0),
+                                limit_gb=float(refreshed.get("limit_gb") or 0),
+                                flow=str(refreshed.get("flow") or ""),
+                            )
                         await bot.send_message(
                             user_id,
                             "⛔ <b>Период продления закончился.</b>\n\n"
