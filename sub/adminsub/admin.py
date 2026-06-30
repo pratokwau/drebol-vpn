@@ -618,6 +618,46 @@ async def add_user_tg_id(message: types.Message, state: FSMContext):
         await message.answer("Нужен числовой TG ID или <code>-</code>.\n\nДля выхода введите /cancel", parse_mode=ParseMode.HTML)
         return
     create_user_with_inbound(tg_id, ib_id)
+    user_key = str(tg_id) if tg_id is not None else ""
+    if tg_id is not None:
+        info = load_vpn_users().get(user_key, {})
+        email = user_key
+        existing_client = await api_get_client(email)
+        if existing_client:
+            add_device_to_user_key(
+                user_key,
+                ib_id,
+                str(existing_client.get("id", "") or ""),
+                email,
+                limit_ip=int(info.get("limit_ip") or DEFAULT_LIMIT_IP),
+                label=str(tg_id),
+            )
+        else:
+            result, client_uuid = await api_add_client(
+                ib_id,
+                email,
+                0,
+                float(info.get("limit_gb") or DEFAULT_LIMIT_GB),
+                str(info.get("flow") or DEFAULT_FLOW),
+                expiry_time_ms=int(info.get("expiry_time_ms") or DEFAULT_EXPIRY_TIME_MS),
+                limit_ip=int(info.get("limit_ip") or DEFAULT_LIMIT_IP),
+                comment=str(tg_id),
+            )
+            if result.get("success"):
+                add_device_to_user_key(
+                    user_key,
+                    ib_id,
+                    client_uuid,
+                    email,
+                    limit_ip=int(info.get("limit_ip") or DEFAULT_LIMIT_IP),
+                    label=str(tg_id),
+                )
+            else:
+                await message.answer(
+                    "⚠️ Пользователь создан, но не удалось добавить его в панель 3x-ui.\n"
+                    f"<code>{html.escape(str(result.get('msg') or 'Неизвестная ошибка'))}</code>",
+                    parse_mode=ParseMode.HTML,
+                )
     await state.clear()
     inbounds, _ = await api_get_inbounds()
     inbound = next((item for item in inbounds if item.get("id") == ib_id), None)
