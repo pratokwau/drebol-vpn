@@ -25,6 +25,22 @@ from sub import router as xui_router
 from sub.adminpaysub.paid_settings_store import format_duration
 
 
+def _payment_notification_started_key(event: str) -> str:
+    return {
+        "trial_expired": "trial_expired_notification_started_at",
+        "payment_expired": "payment_expired_notification_started_at",
+        "grace_expired": "grace_expired_notification_started_at",
+    }[event]
+
+
+def _payment_notification_sent_key(event: str) -> str:
+    return {
+        "trial_expired": "trial_expired_notified_at",
+        "payment_expired": "payment_expired_notified_at",
+        "grace_expired": "grace_expired_notified_at",
+    }[event]
+
+
 async def setup_commands() -> None:
     await bot.set_my_commands(
         [
@@ -85,6 +101,11 @@ async def _notify_about_paid_subscriptions() -> None:
                     continue
                 user_id = int(user_key)
                 for event in events:
+                    started_key = _payment_notification_started_key(event)
+                    sent_key = _payment_notification_sent_key(event)
+                    refreshed[started_key] = int(time.time())
+                    subscriptions[user_key] = refreshed
+                    save_paid_subscriptions(subscriptions)
                     if event == "trial_expired":
                         grace_ends_at = int(refreshed.get("grace_ends_at") or 0)
                         grace_text = format_duration(refreshed.get("grace_seconds"))
@@ -105,7 +126,7 @@ async def _notify_about_paid_subscriptions() -> None:
                             "Открой /sub и нажми «Продлить подписку».",
                             parse_mode="HTML",
                         )
-                        refreshed["trial_expired_notified_at"] = int(time.time())
+                        refreshed[sent_key] = int(time.time())
                     elif event == "payment_expired":
                         grace_text = format_duration(refreshed.get("grace_seconds"))
                         grace_ends_at = int(refreshed.get("grace_ends_at") or 0)
@@ -125,7 +146,7 @@ async def _notify_about_paid_subscriptions() -> None:
                             + "Открой /sub и нажми «Продлить подписку».",
                             parse_mode="HTML",
                         )
-                        refreshed["payment_expired_notified_at"] = int(time.time())
+                        refreshed[sent_key] = int(time.time())
                     elif event == "grace_expired":
                         grace_ends_at = int(refreshed.get("grace_ends_at") or 0)
                         if grace_ends_at:
@@ -143,7 +164,10 @@ async def _notify_about_paid_subscriptions() -> None:
                             "Чтобы вернуть доступ, нажми /sub и продли подписку.",
                             parse_mode="HTML",
                         )
-                        refreshed["grace_expired_notified_at"] = int(time.time())
+                        refreshed[sent_key] = int(time.time())
+                    refreshed.pop(started_key, None)
+                    subscriptions[user_key] = refreshed
+                    save_paid_subscriptions(subscriptions)
                 changed = True
             if changed:
                 save_paid_subscriptions(subscriptions)
