@@ -83,6 +83,27 @@ def _migrate_vpn_users(data: dict) -> dict:
         info.setdefault("settings_ready", bool(info.get("devices")) or bool(info.get("has_vpn_access")))
         info.setdefault("admin_disabled", False)
         info.setdefault("has_vpn_access", False)
+        if info.get("max_devices") is None:
+            info["max_devices"] = DEFAULT_MAX_DEVICES
+            changed = True
+        if info.get("limit_gb") is None:
+            info["limit_gb"] = DEFAULT_LIMIT_GB
+            changed = True
+        if info.get("expiry_time_ms") is None:
+            info["expiry_time_ms"] = DEFAULT_EXPIRY_TIME_MS
+            changed = True
+        if info.get("limit_ip") is None:
+            info["limit_ip"] = DEFAULT_LIMIT_IP
+            changed = True
+        if info.get("flow") in (None, ""):
+            info["flow"] = DEFAULT_FLOW
+            changed = True
+        if not info.get("settings_ready"):
+            info["settings_ready"] = True
+            changed = True
+        if not info.get("has_vpn_access"):
+            info["has_vpn_access"] = True
+            changed = True
         if "devices" not in info:
             old_uuid = info.get("uuid")
             old_email = info.get("email")
@@ -234,6 +255,12 @@ def create_user(tg_id: int | None, max_devices: int = DEFAULT_MAX_DEVICES, note:
             data[key]["max_devices"] = max_devices
             if note:
                 data[key]["note"] = note[:NOTE_MAX_LEN]
+            data[key]["limit_gb"] = data[key].get("limit_gb", DEFAULT_LIMIT_GB)
+            data[key]["expiry_time_ms"] = data[key].get("expiry_time_ms", DEFAULT_EXPIRY_TIME_MS)
+            data[key]["limit_ip"] = data[key].get("limit_ip", DEFAULT_LIMIT_IP)
+            data[key]["flow"] = data[key].get("flow", DEFAULT_FLOW)
+            data[key]["settings_ready"] = True
+            data[key]["has_vpn_access"] = True
             save_vpn_users(data)
             return key
     else:
@@ -244,14 +271,17 @@ def create_user(tg_id: int | None, max_devices: int = DEFAULT_MAX_DEVICES, note:
         "default_ib_id": 0,
         "note": note[:NOTE_MAX_LEN],
         "max_devices": max_devices,
-        "limit_gb": None,
-        "expiry_time_ms": None,
-        "limit_ip": None,
+        "limit_gb": DEFAULT_LIMIT_GB,
+        "expiry_time_ms": DEFAULT_EXPIRY_TIME_MS,
+        "limit_ip": DEFAULT_LIMIT_IP,
         "settings_ready": False,
         "admin_disabled": False,
         "has_vpn_access": False,
         "devices": [],
+        "flow": DEFAULT_FLOW,
     }
+    data[key]["settings_ready"] = True
+    data[key]["has_vpn_access"] = True
     save_vpn_users(data)
     return key
 
@@ -269,13 +299,13 @@ def create_user_with_inbound(tg_id: int | None, ib_id: int, note: str = "", subs
             "default_ib_id": int(ib_id or 0),
             "note": note[:NOTE_MAX_LEN],
             "max_devices": DEFAULT_MAX_DEVICES,
-            "limit_gb": None,
-            "expiry_time_ms": None,
-            "limit_ip": None,
+            "limit_gb": DEFAULT_LIMIT_GB,
+            "expiry_time_ms": DEFAULT_EXPIRY_TIME_MS,
+            "limit_ip": DEFAULT_LIMIT_IP,
             "flow": DEFAULT_FLOW,
-            "settings_ready": False,
+            "settings_ready": True,
             "admin_disabled": False,
-            "has_vpn_access": False,
+            "has_vpn_access": True,
             "devices": [],
         }
     else:
@@ -283,6 +313,13 @@ def create_user_with_inbound(tg_id: int | None, ib_id: int, note: str = "", subs
         data[key]["subscription_type"] = subscription_type
         if note:
             data[key]["note"] = note[:NOTE_MAX_LEN]
+        data[key].setdefault("max_devices", DEFAULT_MAX_DEVICES)
+        data[key].setdefault("limit_gb", DEFAULT_LIMIT_GB)
+        data[key].setdefault("expiry_time_ms", DEFAULT_EXPIRY_TIME_MS)
+        data[key].setdefault("limit_ip", DEFAULT_LIMIT_IP)
+        data[key].setdefault("flow", DEFAULT_FLOW)
+        data[key]["settings_ready"] = True
+        data[key]["has_vpn_access"] = True
     save_vpn_users(data)
     return key
 
