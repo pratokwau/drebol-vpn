@@ -36,7 +36,7 @@ def _start_kb(*, has_admin_sub: bool, has_paid_sub: bool, is_admin_user: bool) -
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _render_start(message: types.Message) -> None:
+async def _render_start(message: types.Message, *, edit: bool = False) -> None:
     user_id = message.from_user.id
     vpn_user = get_vpn_user(user_id)
     subscription_type = str(vpn_user.get("subscription_type", "")).lower() if vpn_user else ""
@@ -52,15 +52,15 @@ async def _render_start(message: types.Message) -> None:
         "Здесь можно открыть свой VPN или посмотреть подписку.\n\n"
         "Выберите действие кнопкой ниже:"
     )
-    await message.answer(
-        text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=_start_kb(
-            has_admin_sub=has_admin_sub,
-            has_paid_sub=has_paid_sub,
-            is_admin_user=is_admin_user,
-        ),
+    markup = _start_kb(
+        has_admin_sub=has_admin_sub,
+        has_paid_sub=has_paid_sub,
+        is_admin_user=is_admin_user,
     )
+    if edit:
+        await message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+    else:
+        await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 
 @router.message(Command("start"))
@@ -126,3 +126,9 @@ async def cb_start_tickets(call: types.CallbackQuery, state: FSMContext):
     from handlers.tickets import cb_admin_tickets
 
     await cb_admin_tickets(call, state)
+
+
+@router.callback_query(F.data == "paiduser_to_main")
+async def cb_paiduser_to_main(call: types.CallbackQuery):
+    await call.answer()
+    await _render_start(call.message, edit=True)
