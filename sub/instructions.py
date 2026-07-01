@@ -44,5 +44,6 @@ def happ_instruction(sub_id: str | None = None, inbound_id: int | None = None) -
         "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n\n"
         f"{device_line}"
         "На сайте выберите ваше устройство и перейдите в приложение HAPP.\n\n"
-        "🪟 <b>Для Windows</b>: сначала скопируйте ссылку подписки, затем в приложении HAPP нажмите <b>+</b> и выберите импорт из буфера обмена."
+        "🪟 <b>Для Windows</b>: сначала скопируйте ссылку подписки, затем в приложении HAPP нажмите <b>+</b> и выберите импорт из буфера обмена.\n\n"
+        "<b>Если сайт не открывается</b>: скопируйте ссылку на вашу подписку, нажмите <b>+</b> сверху в HAPP и выберите «Вставить из буфера обмена»."
     )
