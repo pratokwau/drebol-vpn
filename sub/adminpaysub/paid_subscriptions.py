@@ -970,14 +970,15 @@ def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None 
             rows.append([InlineKeyboardButton(text="⏳ Заявка на продление отправлена", callback_data="paiduser_wait")])
         else:
             if payment_block and paid_subscription_status(subscription) not in {"trial", "active", "grace", "pending_payment"}:
-                rows.append([InlineKeyboardButton(text="🔇 Продление заглушено", callback_data="paiduser_blocked_payment")])
+                rows.append([InlineKeyboardButton(text=" Продление заглушено", callback_data="paiduser_blocked_payment")])
             else:
                 rows.append([InlineKeyboardButton(text="💳 Продлить подписку", callback_data=f"paiduser_renew_{user_id}")])
         if paid_user.get("devices"):
-            rows.append([InlineKeyboardButton(text="📖 Инструкция", callback_data="paiduser_inst")])
+            rows.append([InlineKeyboardButton(text=" Инструкция", callback_data="paiduser_inst")])
     if request:
         if not subscription:
             rows = [[InlineKeyboardButton(text="⏳ Заявка уже отправлена", callback_data="paiduser_wait")]]
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="paiduser_to_main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
