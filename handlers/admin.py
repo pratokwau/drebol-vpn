@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import html
+import subprocess
 
 from aiogram import F, Router, types
 from aiogram.enums import ParseMode
@@ -14,6 +16,7 @@ from storage import load_authorized_users, load_xui_settings, save_xui_settings,
 from loader import bot
 from sub.adminpaysub.paid_storage import load_paid_subscriptions
 from sub.adminsub.storage import load_vpn_users
+from handlers.migration import MigrationTarget, migrate_bot_to_server
 from sub.keyboards import settings_kb
 from sub.utils import is_admin
 
@@ -32,11 +35,22 @@ class Broadcast(StatesGroup):
     confirm = State()
 
 
+class Migration(StatesGroup):
+    host = State()
+    port = State()
+    username = State()
+    password = State()
+    target_dir = State()
+    confirm = State()
+    stop_old = State()
+
+
 def _admin_kb() -> types.InlineKeyboardMarkup:
     configured = update_available()
     rows = [
         [types.InlineKeyboardButton(text="🔄 Проверить обновление", callback_data="app_update_check")],
         [types.InlineKeyboardButton(text="⚙️ Настроить XUI", callback_data="admin_xui_settings")],
+        [types.InlineKeyboardButton(text="🚚 Миграция на новый сервер", callback_data="admin_migration")],
         [types.InlineKeyboardButton(text="🎫 Тикеты", callback_data="admin_tickets")],
         [types.InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
     ]
@@ -85,6 +99,199 @@ async def cb_admin_xui_settings(call: types.CallbackQuery):
         reply_markup=settings_kb(),
     )
     await call.answer()
+
+
+def _migration_summary_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Начать перенос", callback_data="admin_migration_run")],
+            [InlineKeyboardButton(text="↩️ Отмена", callback_data="admin_migration_cancel")],
+        ]
+    )
+
+
+@router.callback_query(F.data == "admin_migration")
+async def cb_admin_migration(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    await state.clear()
+    await state.set_state(Migration.host)
+    await call.message.edit_text(
+        "🚚 <b>Миграция на новый сервер</b>\n\n"
+        "Я последовательно спрошу данные для подключения к новому серверу и перенесу проект, данные и автозапуск.\n\n"
+        "Отправь <b>IP или домен</b> нового сервера.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+    await call.answer()
+
+
+@router.message(Migration.host)
+async def migration_host_input(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    host = (message.text or "").strip()
+    if not host:
+        await message.answer("Хост не может быть пустым.\n\nДля выхода введите /cancel")
+        return
+    await state.update_data(migration_host=host)
+    await state.set_state(Migration.port)
+    await message.answer(
+        "Отправь <b>SSH-порт</b> нового сервера.\n\n"
+        "Обычно это <code>22</code>.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.message(Migration.port)
+async def migration_port_input(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        await message.answer("Нужен числовой SSH-порт.\n\nДля выхода введите /cancel")
+        return
+    await state.update_data(migration_port=int(raw))
+    await state.set_state(Migration.username)
+    await message.answer(
+        "Отправь <b>SSH-логин</b> нового сервера.\n\n"
+        "Обычно это <code>root</code>.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.message(Migration.username)
+async def migration_username_input(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    username = (message.text or "").strip()
+    if not username:
+        await message.answer("Логин не может быть пустым.\n\nДля выхода введите /cancel")
+        return
+    await state.update_data(migration_username=username)
+    await state.set_state(Migration.password)
+    await message.answer(
+        "Отправь <b>SSH-пароль</b> нового сервера.\n\n"
+        "Он нужен только для переноса, в чат не выводится.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.message(Migration.password)
+async def migration_password_input(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    password = (message.text or "").strip()
+    if not password:
+        await message.answer("Пароль не может быть пустым.\n\nДля выхода введите /cancel")
+        return
+    await state.update_data(migration_password=password)
+    await state.set_state(Migration.target_dir)
+    await message.answer(
+        "Отправь <b>папку установки</b> на новом сервере.\n\n"
+        "По умолчанию можно оставить <code>/root/drebol-vpn</code>.\n\n"
+        "Для выхода введите /cancel",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.message(Migration.target_dir)
+async def migration_target_dir_input(message: types.Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    target_dir = (message.text or "").strip() or "/root/drebol-vpn"
+    if not target_dir.startswith("/"):
+        await message.answer("Путь должен быть абсолютным, например <code>/root/drebol-vpn</code>.", parse_mode=ParseMode.HTML)
+        return
+    await state.update_data(migration_target_dir=target_dir)
+    data = await state.get_data()
+    summary = (
+        "🚚 <b>Проверь данные миграции</b>\n\n"
+        f"🌐 Хост: <code>{html.escape(str(data.get('migration_host') or ''))}</code>\n"
+        f"🔌 Порт: <code>{html.escape(str(data.get('migration_port') or ''))}</code>\n"
+        f"👤 Пользователь: <code>{html.escape(str(data.get('migration_username') or ''))}</code>\n"
+        f"🔑 Пароль: <code>{'•' * max(8, len(str(data.get('migration_password') or '')))}</code>\n"
+        f"📁 Папка установки: <code>{html.escape(target_dir)}</code>\n"
+        f"⚙️ Сервис: <code>drebol-vpn</code>\n\n"
+        "Если всё верно, нажми «Начать перенос»."
+    )
+    await state.set_state(Migration.confirm)
+    await message.answer(summary, parse_mode=ParseMode.HTML, reply_markup=_migration_summary_kb())
+
+
+@router.callback_query(F.data == "admin_migration_cancel")
+async def cb_admin_migration_cancel(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    await state.clear()
+    await render_admin_menu(call.message, call.from_user.id, edit=True)
+    await call.answer("Отменено")
+
+
+@router.callback_query(F.data == "admin_migration_run")
+async def cb_admin_migration_run(call: types.CallbackQuery, state: FSMContext):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    data = await state.get_data()
+    if await state.get_state() != Migration.confirm.state:
+        return await call.answer("Сначала заполни данные миграции.", show_alert=True)
+    target = MigrationTarget(
+        host=str(data.get("migration_host") or "").strip(),
+        port=int(data.get("migration_port") or 22),
+        username=str(data.get("migration_username") or "root").strip() or "root",
+        password=str(data.get("migration_password") or ""),
+        target_dir=str(data.get("migration_target_dir") or "/root/drebol-vpn").strip() or "/root/drebol-vpn",
+    )
+    await call.answer()
+    await call.message.edit_text(
+        "⏳ <b>Перенос выполняется...</b>\n\n"
+        "Я собираю проект, передаю его на новый сервер и поднимаю сервис.",
+        parse_mode=ParseMode.HTML,
+    )
+
+    async def _progress(text: str) -> None:
+        try:
+            await call.message.edit_text(text, parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+
+    result = await migrate_bot_to_server(target, progress_cb=_progress)
+    await state.clear()
+    if result.ok:
+        await call.message.edit_text(
+            "✅ <b>Миграция завершена успешно.</b>\n\n"
+            "На новом сервере автозапуск уже включён, сервис перезапущен.\n\n"
+            "Команда для запуска на новом сервере:\n"
+            "<code>sudo systemctl start drebol-vpn</code>\n\n"
+            "Команда для остановки на этом сервере:\n"
+            "<code>sudo systemctl stop drebol-vpn</code>\n\n"
+            "Сейчас я попробую мягко остановить этот сервер через несколько секунд.",
+            parse_mode=ParseMode.HTML,
+        )
+        async def _stop_old_server() -> None:
+            await asyncio.sleep(5)
+            try:
+                subprocess.Popen(
+                    ["systemctl", "stop", "drebol-vpn"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except Exception:
+                pass
+
+        asyncio.create_task(_stop_old_server())
+        return
+    await call.message.edit_text(
+        "❌ <b>Миграция не удалась.</b>\n\n"
+        f"<code>{html.escape(result.message)}</code>\n\n"
+        "Попробуй ещё раз или проверь доступ по SSH.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_admin_kb(),
+    )
 
 
 @router.callback_query(F.data == "xui_settings")
