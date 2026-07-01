@@ -974,7 +974,7 @@ def _paid_user_kb(user_id: int, subscription: dict | None, request: dict | None 
             else:
                 rows.append([InlineKeyboardButton(text="💳 Продлить подписку", callback_data=f"paiduser_renew_{user_id}")])
         if paid_user.get("devices"):
-            rows.append([InlineKeyboardButton(text=" Инструкция", callback_data="paiduser_inst")])
+            rows.append([InlineKeyboardButton(text="📖 Инструкция", callback_data="paiduser_inst")])
     if request:
         if not subscription:
             rows = [[InlineKeyboardButton(text="⏳ Заявка уже отправлена", callback_data="paiduser_wait")]]
