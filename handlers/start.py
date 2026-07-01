@@ -36,8 +36,13 @@ def _start_kb(*, has_admin_sub: bool, has_paid_sub: bool, is_admin_user: bool) -
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def _render_start(message: types.Message, *, edit: bool = False) -> None:
-    user_id = message.from_user.id
+async def _render_start(
+    message: types.Message,
+    *,
+    user_id: int | None = None,
+    edit: bool = False,
+) -> None:
+    user_id = int(user_id or message.from_user.id)
     vpn_user = get_vpn_user(user_id)
     subscription_type = str(vpn_user.get("subscription_type", "")).lower() if vpn_user else ""
     has_admin_sub = bool(
@@ -131,4 +136,4 @@ async def cb_start_tickets(call: types.CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "paiduser_to_main")
 async def cb_paiduser_to_main(call: types.CallbackQuery):
     await call.answer()
-    await _render_start(call.message, edit=True)
+    await _render_start(call.message, user_id=call.from_user.id, edit=True)
