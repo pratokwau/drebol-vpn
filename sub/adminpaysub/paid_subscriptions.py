@@ -578,7 +578,7 @@ def _paid_create_inbound_ids(settings: dict | None = None) -> list[int]:
             continue
         if inbound_id > 0 and inbound_id not in ids:
             ids.append(inbound_id)
-    return ids
+    return ids[:1]
 
 
 def _paid_inbound_label_map(inbounds: list[dict]) -> dict[int, str]:
@@ -636,7 +636,7 @@ async def _show_paid_create_inbound_selector(call: types.CallbackQuery) -> None:
     rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="paidset_create_inbound_back")])
     await call.message.edit_text(
         "🧭 <b>Инбауды для создания</b>\n\n"
-        "Выбери один или несколько inbound'ов, на которых будет создаваться новая платная подписка.\n"
+        "Выбери один inbound, на котором будет создаваться новая платная подписка.\n"
         f"Выбрано: <b>{_paid_create_inbounds_count(settings)}</b>\n\n"
         "Если ничего не выбрано, бот возьмёт первый доступный inbound из панели.",
         parse_mode=ParseMode.HTML,
@@ -898,11 +898,11 @@ async def _sync_paid_subscription_devices(
                 expiry_time_ms=expiry_time_ms if expiry_time_ms > 0 else None,
                 limit_ip=target_limit_ip,
                 comment=comment,
+                client_uuid=str(device.get("uuid") or client.get("id") or "") or None,
             )
             if result.get("success"):
                 device["ib_id"] = desired_inbound_id
-                if new_uuid:
-                    device["uuid"] = new_uuid
+                device["uuid"] = str(device.get("uuid") or new_uuid or client.get("id") or "")
                 changed = True
                 continue
             client = await api_get_client(email)
@@ -1519,10 +1519,10 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     _log_paid(f"email candidates={email_candidates!r}")
     last_result: dict = {}
     for email in email_candidates:
-        target_inbound_ids = selected_inbound_ids or [inbound_id]
-        _log_paid(f"api_add_client try email={email!r} inbound_ids={target_inbound_ids} expiry_time_ms={expiry_time_ms}")
+        target_inbound_id = selected_inbound_ids[0] if selected_inbound_ids else inbound_id
+        _log_paid(f"api_add_client try email={email!r} inbound_id={target_inbound_id} expiry_time_ms={expiry_time_ms}")
         result, client_uuid = await api_add_client(
-            inbound_id,
+            target_inbound_id,
             email,
             0,
             limit_gb,
@@ -1530,13 +1530,13 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
             expiry_time_ms=expiry_time_ms,
             limit_ip=limit_ip,
             comment=display_name,
-            inbound_ids=target_inbound_ids,
+            inbound_ids=[target_inbound_id],
         )
         last_result = result
         _log_paid(f"api_add_client result email={email!r} success={result.get('success')} msg={result.get('msg')!r} uuid={client_uuid!r}")
         if result.get("success"):
             _log_paid(f"device created email={email!r} uuid={client_uuid!r}")
-            add_device_to_user_key(user_key, inbound_id, client_uuid, email, limit_ip=limit_ip, label=display_name)
+            add_device_to_user_key(user_key, target_inbound_id, client_uuid, email, limit_ip=limit_ip, label=display_name)
             return
     error_msg = str(last_result.get("msg") or "Неизвестная ошибка XUI")
     _log_paid(f"device creation failed user_id={user_id} error={error_msg!r}")
@@ -1595,8 +1595,7 @@ async def _sync_paid_user_devices_expiry(
                 )
                 if result.get("success"):
                     device["ib_id"] = target_inbound_id
-                    if new_uuid:
-                        device["uuid"] = new_uuid
+                    device["uuid"] = client_uuid or new_uuid or device.get("uuid")
                     changed = True
                     continue
             client["totalGB"] = 0 if target_limit_gb <= 0 else int(target_limit_gb * 1024 ** 3)
@@ -2240,16 +2239,17 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
     if call.data.startswith("paidset_create_inbound_toggle_"):
         inbound_id = int(call.data[len("paidset_create_inbound_toggle_"): ] or 0)
         settings = load_paid_settings()
-        selected_ids = _paid_create_inbound_ids(settings)
-        if inbound_id in selected_ids:
-            selected_ids = [item for item in selected_ids if item != inbound_id]
-        else:
-            selected_ids.append(inbound_id)
+        selected_ids = [] if inbound_id in _paid_create_inbound_ids(settings) else [inbound_id]
+        settings["create_inbound_ids"] = selected_ids
+        save_paid_settings(settings)
         save_paid_create_inbound_ids(selected_ids)
         await call.answer("Сохранено")
         await _show_paid_create_inbound_selector(call)
         return
     if call.data == "paidset_create_inbound_clear":
+        settings = load_paid_settings()
+        settings["create_inbound_ids"] = []
+        save_paid_settings(settings)
         save_paid_create_inbound_ids([])
         await call.answer("Очищено")
         await _show_paid_create_inbound_selector(call)
