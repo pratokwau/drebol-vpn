@@ -441,6 +441,7 @@ def _paid_subscription_actions_kb(user_key: str, subscription: dict) -> InlineKe
             [
                 InlineKeyboardButton(text="➕ Добавить срок", callback_data=f"paidsub_addtime_{user_key}"),
                 InlineKeyboardButton(text=freeze_label, callback_data=f"paidsub_freeze_{user_key}"),
+                InlineKeyboardButton(text="🗑 Удалить", callback_data=f"paidsub_delete_{user_key}"),
             ],
         ]
     )
@@ -473,6 +474,7 @@ def _paid_subscription_settings_kb(user_key: str, subscription: dict) -> InlineK
             [
                 InlineKeyboardButton(text="➕ Добавить срок", callback_data=f"paidsub_addtime_{user_key}"),
                 InlineKeyboardButton(text=freeze_label, callback_data=f"paidsub_freeze_{user_key}"),
+                InlineKeyboardButton(text="🗑 Удалить", callback_data=f"paidsub_delete_{user_key}"),
             ],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"paidsub_{user_key}")],
         ]
@@ -2023,6 +2025,22 @@ async def cb_paid_sub_freeze(call: types.CallbackQuery):
         )
         await call.answer("Подписка заморожена")
     await _render_paid_subscription_detail(call, user_key)
+
+
+@router.callback_query(F.data.startswith("paidsub_delete_"))
+async def cb_paid_sub_delete(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    user_key = call.data[len("paidsub_delete_"):]
+    info = load_vpn_users().get(user_key)
+    if not info or str(info.get("subscription_type", "")).lower() != "paid":
+        return await call.answer("Подписка не найдена", show_alert=True)
+    user_id = _extract_paid_user_id(user_key)
+    if user_id is None:
+        return await call.answer("Для этой подписки действие недоступно", show_alert=True)
+    await _revoke_paid_user_access(user_id)
+    await call.answer("Подписка удалена")
+    await render_paid_subscriptions(call)
 
 
 @router.callback_query(F.data.startswith("paidreq_view_"))
