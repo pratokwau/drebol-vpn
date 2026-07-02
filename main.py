@@ -12,6 +12,7 @@ from handlers.tickets import router as tickets_router
 from loader import bot, dp
 from storage import clear_update_state, load_update_state
 from sub.adminpaysub.paid_settings_store import DEFAULT_PAID_PAYMENT_URL
+from sub.adminpaysub.paid_settings_store import load_paid_settings
 from sub.adminpaysub.paid_storage import (
     load_paid_subscriptions,
     paid_subscription_status,
@@ -111,6 +112,7 @@ async def _notify_about_paid_subscriptions() -> None:
                         refreshed[sent_key] = int(time.time())
                     elif event == "grace_expired":
                         grace_ends_at = int(refreshed.get("grace_ends_at") or 0)
+                        expired_inbound_id = int(load_paid_settings().get("expired_inbound_id") or 0)
                         if grace_ends_at:
                             await _sync_paid_user_devices_expiry(
                                 user_id,
@@ -118,6 +120,7 @@ async def _notify_about_paid_subscriptions() -> None:
                                 limit_ip=int(refreshed.get("limit_ip") or 0),
                                 limit_gb=float(refreshed.get("limit_gb") or 0),
                                 flow=str(refreshed.get("flow") or ""),
+                                target_inbound_id=expired_inbound_id,
                             )
                         await bot.send_message(
                             user_id,
