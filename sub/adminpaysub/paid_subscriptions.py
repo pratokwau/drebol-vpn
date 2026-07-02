@@ -26,8 +26,10 @@ from sub.adminpaysub.paid_settings_store import (
     DEFAULT_PAID_TRIAL_SECONDS,
     DEFAULT_PAID_FLOW,
     format_duration,
+    load_paid_create_inbound_ids,
     load_paid_settings,
     parse_duration_to_seconds,
+    save_paid_create_inbound_ids,
     save_paid_settings,
 )
 from sub.adminpaysub.paid_storage import (
@@ -565,8 +567,9 @@ def _paid_setting_default(field: str):
 
 
 def _paid_create_inbound_ids(settings: dict | None = None) -> list[int]:
-    settings = settings or load_paid_settings()
-    raw_ids = settings.get("create_inbound_ids") or []
+    raw_ids = load_paid_create_inbound_ids()
+    if not raw_ids and settings:
+        raw_ids = settings.get("create_inbound_ids") or []
     ids: list[int] = []
     for item in raw_ids:
         try:
@@ -2242,15 +2245,12 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
             selected_ids = [item for item in selected_ids if item != inbound_id]
         else:
             selected_ids.append(inbound_id)
-        settings["create_inbound_ids"] = selected_ids
-        save_paid_settings(settings)
+        save_paid_create_inbound_ids(selected_ids)
         await call.answer("Сохранено")
         await _show_paid_create_inbound_selector(call)
         return
     if call.data == "paidset_create_inbound_clear":
-        settings = load_paid_settings()
-        settings["create_inbound_ids"] = []
-        save_paid_settings(settings)
+        save_paid_create_inbound_ids([])
         await call.answer("Очищено")
         await _show_paid_create_inbound_selector(call)
         return

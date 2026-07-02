@@ -6,6 +6,7 @@ from pathlib import Path
 from storage import _read_json, _write_json
 
 PAID_SETTINGS_FILE = Path("data/paid_settings.json")
+PAID_CREATE_INBOUND_IDS_FILE = Path("data/paid_create_inbound_ids.json")
 
 SECOND = 1
 MINUTE = 60 * SECOND
@@ -26,6 +27,21 @@ DEFAULT_PAID_EXPIRY_TIME_MS = 2523456000000
 DEFAULT_PAID_FLOW = "xtls-rprx-vision"
 DEFAULT_PAID_PAYMENT_URL = ""
 DEFAULT_PAID_EXPIRED_INBOUND_ID = 0
+DEFAULT_PAID_CREATE_INBOUND_IDS: list[int] = []
+
+
+def _normalize_inbound_ids(raw_value) -> list[int]:
+    if not isinstance(raw_value, list):
+        return []
+    normalized: list[int] = []
+    for item in raw_value:
+        try:
+            inbound_id = int(item)
+        except Exception:
+            continue
+        if inbound_id > 0 and inbound_id not in normalized:
+            normalized.append(inbound_id)
+    return normalized
 
 
 def parse_duration_to_seconds(raw: str | int | float | None) -> int:
@@ -148,6 +164,7 @@ def load_paid_settings() -> dict:
         payment_seconds = int(raw.get("payment_days") or DEFAULT_PAID_PAYMENT_SECONDS // DAY) * DAY
     if grace_seconds is None and raw.get("grace_hours") is not None:
         grace_seconds = int(raw.get("grace_hours") or DEFAULT_PAID_GRACE_SECONDS // HOUR) * HOUR
+    create_inbound_ids = _normalize_inbound_ids(raw.get("create_inbound_ids", DEFAULT_PAID_CREATE_INBOUND_IDS))
     return {
         "trial_seconds": int(trial_seconds or DEFAULT_PAID_TRIAL_SECONDS),
         "payment_seconds": int(payment_seconds or DEFAULT_PAID_PAYMENT_SECONDS),
@@ -159,6 +176,7 @@ def load_paid_settings() -> dict:
         "flow": str(raw.get("flow", DEFAULT_PAID_FLOW) or DEFAULT_PAID_FLOW),
         "payment_url": str(raw.get("payment_url", DEFAULT_PAID_PAYMENT_URL) or ""),
         "expired_inbound_id": int(raw.get("expired_inbound_id", DEFAULT_PAID_EXPIRED_INBOUND_ID) or DEFAULT_PAID_EXPIRED_INBOUND_ID),
+        "create_inbound_ids": create_inbound_ids,
     }
 
 
@@ -174,5 +192,24 @@ def save_paid_settings(data: dict) -> None:
         "flow": str(data.get("flow", DEFAULT_PAID_FLOW) or DEFAULT_PAID_FLOW),
         "payment_url": str(data.get("payment_url", DEFAULT_PAID_PAYMENT_URL) or ""),
         "expired_inbound_id": int(data.get("expired_inbound_id", DEFAULT_PAID_EXPIRED_INBOUND_ID) or DEFAULT_PAID_EXPIRED_INBOUND_ID),
+        "create_inbound_ids": _normalize_inbound_ids(data.get("create_inbound_ids") or []),
     }
     _write_json(PAID_SETTINGS_FILE, payload)
+
+
+def load_paid_create_inbound_ids() -> list[int]:
+    raw = _read_json(PAID_CREATE_INBOUND_IDS_FILE, None)
+    if isinstance(raw, dict) and "create_inbound_ids" in raw:
+        raw = raw.get("create_inbound_ids")
+    if raw is None:
+        try:
+            fallback = load_paid_settings().get("create_inbound_ids") or []
+        except Exception:
+            fallback = []
+        return _normalize_inbound_ids(fallback)
+    return _normalize_inbound_ids(raw)
+
+
+def save_paid_create_inbound_ids(ids: list[int]) -> None:
+    payload = _normalize_inbound_ids(ids)
+    _write_json(PAID_CREATE_INBOUND_IDS_FILE, payload)
