@@ -2015,6 +2015,32 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     if call.data.startswith("paidset_expired_inbound_choose_"):
+        inbound_id = int(call.data[len("paidset_expired_inbound_choose_"): ] or 0)
+        settings = load_paid_settings()
+        settings["expired_inbound_id"] = inbound_id
+        save_paid_settings(settings)
+        if inbound_id:
+            subscriptions = load_paid_subscriptions()
+            for user_key, subscription in list(subscriptions.items()):
+                if not str(user_key).isdigit():
+                    continue
+                if paid_subscription_status(subscription) != "expired":
+                    continue
+                user_id = int(user_key)
+                expiry_time_ms = int(subscription.get("expiry_time_ms") or 0)
+                if not expiry_time_ms:
+                    expiry_time_ms = int(subscription.get("grace_ends_at") or subscription.get("paid_ends_at") or 0) * 1000
+                await _sync_paid_user_devices_expiry(
+                    user_id,
+                    expiry_time_ms,
+                    enabled=True,
+                    limit_ip=int(subscription.get("limit_ip") or DEFAULT_PAID_LIMIT_IP),
+                    limit_gb=float(subscription.get("limit_gb") or DEFAULT_PAID_LIMIT_GB),
+                    flow=str(subscription.get("flow") or DEFAULT_PAID_FLOW),
+                    target_inbound_id=inbound_id,
+                )
+        await call.answer("Сохранено")
+        await _show_paid_settings(call, edit=True)
         return
     field = call.data[len("paidset_"):]
     if field == "expired_inbound_id":
@@ -2044,40 +2070,6 @@ async def cb_paid_settings_default(call: types.CallbackQuery):
     save_paid_settings(settings)
     await call.answer("Применено")
     await _show_paid_settings(call, edit=True)
-
-
-@router.callback_query(F.data.startswith("paidset_expired_inbound_choose_"))
-async def cb_paid_expired_inbound_choose(call: types.CallbackQuery):
-    if not is_admin(call.from_user.id):
-        return await call.answer("Нет доступа", show_alert=True)
-    inbound_id = int(call.data[len("paidset_expired_inbound_choose_"): ] or 0)
-    settings = load_paid_settings()
-    settings["expired_inbound_id"] = inbound_id
-    save_paid_settings(settings)
-    if inbound_id:
-        subscriptions = load_paid_subscriptions()
-        for user_key, subscription in list(subscriptions.items()):
-            if not str(user_key).isdigit():
-                continue
-            if paid_subscription_status(subscription) != "expired":
-                continue
-            user_id = int(user_key)
-            expiry_time_ms = int(subscription.get("expiry_time_ms") or 0)
-            if not expiry_time_ms:
-                expiry_time_ms = int(subscription.get("grace_ends_at") or subscription.get("paid_ends_at") or 0) * 1000
-            await _sync_paid_user_devices_expiry(
-                user_id,
-                expiry_time_ms,
-                enabled=True,
-                limit_ip=int(subscription.get("limit_ip") or DEFAULT_PAID_LIMIT_IP),
-                limit_gb=float(subscription.get("limit_gb") or DEFAULT_PAID_LIMIT_GB),
-                flow=str(subscription.get("flow") or DEFAULT_PAID_FLOW),
-                target_inbound_id=inbound_id,
-            )
-    await call.answer("Сохранено")
-    await _show_paid_settings(call, edit=True)
-
-
 @router.message(PaidSubSettings.waiting_value)
 async def paid_settings_value(message: types.Message, state):
     if not is_admin(message.from_user.id):
