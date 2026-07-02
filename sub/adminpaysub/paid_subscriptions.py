@@ -465,9 +465,6 @@ def _paid_subscription_settings_kb(user_key: str, subscription: dict) -> InlineK
                 InlineKeyboardButton(text=f"📱 Устройства: {int(subscription.get('max_devices') or 1)}", callback_data=f"paidsubset_max_{user_key}"),
             ],
             [
-                InlineKeyboardButton(text=f"🧭 Инбауды создания: {_paid_create_inbounds_summary(subscription)}", callback_data="paidset_create_inbound_ids"),
-            ],
-            [
                 InlineKeyboardButton(text=f"💾 Трафик: {_format_limit_gb(subscription.get('limit_gb'))}", callback_data=f"paidsubset_gb_{user_key}"),
                 InlineKeyboardButton(text=f"🌐 IP: {int(subscription.get('limit_ip') or 2)}", callback_data=f"paidsubset_ip_{user_key}"),
             ],
@@ -484,7 +481,7 @@ def _paid_subscription_settings_kb(user_key: str, subscription: dict) -> InlineK
     )
 
 
-def _paid_settings_kb() -> InlineKeyboardMarkup:
+def _paid_settings_kb(create_inbound_labels: dict[int, str] | None = None) -> InlineKeyboardMarkup:
     settings = load_paid_settings()
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -497,6 +494,12 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text=f"🏁 Инбаунд после окончания: {settings['expired_inbound_id'] or 'не задан'}",
                     callback_data="paidset_expired_inbound_id",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"🧭 Инбауды создания: {_paid_create_inbounds_summary(settings, create_inbound_labels)}",
+                    callback_data="paidset_create_inbound_ids",
                 ),
             ],
             [
@@ -669,7 +672,7 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
         f"⚡ Параметр flow: <b>{settings['flow']}</b>"
     )
-    markup = _paid_settings_kb()
+    markup = _paid_settings_kb(create_inbound_labels)
     if edit and isinstance(call_or_message, types.CallbackQuery):
         try:
             await call_or_message.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
