@@ -145,6 +145,8 @@ async def api_add_client(
     expiry_time_ms: int | None = None,
     limit_ip: int = 0,
     comment: str = "",
+    client_uuid: str | None = None,
+    inbound_ids: list[int] | None = None,
 ) -> tuple[dict, str]:
     import time
     import uuid as uuid_lib
@@ -153,7 +155,10 @@ async def api_add_client(
     if expiry_time_ms is None and expiry_days > 0:
         expiry_time = int((time.time() + expiry_days * 86400) * 1000)
     total_bytes = 0 if limit_gb <= 0 else int(limit_gb * 1024 ** 3)
-    client_uuid = str(uuid_lib.uuid4())
+    client_uuid = str(client_uuid or uuid_lib.uuid4())
+    target_inbound_ids = [int(item) for item in (inbound_ids or [ib_id]) if int(item or 0) > 0]
+    if not target_inbound_ids and ib_id > 0:
+        target_inbound_ids = [int(ib_id)]
     client = {
         "id": client_uuid,
         "email": email,
@@ -168,7 +173,7 @@ async def api_add_client(
     }
     if comment:
         client["comment"] = comment
-    result = await xui_post("/panel/api/clients/add", data={"client": client, "inboundIds": [ib_id]})
+    result = await xui_post("/panel/api/clients/add", data={"client": client, "inboundIds": target_inbound_ids})
     return result, client_uuid
 
 
