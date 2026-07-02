@@ -15,7 +15,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TARGET_DIR = "/root/drebol-vpn"
 DEFAULT_SERVICE_NAME = "drebol-vpn"
 EXCLUDED_PARTS = {
-    ".git",
     ".venv",
     "__pycache__",
     ".mypy_cache",
