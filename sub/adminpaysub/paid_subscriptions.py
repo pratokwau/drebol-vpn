@@ -15,6 +15,7 @@ from config import ADMIN_ID
 from loader import bot
 from sub.adminpaysub.paid_settings_store import (
     DEFAULT_PAID_GRACE_SECONDS,
+    DEFAULT_PAID_EXPIRED_INBOUND_ID,
     DEFAULT_PAID_LIMIT_IP,
     DEFAULT_PAID_LIMIT_GB,
     DEFAULT_PAID_PAYMENT_AMOUNT,
@@ -477,6 +478,13 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=f"🕒 Время на продление: {format_duration(settings['grace_seconds'])}", callback_data="paidset_grace_seconds")],
             [InlineKeyboardButton(text=f"🔗 Ссылка на оплату: {'задана' if settings['payment_url'] else 'не задана'}", callback_data="paidset_payment_url")],
             [
+                InlineKeyboardButton(
+                    text=f"🏁 Инбаунд после окончания: {settings['expired_inbound_id'] or 'не задан'}",
+                    callback_data="paidset_expired_inbound_id",
+                ),
+                InlineKeyboardButton(text="По умолчанию", callback_data="paiddef_expired_inbound_id"),
+            ],
+            [
                 InlineKeyboardButton(text=f"📱 Лимит устройств: {settings['max_devices']}", callback_data="paidset_max_devices"),
                 InlineKeyboardButton(text="По умолчанию", callback_data="paiddef_max_devices"),
             ],
@@ -508,6 +516,8 @@ def _paid_setting_prompt(field: str) -> str:
         return "Введите время на продление любым форматом: <code>12 часов</code>, <code>1 день</code>, <code>36 часов</code>. Можно <code>-</code> для значения по умолчанию."
     if field == "payment_url":
         return "Введите ссылку на оплату или <code>-</code>, чтобы очистить её."
+    if field == "expired_inbound_id":
+        return "Выберите inbound после окончания подписки из списка ниже."
     if field == "max_devices":
         return "Введите лимит устройств или <code>-</code> для значения по умолчанию."
     if field == "limit_gb":
@@ -530,12 +540,25 @@ def _paid_setting_default(field: str):
         "limit_ip": DEFAULT_PAID_LIMIT_IP,
         "flow": DEFAULT_PAID_FLOW,
         "payment_url": DEFAULT_PAID_PAYMENT_URL,
+        "expired_inbound_id": DEFAULT_PAID_EXPIRED_INBOUND_ID,
     }
     return defaults.get(field)
 
 
 async def _show_paid_settings(call_or_message, *, edit: bool = True):
     settings = load_paid_settings()
+    expired_inbound_label = "не задан"
+    expired_inbound_id = int(settings.get("expired_inbound_id") or 0)
+    if expired_inbound_id:
+        try:
+            inbounds, _ = await api_get_inbounds()
+            inbound = next((item for item in inbounds if int(item.get("id") or 0) == expired_inbound_id), None)
+            if inbound:
+                expired_inbound_label = f"{inbound.get('remark') or inbound.get('id')} ({expired_inbound_id})"
+            else:
+                expired_inbound_label = str(expired_inbound_id)
+        except Exception:
+            expired_inbound_label = str(expired_inbound_id)
     text = (
         "⚙️ <b>Настройки платных подписок</b>\n\n"
         f"🧪 Пробный период: <b>{format_duration(settings['trial_seconds'])}</b>\n"
@@ -543,6 +566,7 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
         f"💰 Сумма: <b>{settings['payment_amount']} ₽</b>\n"
         f"🕒 Время на продление: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"🔗 Ссылка на оплату: <b>{'задана' if settings['payment_url'] else 'не задана'}</b>\n"
+        f"🏁 Инбаунд после окончания: <b>{expired_inbound_label}</b>\n"
         f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
         f"💾 Лимит ГБ: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
@@ -559,6 +583,48 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
         await call_or_message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
     else:
         await call_or_message.answer(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+
+
+def _paid_expired_inbound_selector_kb(inbounds: list[dict], current_id: int) -> InlineKeyboardMarkup:
+    rows = []
+    for inbound in sorted(inbounds, key=lambda item: int(item.get("id") or 0)):
+        inbound_id = int(inbound.get("id") or 0)
+        protocol = str(inbound.get("protocol", "?")).upper()
+        port = inbound.get("port", "?")
+        remark = inbound.get("remark") or f"{protocol}:{port}"
+        prefix = "✅ " if inbound_id == current_id else ""
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{prefix}{remark} | {protocol}:{port}",
+                callback_data=f"paidset_expired_inbound_choose_{inbound_id}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="🚫 Без заглушки", callback_data="paidset_expired_inbound_choose_0")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_settings")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _show_paid_expired_inbound_selector(call: types.CallbackQuery) -> None:
+    settings = load_paid_settings()
+    current_id = int(settings.get("expired_inbound_id") or 0)
+    inbounds, err = await api_get_inbounds()
+    if not inbounds:
+        await call.message.edit_text(
+            "⚙️ <b>Инбаунд после окончания</b>\n\n"
+            f"Не удалось загрузить список inbound.\n<code>{html.escape(err or 'unknown error')}</code>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_settings")]]
+            ),
+        )
+        return
+    await call.message.edit_text(
+        "⚙️ <b>Выбор инбаунда после окончания</b>\n\n"
+        "Выбери inbound, на который будут пересаживаться клиенты после завершения подписки.\n"
+        "Лучше использовать отдельный inbound с названием вроде «Подписка закончилась».",
+        parse_mode=ParseMode.HTML,
+        reply_markup=_paid_expired_inbound_selector_kb(inbounds, current_id),
+    )
 
 
 async def render_paid_subscriptions(message_or_call):
@@ -682,9 +748,11 @@ async def _sync_paid_subscription_devices(
     limit_ip: int | None = None,
     limit_gb: float | None = None,
     flow: str | None = None,
+    target_inbound_id: int | None = None,
 ) -> None:
     user_key = _paid_user_key(user_id)
-    info = load_vpn_users().get(user_key, {})
+    data = load_vpn_users()
+    info = data.get(user_key, {})
     expiry_time_ms = int(subscription.get("expiry_time_ms") or 0)
     if expire_from_subscription and not expiry_time_ms:
         for field in ("grace_ends_at", "paid_ends_at", "trial_ends_at"):
@@ -692,9 +760,13 @@ async def _sync_paid_subscription_devices(
             if value > 0:
                 expiry_time_ms = value * 1000
                 break
+    settings = load_paid_settings()
+    target_inbound_id = int(target_inbound_id if target_inbound_id is not None else int(info.get("default_ib_id") or 0) or 0)
+    expired_inbound_id = int(settings.get("expired_inbound_id") or 0)
     target_limit_ip = int(limit_ip if limit_ip is not None else subscription.get("limit_ip") or 0)
     target_limit_gb = float(limit_gb if limit_gb is not None else subscription.get("limit_gb") or 0)
     target_flow = str(flow if flow is not None else subscription.get("flow") or "")
+    changed = False
     for device in info.get("devices", []):
         email = str(device.get("email") or "")
         if not email:
@@ -702,6 +774,32 @@ async def _sync_paid_subscription_devices(
         client = await api_get_client(email)
         if not client:
             continue
+        current_inbound_id = int(device.get("ib_id") or 0)
+        desired_inbound_id = target_inbound_id
+        if not enabled and expired_inbound_id and paid_subscription_status(subscription) == "expired":
+            desired_inbound_id = expired_inbound_id
+        if desired_inbound_id and current_inbound_id != desired_inbound_id:
+            comment = str(client.get("comment") or device.get("label") or email)
+            await api_del_client_by_email(email)
+            result, new_uuid = await api_add_client(
+                desired_inbound_id,
+                email,
+                0,
+                target_limit_gb,
+                target_flow,
+                expiry_time_ms=expiry_time_ms if expiry_time_ms > 0 else None,
+                limit_ip=target_limit_ip,
+                comment=comment,
+            )
+            if result.get("success"):
+                device["ib_id"] = desired_inbound_id
+                if new_uuid:
+                    device["uuid"] = new_uuid
+                changed = True
+                continue
+            client = await api_get_client(email)
+            if not client:
+                continue
         if expiry_time_ms > 0:
             client["expiryTime"] = expiry_time_ms
         client["enable"] = bool(enabled)
@@ -709,6 +807,9 @@ async def _sync_paid_subscription_devices(
         client["totalGB"] = 0 if target_limit_gb <= 0 else int(target_limit_gb * 1024 ** 3)
         client["flow"] = target_flow
         await api_update_client(email, client)
+    if changed:
+        data[user_key]["devices"] = info.get("devices", [])
+        save_vpn_users(data)
 
 
 def _subscription_action_target(subscription: dict) -> tuple[str, int]:
@@ -1271,23 +1372,49 @@ async def _sync_paid_user_devices_expiry(
     limit_ip: int | None = None,
     limit_gb: float | None = None,
     flow: str | None = None,
+    target_inbound_id: int | None = None,
 ) -> None:
-    info = load_vpn_users().get(_paid_user_key(user_id), {})
+    data = load_vpn_users()
+    info = data.get(_paid_user_key(user_id), {})
     target_limit_ip = int(limit_ip if limit_ip is not None else DEFAULT_PAID_LIMIT_IP)
     target_limit_gb = float(limit_gb if limit_gb is not None else DEFAULT_PAID_LIMIT_GB)
     target_flow = str(flow if flow is not None else DEFAULT_PAID_FLOW)
+    target_inbound_id = int(target_inbound_id or 0)
+    changed = False
     for device in info.get("devices", []):
         email = str(device.get("email") or "")
         if not email:
             continue
         client = await api_get_client(email)
         if client:
+            if target_inbound_id and int(device.get("ib_id") or 0) != target_inbound_id:
+                comment = str(client.get("comment") or device.get("label") or email)
+                await api_del_client_by_email(email)
+                result, new_uuid = await api_add_client(
+                    target_inbound_id,
+                    email,
+                    0,
+                    target_limit_gb,
+                    target_flow,
+                    expiry_time_ms=int(expiry_time_ms),
+                    limit_ip=target_limit_ip,
+                    comment=comment,
+                )
+                if result.get("success"):
+                    device["ib_id"] = target_inbound_id
+                    if new_uuid:
+                        device["uuid"] = new_uuid
+                    changed = True
+                    continue
             client["totalGB"] = 0 if target_limit_gb <= 0 else int(target_limit_gb * 1024 ** 3)
             client["expiryTime"] = int(expiry_time_ms)
             client["limitIp"] = target_limit_ip
             client["flow"] = target_flow
             client["enable"] = bool(enabled)
             await api_update_client(email, client)
+    if changed:
+        data[_paid_user_key(user_id)]["devices"] = info.get("devices", [])
+        save_vpn_users(data)
 
 
 async def _revoke_paid_user_access(user_id: int) -> None:
@@ -1889,6 +2016,10 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
     field = call.data[len("paidset_"):]
+    if field == "expired_inbound_id":
+        await call.answer()
+        await _show_paid_expired_inbound_selector(call)
+        return
     if field not in {"trial_seconds", "payment_seconds", "payment_amount", "grace_seconds", "payment_url", "max_devices", "limit_gb", "limit_ip", "flow"}:
         return await call.answer("Неизвестная настройка", show_alert=True)
     await state.update_data(target_paid_setting_field=field)
@@ -1906,11 +2037,43 @@ async def cb_paid_settings_default(call: types.CallbackQuery):
         return await call.answer("Нет доступа", show_alert=True)
     field = call.data[len("paiddef_"):]
     settings = load_paid_settings()
-    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "max_devices", "limit_gb", "limit_ip", "flow", "grace_seconds", "payment_url"}:
+    if field not in {"trial_seconds", "payment_seconds", "payment_amount", "max_devices", "limit_gb", "limit_ip", "flow", "grace_seconds", "payment_url", "expired_inbound_id"}:
         return await call.answer("Неизвестная настройка", show_alert=True)
     settings[field] = _paid_setting_default(field)
     save_paid_settings(settings)
     await call.answer("Применено")
+    await _show_paid_settings(call, edit=True)
+
+
+@router.callback_query(F.data.startswith("paidset_expired_inbound_choose_"))
+async def cb_paid_expired_inbound_choose(call: types.CallbackQuery):
+    if not is_admin(call.from_user.id):
+        return await call.answer("Нет доступа", show_alert=True)
+    inbound_id = int(call.data[len("paidset_expired_inbound_choose_"): ] or 0)
+    settings = load_paid_settings()
+    settings["expired_inbound_id"] = inbound_id
+    save_paid_settings(settings)
+    if inbound_id:
+        subscriptions = load_paid_subscriptions()
+        for user_key, subscription in list(subscriptions.items()):
+            if not str(user_key).isdigit():
+                continue
+            if paid_subscription_status(subscription) != "expired":
+                continue
+            user_id = int(user_key)
+            expiry_time_ms = int(subscription.get("expiry_time_ms") or 0)
+            if not expiry_time_ms:
+                expiry_time_ms = int(subscription.get("grace_ends_at") or subscription.get("paid_ends_at") or 0) * 1000
+            await _sync_paid_user_devices_expiry(
+                user_id,
+                expiry_time_ms,
+                enabled=True,
+                limit_ip=int(subscription.get("limit_ip") or DEFAULT_PAID_LIMIT_IP),
+                limit_gb=float(subscription.get("limit_gb") or DEFAULT_PAID_LIMIT_GB),
+                flow=str(subscription.get("flow") or DEFAULT_PAID_FLOW),
+                target_inbound_id=inbound_id,
+            )
+    await call.answer("Сохранено")
     await _show_paid_settings(call, edit=True)
 
 

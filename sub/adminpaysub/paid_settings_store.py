@@ -25,6 +25,7 @@ DEFAULT_PAID_LIMIT_GB = 0.0
 DEFAULT_PAID_EXPIRY_TIME_MS = 2523456000000
 DEFAULT_PAID_FLOW = "xtls-rprx-vision"
 DEFAULT_PAID_PAYMENT_URL = ""
+DEFAULT_PAID_EXPIRED_INBOUND_ID = 0
 
 
 def parse_duration_to_seconds(raw: str | int | float | None) -> int:
@@ -157,6 +158,7 @@ def load_paid_settings() -> dict:
         "limit_gb": float(raw.get("limit_gb", DEFAULT_PAID_LIMIT_GB) or DEFAULT_PAID_LIMIT_GB),
         "flow": str(raw.get("flow", DEFAULT_PAID_FLOW) or DEFAULT_PAID_FLOW),
         "payment_url": str(raw.get("payment_url", DEFAULT_PAID_PAYMENT_URL) or ""),
+        "expired_inbound_id": int(raw.get("expired_inbound_id", DEFAULT_PAID_EXPIRED_INBOUND_ID) or DEFAULT_PAID_EXPIRED_INBOUND_ID),
     }
 
 
@@ -171,5 +173,6 @@ def save_paid_settings(data: dict) -> None:
         "limit_gb": float(data.get("limit_gb", DEFAULT_PAID_LIMIT_GB) or DEFAULT_PAID_LIMIT_GB),
         "flow": str(data.get("flow", DEFAULT_PAID_FLOW) or DEFAULT_PAID_FLOW),
         "payment_url": str(data.get("payment_url", DEFAULT_PAID_PAYMENT_URL) or ""),
+        "expired_inbound_id": int(data.get("expired_inbound_id", DEFAULT_PAID_EXPIRED_INBOUND_ID) or DEFAULT_PAID_EXPIRED_INBOUND_ID),
     }
     _write_json(PAID_SETTINGS_FILE, payload)
