@@ -482,7 +482,6 @@ def _paid_settings_kb() -> InlineKeyboardMarkup:
                     text=f"🏁 Инбаунд после окончания: {settings['expired_inbound_id'] or 'не задан'}",
                     callback_data="paidset_expired_inbound_id",
                 ),
-                InlineKeyboardButton(text="По умолчанию", callback_data="paiddef_expired_inbound_id"),
             ],
             [
                 InlineKeyboardButton(text=f"📱 Лимит устройств: {settings['max_devices']}", callback_data="paidset_max_devices"),
@@ -2015,6 +2014,8 @@ async def cb_paid_block_clear(call: types.CallbackQuery):
 async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
+    if call.data.startswith("paidset_expired_inbound_choose_"):
+        return
     field = call.data[len("paidset_"):]
     if field == "expired_inbound_id":
         await call.answer()
