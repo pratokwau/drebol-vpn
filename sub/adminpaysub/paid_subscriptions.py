@@ -889,6 +889,58 @@ def _paid_subscription_effective_settings(subscription: dict | None) -> dict:
     return effective
 
 
+def _apply_paid_subscription_individual_timeline(subscription: dict, *, field: str, value, defaults: dict) -> dict:
+    now = int(time.time())
+    status = paid_subscription_status(subscription)
+    trial_seconds = int(subscription.get("trial_seconds") or defaults.get("trial_seconds") or DEFAULT_PAID_TRIAL_SECONDS)
+    payment_seconds = int(subscription.get("payment_seconds") or defaults.get("payment_seconds") or DEFAULT_PAID_PAYMENT_SECONDS)
+    grace_seconds = int(subscription.get("grace_seconds") or defaults.get("grace_seconds") or DEFAULT_PAID_GRACE_SECONDS)
+
+    if field == "trial":
+        trial_seconds = int(value)
+        subscription["trial_seconds"] = trial_seconds
+        subscription["trial_ends_at"] = now + trial_seconds
+        subscription["grace_ends_at"] = subscription["trial_ends_at"] + grace_seconds
+        subscription["expiry_time_ms"] = int(subscription["grace_ends_at"] * 1000)
+        if status in {"expired", "grace"}:
+            subscription["status"] = "trial"
+            subscription["active"] = True
+        return subscription
+
+    if field == "payment":
+        payment_seconds = int(value)
+        subscription["payment_seconds"] = payment_seconds
+        if status in {"active", "grace", "pending_payment", "expired"}:
+            base = now
+            subscription["paid_ends_at"] = base + payment_seconds
+            subscription["grace_ends_at"] = subscription["paid_ends_at"] + grace_seconds
+            subscription["expiry_time_ms"] = int(subscription["grace_ends_at"] * 1000)
+            subscription["status"] = "active"
+            subscription["active"] = True
+        return subscription
+
+    if field == "grace":
+        grace_seconds = int(value)
+        subscription["grace_seconds"] = grace_seconds
+        base_end = int(subscription.get("trial_ends_at") or subscription.get("paid_ends_at") or now)
+        subscription["grace_ends_at"] = base_end + grace_seconds
+        subscription["expiry_time_ms"] = int(subscription["grace_ends_at"] * 1000)
+        return subscription
+
+    if field == "amount":
+        subscription["payment_amount"] = int(value)
+        return subscription
+
+    if field == "url":
+        subscription["payment_url"] = str(value or "")
+        return subscription
+
+    subscription["trial_seconds"] = trial_seconds
+    subscription["payment_seconds"] = payment_seconds
+    subscription["grace_seconds"] = grace_seconds
+    return subscription
+
+
 def _paid_subscription_detail_payload(user_key: str) -> tuple[str, InlineKeyboardMarkup] | None:
     info = load_vpn_users().get(user_key)
     if not info or str(info.get("subscription_type", "")).lower() != "paid":
@@ -2271,6 +2323,13 @@ async def paid_subscription_settings_value(message: types.Message, state: FSMCon
         else:
             await message.answer("Неизвестная настройка.")
             return
+        if field in {"trial", "payment", "grace", "amount", "url"}:
+            current = _apply_paid_subscription_individual_timeline(
+                current,
+                field=field,
+                value=value,
+                defaults=effective_defaults,
+            )
         current["last_activity_at"] = int(time.time())
         if user_id is not None:
             all_data = load_paid_subscriptions()
@@ -2295,7 +2354,7 @@ async def paid_subscription_settings_value(message: types.Message, state: FSMCon
                 )
                 save_vpn_users(users)
         if user_id is not None:
-            if field in {"max", "gb", "ip", "flow"}:
+            if field in {"max", "gb", "ip", "flow", "trial", "payment", "grace"}:
                 await _sync_paid_subscription_devices(
                     user_id,
                     current,
