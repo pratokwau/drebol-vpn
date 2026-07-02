@@ -16,7 +16,6 @@ from loader import bot
 from sub.adminpaysub.paid_settings_store import (
     DEFAULT_PAID_GRACE_SECONDS,
     DEFAULT_PAID_EXPIRED_INBOUND_ID,
-    DEFAULT_PAID_CREATE_INBOUND_IDS,
     DEFAULT_PAID_LIMIT_IP,
     DEFAULT_PAID_LIMIT_GB,
     DEFAULT_PAID_PAYMENT_AMOUNT,
@@ -557,7 +556,7 @@ def _paid_setting_default(field: str):
         "flow": DEFAULT_PAID_FLOW,
         "payment_url": DEFAULT_PAID_PAYMENT_URL,
         "expired_inbound_id": DEFAULT_PAID_EXPIRED_INBOUND_ID,
-        "create_inbound_ids": DEFAULT_PAID_CREATE_INBOUND_IDS,
+        "create_inbound_ids": [],
     }
     return defaults.get(field)
 
@@ -589,13 +588,13 @@ def _paid_inbound_label_map(inbounds: list[dict]) -> dict[int, str]:
     return labels
 
 
-def _paid_create_inbounds_summary(settings: dict | None = None) -> str:
+def _paid_create_inbounds_summary(settings: dict | None, labels: dict[int, str] | None = None) -> str:
     ids = _paid_create_inbound_ids(settings)
     if not ids:
         return "не заданы"
-    if len(ids) == 1:
-        return str(ids[0])
-    return f"{len(ids)} выбрано"
+    if not labels:
+        return ", ".join(str(inbound_id) for inbound_id in ids)
+    return ", ".join(labels.get(inbound_id, str(inbound_id)) for inbound_id in ids)
 
 
 async def _show_paid_create_inbound_selector(call: types.CallbackQuery) -> None:
@@ -637,10 +636,12 @@ async def _show_paid_create_inbound_selector(call: types.CallbackQuery) -> None:
 async def _show_paid_settings(call_or_message, *, edit: bool = True):
     settings = load_paid_settings()
     expired_inbound_label = "не задан"
+    create_inbound_labels = {}
     expired_inbound_id = int(settings.get("expired_inbound_id") or 0)
     if expired_inbound_id:
         try:
             inbounds, _ = await api_get_inbounds()
+            create_inbound_labels = _paid_inbound_label_map(inbounds)
             inbound = next((item for item in inbounds if int(item.get("id") or 0) == expired_inbound_id), None)
             if inbound:
                 expired_inbound_label = f"{inbound.get('remark') or inbound.get('id')} ({expired_inbound_id})"
@@ -648,6 +649,12 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
                 expired_inbound_label = str(expired_inbound_id)
         except Exception:
             expired_inbound_label = str(expired_inbound_id)
+    else:
+        try:
+            inbounds, _ = await api_get_inbounds()
+            create_inbound_labels = _paid_inbound_label_map(inbounds)
+        except Exception:
+            create_inbound_labels = {}
     text = (
         "⚙️ <b>Настройки платных подписок</b>\n\n"
         f"🧪 Пробный период: <b>{format_duration(settings['trial_seconds'])}</b>\n"
@@ -656,7 +663,7 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
         f"🕒 Время на продление: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"🔗 Ссылка на оплату: <b>{'задана' if settings['payment_url'] else 'не задана'}</b>\n"
         f"🏁 Инбаунд после окончания: <b>{expired_inbound_label}</b>\n"
-        f"🧭 Инбауды создания: <b>{_paid_create_inbounds_summary(settings)}</b>\n"
+        f"🧭 Инбауды создания: <b>{_paid_create_inbounds_summary(settings, create_inbound_labels)}</b>\n"
         f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
         f"💾 Лимит ГБ: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
