@@ -452,11 +452,22 @@ def _paid_subscription_settings_kb(user_key: str, subscription: dict) -> InlineK
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
+                InlineKeyboardButton(text=f"🧪 Триал: {format_duration(subscription.get('trial_seconds'))}", callback_data=f"paidsubset_trial_{user_key}"),
+                InlineKeyboardButton(text=f"⏳ Оплата: {format_duration(subscription.get('payment_seconds'))}", callback_data=f"paidsubset_payment_{user_key}"),
+            ],
+            [
+                InlineKeyboardButton(text=f"💰 Сумма: {int(subscription.get('payment_amount') or 0)} ₽", callback_data=f"paidsubset_amount_{user_key}"),
+                InlineKeyboardButton(text=f"🕒 Grace: {format_duration(subscription.get('grace_seconds'))}", callback_data=f"paidsubset_grace_{user_key}"),
+            ],
+            [
+                InlineKeyboardButton(text=f"🔗 Оплата: {'задана' if subscription.get('payment_url') else 'не задана'}", callback_data=f"paidsubset_url_{user_key}"),
                 InlineKeyboardButton(text=f"📱 Устройства: {int(subscription.get('max_devices') or 1)}", callback_data=f"paidsubset_max_{user_key}"),
-                InlineKeyboardButton(text=f"🌐 IP: {int(subscription.get('limit_ip') or 2)}", callback_data=f"paidsubset_ip_{user_key}"),
             ],
             [
                 InlineKeyboardButton(text=f"💾 Трафик: {_format_limit_gb(subscription.get('limit_gb'))}", callback_data=f"paidsubset_gb_{user_key}"),
+                InlineKeyboardButton(text=f"🌐 IP: {int(subscription.get('limit_ip') or 2)}", callback_data=f"paidsubset_ip_{user_key}"),
+            ],
+            [
                 InlineKeyboardButton(text=f"⚡ Flow: {str(subscription.get('flow') or DEFAULT_PAID_FLOW)}", callback_data=f"paidsubset_flow_{user_key}"),
             ],
             [
@@ -857,6 +868,27 @@ def _apply_paid_subscription_extension(subscription: dict, seconds: int) -> dict
     return subscription
 
 
+def _paid_subscription_effective_settings(subscription: dict | None) -> dict:
+    effective = load_paid_settings()
+    if not subscription:
+        return effective
+    for field in (
+        "trial_seconds",
+        "payment_seconds",
+        "payment_amount",
+        "grace_seconds",
+        "max_devices",
+        "limit_gb",
+        "limit_ip",
+        "flow",
+        "payment_url",
+        "expired_inbound_id",
+    ):
+        if field in subscription:
+            effective[field] = subscription.get(field)
+    return effective
+
+
 def _paid_subscription_detail_payload(user_key: str) -> tuple[str, InlineKeyboardMarkup] | None:
     info = load_vpn_users().get(user_key)
     if not info or str(info.get("subscription_type", "")).lower() != "paid":
@@ -915,15 +947,21 @@ def _paid_subscription_settings_payload(user_key: str) -> tuple[str, InlineKeybo
     subscription = get_paid_subscription(_extract_paid_user_id(user_key)) if _extract_paid_user_id(user_key) is not None else info
     if not subscription:
         subscription = info
+    settings = _paid_subscription_effective_settings(subscription)
     return (
         "⚙️ <b>Настройки подписки</b>\n\n"
-        "Здесь меняются только параметры выбранного клиента.\n"
-        "Системные настройки находятся в общем меню платных подписок.\n\n"
-        f"📱 Устройства: <b>{int(subscription.get('max_devices') or 1)}</b>\n"
-        f"🌐 IP-лимит: <b>{int(subscription.get('limit_ip') or 2)}</b>\n"
-        f"💾 Трафик: <b>{'Безлимитный' if _format_limit_gb(subscription.get('limit_gb')) == '∞' else _format_limit_gb(subscription.get('limit_gb'))}</b>\n"
-        f"⚡ Flow: <b>{html.escape(str(subscription.get('flow') or DEFAULT_PAID_FLOW))}</b>",
-        _paid_subscription_settings_kb(user_key, subscription),
+        "Это индивидуальные параметры только для этой подписки.\n"
+        "Они не меняют системные значения и не затрагивают других клиентов.\n\n"
+        f"🧪 Пробный период: <b>{format_duration(settings.get('trial_seconds'))}</b>\n"
+        f"⏳ Период оплаты: <b>{format_duration(settings.get('payment_seconds'))}</b>\n"
+        f"💰 Сумма: <b>{int(settings.get('payment_amount') or 0)} ₽</b>\n"
+        f"🕒 Время на продление: <b>{format_duration(settings.get('grace_seconds'))}</b>\n"
+        f"🔗 Ссылка на оплату: <b>{'задана' if settings.get('payment_url') else 'не задана'}</b>\n"
+        f"📱 Устройства: <b>{int(settings.get('max_devices') or 1)}</b>\n"
+        f"🌐 IP-лимит: <b>{int(settings.get('limit_ip') or 2)}</b>\n"
+        f"💾 Трафик: <b>{_format_limit_gb(settings.get('limit_gb'))}</b>\n"
+        f"⚡ Flow: <b>{html.escape(str(settings.get('flow') or DEFAULT_PAID_FLOW))}</b>",
+        _paid_subscription_settings_kb(user_key, settings),
     )
 
 
@@ -1808,9 +1846,14 @@ async def cb_paid_sub_settings_edit(call: types.CallbackQuery, state: FSMContext
     info = load_vpn_users().get(user_key)
     if not info or str(info.get("subscription_type", "")).lower() != "paid":
         return await call.answer("Подписка не найдена", show_alert=True)
-    if field not in {"max", "gb", "ip", "flow"}:
+    if field not in {"trial", "payment", "amount", "grace", "url", "max", "gb", "ip", "flow"}:
         return await call.answer("Неизвестная настройка", show_alert=True)
     prompts = {
+        "trial": "Введите новый пробный период или <code>-</code> для значения по умолчанию.\n\nПример: <code>12 часов</code>, <code>1 день</code>, <code>5 минут</code>",
+        "payment": "Введите новый срок платной подписки или <code>-</code> для значения по умолчанию.\n\nПример: <code>12 часов</code>, <code>1 месяц</code>",
+        "amount": "Введите новую сумму оплаты в рублях или <code>-</code> для значения по умолчанию.",
+        "grace": "Введите новое время на продление или <code>-</code> для значения по умолчанию.\n\nПример: <code>36 часов</code>, <code>1 день</code>",
+        "url": "Введите новую ссылку на оплату или <code>-</code>, чтобы очистить её.",
         "max": "Введите новый лимит устройств или <code>-</code> для значения по умолчанию.",
         "gb": "Введите новый лимит трафика или <code>-</code> для бесконечности.\n\nПример: <code>100</code>",
         "ip": "Введите новый лимит IP или <code>-</code> для значения по умолчанию.",
@@ -2192,8 +2235,24 @@ async def paid_subscription_settings_value(message: types.Message, state: FSMCon
     user_id = _extract_paid_user_id(user_key)
     subscription = get_paid_subscription(user_id) if user_id is not None else None
     current = subscription or info
+    effective_defaults = _paid_subscription_effective_settings(current)
     try:
-        if field == "max":
+        if field == "trial":
+            value = int(effective_defaults["trial_seconds"]) if raw == "-" else parse_duration_to_seconds(raw)
+            current["trial_seconds"] = value
+        elif field == "payment":
+            value = int(effective_defaults["payment_seconds"]) if raw == "-" else parse_duration_to_seconds(raw)
+            current["payment_seconds"] = value
+        elif field == "amount":
+            value = int(effective_defaults["payment_amount"]) if raw == "-" else int(raw)
+            current["payment_amount"] = value
+        elif field == "grace":
+            value = int(effective_defaults["grace_seconds"]) if raw == "-" else parse_duration_to_seconds(raw)
+            current["grace_seconds"] = value
+        elif field == "url":
+            value = "" if raw == "-" else raw
+            current["payment_url"] = value
+        elif field == "max":
             value = DEFAULT_PAID_MAX_DEVICES if raw == "-" else max(1, int(raw))
             current["max_devices"] = value
             set_user_max_devices(user_key, value)
@@ -2222,6 +2281,11 @@ async def paid_subscription_settings_value(message: types.Message, state: FSMCon
             if user_key in users:
                 users[user_key].update(
                     {
+                        "trial_seconds": current.get("trial_seconds"),
+                        "payment_seconds": current.get("payment_seconds"),
+                        "payment_amount": current.get("payment_amount"),
+                        "grace_seconds": current.get("grace_seconds"),
+                        "payment_url": current.get("payment_url"),
                         "max_devices": current.get("max_devices"),
                         "limit_gb": current.get("limit_gb"),
                         "limit_ip": current.get("limit_ip"),
@@ -2231,14 +2295,15 @@ async def paid_subscription_settings_value(message: types.Message, state: FSMCon
                 )
                 save_vpn_users(users)
         if user_id is not None:
-            await _sync_paid_subscription_devices(
-                user_id,
-                current,
-                enabled=paid_subscription_status(current) != "frozen",
-                limit_ip=int(current.get("limit_ip") or 0),
-                limit_gb=float(current.get("limit_gb") or 0),
-                flow=str(current.get("flow") or DEFAULT_PAID_FLOW),
-            )
+            if field in {"max", "gb", "ip", "flow"}:
+                await _sync_paid_subscription_devices(
+                    user_id,
+                    current,
+                    enabled=paid_subscription_status(current) != "frozen",
+                    limit_ip=int(current.get("limit_ip") or 0),
+                    limit_gb=float(current.get("limit_gb") or 0),
+                    flow=str(current.get("flow") or DEFAULT_PAID_FLOW),
+                )
     except ValueError:
         await message.answer("Некорректное значение.\n\nДля выхода введите /cancel")
         return
@@ -2277,24 +2342,21 @@ async def cb_paid_request_ok(call: types.CallbackQuery):
     _log_paid(f"request approved by admin={call.from_user.id} user_id={user_id} kind={kind!r} request_id={request_id!r}")
     if kind in {"renew", "payment_check"}:
         existing = get_paid_subscription(user_id) or {}
-        updated = extend_paid_subscription(existing, settings, from_now=(kind == "renew"))
+        subscription_settings = _paid_subscription_effective_settings(existing)
+        updated = extend_paid_subscription(existing, subscription_settings, from_now=(kind == "renew"))
         updated["subscription_type"] = "paid"
-        updated["payment_url"] = str(settings["payment_url"])
-        updated["max_devices"] = int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES)
-        updated["limit_ip"] = int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP)
-        updated["limit_gb"] = float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB)
-        updated["flow"] = str(settings.get("flow") or DEFAULT_PAID_FLOW)
+        updated["payment_url"] = str(subscription_settings.get("payment_url") or "")
         updated["renewals_count"] = int(updated.get("renewals_count") or 0) + 1
-        updated["total_paid_amount"] = int(updated.get("total_paid_amount") or 0) + int(settings.get("payment_amount") or DEFAULT_PAID_PAYMENT_AMOUNT)
+        updated["total_paid_amount"] = int(updated.get("total_paid_amount") or 0) + int(subscription_settings.get("payment_amount") or DEFAULT_PAID_PAYMENT_AMOUNT)
         updated["last_activity_at"] = int(time.time())
         set_paid_subscription(user_id, updated)
         device_expiry_ms = int(updated.get("grace_ends_at") or updated.get("paid_ends_at") or 0) * 1000
         await _sync_paid_user_devices_expiry(
             user_id,
             device_expiry_ms,
-            limit_ip=int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP),
-            limit_gb=float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB),
-            flow=str(settings.get("flow") or DEFAULT_PAID_FLOW),
+            limit_ip=int(subscription_settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP),
+            limit_gb=float(subscription_settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB),
+            flow=str(subscription_settings.get("flow") or DEFAULT_PAID_FLOW),
         )
         user_message = (
             "✅ <b>Твоя платная подписка продлена.</b>\n\n"
@@ -2373,25 +2435,22 @@ async def cb_paid_payment_ok(call: types.CallbackQuery):
     settings = load_paid_settings()
     _log_paid(f"payment confirmed by admin={call.from_user.id} user_id={user_id} request_id={request_id!r}")
     existing = get_paid_subscription(user_id) or {}
-    updated = extend_paid_subscription(existing, settings, from_now=True)
+    subscription_settings = _paid_subscription_effective_settings(existing)
+    updated = extend_paid_subscription(existing, subscription_settings, from_now=True)
     updated["subscription_type"] = "paid"
-    updated["payment_url"] = str(settings["payment_url"])
+    updated["payment_url"] = str(subscription_settings.get("payment_url") or "")
     updated["status"] = "active"
-    updated["max_devices"] = int(settings.get("max_devices") or DEFAULT_PAID_MAX_DEVICES)
-    updated["limit_ip"] = int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP)
-    updated["limit_gb"] = float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB)
-    updated["flow"] = str(settings.get("flow") or DEFAULT_PAID_FLOW)
     updated["renewals_count"] = int(updated.get("renewals_count") or 0) + 1
-    updated["total_paid_amount"] = int(updated.get("total_paid_amount") or 0) + int(settings.get("payment_amount") or DEFAULT_PAID_PAYMENT_AMOUNT)
+    updated["total_paid_amount"] = int(updated.get("total_paid_amount") or 0) + int(subscription_settings.get("payment_amount") or DEFAULT_PAID_PAYMENT_AMOUNT)
     updated["last_activity_at"] = int(time.time())
     set_paid_subscription(user_id, updated)
     device_expiry_ms = int(updated.get("grace_ends_at") or updated.get("paid_ends_at") or 0) * 1000
     await _sync_paid_user_devices_expiry(
         user_id,
         device_expiry_ms,
-        limit_ip=int(settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP),
-        limit_gb=float(settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB),
-        flow=str(settings.get("flow") or DEFAULT_PAID_FLOW),
+        limit_ip=int(subscription_settings.get("limit_ip") or DEFAULT_PAID_LIMIT_IP),
+        limit_gb=float(subscription_settings.get("limit_gb") or DEFAULT_PAID_LIMIT_GB),
+        flow=str(subscription_settings.get("flow") or DEFAULT_PAID_FLOW),
     )
     delete_paid_request(user_id)
     await bot.send_message(
