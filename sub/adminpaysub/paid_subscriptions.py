@@ -600,6 +600,10 @@ def _paid_create_inbounds_summary(settings: dict | None, labels: dict[int, str] 
     return ", ".join(labels.get(inbound_id, str(inbound_id)) for inbound_id in ids)
 
 
+def _paid_create_inbounds_count(settings: dict | None = None) -> int:
+    return len(_paid_create_inbound_ids(settings))
+
+
 async def _show_paid_create_inbound_selector(call: types.CallbackQuery) -> None:
     settings = load_paid_settings()
     selected_ids = _paid_create_inbound_ids(settings)
@@ -626,10 +630,11 @@ async def _show_paid_create_inbound_selector(call: types.CallbackQuery) -> None:
             )
         ])
     rows.append([InlineKeyboardButton(text="🧹 Очистить", callback_data="paidset_create_inbound_clear")])
-    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_settings")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="paidset_create_inbound_back")])
     await call.message.edit_text(
         "🧭 <b>Инбауды для создания</b>\n\n"
         "Выбери один или несколько inbound'ов, на которых будет создаваться новая платная подписка.\n"
+        f"Выбрано: <b>{_paid_create_inbounds_count(settings)}</b>\n\n"
         "Если ничего не выбрано, бот возьмёт первый доступный inbound из панели.",
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
@@ -2224,6 +2229,10 @@ async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
     if call.data == "paidset_create_inbound_ids":
         await call.answer()
         await _show_paid_create_inbound_selector(call)
+        return
+    if call.data == "paidset_create_inbound_back":
+        await call.answer()
+        await _show_paid_settings(call, edit=True)
         return
     if call.data.startswith("paidset_create_inbound_toggle_"):
         inbound_id = int(call.data[len("paidset_create_inbound_toggle_"): ] or 0)
