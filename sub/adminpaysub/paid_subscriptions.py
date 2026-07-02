@@ -16,6 +16,7 @@ from loader import bot
 from sub.adminpaysub.paid_settings_store import (
     DEFAULT_PAID_GRACE_SECONDS,
     DEFAULT_PAID_EXPIRED_INBOUND_ID,
+    DEFAULT_PAID_CREATE_INBOUND_IDS,
     DEFAULT_PAID_LIMIT_IP,
     DEFAULT_PAID_LIMIT_GB,
     DEFAULT_PAID_PAYMENT_AMOUNT,
@@ -465,6 +466,9 @@ def _paid_subscription_settings_kb(user_key: str, subscription: dict) -> InlineK
                 InlineKeyboardButton(text=f"📱 Устройства: {int(subscription.get('max_devices') or 1)}", callback_data=f"paidsubset_max_{user_key}"),
             ],
             [
+                InlineKeyboardButton(text=f"🧭 Инбауды создания: {_paid_create_inbounds_summary(subscription)}", callback_data="paidset_create_inbound_ids"),
+            ],
+            [
                 InlineKeyboardButton(text=f"💾 Трафик: {_format_limit_gb(subscription.get('limit_gb'))}", callback_data=f"paidsubset_gb_{user_key}"),
                 InlineKeyboardButton(text=f"🌐 IP: {int(subscription.get('limit_ip') or 2)}", callback_data=f"paidsubset_ip_{user_key}"),
             ],
@@ -553,8 +557,81 @@ def _paid_setting_default(field: str):
         "flow": DEFAULT_PAID_FLOW,
         "payment_url": DEFAULT_PAID_PAYMENT_URL,
         "expired_inbound_id": DEFAULT_PAID_EXPIRED_INBOUND_ID,
+        "create_inbound_ids": DEFAULT_PAID_CREATE_INBOUND_IDS,
     }
     return defaults.get(field)
+
+
+def _paid_create_inbound_ids(settings: dict | None = None) -> list[int]:
+    settings = settings or load_paid_settings()
+    raw_ids = settings.get("create_inbound_ids") or []
+    ids: list[int] = []
+    for item in raw_ids:
+        try:
+            inbound_id = int(item)
+        except Exception:
+            continue
+        if inbound_id > 0 and inbound_id not in ids:
+            ids.append(inbound_id)
+    return ids
+
+
+def _paid_inbound_label_map(inbounds: list[dict]) -> dict[int, str]:
+    labels: dict[int, str] = {}
+    for inbound in inbounds:
+        inbound_id = int(inbound.get("id") or 0)
+        if inbound_id <= 0:
+            continue
+        protocol = str(inbound.get("protocol", "?")).upper()
+        port = inbound.get("port", "?")
+        remark = inbound.get("remark") or f"{protocol}:{port}"
+        labels[inbound_id] = f"{remark} ({protocol}:{port})"
+    return labels
+
+
+def _paid_create_inbounds_summary(settings: dict | None = None) -> str:
+    ids = _paid_create_inbound_ids(settings)
+    if not ids:
+        return "не заданы"
+    if len(ids) == 1:
+        return str(ids[0])
+    return f"{len(ids)} выбрано"
+
+
+async def _show_paid_create_inbound_selector(call: types.CallbackQuery) -> None:
+    settings = load_paid_settings()
+    selected_ids = _paid_create_inbound_ids(settings)
+    inbounds, err = await api_get_inbounds()
+    if not inbounds:
+        await call.message.edit_text(
+            "🧭 <b>Инбауды для создания</b>\n\n"
+            f"Не удалось загрузить список inbound.\n<code>{html.escape(err or 'unknown error')}</code>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_settings")]]
+            ),
+        )
+        return
+    labels = _paid_inbound_label_map(inbounds)
+    rows = []
+    for inbound in sorted(inbounds, key=lambda item: int(item.get("id") or 0)):
+        inbound_id = int(inbound.get("id") or 0)
+        prefix = "✅ " if inbound_id in selected_ids else "☐ "
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{prefix}{labels.get(inbound_id, str(inbound_id))}",
+                callback_data=f"paidset_create_inbound_toggle_{inbound_id}",
+            )
+        ])
+    rows.append([InlineKeyboardButton(text="🧹 Очистить", callback_data="paidset_create_inbound_clear")])
+    rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="adminpaysub_settings")])
+    await call.message.edit_text(
+        "🧭 <b>Инбауды для создания</b>\n\n"
+        "Выбери один или несколько inbound'ов, на которых будет создаваться новая платная подписка.\n"
+        "Если ничего не выбрано, бот возьмёт первый доступный inbound из панели.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+    )
 
 
 async def _show_paid_settings(call_or_message, *, edit: bool = True):
@@ -579,6 +656,7 @@ async def _show_paid_settings(call_or_message, *, edit: bool = True):
         f"🕒 Время на продление: <b>{format_duration(settings['grace_seconds'])}</b>\n"
         f"🔗 Ссылка на оплату: <b>{'задана' if settings['payment_url'] else 'не задана'}</b>\n"
         f"🏁 Инбаунд после окончания: <b>{expired_inbound_label}</b>\n"
+        f"🧭 Инбауды создания: <b>{_paid_create_inbounds_summary(settings)}</b>\n"
         f"📱 Лимит устройств: <b>{settings['max_devices']}</b>\n"
         f"💾 Лимит ГБ: <b>{_format_limit_gb(settings['limit_gb'])}</b>\n"
         f"🌐 Лимит IP: <b>{settings['limit_ip']}</b>\n"
@@ -1393,6 +1471,8 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
             save_vpn_users(data)
     inbounds, _ = await api_get_inbounds()
     _log_paid(f"inbounds loaded count={len(inbounds)}")
+    selected_inbound_ids = _paid_create_inbound_ids(settings)
+    selected_inbound_ids = [item for item in selected_inbound_ids if any(int(inbound.get("id") or 0) == item for inbound in inbounds)]
     inbound = next((item for item in inbounds if item.get("id") is not None), None)
     if not inbound:
         _log_paid("no inbound found, creating local user only")
@@ -1421,7 +1501,8 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
     _log_paid(f"email candidates={email_candidates!r}")
     last_result: dict = {}
     for email in email_candidates:
-        _log_paid(f"api_add_client try email={email!r} inbound_id={inbound_id} expiry_time_ms={expiry_time_ms}")
+        target_inbound_ids = selected_inbound_ids or [inbound_id]
+        _log_paid(f"api_add_client try email={email!r} inbound_ids={target_inbound_ids} expiry_time_ms={expiry_time_ms}")
         result, client_uuid = await api_add_client(
             inbound_id,
             email,
@@ -1431,6 +1512,7 @@ async def _create_paid_device_for_user(user_id: int, settings: dict, request: di
             expiry_time_ms=expiry_time_ms,
             limit_ip=limit_ip,
             comment=display_name,
+            inbound_ids=target_inbound_ids,
         )
         last_result = result
         _log_paid(f"api_add_client result email={email!r} success={result.get('success')} msg={result.get('msg')!r} uuid={client_uuid!r}")
@@ -1480,6 +1562,7 @@ async def _sync_paid_user_devices_expiry(
         if client:
             if target_inbound_id and int(device.get("ib_id") or 0) != target_inbound_id:
                 comment = str(client.get("comment") or device.get("label") or email)
+                client_uuid = str(device.get("uuid") or client.get("id") or "")
                 await api_del_client_by_email(email)
                 result, new_uuid = await api_add_client(
                     target_inbound_id,
@@ -1490,6 +1573,7 @@ async def _sync_paid_user_devices_expiry(
                     expiry_time_ms=int(expiry_time_ms),
                     limit_ip=target_limit_ip,
                     comment=comment,
+                    client_uuid=client_uuid or None,
                 )
                 if result.get("success"):
                     device["ib_id"] = target_inbound_id
@@ -2127,6 +2211,30 @@ async def cb_paid_block_clear(call: types.CallbackQuery):
 async def cb_paid_settings_edit(call: types.CallbackQuery, state: FSMContext):
     if not is_admin(call.from_user.id):
         return await call.answer("Нет доступа", show_alert=True)
+    if call.data == "paidset_create_inbound_ids":
+        await call.answer()
+        await _show_paid_create_inbound_selector(call)
+        return
+    if call.data.startswith("paidset_create_inbound_toggle_"):
+        inbound_id = int(call.data[len("paidset_create_inbound_toggle_"): ] or 0)
+        settings = load_paid_settings()
+        selected_ids = _paid_create_inbound_ids(settings)
+        if inbound_id in selected_ids:
+            selected_ids = [item for item in selected_ids if item != inbound_id]
+        else:
+            selected_ids.append(inbound_id)
+        settings["create_inbound_ids"] = selected_ids
+        save_paid_settings(settings)
+        await call.answer("Сохранено")
+        await _show_paid_create_inbound_selector(call)
+        return
+    if call.data == "paidset_create_inbound_clear":
+        settings = load_paid_settings()
+        settings["create_inbound_ids"] = []
+        save_paid_settings(settings)
+        await call.answer("Очищено")
+        await _show_paid_create_inbound_selector(call)
+        return
     if call.data.startswith("paidset_expired_inbound_choose_"):
         inbound_id = int(call.data[len("paidset_expired_inbound_choose_"): ] or 0)
         settings = load_paid_settings()
