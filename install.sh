@@ -2,7 +2,7 @@
 set -e
 
 REPO_URL="https://github.com/pratokwau/drebol-vpn.git"
-INSTALL_DIR="/opt/drebol-vpn"
+INSTALL_DIR="/root/drebol-vpn"
 SERVICE_NAME="drebol-vpn"
 PYTHON="python3"
 

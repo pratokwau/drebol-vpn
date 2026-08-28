@@ -54,7 +54,7 @@ sudo bash install.sh
 
 ## Конфигурация
 
-После установки настройки хранятся в `/opt/drebol-vpn/.env`:
+После установки настройки хранятся в `/root/drebol-vpn/.env`:
 
 ```env
 BOT_TOKEN=ваш_токен_от_BotFather
