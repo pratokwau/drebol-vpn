@@ -390,7 +390,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
         )
         return
 
-    await add_paid_sub(
+    new_sub_id = await add_paid_sub(
         tg_id=tg_id,
         email=result["email"],
         uuid_val=result["uuid"],
@@ -401,6 +401,9 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
         limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
         total_gb=int(cfg.get("paid_preset_traffic", 0)),
     )
+
+    if not trial:
+        await update_paid_sub_field(new_sub_id, "times_renewed", 1)
 
     traffic_str = f"{cfg.get('paid_preset_traffic', 0)} ГБ" if int(cfg.get("paid_preset_traffic", 0)) > 0 else "безлимит"
     period_label = "пробный период" if trial else "оплаченный период"
