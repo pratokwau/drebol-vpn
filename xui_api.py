@@ -46,7 +46,7 @@ async def _login(url: str, login: str, password: str) -> tuple[aiohttp.ClientSes
                 body = await resp.text()
                 await session.close()
                 return None, f"HTTP {status}, ответ не JSON: {body[:300]}"
-            if data.get("success"):
+            if (data or {}).get("success"):
                 return session, ""
             await session.close()
             return None, f"HTTP {status}, ответ: {data}"
@@ -89,7 +89,7 @@ async def _fetch_inbound_id(session: aiohttp.ClientSession, url: str) -> tuple[i
                 body = await resp.text()
                 return None, f"list HTTP {status}, ответ не JSON: {body[:300]}"
 
-            if not data.get("success"):
+            if not (data or {}).get("success"):
                 return None, f"list HTTP {status}: {data}"
 
             inbounds = data.get("obj", []) or []
@@ -166,7 +166,7 @@ async def create_client(
                 body = await resp.text()
                 return {"success": False, "error": f"clients/add HTTP {status}, ответ не JSON: {body[:400]}"}
 
-        if not data.get("success"):
+        if not (data or {}).get("success"):
             # Фолбэк на старое API
             import json as _json
             old_body = {
@@ -185,7 +185,7 @@ async def create_client(
                     body = await resp2.text()
                     return {"success": False, "error": f"addClient HTTP {status2}: {body[:400]}"}
 
-        if data.get("success"):
+        if (data or {}).get("success"):
             parsed = urlparse(url)
             sub_url = f"{parsed.scheme}://{parsed.hostname}:{sub_port}{sub_path}{sub_id}"
             return {
