@@ -40,9 +40,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Проверка подписки для не-админов
     if data != "check_sub" and not adm:
         if not await is_subscribed(context.bot, update.effective_user.id):
+            user = update.effective_user
             await query.edit_message_text(
-                f"👋 Привет, {update.effective_user.first_name}!\n\n"
-                "Добро пожаловать в <b>Drebol VPN</b>.\n\n"
+                f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+                "🔒 Быстрый и безопасный VPN\n"
+                "⚡️ Стабильное подключение\n"
+                "🌍 Доступ к популярным сервисам\n\n"
                 "🔒 Чтобы пользоваться ботом, необходимо подписаться на наш канал.\n\n"
                 "После подписки нажми кнопку <b>✅ Я подписался</b>.",
                 parse_mode="HTML",
@@ -54,8 +57,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         if not await is_subscribed(context.bot, user.id):
             await query.edit_message_text(
-                f"👋 Привет, {user.first_name}!\n\n"
-                "Добро пожаловать в <b>Drebol VPN</b>.\n\n"
+                f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+                "🔒 Быстрый и безопасный VPN\n"
+                "⚡️ Стабильное подключение\n"
+                "🌍 Доступ к популярным сервисам\n\n"
                 "❌ Вы не подписаны на канал.\n\n"
                 "Подпишитесь и снова нажмите <b>✅ Я подписался</b>.",
                 parse_mode="HTML",

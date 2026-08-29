@@ -13,8 +13,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(
-            f"👋 Привет, {user.first_name}!\n\n"
-            "Добро пожаловать в <b>Drebol VPN</b>.\n\n"
+            f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+            "🔒 Быстрый и безопасный VPN\n"
+            "⚡️ Стабильное подключение\n"
+            "🌍 Доступ к популярным сервисам\n\n"
             "🔒 Чтобы пользоваться ботом, необходимо подписаться на наш канал.\n\n"
             "После подписки нажми кнопку <b>✅ Я подписался</b>.",
             parse_mode="HTML",
