@@ -127,6 +127,41 @@ async def _fetch_inbound_id(session: aiohttp.ClientSession, url: str) -> tuple[i
     return inbounds[0].get("id"), ""
 
 
+async def update_client_email(old_email: str, new_email: str, client_uuid: str,
+                               sub_id: str, expire_date: str,
+                               limit_ip: int, limit_hwid: int, total_gb: int) -> dict:
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "URL или токен не заданы"}
+    s = _session(token)
+    try:
+        safe_old = quote(old_email, safe="")
+        expire_ms = date_to_ms(expire_date)
+        payload = {
+            "id": client_uuid,
+            "email": new_email,
+            "subId": sub_id,
+            "flow": "xtls-rprx-vision",
+            "limitIp": limit_ip,
+            "limitHwId": limit_hwid,
+            "totalGB": gb_to_bytes(total_gb) if total_gb > 0 else 0,
+            "expiryTime": expire_ms,
+            "enable": True,
+            "tgId": 0,
+            "reset": 0,
+        }
+        data, err = await _post(s, f"{url}/panel/api/clients/update/{safe_old}", payload)
+        if data and data.get("success"):
+            return {"success": True}
+        return {"success": False, "error": err or str(data)}
+    except Exception as e:
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        await s.close()
+
+
 async def delete_client(email: str) -> dict:
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")

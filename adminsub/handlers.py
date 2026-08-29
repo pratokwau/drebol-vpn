@@ -2,7 +2,7 @@ from telegram.ext import ContextTypes
 
 from config import load_config, save_config
 from keyboards import back_admin
-from adminsub.storage import list_subs, add_sub, get_sub, delete_sub
+from adminsub.storage import list_subs, add_sub, get_sub, delete_sub, get_all_subs_with_tg, update_sub_email
 from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard, inbounds_keyboard
 
 
@@ -49,13 +49,54 @@ async def handle_admin_subs_menu(query, page: int = 1):
 
 async def handle_presets_menu(query):
     cfg = load_config()
+    auto_update = cfg.get("auto_update_usernames", False)
     await query.edit_message_text(
         "⚙️ <b>Настройки подписки (по умолчанию)</b>\n\n"
         + _fmt_presets(cfg)
         + "\n\nВыбери параметр для изменения:",
         parse_mode="HTML",
-        reply_markup=presets_keyboard(),
+        reply_markup=presets_keyboard(auto_update),
     )
+
+
+async def handle_toggle_auto_update(query):
+    cfg = load_config()
+    cfg["auto_update_usernames"] = not cfg.get("auto_update_usernames", False)
+    save_config(cfg)
+    await handle_presets_menu(query)
+
+
+async def sync_usernames(context=None):
+    """Фоновая задача: обновляет email в панели если юзернейм изменился."""
+    from xui_api import update_client_email, build_email
+    from database import get_user_info
+
+    subs = await get_all_subs_with_tg()
+    updated = 0
+    for row in subs:
+        sub_id, tg_id, old_email, uuid_val, sub_id_str, expire_date, limit_ip, limit_hwid, total_gb = row
+        user_row = await get_user_info(tg_id)
+        if not user_row:
+            continue
+        username = user_row[2]
+        new_email = build_email(tg_id, username)
+        if new_email == old_email:
+            continue
+        result = await update_client_email(
+            old_email=old_email,
+            new_email=new_email,
+            client_uuid=uuid_val,
+            sub_id=sub_id_str,
+            expire_date=expire_date,
+            limit_ip=limit_ip,
+            limit_hwid=limit_hwid,
+            total_gb=total_gb,
+        )
+        if result["success"]:
+            await update_sub_email(sub_id, new_email)
+            updated += 1
+    if updated:
+        print(f"[sync_usernames] обновлено {updated} email(ов)")
 
 
 async def handle_preset_expire(query, context: ContextTypes.DEFAULT_TYPE):

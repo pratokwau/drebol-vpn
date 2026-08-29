@@ -27,13 +27,15 @@ def subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bool) -
     return InlineKeyboardMarkup(kb)
 
 
-def presets_keyboard() -> InlineKeyboardMarkup:
+def presets_keyboard(auto_update: bool = False) -> InlineKeyboardMarkup:
+    au_label = "🔄 Авто-обновление ников: ВКЛ" if auto_update else "🔁 Авто-обновление ников: ВЫКЛ"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📅 Дата окончания", callback_data="preset_expire")],
         [InlineKeyboardButton("🌐 Лимит IP", callback_data="preset_ip")],
         [InlineKeyboardButton("🖥 Лимит HWID", callback_data="preset_hwid")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="preset_traffic")],
         [InlineKeyboardButton("📡 Инбаунды подписки", callback_data="inbounds_menu")],
+        [InlineKeyboardButton(au_label, callback_data="toggle_auto_update")],
         [InlineKeyboardButton("◀️ Назад к подпискам", callback_data="admin_subs")],
     ])
 

@@ -9,6 +9,15 @@ from handlers.messages import handle_text
 
 async def post_init(app: Application):
     await init_db()
+    from adminsub.handlers import sync_usernames
+    from config import load_config
+
+    async def _sync_job(ctx):
+        cfg = load_config()
+        if cfg.get("auto_update_usernames", False):
+            await sync_usernames(ctx)
+
+    app.job_queue.run_repeating(_sync_job, interval=2 * 24 * 3600, first=60)
 
 
 def main():
