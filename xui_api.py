@@ -32,11 +32,16 @@ def _connector() -> aiohttp.TCPConnector:
 
 async def _login(url: str, login: str, password: str) -> tuple[aiohttp.ClientSession | None, str]:
     """Возвращает (session, error). Если session None — error содержит подробности."""
-    session = aiohttp.ClientSession(connector=_connector())
+    headers = {
+        "Referer": url + "/",
+        "Origin": url,
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    session = aiohttp.ClientSession(connector=_connector(), headers=headers)
     try:
         async with session.post(
             f"{url}/login",
-            json={"username": login, "password": password},
+            data={"username": login, "password": password},
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
             status = resp.status
