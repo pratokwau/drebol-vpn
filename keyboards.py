@@ -35,12 +35,16 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     channel_label = "📢 Изменить канал" if cfg.get("channel_url") else "📢 Установить канал"
     sub_enabled = cfg.get("force_subscribe", False)
     sub_label = "🔔 Подписка на канал: ВКЛ" if sub_enabled else "🔕 Подписка на канал: ВЫКЛ"
+    privacy_label = "📋 Изменить политику конф." if cfg.get("privacy_url") else "📋 Политика конфиденциальности"
+    terms_label = "📄 Изменить польз. соглашение" if cfg.get("terms_url") else "📄 Пользовательское соглашение"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton("🎫 Тикеты", callback_data="ticket_list:1")],
         [InlineKeyboardButton(sub_label, callback_data="toggle_force_sub")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
         [InlineKeyboardButton(channel_label, callback_data="set_channel")],
+        [InlineKeyboardButton(privacy_label, callback_data="set_privacy_url")],
+        [InlineKeyboardButton(terms_label, callback_data="set_terms_url")],
         [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
     ])
 

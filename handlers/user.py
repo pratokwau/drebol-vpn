@@ -1,4 +1,4 @@
-from config import ADMIN_ID
+from config import ADMIN_ID, load_config
 from keyboards import main_keyboard, back_main
 
 
@@ -21,13 +21,13 @@ async def handle_news(query):
 async def handle_how_to(query):
     await query.edit_message_text(
         "<b>❓ Как подключиться?</b>\n\n"
-        "1. Оформи пробный период или подписку\n\n"
+        "1. Оформи пробный период или подписку\n"
         "2. Установи приложение — рекомендуем Happ\n"
         "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>\n"
         "• <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Android</a>\n"
         "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n"
-        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">MacOS</a>\n\n"
-        "3. Скопируй ссылку подписки и вставь её в приложение\n\n"
+        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">MacOS</a>\n"
+        "3. Скопируй ссылку подписки и вставь её в приложение\n"
         "4. Выбери сервер и подключайся",
         parse_mode="HTML",
         reply_markup=back_main(),
@@ -44,10 +44,31 @@ async def handle_buy(query):
 
 
 async def handle_about(query):
+    cfg = load_config()
+    privacy_url = cfg.get("privacy_url", "")
+    terms_url = cfg.get("terms_url", "")
+
+    if privacy_url and terms_url:
+        docs = (
+            f'<a href="{privacy_url}">политика конфиденциальности</a>'
+            f' и <a href="{terms_url}">пользовательское соглашение</a>'
+        )
+    elif privacy_url:
+        docs = f'<a href="{privacy_url}">политика конфиденциальности</a> и пользовательское соглашение'
+    elif terms_url:
+        docs = f'политика конфиденциальности и <a href="{terms_url}">пользовательское соглашение</a>'
+    else:
+        docs = "политика конфиденциальности и пользовательское соглашение"
+
     await query.edit_message_text(
-        "ℹ️ <b>О сервисе</b>\n\nDrebol VPN — быстрый и надёжный VPN-сервис.",
+        "<b>ℹ️ О сервисе</b>\n\n"
+        "<b>🖥️ Любая платформа</b> — iOS, MacOS, Android, Windows\n"
+        "<b>🛡️ Без логов</b> — не храним данные об активности пользователей\n"
+        "<b>💳 Прозрачные платежи</b> — без скрытых списаний и автопродления\n"
+        f"<b>📕 Документы</b> — {docs}",
         parse_mode="HTML",
         reply_markup=back_main(),
+        disable_web_page_preview=True,
     )
 
 
