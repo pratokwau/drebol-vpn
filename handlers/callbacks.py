@@ -4,7 +4,7 @@ from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard
 from keyboards import main_keyboard
-from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to
+from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to, handle_renew_sub, handle_i_paid
 from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
@@ -36,6 +36,7 @@ from paidsub.handlers import (
     handle_paid_sub_freeze, handle_paid_sub_extend,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_ip, handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
+    handle_confirm_payment, handle_reject_payment,
 )
 
 
@@ -83,7 +84,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         from adminsub.storage import get_sub_by_tg_id
+        from paidsub.storage import get_paid_sub_status
         has_sub = bool(await get_sub_by_tg_id(user.id))
+        paid_status = await get_paid_sub_status(user.id)
         await query.edit_message_text(
             f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
             "🔒 Быстрый и безопасный VPN\n"
@@ -91,7 +94,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🌍 Доступ к популярным сервисам\n\n"
             "Выберите нужный раздел ниже 👇",
             parse_mode="HTML",
-            reply_markup=main_keyboard(adm, has_sub),
+            reply_markup=main_keyboard(adm, has_sub, paid_status),
         )
         return
 
@@ -105,6 +108,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_my_paid_sub(query)
         else:
             await handle_request_sub(query, context)
+    elif data == "renew_sub":
+        await handle_renew_sub(query)
+    elif data == "i_paid":
+        await handle_i_paid(query, context)
     elif data == "my_sub":
         await handle_my_sub(query)
     elif data == "news":
@@ -271,3 +278,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_approve(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_reject:"):
         await handle_reject(query, int(data.split(":")[1]), context)
+    elif data.startswith("confirm_payment:"):
+        await handle_confirm_payment(query, int(data.split(":")[1]), context)
+    elif data.startswith("reject_payment:"):
+        await handle_reject_payment(query, int(data.split(":")[1]), context)

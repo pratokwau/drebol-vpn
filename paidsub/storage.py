@@ -43,11 +43,18 @@ async def get_paid_sub(sub_id: int) -> tuple | None:
 async def get_paid_sub_by_tg_id(tg_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at
+            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at, status
             FROM paid_subs WHERE tg_id = ?
             ORDER BY created_at DESC LIMIT 1
         """, (tg_id,)) as cur:
             return await cur.fetchone()
+
+
+async def get_paid_sub_status(tg_id: int) -> str:
+    row = await get_paid_sub_by_tg_id(tg_id)
+    if not row:
+        return ""
+    return row[11] if len(row) > 11 else "active"
 
 
 async def delete_paid_sub(sub_id: int):

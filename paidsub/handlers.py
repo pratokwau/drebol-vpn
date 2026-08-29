@@ -852,6 +852,67 @@ async def check_expired_subs(context):
                     await move_client_inbound(email, expire_inbound_ids)
 
 
+async def handle_confirm_payment(query, tg_id: int, context):
+    """Админ подтвердил оплату — продлеваем подписку на оплаченный период."""
+    row = await get_paid_sub_by_tg_id(tg_id)
+    if not row:
+        await query.edit_message_text(
+            f"❌ Подписка для <code>{tg_id}</code> не найдена.",
+            parse_mode="HTML",
+        )
+        return
+
+    sub_id = row[0]
+    email = row[2]
+    expire_str = row[6]
+
+    cfg = load_config()
+    pay_seconds = cfg.get("paid_pay_period", 2592000)
+    renew_seconds = cfg.get("paid_renew_time", 86400)
+    total_seconds = pay_seconds + renew_seconds
+
+    new_expire = datetime.now() + timedelta(seconds=total_seconds)
+    new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
+
+    await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
+    await update_paid_sub_field(sub_id, "status", "active")
+
+    from xui_api import get_client_info, toggle_client
+    info = await get_client_info(email)
+    if info.get("success") and not info.get("enabled", True):
+        await toggle_client(email, True)
+
+    # Возвращаем на основные инбаунды если были переключены
+    create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
+    if create_inbound_ids:
+        from xui_api import move_client_inbound
+        await move_client_inbound(email, create_inbound_ids)
+
+    await query.edit_message_text(
+        f"✅ Оплата подтверждена для <code>{tg_id}</code>!\n\n"
+        f"📅 Новая дата: <b>{new_expire_str}</b>",
+        parse_mode="HTML",
+    )
+
+    await _notify_user(context.bot, tg_id,
+        f"🎉 <b>Оплата подтверждена!</b>\n\n"
+        f"Ваша подписка продлена до <b>{new_expire_str}</b>.\n"
+        "Спасибо за использование Drebol VPN!"
+    )
+
+
+async def handle_reject_payment(query, tg_id: int, context):
+    """Админ отклонил заявку на оплату."""
+    await query.edit_message_text(
+        f"❌ Заявка на оплату от <code>{tg_id}</code> отклонена.",
+        parse_mode="HTML",
+    )
+    await _notify_user(context.bot, tg_id,
+        "❌ Ваша заявка на оплату <b>отклонена</b> администратором.\n"
+        "Если вы считаете это ошибкой, обратитесь в поддержку."
+    )
+
+
 def save_paid_preset(key: str, value):
     cfg = load_config()
     cfg[key] = value

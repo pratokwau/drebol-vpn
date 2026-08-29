@@ -4,7 +4,7 @@ from config import load_config
 
 # ── Главное меню ──────────────────────────────────────────────────────────────
 
-def main_keyboard(is_admin: bool, has_sub: bool = False, has_paid_sub: bool = False) -> InlineKeyboardMarkup:
+def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = "") -> InlineKeyboardMarkup:
     cfg = load_config()
     channel_url = cfg.get("channel_url")
 
@@ -16,6 +16,8 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, has_paid_sub: bool = Fa
 
     rows = []
     rows.append([InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")])
+    if paid_sub_status in ("renewal", "expired"):
+        rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
     if has_sub:
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
     rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1")])

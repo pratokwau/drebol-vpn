@@ -26,7 +26,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     is_admin = user.id == ADMIN_ID
     from adminsub.storage import get_sub_by_tg_id
+    from paidsub.storage import get_paid_sub_status
     has_sub = bool(await get_sub_by_tg_id(user.id))
+    paid_status = await get_paid_sub_status(user.id)
     await update.message.reply_text(
         f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
         "🔒 Быстрый и безопасный VPN\n"
@@ -34,6 +36,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌍 Доступ к популярным сервисам\n\n"
         "Выберите нужный раздел ниже 👇",
         parse_mode="HTML",
-        reply_markup=main_keyboard(is_admin, has_sub),
+        reply_markup=main_keyboard(is_admin, has_sub, paid_status),
     )
 
