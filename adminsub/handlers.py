@@ -13,8 +13,8 @@ async def _notify_user(bot: Bot, tg_id: int | None, text: str):
         await bot.send_message(chat_id=tg_id, text=text, parse_mode="HTML")
     except Exception:
         pass
-from adminsub.storage import list_subs, add_sub, get_sub, delete_sub, get_all_subs_with_tg, update_sub_email
-from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard, inbounds_keyboard, auto_update_keyboard
+from adminsub.storage import list_subs, add_sub, get_sub, delete_sub, get_all_subs_with_tg, update_sub_email, update_sub_field
+from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard, sub_settings_keyboard, inbounds_keyboard, auto_update_keyboard
 
 
 def _presets_ready(cfg: dict) -> bool:
@@ -396,7 +396,16 @@ async def handle_sub_view(query, sub_id: int):
     status_icon = "🟢" if enabled else "🔴"
 
     tg_line = f'👤 TG: <a href="tg://user?id={tg_id}">{tg_id}</a>\n' if tg_id else ""
-    link_line = f'⛓‍💥 <a href="tg://user?id={tg_id}">Написать</a>' if tg_id else ""
+    # Если есть username — ссылка через @, иначе через tg://user?id=
+    from database import get_user_info
+    user_info = await get_user_info(tg_id) if tg_id else None
+    uname = user_info[2] if user_info and user_info[2] else None
+    if tg_id and uname:
+        link_line = f'⛓‍💥 <a href="https://t.me/{uname}">Написать</a>'
+    elif tg_id:
+        link_line = f'⛓‍💥 <a href="tg://user?id={tg_id}">Написать</a>'
+    else:
+        link_line = ""
 
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b> {status_icon}\n\n"
@@ -470,6 +479,74 @@ async def handle_sub_delete(query, sub_id: int, context=None):
 
     await query.edit_message_text(
         f"🗑 Подписка удалена из базы.\n{panel_status}",
+        reply_markup=back_admin(),
+    )
+
+
+# ── Индивидуальные настройки подписки ─────────────────────────────────────────
+
+async def handle_sub_settings(query, sub_id: int):
+    row = await get_sub(sub_id)
+    if not row:
+        await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+    _, tg_id, email, _, _, _, expire, limit_ip, limit_hwid, total_gb, _ = row
+    traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
+    ip_str = str(limit_ip) if limit_ip > 0 else "безлимит"
+    hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
+    await query.edit_message_text(
+        f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
+        f"📅 Дата окончания: <b>{expire}</b>\n"
+        f"🌐 Лимит IP: <b>{ip_str}</b>\n"
+        f"🖥 Лимит HWID: <b>{hwid_str}</b>\n"
+        f"📶 Трафик: <b>{traffic}</b>\n\n"
+        "Выбери параметр для изменения:",
+        parse_mode="HTML",
+        reply_markup=sub_settings_keyboard(sub_id),
+    )
+
+
+async def handle_sub_edit_expire(query, sub_id: int, context):
+    from states import AWAITING_SUB_EDIT_EXPIRE
+    context.user_data["state"] = AWAITING_SUB_EDIT_EXPIRE
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"📅 <b>Дата окончания подписки #{sub_id}</b>\n\n"
+        "Введи новую дату в формате <code>дд.мм.гггг</code>:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_sub_edit_ip(query, sub_id: int, context):
+    from states import AWAITING_SUB_EDIT_IP
+    context.user_data["state"] = AWAITING_SUB_EDIT_IP
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"🌐 <b>Лимит IP подписки #{sub_id}</b>\n\nВведи число (0 = безлимит):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_sub_edit_hwid(query, sub_id: int, context):
+    from states import AWAITING_SUB_EDIT_HWID
+    context.user_data["state"] = AWAITING_SUB_EDIT_HWID
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"🖥 <b>Лимит HWID подписки #{sub_id}</b>\n\nВведи число (0 = безлимит):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_sub_edit_traffic(query, sub_id: int, context):
+    from states import AWAITING_SUB_EDIT_TRAFFIC
+    context.user_data["state"] = AWAITING_SUB_EDIT_TRAFFIC
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"📶 <b>Трафик подписки #{sub_id}</b>\n\nВведи число ГБ или <code>-</code> для безлимита:",
+        parse_mode="HTML",
         reply_markup=back_admin(),
     )
 

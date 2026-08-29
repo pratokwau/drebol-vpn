@@ -42,6 +42,14 @@ async def init_db():
             )
         """)
         await db.execute("""
+            CREATE TABLE IF NOT EXISTS paid_sub_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
             CREATE TABLE IF NOT EXISTS paid_subs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tg_id INTEGER,

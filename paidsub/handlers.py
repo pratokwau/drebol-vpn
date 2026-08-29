@@ -6,7 +6,10 @@ from telegram.ext import ContextTypes
 from config import ADMIN_ID, load_config, save_config
 from keyboards import back_admin, back_main
 
-from paidsub.storage import list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id
+from paidsub.storage import (
+    list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
+    add_request, get_pending_request, resolve_request,
+)
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
     paid_inbounds_keyboard, approve_keyboard,
@@ -434,17 +437,45 @@ async def handle_request_sub(query, context):
         )
         return
 
+    pending = await get_pending_request(user.id)
+    if pending:
+        await query.edit_message_text(
+            "👤 <b>Моя подписка</b>\n\n"
+            "⏳ Вы уже отправили запрос. Ожидайте ответа администратора.",
+            parse_mode="HTML",
+            reply_markup=back_main(),
+        )
+        return
+
+    await add_request(user.id)
+
     uname = f"@{user.username}" if user.username else f"id{user.id}"
-    trial_str = fmt_duration(cfg.get("paid_trial_period", 86400))
+    trial_sec = cfg.get("paid_trial_period", 86400)
+    pay_sec = cfg.get("paid_pay_period", 2592000)
+    renew_sec = cfg.get("paid_renew_time", 86400)
+    ip = cfg.get("paid_preset_ip", 0)
+    hwid = cfg.get("paid_preset_hwid", 0)
+    traf_raw = cfg.get("paid_preset_traffic", 0)
+    traf_str = f"{traf_raw} ГБ" if traf_raw > 0 else "безлимит"
+    price = cfg.get("paid_price", 0)
+    ip_str = str(ip) if ip > 0 else "безлимит"
+    hwid_str = str(hwid) if hwid > 0 else "безлимит"
 
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
             f"🆕 <b>Запрос на подписку</b>\n\n"
-            f"👤 {user.first_name} ({uname})\n"
+            f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
             f"🆔 TG ID: <code>{user.id}</code>\n\n"
-            f"Пробный период: <b>{trial_str}</b>\n\n"
-            "Одобрить?"
+            f"<b>Параметры подписки:</b>\n"
+            f"🆓 Пробный период: <b>{fmt_duration(trial_sec)}</b>\n"
+            f"💰 После оплаты: <b>{fmt_duration(pay_sec)}</b>\n"
+            f"⏳ На продление: <b>{fmt_duration(renew_sec)}</b>\n"
+            f"💵 Сумма: <b>{price} ₽</b>\n"
+            f"🌐 Лимит IP: <b>{ip_str}</b>\n"
+            f"🖥 Лимит HWID: <b>{hwid_str}</b>\n"
+            f"📶 Трафик: <b>{traf_str}</b>\n\n"
+            "Одобрить пробную подписку?"
         ),
         parse_mode="HTML",
         reply_markup=approve_keyboard(user.id),
@@ -463,11 +494,14 @@ async def handle_approve(query, tg_id: int, context):
     """Админ одобрил подписку — создаём пробный период."""
     existing = await get_paid_sub_by_tg_id(tg_id)
     if existing:
+        await resolve_request(tg_id, "approved")
         await query.edit_message_text(
             f"⚠️ У пользователя <code>{tg_id}</code> уже есть подписка.",
             parse_mode="HTML",
         )
         return
+
+    await resolve_request(tg_id, "approved")
 
     async def _edit(txt, **kw):
         await query.edit_message_text(txt, **kw)
@@ -477,6 +511,7 @@ async def handle_approve(query, tg_id: int, context):
 
 async def handle_reject(query, tg_id: int, context):
     """Админ отклонил запрос."""
+    await resolve_request(tg_id, "rejected")
     await query.edit_message_text(
         f"❌ Запрос от <code>{tg_id}</code> отклонён.",
         parse_mode="HTML",
@@ -518,7 +553,15 @@ async def handle_paid_sub_view(query, sub_id: int):
     status_icon = "🟢" if enabled else "🔴"
 
     tg_line = f'👤 TG: <a href="tg://user?id={tg_id}">{tg_id}</a>\n' if tg_id else ""
-    link_line = f'⛓‍💥 <a href="tg://user?id={tg_id}">Написать</a>' if tg_id else ""
+    from database import get_user_info
+    user_info = await get_user_info(tg_id) if tg_id else None
+    uname = user_info[2] if user_info and user_info[2] else None
+    if tg_id and uname:
+        link_line = f'⛓‍💥 <a href="https://t.me/{uname}">Написать</a>'
+    elif tg_id:
+        link_line = f'⛓‍💥 <a href="tg://user?id={tg_id}">Написать</a>'
+    else:
+        link_line = ""
 
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b> {status_icon}\n\n"

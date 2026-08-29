@@ -69,3 +69,32 @@ async def update_paid_sub_email(sub_id: int, new_email: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE paid_subs SET email = ? WHERE id = ?", (new_email, sub_id))
         await db.commit()
+
+
+# ── Запросы на подписку ──────────────────────────────────────────────────────
+
+async def add_request(tg_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT INTO paid_sub_requests (tg_id) VALUES (?)", (tg_id,)
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def get_pending_request(tg_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id FROM paid_sub_requests WHERE tg_id = ? AND status = 'pending'",
+            (tg_id,),
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def resolve_request(tg_id: int, status: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE paid_sub_requests SET status = ? WHERE tg_id = ? AND status = 'pending'",
+            (status, tg_id),
+        )
+        await db.commit()

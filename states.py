@@ -22,6 +22,12 @@ AWAITING_PRESET_IP = "awaiting_preset_ip"
 AWAITING_PRESET_HWID = "awaiting_preset_hwid"
 AWAITING_PRESET_TRAFFIC = "awaiting_preset_traffic"
 
+# Редактирование конкретной админской подписки
+AWAITING_SUB_EDIT_EXPIRE = "awaiting_sub_edit_expire"
+AWAITING_SUB_EDIT_IP = "awaiting_sub_edit_ip"
+AWAITING_SUB_EDIT_HWID = "awaiting_sub_edit_hwid"
+AWAITING_SUB_EDIT_TRAFFIC = "awaiting_sub_edit_traffic"
+
 # Платные подписки
 AWAITING_PAID_SUB_TG_ID = "awaiting_paid_sub_tg_id"
 AWAITING_PAID_PRESET_IP = "awaiting_paid_preset_ip"

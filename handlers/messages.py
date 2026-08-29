@@ -15,6 +15,8 @@ from states import (
     AWAITING_PRESET_EXPIRE, AWAITING_PRESET_IP,
     AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC,
     AWAITING_SUB_TG_ID, AWAITING_AUTO_UPDATE_DAYS,
+    AWAITING_SUB_EDIT_EXPIRE, AWAITING_SUB_EDIT_IP,
+    AWAITING_SUB_EDIT_HWID, AWAITING_SUB_EDIT_TRAFFIC,
     AWAITING_PAID_SUB_TG_ID,
     AWAITING_PAID_PRESET_IP, AWAITING_PAID_PRESET_HWID,
     AWAITING_PAID_PRESET_TRAFFIC,
@@ -219,6 +221,63 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("preset_traffic", val)
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Трафик: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Редактирование конкретной админской подписки ────────────────────────────
+    if state == AWAITING_SUB_EDIT_EXPIRE:
+        try:
+            datetime.strptime(text, "%d.%m.%Y")
+        except ValueError:
+            await update.message.reply_text("❌ Формат: <code>дд.мм.гггг</code>", parse_mode="HTML", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from adminsub.storage import update_sub_field
+            await update_sub_field(sub_id, "expire_date", text)
+        await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_SUB_EDIT_IP:
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from adminsub.storage import update_sub_field
+            await update_sub_field(sub_id, "limit_ip", int(text))
+        await update.message.reply_text(f"✅ Лимит IP обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_SUB_EDIT_HWID:
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from adminsub.storage import update_sub_field
+            await update_sub_field(sub_id, "limit_hwid", int(text))
+        await update.message.reply_text(f"✅ Лимит HWID обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_SUB_EDIT_TRAFFIC:
+        if text == "-":
+            val = 0
+            label = "безлимит"
+        elif text.isdigit():
+            val = int(text)
+            label = f"{val} ГБ" if val > 0 else "безлимит"
+        else:
+            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from adminsub.storage import update_sub_field
+            await update_sub_field(sub_id, "total_gb", val)
+        await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Платные подписки: TG ID ──────────────────────────────────────────────────

@@ -21,6 +21,8 @@ from adminsub.handlers import (
     handle_inbounds_menu, handle_toggle_inbound,
     handle_auto_update_settings, handle_toggle_auto_update,
     handle_set_auto_update_days, handle_run_sync_now,
+    handle_sub_settings, handle_sub_edit_expire, handle_sub_edit_ip,
+    handle_sub_edit_hwid, handle_sub_edit_traffic,
 )
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
@@ -186,6 +188,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_sub_toggle(query, int(data.split(":")[1]), context)
     elif data.startswith("sub_delete:"):
         await handle_sub_delete(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_settings:"):
+        await handle_sub_settings(query, int(data.split(":")[1]))
+    elif data.startswith("sub_edit_expire:"):
+        await handle_sub_edit_expire(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_edit_ip:"):
+        await handle_sub_edit_ip(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_edit_hwid:"):
+        await handle_sub_edit_hwid(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_edit_traffic:"):
+        await handle_sub_edit_traffic(query, int(data.split(":")[1]), context)
     elif data == "inbounds_menu":
         await handle_inbounds_menu(query)
     elif data.startswith("toggle_inbound:"):
