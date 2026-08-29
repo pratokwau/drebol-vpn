@@ -870,9 +870,6 @@ async def check_expired_subs(context):
                 # Переход active → renewal: одноразовое уведомление
                 await update_paid_sub_field(sub_id, "status", "renewal")
                 if tg_id:
-                    price = cfg.get("paid_price", 0)
-                    pay_url = cfg.get("paid_pay_url", "")
-                    pay_line = f'\n\n🔗 <a href="{pay_url}">Оплатить {price} ₽</a>' if pay_url else ""
                     kb = InlineKeyboardMarkup([
                         [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
                     ])
@@ -883,7 +880,6 @@ async def check_expired_subs(context):
                                 "⚠️ <b>Пробный период окончился!</b>\n\n"
                                 f"У вас есть <b>{fmt_duration(renew_seconds)}</b> на продление.\n"
                                 f"Продлите подписку, чтобы не потерять доступ."
-                                f"{pay_line}"
                             ),
                             parse_mode="HTML",
                             reply_markup=kb,
