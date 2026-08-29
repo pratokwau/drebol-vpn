@@ -14,6 +14,7 @@ AWAITING_XUI_SUB_PATH = "awaiting_xui_sub_path"
 
 # Создание подписки
 AWAITING_SUB_TG_ID = "awaiting_sub_tg_id"
+AWAITING_AUTO_UPDATE_DAYS = "awaiting_auto_update_days"
 
 # Настройки-пресеты для админских подписок
 AWAITING_PRESET_EXPIRE = "awaiting_preset_expire"

@@ -252,7 +252,11 @@ async def create_client(
             data = data2
 
         parsed = urlparse(url)
-        sub_url = f"{parsed.scheme}://{parsed.hostname}:{sub_port}{sub_path}{sub_id}"
+        default_ports = {"https": "443", "http": "80"}
+        if str(sub_port) == default_ports.get(parsed.scheme, ""):
+            sub_url = f"{parsed.scheme}://{parsed.hostname}{sub_path}{sub_id}"
+        else:
+            sub_url = f"{parsed.scheme}://{parsed.hostname}:{sub_port}{sub_path}{sub_id}"
         return {
             "success": True,
             "sub_url": sub_url,

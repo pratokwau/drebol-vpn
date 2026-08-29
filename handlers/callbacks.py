@@ -19,7 +19,8 @@ from adminsub.handlers import (
     handle_preset_expire, handle_preset_ip, handle_preset_hwid, handle_preset_traffic,
     handle_create_sub, handle_sub_view, handle_sub_delete,
     handle_inbounds_menu, handle_toggle_inbound,
-    handle_toggle_auto_update,
+    handle_auto_update_settings, handle_toggle_auto_update,
+    handle_set_auto_update_days, handle_run_sync_now,
 )
 
 
@@ -166,5 +167,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_inbounds_menu(query)
     elif data.startswith("toggle_inbound:"):
         await handle_toggle_inbound(query, int(data.split(":")[1]))
+    elif data == "auto_update_settings":
+        await handle_auto_update_settings(query)
     elif data == "toggle_auto_update":
         await handle_toggle_auto_update(query)
+    elif data == "set_auto_update_days":
+        await handle_set_auto_update_days(query, context)
+    elif data == "run_sync_now":
+        await handle_run_sync_now(query)

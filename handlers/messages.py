@@ -14,7 +14,7 @@ from states import (
     AWAITING_XUI_SUB_PORT, AWAITING_XUI_SUB_PATH,
     AWAITING_PRESET_EXPIRE, AWAITING_PRESET_IP,
     AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC,
-    AWAITING_SUB_TG_ID,
+    AWAITING_SUB_TG_ID, AWAITING_AUTO_UPDATE_DAYS,
 )
 from handlers.broadcast import do_broadcast
 
@@ -141,6 +141,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("xui_sub_path", path)
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Путь: <code>{path}</code>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Авто-обновление: интервал дней ───────────────────────────────────────────
+    if state == AWAITING_AUTO_UPDATE_DAYS:
+        if not text.isdigit() or int(text) < 1:
+            await update.message.reply_text("❌ Введи целое число дней (минимум 1):", reply_markup=back_admin())
+            return
+        _save("auto_update_days", int(text))
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Интервал: <b>{text} дн.</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Создание подписки: TG ID ─────────────────────────────────────────────────

@@ -3,7 +3,7 @@ from telegram.ext import ContextTypes
 from config import load_config, save_config
 from keyboards import back_admin
 from adminsub.storage import list_subs, add_sub, get_sub, delete_sub, get_all_subs_with_tg, update_sub_email
-from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard, inbounds_keyboard
+from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard, inbounds_keyboard, auto_update_keyboard
 
 
 def _presets_ready(cfg: dict) -> bool:
@@ -49,13 +49,28 @@ async def handle_admin_subs_menu(query, page: int = 1):
 
 async def handle_presets_menu(query):
     cfg = load_config()
-    auto_update = cfg.get("auto_update_usernames", False)
     await query.edit_message_text(
         "⚙️ <b>Настройки подписки (по умолчанию)</b>\n\n"
         + _fmt_presets(cfg)
         + "\n\nВыбери параметр для изменения:",
         parse_mode="HTML",
-        reply_markup=presets_keyboard(auto_update),
+        reply_markup=presets_keyboard(),
+    )
+
+
+async def handle_auto_update_settings(query):
+    cfg = load_config()
+    enabled = cfg.get("auto_update_usernames", False)
+    days = cfg.get("auto_update_days", 2)
+    last_run = cfg.get("auto_update_last_run")
+    last_line = f"\n🕐 Последний запуск: {last_run}" if last_run else ""
+    await query.edit_message_text(
+        "⏰ <b>Авто-обновление ников</b>\n\n"
+        "Бот проверяет, изменился ли юзернейм у пользователей с подписками, "
+        "и обновляет email в панели.\n"
+        + last_line,
+        parse_mode="HTML",
+        reply_markup=auto_update_keyboard(enabled, days),
     )
 
 
@@ -63,13 +78,38 @@ async def handle_toggle_auto_update(query):
     cfg = load_config()
     cfg["auto_update_usernames"] = not cfg.get("auto_update_usernames", False)
     save_config(cfg)
-    await handle_presets_menu(query)
+    await handle_auto_update_settings(query)
+
+
+async def handle_set_auto_update_days(query, context):
+    from states import AWAITING_AUTO_UPDATE_DAYS
+    context.user_data["state"] = AWAITING_AUTO_UPDATE_DAYS
+    cfg = load_config()
+    current = cfg.get("auto_update_days", 2)
+    await query.edit_message_text(
+        f"📝 <b>Интервал проверки</b>\n\n"
+        f"Сейчас: <b>{current} дн.</b>\n\n"
+        "Введи новое значение (целое число дней, минимум 1):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_run_sync_now(query):
+    await query.edit_message_text("⏳ Запускаю синхронизацию ников...")
+    await sync_usernames()
+    cfg = load_config()
+    from datetime import datetime
+    cfg["auto_update_last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+    save_config(cfg)
+    await handle_auto_update_settings(query)
 
 
 async def sync_usernames(context=None):
-    """Фоновая задача: обновляет email в панели если юзернейм изменился."""
+    """Обновляет email в панели если юзернейм изменился."""
     from xui_api import update_client_email, build_email
     from database import get_user_info
+    from datetime import datetime
 
     subs = await get_all_subs_with_tg()
     updated = 0
@@ -95,6 +135,10 @@ async def sync_usernames(context=None):
         if result["success"]:
             await update_sub_email(sub_id, new_email)
             updated += 1
+
+    cfg = load_config()
+    cfg["auto_update_last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+    save_config(cfg)
     if updated:
         print(f"[sync_usernames] обновлено {updated} email(ов)")
 
