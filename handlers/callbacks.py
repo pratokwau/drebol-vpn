@@ -17,7 +17,7 @@ from handlers.xui_settings import (
 from adminsub.handlers import (
     handle_admin_subs_menu, handle_presets_menu,
     handle_preset_expire, handle_preset_ip, handle_preset_hwid, handle_preset_traffic,
-    handle_create_sub, handle_sub_view, handle_sub_delete,
+    handle_create_sub, handle_sub_view, handle_sub_delete, handle_sub_toggle,
     handle_inbounds_menu, handle_toggle_inbound,
     handle_auto_update_settings, handle_toggle_auto_update,
     handle_set_auto_update_days, handle_run_sync_now,
@@ -166,6 +166,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_preset_traffic(query, context)
     elif data.startswith("sub_view:"):
         await handle_sub_view(query, int(data.split(":")[1]))
+    elif data.startswith("sub_toggle:"):
+        await handle_sub_toggle(query, int(data.split(":")[1]))
     elif data.startswith("sub_delete:"):
         await handle_sub_delete(query, int(data.split(":")[1]))
     elif data == "inbounds_menu":

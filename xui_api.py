@@ -146,6 +146,82 @@ async def _fetch_inbound_id(session: aiohttp.ClientSession, url: str) -> tuple[i
     return inbounds[0].get("id"), ""
 
 
+async def get_client_info(email: str) -> dict:
+    """Получает enable-статус клиента из панели."""
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False}
+    s = _session(token)
+    try:
+        data, _ = await _get(s, f"{url}/panel/api/inbounds/list")
+        if data and data.get("success"):
+            for inb in (data.get("obj") or []):
+                settings_str = inb.get("settings") or "{}"
+                try:
+                    settings = json.loads(settings_str) if isinstance(settings_str, str) else settings_str
+                except Exception:
+                    continue
+                for c in settings.get("clients", []):
+                    if c.get("email") == email:
+                        return {"success": True, "enabled": c.get("enable", True), "uuid": c.get("id", ""), "inbound_id": inb.get("id")}
+        return {"success": False}
+    finally:
+        await s.close()
+
+
+async def toggle_client(email: str, enable: bool) -> dict:
+    """Включает/выключает клиента в панели."""
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "URL или токен не заданы"}
+    s = _session(token)
+    try:
+        info = await get_client_info.__wrapped__(s, url, email) if False else None
+        # получаем данные клиента из инбаундов
+        data, _ = await _get(s, f"{url}/panel/api/inbounds/list")
+        if not data or not data.get("success"):
+            return {"success": False, "error": "Не удалось загрузить инбаунды"}
+        client_obj = None
+        inbound_id = None
+        for inb in (data.get("obj") or []):
+            settings_str = inb.get("settings") or "{}"
+            try:
+                settings = json.loads(settings_str) if isinstance(settings_str, str) else settings_str
+            except Exception:
+                continue
+            for c in settings.get("clients", []):
+                if c.get("email") == email:
+                    client_obj = c
+                    inbound_id = inb.get("id")
+                    break
+            if client_obj:
+                break
+        if not client_obj:
+            return {"success": False, "error": "Клиент не найден в панели"}
+
+        client_obj["enable"] = enable
+        safe_uuid = quote(client_obj.get("id", ""), safe="")
+        safe_email = quote(email, safe="")
+
+        for path in (
+            f"/panel/api/clients/update/{safe_uuid}",
+            f"/panel/api/clients/update/{safe_email}",
+            f"/panel/api/inbounds/updateClient/{safe_uuid}",
+        ):
+            result, err = await _post(s, f"{url}{path}", client_obj)
+            if result and result.get("success"):
+                return {"success": True}
+        return {"success": False, "error": f"API не принял обновление: {err}"}
+    except Exception as e:
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        await s.close()
+
+
 async def get_client_traffic(email: str) -> dict:
     """Получает трафик клиента из панели. Возвращает {up, down} в байтах."""
     cfg = load_config()

@@ -68,8 +68,10 @@ def inbounds_keyboard(inbounds: list, selected_ids: list) -> InlineKeyboardMarku
     return InlineKeyboardMarkup(kb)
 
 
-def sub_view_keyboard(sub_id: int) -> InlineKeyboardMarkup:
+def sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardMarkup:
+    toggle_label = "⏸ Отключить" if enabled else "▶️ Включить"
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton(toggle_label, callback_data=f"sub_toggle:{sub_id}")],
         [InlineKeyboardButton("🗑 Удалить из базы", callback_data=f"sub_delete:{sub_id}")],
         [InlineKeyboardButton("◀️ К списку", callback_data="admin_subs")],
     ])

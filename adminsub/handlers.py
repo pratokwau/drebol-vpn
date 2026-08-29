@@ -359,8 +359,8 @@ async def handle_sub_view(query, sub_id: int):
     _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
-    # Получаем реальный трафик из панели
-    from xui_api import get_client_traffic
+    # Получаем реальный трафик и статус из панели
+    from xui_api import get_client_traffic, get_client_info
     t = await get_client_traffic(email)
     if t["success"]:
         up = t.get("up", 0)
@@ -369,11 +369,15 @@ async def handle_sub_view(query, sub_id: int):
     else:
         traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>"
 
+    info = await get_client_info(email)
+    enabled = info.get("enabled", True) if info.get("success") else True
+    status_icon = "🟢" if enabled else "🔴"
+
     tg_line = f'👤 TG: <a href="tg://user?id={tg_id}">{tg_id}</a>\n' if tg_id else ""
     link_line = f'⛓‍💥 <a href="tg://user?id={tg_id}">Написать</a>' if tg_id else ""
 
     await query.edit_message_text(
-        f"📄 <b>Подписка #{sub_id}</b>\n\n"
+        f"📄 <b>Подписка #{sub_id}</b> {status_icon}\n\n"
         + tg_line +
         f"📧 Email: <code>{email}</code>\n"
         f"🆔 UUID: <code>{uuid_val}</code>\n"
@@ -385,9 +389,33 @@ async def handle_sub_view(query, sub_id: int):
         + (f"\n{link_line}\n" if link_line else "") +
         f"\n🔗 Ссылка:\n<code>{sub_url}</code>",
         parse_mode="HTML",
-        reply_markup=sub_view_keyboard(sub_id),
+        reply_markup=sub_view_keyboard(sub_id, enabled),
         disable_web_page_preview=True,
     )
+
+
+async def handle_sub_toggle(query, sub_id: int):
+    row = await get_sub(sub_id)
+    if not row:
+        await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+    email = row[2]
+    from xui_api import get_client_info, toggle_client
+    info = await get_client_info(email)
+    if not info.get("success"):
+        await query.answer("❌ Клиент не найден в панели", show_alert=True)
+        return
+    new_state = not info.get("enabled", True)
+    await query.edit_message_text("⏳ Обновляю статус...")
+    result = await toggle_client(email, new_state)
+    if not result["success"]:
+        await query.edit_message_text(
+            f"❌ Ошибка: <code>{result['error']}</code>",
+            parse_mode="HTML",
+            reply_markup=back_admin(),
+        )
+        return
+    await handle_sub_view(query, sub_id)
 
 
 async def handle_sub_delete(query, sub_id: int):
