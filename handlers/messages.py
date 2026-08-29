@@ -28,6 +28,7 @@ from states import (
     AWAITING_PAID_SUB_EDIT_TRIAL, AWAITING_PAID_SUB_EDIT_PAY_PERIOD,
     AWAITING_PAID_SUB_EDIT_RENEW_TIME, AWAITING_PAID_SUB_EDIT_PRICE,
     AWAITING_PAID_SUB_EDIT_PAY_URL, AWAITING_PAID_MUTE_USER,
+    AWAITING_PAID_AUTO_UPDATE_DAYS,
 )
 from handlers.broadcast import do_broadcast
 
@@ -443,6 +444,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📅 Новая дата: <b>{new_expire_str}</b>",
                     parse_mode="HTML", reply_markup=back_admin(),
                 )
+                tg_id = row[1]
+                if tg_id:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=tg_id,
+                            text=(
+                                f"🎉 <b>Ваша подписка продлена!</b>\n\n"
+                                f"➕ Добавлено: <b>{fmt_dur(seconds)}</b>\n"
+                                f"📅 Действует до: <b>{new_expire_str}</b>"
+                            ),
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        pass
                 return
         await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
@@ -590,6 +605,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             from paidsub.storage import update_paid_sub_field
             await update_paid_sub_field(sub_id, "ind_pay_url", text)
         await update.message.reply_text("✅ Ссылка на оплату сохранена.", reply_markup=back_admin())
+        return
+
+    # ── Платные подписки: авто-обновление ников ──────────────────────────────────
+    if state == AWAITING_PAID_AUTO_UPDATE_DAYS:
+        if not text.isdigit() or int(text) < 1:
+            await update.message.reply_text("❌ Введи целое число дней (минимум 1):", reply_markup=back_admin())
+            return
+        _save("paid_auto_update_days", int(text))
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Интервал: <b>{text} дн.</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Мьют пользователя ───────────────────────────────────────────────────────

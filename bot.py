@@ -31,8 +31,26 @@ async def post_init(app: Application):
     if app.job_queue:
         app.job_queue.run_repeating(_sync_job, interval=24 * 3600, first=300)
 
-        from paidsub.handlers import check_expired_subs
+        from paidsub.handlers import check_expired_subs, paid_sync_usernames
         app.job_queue.run_repeating(check_expired_subs, interval=10, first=10)
+
+        async def _paid_sync_job(ctx):
+            from datetime import datetime
+            cfg = load_config()
+            if not cfg.get("paid_auto_update_usernames", False):
+                return
+            days = int(cfg.get("paid_auto_update_days", 2))
+            last_run_str = cfg.get("paid_auto_update_last_run")
+            if last_run_str:
+                try:
+                    last_run = datetime.strptime(last_run_str, "%d.%m.%Y %H:%M")
+                    if (datetime.now() - last_run).days < days:
+                        return
+                except Exception:
+                    pass
+            await paid_sync_usernames(ctx)
+
+        app.job_queue.run_repeating(_paid_sync_job, interval=24 * 3600, first=300)
 
 
 def main():

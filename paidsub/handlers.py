@@ -1185,6 +1185,112 @@ def _is_mute_active(muted_until: str) -> bool:
     return False
 
 
+# ── Авто-обновление ников ────────────────────────────────────────────────────
+
+async def handle_paid_auto_update_settings(query):
+    cfg = load_config()
+    enabled = cfg.get("paid_auto_update_usernames", False)
+    days = cfg.get("paid_auto_update_days", 2)
+    last_run = cfg.get("paid_auto_update_last_run")
+    last_line = f"\n🕐 Последний запуск: {last_run}" if last_run else ""
+    from paidsub.keyboards import paid_auto_update_keyboard
+    await query.edit_message_text(
+        "⏰ <b>Авто-обновление ников (платные)</b>\n\n"
+        "Бот проверяет, изменился ли юзернейм у пользователей с платными подписками, "
+        "и обновляет email в панели.\n"
+        + last_line,
+        parse_mode="HTML",
+        reply_markup=paid_auto_update_keyboard(enabled, days),
+    )
+
+
+async def handle_paid_toggle_auto_update(query):
+    cfg = load_config()
+    cfg["paid_auto_update_usernames"] = not cfg.get("paid_auto_update_usernames", False)
+    save_config(cfg)
+    await handle_paid_auto_update_settings(query)
+
+
+async def handle_paid_set_auto_update_days(query, context):
+    from states import AWAITING_PAID_AUTO_UPDATE_DAYS
+    context.user_data["state"] = AWAITING_PAID_AUTO_UPDATE_DAYS
+    cfg = load_config()
+    current = cfg.get("paid_auto_update_days", 2)
+    await query.edit_message_text(
+        f"📝 <b>Интервал проверки (платные)</b>\n\n"
+        f"Сейчас: <b>{current} дн.</b>\n\n"
+        "Введи новое значение (целое число дней, минимум 1):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_run_sync_now(query):
+    await query.edit_message_text("⏳ Запускаю синхронизацию ников...")
+    result = await paid_sync_usernames()
+    lines = [f"🔄 <b>Синхронизация завершена</b>\n"]
+    lines.append(f"📊 Всего подписок с TG ID: <b>{result['total']}</b>")
+    lines.append(f"🔍 Нужно обновить: <b>{result['need_update']}</b>")
+    lines.append(f"✅ Успешно обновлено: <b>{result['updated']}</b>")
+    if result["errors"]:
+        lines.append(f"❌ Ошибки: <b>{len(result['errors'])}</b>")
+        for err in result["errors"][:5]:
+            lines.append(f"  • <code>{err}</code>")
+    if result["skipped"]:
+        lines.append(f"⏭ Юзер не в базе: <b>{result['skipped']}</b>")
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def paid_sync_usernames(context=None) -> dict:
+    from xui_api import update_client_email, build_email
+    from database import get_user_info
+    from paidsub.storage import get_all_paid_subs_with_tg, update_paid_sub_email
+
+    subs = await get_all_paid_subs_with_tg()
+    updated = 0
+    need_update = 0
+    skipped = 0
+    errors = []
+
+    for row in subs:
+        sub_id, tg_id, old_email, uuid_val, sub_id_str, expire_date, limit_ip, limit_hwid, total_gb = row
+        user_row = await get_user_info(tg_id)
+        if not user_row:
+            skipped += 1
+            continue
+        username = user_row[2]
+        new_email = build_email(tg_id, username, prefix="paid_")
+        if new_email == old_email:
+            continue
+        need_update += 1
+        result = await update_client_email(
+            old_email=old_email,
+            new_email=new_email,
+            client_uuid=uuid_val,
+            sub_id=sub_id_str,
+            expire_date=expire_date,
+            limit_ip=limit_ip,
+            limit_hwid=limit_hwid,
+            total_gb=total_gb,
+        )
+        if result["success"]:
+            await update_paid_sub_email(sub_id, new_email)
+            updated += 1
+        else:
+            errors.append(f"{old_email} → {new_email}: {result['error'][:100]}")
+
+    cfg = load_config()
+    cfg["paid_auto_update_last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
+    save_config(cfg)
+    if updated:
+        print(f"[paid_sync_usernames] обновлено {updated} email(ов)")
+    return {"total": len(subs), "need_update": need_update, "updated": updated, "skipped": skipped, "errors": errors}
+
+
 def save_paid_preset(key: str, value):
     cfg = load_config()
     cfg[key] = value

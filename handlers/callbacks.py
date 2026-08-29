@@ -41,6 +41,8 @@ from paidsub.handlers import (
     handle_confirm_payment, handle_reject_payment,
     handle_paid_history, handle_mute_user, handle_unmute_user, handle_muted_list,
     handle_paid_requests,
+    handle_paid_auto_update_settings, handle_paid_toggle_auto_update,
+    handle_paid_set_auto_update_days, handle_paid_run_sync_now,
 )
 
 
@@ -292,6 +294,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_history(query)
     elif data.startswith("paid_history_page:"):
         await handle_paid_history(query, int(data.split(":")[1]))
+    elif data == "paid_auto_update_settings":
+        await handle_paid_auto_update_settings(query)
+    elif data == "paid_toggle_auto_update":
+        await handle_paid_toggle_auto_update(query)
+    elif data == "paid_set_auto_update_days":
+        await handle_paid_set_auto_update_days(query, context)
+    elif data == "paid_run_sync_now":
+        await handle_paid_run_sync_now(query)
     elif data == "paid_requests":
         await handle_paid_requests(query)
     elif data == "paid_muted_list":

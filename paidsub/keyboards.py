@@ -44,6 +44,7 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="paid_preset_traffic")],
         [InlineKeyboardButton("📡 Инбаунды создания", callback_data="paid_inbounds_menu")],
         [InlineKeyboardButton("📡 Инбаунды окончания", callback_data="paid_inbounds_expire_menu")],
+        [InlineKeyboardButton("⏰ Авто-обновление ников", callback_data="paid_auto_update_settings")],
         [InlineKeyboardButton("◀️ Назад к подпискам", callback_data="paid_subs")],
     ])
 
@@ -122,6 +123,18 @@ def payment_approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"confirm_payment:{tg_id}")],
         [InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_payment:{tg_id}")],
         [InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}")],
+    ])
+
+
+def paid_auto_update_keyboard(enabled: bool, days: int) -> InlineKeyboardMarkup:
+    toggle_label = "🔔 Выключить" if enabled else "🔕 Включить"
+    status = f"{'ВКЛ ✅' if enabled else 'ВЫКЛ ❌'} · каждые {days} дн."
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"Статус: {status}", callback_data="noop")],
+        [InlineKeyboardButton(toggle_label, callback_data="paid_toggle_auto_update")],
+        [InlineKeyboardButton("📝 Изменить интервал (дней)", callback_data="paid_set_auto_update_days")],
+        [InlineKeyboardButton("🔄 Обновить сейчас", callback_data="paid_run_sync_now")],
+        [InlineKeyboardButton("◀️ Назад к настройкам", callback_data="paid_sub_presets")],
     ])
 
 
