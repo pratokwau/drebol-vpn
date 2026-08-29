@@ -77,6 +77,10 @@ async def init_db():
             await db.execute("ALTER TABLE paid_subs ADD COLUMN payment_pending INTEGER NOT NULL DEFAULT 0")
         except Exception:
             pass
+        try:
+            await db.execute("ALTER TABLE paid_subs ADD COLUMN times_renewed INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
         for col in ("ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url"):
             try:
                 if col == "ind_pay_url":

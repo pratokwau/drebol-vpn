@@ -70,7 +70,7 @@ async def handle_my_paid_sub(query):
             reply_markup=back_main(),
         )
         return
-    _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at, status = row
+    _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at, status, times_renewed = row[:13]
 
     from xui_api import get_client_info, get_client_traffic
     info = await get_client_info(email)
@@ -166,10 +166,23 @@ async def handle_my_paid_sub(query):
     except Exception:
         created_str = str(created_at)[:10]
 
+    # --- Тип подписки ---
+    if status == "expired":
+        sub_type = "🚫 Требуется продление"
+    elif status == "renewal":
+        sub_type = "⏳ Ожидает оплаты"
+    elif not enabled:
+        sub_type = "❄️ Заморожена"
+    elif times_renewed > 0:
+        sub_type = "⭐ Премиум"
+    else:
+        sub_type = "🆓 Пробный период"
+
     text = (
         f"🔐 <b>Drebol VPN — Моя подписка</b>\n"
         f"{'━' * 28}\n\n"
 
+        f"📋 Тип: <b>{sub_type}</b>\n"
         f"{status_emoji} Статус: <b>{status_text}</b>\n"
         f"     <i>{status_detail}</i>\n\n"
 
@@ -200,8 +213,18 @@ async def handle_renew_sub(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     user = query.from_user
     cfg = load_config()
-    price = cfg.get("paid_price", 0)
-    pay_url = cfg.get("paid_pay_url", "")
+
+    from paidsub.storage import get_paid_sub_by_tg_id, get_paid_sub
+    row = await get_paid_sub_by_tg_id(user.id)
+    if row:
+        full = await get_paid_sub(row[0])
+        ind_price = full[16] if full and full[16] else None
+        ind_pay_url = full[17] if full and full[17] else None
+    else:
+        ind_price = None
+        ind_pay_url = None
+    price = ind_price if ind_price else cfg.get("paid_price", 0)
+    pay_url = ind_pay_url if ind_pay_url else cfg.get("paid_pay_url", "")
 
     uname = f"@{user.username}" if user.username else f"id{user.id}"
     hint_text = f"{user.id} - {uname}"

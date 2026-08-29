@@ -422,7 +422,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
             f"📅 Действует до: <b>{result['expire']}</b>\n"
             f"📶 Трафик: <b>{traffic_str}</b>\n\n"
             f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
-            "Скопируй ссылку и вставь в приложение (Happ, v2rayNG и др.)"
+            "Скопируй ссылку и вставь в приложение (Happ или INCY)"
         )
 
 
@@ -833,14 +833,15 @@ async def check_expired_subs(context):
     """Проверяет подписки: уведомляет при смене статуса, отключает и меняет инбаунды."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     cfg = load_config()
-    renew_seconds = cfg.get("paid_renew_time", 86400)
+    global_renew_seconds = cfg.get("paid_renew_time", 86400)
     expire_inbound_ids = cfg.get("paid_expire_inbound_ids") or []
 
     subs = await get_expired_paid_subs()
     now = datetime.now()
 
     for row in subs:
-        sub_id, tg_id, email, uuid_val, sub_id_str, sub_url, expire_str, status = row
+        sub_id, tg_id, email, uuid_val, sub_id_str, sub_url, expire_str, status, times_renewed, ind_renew_time = row
+        renew_seconds = ind_renew_time if ind_renew_time else global_renew_seconds
         try:
             for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
                 try:
@@ -874,10 +875,14 @@ async def check_expired_subs(context):
                         [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
                     ])
                     try:
+                        if times_renewed > 0:
+                            period_text = "Подписка истекла"
+                        else:
+                            period_text = "Пробный период окончился"
                         await context.bot.send_message(
                             chat_id=tg_id,
                             text=(
-                                "⚠️ <b>Пробный период окончился!</b>\n\n"
+                                f"⚠️ <b>{period_text}!</b>\n\n"
                                 f"У вас есть <b>{fmt_duration(renew_seconds)}</b> на продление.\n"
                                 f"Продлите подписку, чтобы не потерять доступ."
                             ),
@@ -935,9 +940,12 @@ async def handle_confirm_payment(query, tg_id: int, context):
     email = row[2]
     expire_str = row[6]
 
+    full_row = await get_paid_sub(sub_id)
     cfg = load_config()
-    pay_seconds = cfg.get("paid_pay_period", 2592000)
-    renew_seconds = cfg.get("paid_renew_time", 86400)
+    ind_pay = full_row[14] if full_row and full_row[14] else None
+    ind_renew = full_row[15] if full_row and full_row[15] else None
+    pay_seconds = ind_pay if ind_pay else cfg.get("paid_pay_period", 2592000)
+    renew_seconds = ind_renew if ind_renew else cfg.get("paid_renew_time", 86400)
     total_seconds = pay_seconds + renew_seconds
 
     new_expire = datetime.now() + timedelta(seconds=total_seconds)
@@ -946,6 +954,8 @@ async def handle_confirm_payment(query, tg_id: int, context):
     await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
     await update_paid_sub_field(sub_id, "status", "active")
     await update_paid_sub_field(sub_id, "payment_pending", 0)
+    cur_renewed = row[12] if len(row) > 12 else 0
+    await update_paid_sub_field(sub_id, "times_renewed", cur_renewed + 1)
 
     from xui_api import get_client_info, toggle_client, update_client_expire
     info = await get_client_info(email)
