@@ -54,12 +54,12 @@ if [ -f .env ]; then
     warn "Файл .env уже существует. Пропускаем настройку."
     warn "Чтобы изменить конфиг, отредактируйте $INSTALL_DIR/.env"
 else
-    read -rp "Введите токен Telegram-бота (от @BotFather): " BOT_TOKEN
+    read -rp "Введите токен Telegram-бота (от @BotFather): " BOT_TOKEN </dev/tty
     if [ -z "$BOT_TOKEN" ]; then
         error "Токен бота не может быть пустым."
     fi
 
-    read -rp "Введите ваш Telegram ID (администратора): " ADMIN_ID
+    read -rp "Введите ваш Telegram ID (администратора): " ADMIN_ID </dev/tty
     if ! [[ "$ADMIN_ID" =~ ^[0-9]+$ ]]; then
         error "Telegram ID должен состоять только из цифр."
     fi
