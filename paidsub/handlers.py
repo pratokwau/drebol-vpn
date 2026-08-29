@@ -12,6 +12,7 @@ from paidsub.storage import (
     update_paid_sub_field, get_expired_paid_subs,
     add_history, list_history,
     get_muted_until, set_mute, clear_mute, list_muted,
+    list_pending_requests, list_pending_payments,
 )
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
@@ -1041,6 +1042,64 @@ async def handle_reject_payment(query, tg_id: int, context):
     await _notify_user(context.bot, tg_id,
         "❌ Ваша заявка на оплату <b>отклонена</b> администратором.\n"
         "Если вы считаете это ошибкой, обратитесь в поддержку."
+    )
+
+
+# ── Запросы ──────────────────────────────────────────────────────────────────
+
+async def handle_paid_requests(query):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from database import get_user_info
+    trial_rows = await list_pending_requests()
+    payment_rows = await list_pending_payments()
+
+    if not trial_rows and not payment_rows:
+        await query.edit_message_text(
+            "📬 <b>Запросы</b>\n\nНет ожидающих запросов.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")]
+            ]),
+        )
+        return
+
+    kb = []
+    lines = []
+
+    if trial_rows:
+        lines.append("<b>🆓 Запросы на пробный период:</b>\n")
+        for tg_id, created_at in trial_rows:
+            user_info = await get_user_info(tg_id)
+            name = user_info[1] if user_info else str(tg_id)
+            uname = f"@{user_info[2]}" if user_info and user_info[2] else f"id{tg_id}"
+            ts = created_at[:16] if created_at else "?"
+            lines.append(f"👤 {name} ({uname}) · <code>{ts}</code>")
+            kb.append([
+                InlineKeyboardButton(f"✅ {tg_id}", callback_data=f"paid_approve:{tg_id}"),
+                InlineKeyboardButton(f"❌ {tg_id}", callback_data=f"paid_reject:{tg_id}"),
+                InlineKeyboardButton(f"🔇", callback_data=f"paid_mute_user:{tg_id}"),
+            ])
+        lines.append("")
+
+    if payment_rows:
+        lines.append("<b>💰 Запросы на проверку оплаты:</b>\n")
+        for tg_id, email, expire in payment_rows:
+            user_info = await get_user_info(tg_id)
+            name = user_info[1] if user_info else str(tg_id)
+            uname = f"@{user_info[2]}" if user_info and user_info[2] else f"id{tg_id}"
+            lines.append(f"👤 {name} ({uname}) · до {expire}")
+            kb.append([
+                InlineKeyboardButton(f"✅ {tg_id}", callback_data=f"confirm_payment:{tg_id}"),
+                InlineKeyboardButton(f"❌ {tg_id}", callback_data=f"reject_payment:{tg_id}"),
+                InlineKeyboardButton(f"🔇", callback_data=f"paid_mute_user:{tg_id}"),
+            ])
+
+    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
+
+    await query.edit_message_text(
+        "📬 <b>Запросы</b>\n\n" + "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb),
     )
 
 

@@ -129,6 +129,28 @@ async def get_pending_request(tg_id: int):
             return await cur.fetchone()
 
 
+async def list_pending_requests() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT r.tg_id, r.created_at
+            FROM paid_sub_requests r
+            WHERE r.status = 'pending'
+            ORDER BY r.created_at DESC
+        """) as cur:
+            return await cur.fetchall()
+
+
+async def list_pending_payments() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT tg_id, email, expire_date
+            FROM paid_subs
+            WHERE payment_pending = 1
+            ORDER BY expire_date ASC
+        """) as cur:
+            return await cur.fetchall()
+
+
 async def resolve_request(tg_id: int, status: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(

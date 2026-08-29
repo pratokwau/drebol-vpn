@@ -22,6 +22,7 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
 
     create_label = "➕ Создать подписку" if presets_ready else "➕ Создать (сначала настройки)"
     kb.append([InlineKeyboardButton(create_label, callback_data="paid_create_sub")])
+    kb.append([InlineKeyboardButton("📬 Запросы", callback_data="paid_requests")])
     kb.append([
         InlineKeyboardButton("📜 История", callback_data="paid_history"),
         InlineKeyboardButton("🔇 Заглушённые", callback_data="paid_muted_list"),
