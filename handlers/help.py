@@ -5,9 +5,9 @@ from keyboards import back_main
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "*Доступные команды:*\n"
+        "<b>Доступные команды:</b>\n"
         "/start — главное меню\n"
         "/help — список команд",
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=back_main(),
     )

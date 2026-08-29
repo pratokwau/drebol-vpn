@@ -13,8 +13,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url = update.message.text.strip()
         if not url.startswith("http"):
             await update.message.reply_text(
-                "❌ Некорректная ссылка. Должна начинаться с `https://t.me/`",
-                parse_mode="Markdown",
+                "❌ Некорректная ссылка. Должна начинаться с <code>https://t.me/</code>",
+                parse_mode="HTML",
                 reply_markup=back_admin(),
             )
             return
@@ -23,8 +23,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_config(cfg)
         context.user_data.pop("state", None)
         await update.message.reply_text(
-            f"✅ Канал сохранён: {url}\n\n"
-            "Кнопка *📢 Наш канал* теперь видна в главном меню.",
-            parse_mode="Markdown",
+            f"✅ Канал сохранён: <code>{url}</code>\n\n"
+            "Кнопка <b>📢 Наш канал</b> теперь видна в главном меню.",
+            parse_mode="HTML",
             reply_markup=back_admin(),
         )

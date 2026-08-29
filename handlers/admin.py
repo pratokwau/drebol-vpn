@@ -13,10 +13,11 @@ def _is_admin(update: Update) -> bool:
 
 async def handle_admin_panel(query):
     cfg = load_config()
-    channel_info = f"\n📢 Канал: {cfg['channel_url']}" if cfg.get("channel_url") else "\n📢 Канал: не задан"
+    channel_url = cfg.get("channel_url", "")
+    channel_info = f"\n📢 Канал: <code>{channel_url}</code>" if channel_url else "\n📢 Канал: не задан"
     await query.edit_message_text(
-        f"⚙️ *Панель администратора*{channel_info}\n\nВыбери действие:",
-        parse_mode="Markdown",
+        f"⚙️ <b>Панель администратора</b>{channel_info}\n\nВыбери действие:",
+        parse_mode="HTML",
         reply_markup=admin_keyboard(),
     )
 
@@ -24,9 +25,9 @@ async def handle_admin_panel(query):
 async def handle_set_channel(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_CHANNEL
     await query.edit_message_text(
-        "📢 *Установка канала*\n\n"
-        "Отправь ссылку на Telegram-канал (например: `https://t.me/mychannel`):",
-        parse_mode="Markdown",
+        "📢 <b>Установка канала</b>\n\n"
+        "Отправь ссылку на Telegram-канал (например: <code>https://t.me/mychannel</code>):",
+        parse_mode="HTML",
         reply_markup=back_admin(),
     )
 
@@ -40,15 +41,15 @@ async def handle_git_update(query):
         )
         if result.returncode != 0:
             await query.edit_message_text(
-                f"❌ Ошибка git pull:\n`{result.stderr.strip()}`",
-                parse_mode="Markdown",
+                f"❌ Ошибка git pull:\n<code>{result.stderr.strip()}</code>",
+                parse_mode="HTML",
                 reply_markup=back_admin(),
             )
             return
         output = result.stdout.strip()
         await query.edit_message_text(
-            f"✅ Обновление загружено:\n`{output}`\n\nПерезапускаю бота...",
-            parse_mode="Markdown",
+            f"✅ Обновление загружено:\n<code>{output}</code>\n\nПерезапускаю бота...",
+            parse_mode="HTML",
         )
         subprocess.Popen(
             ["systemctl", "restart", "drebol-vpn"],
