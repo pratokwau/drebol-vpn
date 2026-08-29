@@ -2,7 +2,7 @@ import subprocess
 from telegram.ext import ContextTypes
 from config import INSTALL_DIR, load_config
 from keyboards import admin_keyboard, back_admin
-from states import AWAITING_CHANNEL
+from states import AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL
 
 
 async def handle_admin_panel(query):
@@ -21,6 +21,24 @@ async def handle_set_channel(query, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         "📢 <b>Установка канала</b>\n\n"
         "Отправь ссылку на Telegram-канал (например: <code>https://t.me/mychannel</code>):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_set_privacy_url(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_PRIVACY_URL
+    await query.edit_message_text(
+        "📋 <b>Политика конфиденциальности</b>\n\nОтправь ссылку на документ:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_set_terms_url(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_TERMS_URL
+    await query.edit_message_text(
+        "📄 <b>Пользовательское соглашение</b>\n\nОтправь ссылку на документ:",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )

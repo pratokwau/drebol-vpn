@@ -6,6 +6,7 @@ from keyboards import back_admin, support_keyboard
 from states import (
     AWAITING_CHANNEL, AWAITING_BROADCAST,
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
+    AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
 )
 from handlers.broadcast import do_broadcast
 
@@ -61,6 +62,44 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ok, fail = await do_broadcast(context.bot, text)
         await msg.edit_text(
             f"✅ Рассылка завершена.\n\n👥 В базе: {len(user_ids)}\n📨 Доставлено: {ok}\n❌ Ошибок: {fail}",
+            reply_markup=back_admin(),
+        )
+        return
+
+    # ── Админ задаёт ссылку на политику конфиденциальности ───────────────────
+    if state == AWAITING_PRIVACY_URL and is_admin:
+        if not text.startswith("http"):
+            await update.message.reply_text(
+                "❌ Некорректная ссылка. Должна начинаться с <code>https://</code>",
+                parse_mode="HTML",
+                reply_markup=back_admin(),
+            )
+            return
+        cfg = load_config()
+        cfg["privacy_url"] = text
+        save_config(cfg)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(
+            f"✅ Ссылка на политику конфиденциальности сохранена.",
+            reply_markup=back_admin(),
+        )
+        return
+
+    # ── Админ задаёт ссылку на пользовательское соглашение ───────────────────
+    if state == AWAITING_TERMS_URL and is_admin:
+        if not text.startswith("http"):
+            await update.message.reply_text(
+                "❌ Некорректная ссылка. Должна начинаться с <code>https://</code>",
+                parse_mode="HTML",
+                reply_markup=back_admin(),
+            )
+            return
+        cfg = load_config()
+        cfg["terms_url"] = text
+        save_config(cfg)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(
+            f"✅ Ссылка на пользовательское соглашение сохранена.",
             reply_markup=back_admin(),
         )
         return

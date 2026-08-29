@@ -5,7 +5,7 @@ from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard
 from keyboards import main_keyboard
 from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_news, handle_how_to
-from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update
+from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
 from handlers.tickets import handle_ticket_list, handle_ticket_view, handle_ticket_reply_start
@@ -113,6 +113,18 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("⛔ Нет доступа.")
             return
         await handle_set_channel(query, context)
+
+    elif data == "set_privacy_url":
+        if not adm:
+            await query.edit_message_text("⛔ Нет доступа.")
+            return
+        await handle_set_privacy_url(query, context)
+
+    elif data == "set_terms_url":
+        if not adm:
+            await query.edit_message_text("⛔ Нет доступа.")
+            return
+        await handle_set_terms_url(query, context)
 
     elif data == "git_update":
         if not adm:
