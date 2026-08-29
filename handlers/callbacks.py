@@ -25,6 +25,19 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "noop":
         return
 
+    # ── Глобальная проверка подписки (кроме самой кнопки check_sub) ──────────
+    if data != "check_sub" and not adm:
+        if not await is_subscribed(context.bot, update.effective_user.id):
+            await query.edit_message_text(
+                f"👋 Привет, {update.effective_user.first_name}!\n\n"
+                "Добро пожаловать в <b>Drebol VPN</b>.\n\n"
+                "🔒 Чтобы пользоваться ботом, необходимо подписаться на наш канал.\n\n"
+                "После подписки нажми кнопку <b>✅ Я подписался</b>.",
+                parse_mode="HTML",
+                reply_markup=subscribe_keyboard(),
+            )
+            return
+
     # ── Проверка подписки после нажатия "Я подписался" ───────────────────────
     if data == "check_sub":
         user = update.effective_user
