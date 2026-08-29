@@ -8,7 +8,7 @@ async def handle_my_sub(query):
     row = await get_sub_by_tg_id(user_id)
     if not row:
         await query.edit_message_text(
-            "📦 <b>Моя подписка</b>\n\nУ вас пока нет активной подписки.",
+            "📋 <b>Админская подписка</b>\n\nУ вас пока нет активной подписки.",
             parse_mode="HTML",
             reply_markup=back_main(),
         )
@@ -16,7 +16,7 @@ async def handle_my_sub(query):
     _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
     await query.edit_message_text(
-        "📦 <b>Моя подписка</b>\n\n"
+        "📋 <b>Админская подписка</b>\n\n"
         f"📅 Действует до: <b>{expire}</b>\n"
         f"📶 Трафик: <b>{traffic}</b>\n\n"
         f"🔗 <b>Ссылка подписки:</b>\n<code>{sub_url}</code>\n\n"

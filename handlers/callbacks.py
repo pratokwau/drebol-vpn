@@ -167,9 +167,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("sub_view:"):
         await handle_sub_view(query, int(data.split(":")[1]))
     elif data.startswith("sub_toggle:"):
-        await handle_sub_toggle(query, int(data.split(":")[1]))
+        await handle_sub_toggle(query, int(data.split(":")[1]), context)
     elif data.startswith("sub_delete:"):
-        await handle_sub_delete(query, int(data.split(":")[1]))
+        await handle_sub_delete(query, int(data.split(":")[1]), context)
     elif data == "inbounds_menu":
         await handle_inbounds_menu(query)
     elif data.startswith("toggle_inbound:"):

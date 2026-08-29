@@ -1,7 +1,18 @@
+from telegram import Bot
 from telegram.ext import ContextTypes
 
 from config import load_config, save_config
 from keyboards import back_admin
+
+
+async def _notify_user(bot: Bot, tg_id: int | None, text: str):
+    """Отправляет уведомление юзеру. Молча пропускает если не удалось."""
+    if not tg_id:
+        return
+    try:
+        await bot.send_message(chat_id=tg_id, text=text, parse_mode="HTML")
+    except Exception:
+        pass
 from adminsub.storage import list_subs, add_sub, get_sub, delete_sub, get_all_subs_with_tg, update_sub_email
 from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard, inbounds_keyboard, auto_update_keyboard
 
@@ -342,6 +353,17 @@ async def do_create_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_
         parse_mode="HTML",
     )
 
+    # Уведомление юзеру
+    bot = context.bot if hasattr(context, 'bot') else None
+    if bot:
+        await _notify_user(bot, tg_id,
+            "🎉 <b>Вам выдана админская подписка!</b>\n\n"
+            f"📅 Действует до: <b>{result['expire']}</b>\n"
+            f"📶 Трафик: <b>{traffic_str}</b>\n\n"
+            f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
+            "Скопируй ссылку и вставь в приложение (Happ, v2rayNG и др.)"
+        )
+
 
 def _fmt_bytes(b: int) -> str:
     if b < 1024 ** 2:
@@ -394,11 +416,12 @@ async def handle_sub_view(query, sub_id: int):
     )
 
 
-async def handle_sub_toggle(query, sub_id: int):
+async def handle_sub_toggle(query, sub_id: int, context=None):
     row = await get_sub(sub_id)
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
+    tg_id = row[1]
     email = row[2]
     from xui_api import get_client_info, toggle_client
     info = await get_client_info(email)
@@ -415,12 +438,20 @@ async def handle_sub_toggle(query, sub_id: int):
             reply_markup=back_admin(),
         )
         return
+
+    if context and tg_id:
+        status_text = "✅ включена" if new_state else "⏸ приостановлена"
+        await _notify_user(context.bot, tg_id,
+            f"ℹ️ Ваша админская подписка <b>{status_text}</b>."
+        )
+
     await handle_sub_view(query, sub_id)
 
 
-async def handle_sub_delete(query, sub_id: int):
+async def handle_sub_delete(query, sub_id: int, context=None):
     row = await get_sub(sub_id)
-    email = row[2] if row else None  # row: id, tg_id, email, ...
+    tg_id = row[1] if row else None
+    email = row[2] if row else None
 
     if email:
         from xui_api import delete_client
@@ -431,6 +462,12 @@ async def handle_sub_delete(query, sub_id: int):
         panel_status = "⚠️ email не найден, из панели не удалено"
 
     await delete_sub(sub_id)
+
+    if context and tg_id:
+        await _notify_user(context.bot, tg_id,
+            "🗑 Ваша админская подписка была <b>удалена</b>."
+        )
+
     await query.edit_message_text(
         f"🗑 Подписка удалена из базы.\n{panel_status}",
         reply_markup=back_admin(),
