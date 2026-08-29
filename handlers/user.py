@@ -20,9 +20,18 @@ async def handle_news(query):
 
 async def handle_how_to(query):
     await query.edit_message_text(
-        "❓ <b>Как подключиться?</b>\n\nИнструкция по подключению скоро появится здесь.",
+        "<b>❓ Как подключиться?</b>\n\n"
+        "1. Оформи пробный период или подписку\n\n"
+        "2. Установи приложение — рекомендуем Happ\n"
+        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>\n"
+        "• <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Android</a>\n"
+        "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n"
+        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">MacOS</a>\n\n"
+        "3. Скопируй ссылку подписки и вставь её в приложение\n\n"
+        "4. Выбери сервер и подключайся",
         parse_mode="HTML",
         reply_markup=back_main(),
+        disable_web_page_preview=True,
     )
 
 
