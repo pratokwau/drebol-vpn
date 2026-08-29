@@ -38,9 +38,11 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     privacy_label = "📋 Изменить политику конф." if cfg.get("privacy_url") else "📋 Политика конфиденциальности"
     terms_label = "📄 Изменить польз. соглашение" if cfg.get("terms_url") else "📄 Пользовательское соглашение"
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton("🎫 Тикеты", callback_data="ticket_list:1")],
         [InlineKeyboardButton(sub_label, callback_data="toggle_force_sub")],
+        [InlineKeyboardButton("🔧 Параметры 3x-UI", callback_data="xui_settings")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
         [InlineKeyboardButton(channel_label, callback_data="set_channel")],
         [InlineKeyboardButton(privacy_label, callback_data="set_privacy_url")],
@@ -97,6 +99,29 @@ def ticket_view_keyboard(user_id: int, page: int, total_pages: int) -> InlineKey
     rows.append([InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user_id}")])
     rows.append([InlineKeyboardButton("◀️ К тикетам", callback_data="ticket_list:1")])
     return InlineKeyboardMarkup(rows)
+
+
+# ── 3x-UI настройки ──────────────────────────────────────────────────────────
+
+def xui_settings_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🌐 URL панели", callback_data="set_xui_url")],
+        [InlineKeyboardButton("👤 Логин", callback_data="set_xui_login"),
+         InlineKeyboardButton("🔑 Пароль", callback_data="set_xui_pass")],
+        [InlineKeyboardButton("🔌 Порт подписки", callback_data="set_xui_sub_port")],
+        [InlineKeyboardButton("📂 Путь подписки", callback_data="set_xui_sub_path")],
+        [InlineKeyboardButton("📥 ID инбаунда", callback_data="set_xui_inbound_id")],
+        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+    ])
+
+
+# ── Админские подписки ────────────────────────────────────────────────────────
+
+def admin_subs_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Создать подписку", callback_data="create_sub")],
+        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+    ])
 
 
 # ── Общие ─────────────────────────────────────────────────────────────────────

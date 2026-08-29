@@ -9,6 +9,12 @@ from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_up
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
 from handlers.tickets import handle_ticket_list, handle_ticket_view, handle_ticket_reply_start
+from handlers.xui_settings import (
+    handle_xui_settings, handle_set_xui_url, handle_set_xui_login,
+    handle_set_xui_pass, handle_set_xui_sub_port, handle_set_xui_sub_path,
+    handle_set_xui_inbound_id,
+)
+from adminsub.handlers import handle_admin_subs_menu, handle_create_sub_start
 
 
 def _is_admin(update: Update) -> bool:
@@ -21,11 +27,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     adm = _is_admin(update)
 
-    # Ничего не делать (кнопка-счётчик страниц)
     if data == "noop":
         return
 
-    # ── Глобальная проверка подписки (кроме самой кнопки check_sub) ──────────
+    # ── Глобальная проверка подписки ─────────────────────────────────────────
     if data != "check_sub" and not adm:
         if not await is_subscribed(context.bot, update.effective_user.id):
             await query.edit_message_text(
@@ -38,7 +43,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # ── Проверка подписки после нажатия "Я подписался" ───────────────────────
+    # ── Проверка "Я подписался" ───────────────────────────────────────────────
     if data == "check_sub":
         user = update.effective_user
         if not await is_subscribed(context.bot, user.id):
@@ -51,7 +56,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=subscribe_keyboard(),
             )
             return
-        is_admin = adm
         await query.edit_message_text(
             f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
             "🔒 Быстрый и безопасный VPN\n"
@@ -59,7 +63,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🌍 Доступ к популярным сервисам\n\n"
             "Выберите нужный раздел ниже 👇",
             parse_mode="HTML",
-            reply_markup=main_keyboard(is_admin),
+            reply_markup=main_keyboard(adm),
         )
         return
 
@@ -67,94 +71,73 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "back_start":
         context.user_data.pop("state", None)
         await handle_back_start(query, update.effective_user)
-
     elif data == "my_sub":
         await handle_my_sub(query)
-
     elif data == "news":
         await handle_news(query)
-
     elif data == "news_no_channel":
         await query.answer("Канал пока не настроен.", show_alert=True)
-
     elif data == "how_to":
         await handle_how_to(query)
-
     elif data == "buy":
         await handle_buy(query)
-
     elif data == "about":
         await handle_about(query)
-
     elif data.startswith("support_page:"):
         page = int(data.split(":")[1])
         context.user_data["state"] = AWAITING_SUPPORT_MSG
         await open_support(query, update.effective_user.id, page)
 
     # ── Админские ────────────────────────────────────────────────────────────
+    elif not adm:
+        await query.edit_message_text("⛔ Нет доступа.")
+
     elif data == "admin_panel":
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
         context.user_data.pop("state", None)
         await handle_admin_panel(query)
-
     elif data == "toggle_force_sub":
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
         cfg = load_config()
         cfg["force_subscribe"] = not cfg.get("force_subscribe", False)
         save_config(cfg)
         await handle_admin_panel(query)
-
     elif data == "set_channel":
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
         await handle_set_channel(query, context)
-
     elif data == "set_privacy_url":
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
         await handle_set_privacy_url(query, context)
-
     elif data == "set_terms_url":
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
         await handle_set_terms_url(query, context)
-
     elif data == "git_update":
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
         await handle_git_update(query)
-
     elif data == "broadcast":
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
         await handle_broadcast_start(query, context)
 
+    # Тикеты
     elif data.startswith("ticket_list:"):
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
-        page = int(data.split(":")[1])
-        await handle_ticket_list(query, page)
-
+        await handle_ticket_list(query, int(data.split(":")[1]))
     elif data.startswith("ticket_view:"):
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
-        _, user_id, page = data.split(":")
-        await handle_ticket_view(query, int(user_id), int(page))
-
+        _, uid, page = data.split(":")
+        await handle_ticket_view(query, int(uid), int(page))
     elif data.startswith("ticket_reply:"):
-        if not adm:
-            await query.edit_message_text("⛔ Нет доступа.")
-            return
-        user_id = int(data.split(":")[1])
-        await handle_ticket_reply_start(query, user_id, context)
+        await handle_ticket_reply_start(query, int(data.split(":")[1]), context)
+
+    # 3x-UI настройки
+    elif data == "xui_settings":
+        await handle_xui_settings(query)
+    elif data == "set_xui_url":
+        await handle_set_xui_url(query, context)
+    elif data == "set_xui_login":
+        await handle_set_xui_login(query, context)
+    elif data == "set_xui_pass":
+        await handle_set_xui_pass(query, context)
+    elif data == "set_xui_sub_port":
+        await handle_set_xui_sub_port(query, context)
+    elif data == "set_xui_sub_path":
+        await handle_set_xui_sub_path(query, context)
+    elif data == "set_xui_inbound_id":
+        await handle_set_xui_inbound_id(query, context)
+
+    # Админские подписки
+    elif data == "admin_subs":
+        await handle_admin_subs_menu(query)
+    elif data == "create_sub":
+        await handle_create_sub_start(query, context)
