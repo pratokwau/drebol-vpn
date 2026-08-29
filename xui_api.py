@@ -146,6 +146,47 @@ async def _fetch_inbound_id(session: aiohttp.ClientSession, url: str) -> tuple[i
     return inbounds[0].get("id"), ""
 
 
+async def get_client_traffic(email: str) -> dict:
+    """Получает трафик клиента из панели. Возвращает {up, down} в байтах."""
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "URL или токен не заданы"}
+    s = _session(token)
+    try:
+        safe_email = quote(email, safe="")
+        data, err = await _get(s, f"{url}/panel/api/clients/get/{safe_email}")
+        if data and data.get("success"):
+            obj = data.get("obj") or {}
+            if isinstance(obj, dict):
+                client = obj.get("client") or obj
+            else:
+                client = obj
+            if isinstance(client, dict):
+                return {"success": True, "up": client.get("up", 0), "down": client.get("down", 0)}
+        # фолбэк: ищем в инбаундах
+        data2, err2 = await _get(s, f"{url}/panel/api/inbounds/list")
+        if data2 and data2.get("success"):
+            for inb in (data2.get("obj") or []):
+                clients_str = (inb.get("settings") or "")
+                try:
+                    settings = json.loads(clients_str) if isinstance(clients_str, str) else clients_str
+                    for c in settings.get("clients", []):
+                        if c.get("email") == email:
+                            stats = inb.get("clientStats") or []
+                            for st in stats:
+                                if st.get("email") == email:
+                                    return {"success": True, "up": st.get("up", 0), "down": st.get("down", 0)}
+                except Exception:
+                    pass
+        return {"success": False, "error": "Клиент не найден"}
+    except Exception as e:
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        await s.close()
+
+
 async def update_client_email(old_email: str, new_email: str, client_uuid: str,
                                sub_id: str, expire_date: str,
                                limit_ip: int, limit_hwid: int, total_gb: int) -> dict:

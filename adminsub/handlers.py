@@ -10,7 +10,7 @@ def _presets_ready(cfg: dict) -> bool:
     return all(cfg.get(k) is not None for k in ("preset_expire", "preset_ip", "preset_hwid", "preset_traffic"))
 
 
-def _fmt_presets(cfg: dict) -> str:
+def _fmt_presets(cfg: dict, inbound_names: dict | None = None) -> str:
     exp = cfg.get("preset_expire", "не задан")
     ip = cfg.get("preset_ip", "не задан")
     hwid = cfg.get("preset_hwid", "не задан")
@@ -22,7 +22,13 @@ def _fmt_presets(cfg: dict) -> str:
     else:
         traf = f"{traf_raw} ГБ"
     inbound_ids = cfg.get("preset_inbound_ids") or []
-    inb_label = ", ".join(str(i) for i in inbound_ids) if inbound_ids else "авто (первый VLESS)"
+    if inbound_ids and inbound_names:
+        names = [inbound_names.get(i, f"#{i}") for i in inbound_ids]
+        inb_label = ", ".join(names)
+    elif inbound_ids:
+        inb_label = ", ".join(str(i) for i in inbound_ids)
+    else:
+        inb_label = "авто (первый VLESS)"
     return (
         f"📅 Дата окончания: <b>{exp}</b>\n"
         f"🌐 Лимит IP: <b>{ip}</b>\n"
@@ -49,9 +55,18 @@ async def handle_admin_subs_menu(query, page: int = 1):
 
 async def handle_presets_menu(query):
     cfg = load_config()
+    inbound_names = {}
+    inbound_ids = cfg.get("preset_inbound_ids") or []
+    if inbound_ids:
+        from xui_api import get_inbounds
+        result = await get_inbounds()
+        if result["success"]:
+            for inb in result["inbounds"]:
+                name = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
+                inbound_names[inb.get("id")] = name
     await query.edit_message_text(
         "⚙️ <b>Настройки подписки (по умолчанию)</b>\n\n"
-        + _fmt_presets(cfg)
+        + _fmt_presets(cfg, inbound_names)
         + "\n\nВыбери параметр для изменения:",
         parse_mode="HTML",
         reply_markup=presets_keyboard(),
@@ -328,14 +343,35 @@ async def do_create_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_
     )
 
 
+def _fmt_bytes(b: int) -> str:
+    if b < 1024 ** 2:
+        return f"{b / 1024:.1f} КБ"
+    if b < 1024 ** 3:
+        return f"{b / 1024 ** 2:.1f} МБ"
+    return f"{b / 1024 ** 3:.2f} ГБ"
+
+
 async def handle_sub_view(query, sub_id: int):
     row = await get_sub(sub_id)
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
     _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
-    traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
-    tg_line = f"👤 TG ID: <code>{tg_id}</code>\n" if tg_id else ""
+    traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
+
+    # Получаем реальный трафик из панели
+    from xui_api import get_client_traffic
+    t = await get_client_traffic(email)
+    if t["success"]:
+        up = t.get("up", 0)
+        down = t.get("down", 0)
+        traffic_line = f"📶 Трафик: <b>{traffic_limit}</b> — ⬆ {_fmt_bytes(up)} ⬇ {_fmt_bytes(down)}"
+    else:
+        traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>"
+
+    tg_line = f'👤 TG: <a href="tg://user?id={tg_id}">{tg_id}</a>\n' if tg_id else ""
+    link_line = f'⛓‍💥 <a href="tg://user?id={tg_id}">Написать</a>' if tg_id else ""
+
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b>\n\n"
         + tg_line +
@@ -344,11 +380,13 @@ async def handle_sub_view(query, sub_id: int):
         f"📅 До: <b>{expire}</b>\n"
         f"🌐 Лимит IP: <b>{limit_ip}</b>\n"
         f"🖥 Лимит HWID: <b>{limit_hwid}</b>\n"
-        f"📶 Трафик: <b>{traffic}</b>\n"
-        f"🕐 Создано: {created_at}\n\n"
-        f"🔗 Ссылка:\n<code>{sub_url}</code>",
+        f"{traffic_line}\n"
+        f"🕐 Создано: {created_at}\n"
+        + (f"\n{link_line}\n" if link_line else "") +
+        f"\n🔗 Ссылка:\n<code>{sub_url}</code>",
         parse_mode="HTML",
         reply_markup=sub_view_keyboard(sub_id),
+        disable_web_page_preview=True,
     )
 
 
