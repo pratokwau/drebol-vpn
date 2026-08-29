@@ -122,7 +122,7 @@ async def handle_renew_sub(query):
     await query.edit_message_text(
         "💳 <b>Продление подписки</b>\n\n"
         f"💵 Сумма: <b>{price} ₽</b>\n\n"
-        "После оплаты в поле <b>обратная связь</b> введите:\n"
+        "При оплате в поле <b>обратная связь</b> введите:\n"
         f"<code>{hint_text}</code>\n\n"
         "Затем нажмите кнопку <b>✅ Я оплатил</b> — "
         "администратор проверит и активирует вашу подписку.",
@@ -134,6 +134,24 @@ async def handle_renew_sub(query):
 async def handle_i_paid(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     user = query.from_user
+
+    from paidsub.storage import is_payment_pending, get_paid_sub_by_tg_id, update_paid_sub_field
+    if await is_payment_pending(user.id):
+        await query.edit_message_text(
+            "⏳ <b>Заявка уже отправлена</b>\n\n"
+            "Ваша заявка на оплату уже на рассмотрении.\n"
+            "Ожидайте ответа администратора.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
+            ]),
+        )
+        return
+
+    row = await get_paid_sub_by_tg_id(user.id)
+    if row:
+        await update_paid_sub_field(row[0], "payment_pending", 1)
+
     uname = f"@{user.username}" if user.username else f"id{user.id}"
 
     await query.edit_message_text(
@@ -147,7 +165,6 @@ async def handle_i_paid(query, context):
     )
 
     from config import ADMIN_ID
-    from paidsub.storage import get_paid_sub_by_tg_id
     row = await get_paid_sub_by_tg_id(user.id)
     sub_info = ""
     if row:

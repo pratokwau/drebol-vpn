@@ -876,11 +876,15 @@ async def handle_confirm_payment(query, tg_id: int, context):
 
     await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
     await update_paid_sub_field(sub_id, "status", "active")
+    await update_paid_sub_field(sub_id, "payment_pending", 0)
 
-    from xui_api import get_client_info, toggle_client
+    from xui_api import get_client_info, toggle_client, update_client_expire
     info = await get_client_info(email)
     if info.get("success") and not info.get("enabled", True):
         await toggle_client(email, True)
+
+    # Обновляем expire в панели 3x-UI
+    await update_client_expire(email, new_expire_str)
 
     # Возвращаем на основные инбаунды если были переключены
     create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
@@ -903,6 +907,9 @@ async def handle_confirm_payment(query, tg_id: int, context):
 
 async def handle_reject_payment(query, tg_id: int, context):
     """Админ отклонил заявку на оплату."""
+    row = await get_paid_sub_by_tg_id(tg_id)
+    if row:
+        await update_paid_sub_field(row[0], "payment_pending", 0)
     await query.edit_message_text(
         f"❌ Заявка на оплату от <code>{tg_id}</code> отклонена.",
         parse_mode="HTML",

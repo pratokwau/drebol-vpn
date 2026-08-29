@@ -57,6 +57,16 @@ async def get_paid_sub_status(tg_id: int) -> str:
     return row[11] if len(row) > 11 else "active"
 
 
+async def is_payment_pending(tg_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT payment_pending FROM paid_subs WHERE tg_id = ? ORDER BY created_at DESC LIMIT 1",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return bool(row and row[0])
+
+
 async def delete_paid_sub(sub_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM paid_subs WHERE id = ?", (sub_id,))
@@ -73,7 +83,7 @@ async def get_all_paid_subs_with_tg() -> list:
 
 
 async def update_paid_sub_field(sub_id: int, field: str, value):
-    allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status"}
+    allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:

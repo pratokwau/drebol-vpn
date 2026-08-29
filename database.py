@@ -73,6 +73,10 @@ async def init_db():
             await db.execute("ALTER TABLE paid_subs ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
         except Exception:
             pass
+        try:
+            await db.execute("ALTER TABLE paid_subs ADD COLUMN payment_pending INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
         # убираем :443/:80 из существующих sub_url
         from xui_api import strip_default_port
         async with db.execute("SELECT id, sub_url FROM admin_subs") as cur:

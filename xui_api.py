@@ -340,6 +340,56 @@ async def delete_client(email: str) -> dict:
         await s.close()
 
 
+async def update_client_expire(email: str, new_expire_str: str) -> dict:
+    """Обновляет expiryTime клиента в панели 3x-UI."""
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "URL или токен не заданы"}
+    s = _session(token)
+    try:
+        data, err = await _get(s, f"{url}/panel/api/inbounds/list")
+        if not data or not data.get("success"):
+            return {"success": False, "error": f"Не удалось загрузить инбаунды: {err}"}
+
+        client_obj = None
+        for inb in (data.get("obj") or []):
+            settings_str = inb.get("settings") or "{}"
+            try:
+                settings = json.loads(settings_str) if isinstance(settings_str, str) else settings_str
+            except Exception:
+                continue
+            for c in settings.get("clients", []):
+                if c.get("email") == email:
+                    client_obj = dict(c)
+                    break
+            if client_obj:
+                break
+
+        if not client_obj:
+            return {"success": False, "error": "Клиент не найден в панели"}
+
+        new_expire_ms = date_to_ms(new_expire_str)
+        client_obj["expiryTime"] = new_expire_ms
+
+        safe_uuid = quote(client_obj.get("id", ""), safe="")
+        safe_email = quote(email, safe="")
+        for path in (
+            f"/panel/api/clients/update/{safe_uuid}",
+            f"/panel/api/clients/update/{safe_email}",
+            f"/panel/api/inbounds/updateClient/{safe_uuid}",
+        ):
+            result, err2 = await _post(s, f"{url}{path}", client_obj)
+            if result and result.get("success"):
+                return {"success": True}
+        return {"success": False, "error": f"API не принял обновление: {err2}"}
+    except Exception as e:
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        await s.close()
+
+
 async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
     """Перемещает клиента из текущего инбаунда в целевые инбаунды."""
     cfg = load_config()
