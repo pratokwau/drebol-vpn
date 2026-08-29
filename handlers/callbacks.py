@@ -10,8 +10,8 @@ from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
 from handlers.tickets import handle_ticket_list, handle_ticket_view, handle_ticket_reply_start
 from handlers.xui_settings import (
-    handle_xui_settings, handle_set_xui_url, handle_set_xui_login,
-    handle_set_xui_pass, handle_set_xui_sub_port, handle_set_xui_sub_path,
+    handle_xui_settings, handle_set_xui_url, handle_set_xui_token,
+    handle_set_xui_sub_port, handle_set_xui_sub_path,
     handle_test_xui,
 )
 from adminsub.handlers import (
@@ -128,10 +128,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_xui_settings(query)
     elif data == "set_xui_url":
         await handle_set_xui_url(query, context)
-    elif data == "set_xui_login":
-        await handle_set_xui_login(query, context)
-    elif data == "set_xui_pass":
-        await handle_set_xui_pass(query, context)
+    elif data == "set_xui_token":
+        await handle_set_xui_token(query, context)
     elif data == "set_xui_sub_port":
         await handle_set_xui_sub_port(query, context)
     elif data == "set_xui_sub_path":

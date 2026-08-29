@@ -8,8 +8,7 @@ AWAITING_TERMS_URL = "awaiting_terms_url"
 
 # Параметры 3x-UI
 AWAITING_XUI_URL = "awaiting_xui_url"
-AWAITING_XUI_LOGIN = "awaiting_xui_login"
-AWAITING_XUI_PASS = "awaiting_xui_pass"
+AWAITING_XUI_TOKEN = "awaiting_xui_token"
 AWAITING_XUI_SUB_PORT = "awaiting_xui_sub_port"
 AWAITING_XUI_SUB_PATH = "awaiting_xui_sub_path"
 

@@ -10,7 +10,7 @@ from states import (
     AWAITING_CHANNEL, AWAITING_BROADCAST,
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
-    AWAITING_XUI_URL, AWAITING_XUI_LOGIN, AWAITING_XUI_PASS,
+    AWAITING_XUI_URL, AWAITING_XUI_TOKEN,
     AWAITING_XUI_SUB_PORT, AWAITING_XUI_SUB_PATH,
     AWAITING_PRESET_EXPIRE, AWAITING_PRESET_IP,
     AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC,
@@ -119,16 +119,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ URL сохранён: <code>{text}</code>", parse_mode="HTML", reply_markup=back_admin())
         return
 
-    if state == AWAITING_XUI_LOGIN:
-        _save("xui_login", text)
+    if state == AWAITING_XUI_TOKEN:
+        _save("xui_token", text)
         context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Логин: <code>{text}</code>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_XUI_PASS:
-        _save("xui_password", text)
-        context.user_data.pop("state", None)
-        await update.message.reply_text("✅ Пароль сохранён.", reply_markup=back_admin())
+        await update.message.reply_text("✅ Токен сохранён.", reply_markup=back_admin())
         return
 
     if state == AWAITING_XUI_SUB_PORT:

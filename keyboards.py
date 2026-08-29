@@ -106,8 +106,7 @@ def ticket_view_keyboard(user_id: int, page: int, total_pages: int) -> InlineKey
 def xui_settings_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🌐 URL панели", callback_data="set_xui_url")],
-        [InlineKeyboardButton("👤 Логин", callback_data="set_xui_login"),
-         InlineKeyboardButton("🔑 Пароль", callback_data="set_xui_pass")],
+        [InlineKeyboardButton("🔑 API Токен", callback_data="set_xui_token")],
         [InlineKeyboardButton("🔌 Порт подписки", callback_data="set_xui_sub_port")],
         [InlineKeyboardButton("📂 Путь подписки", callback_data="set_xui_sub_path")],
         [InlineKeyboardButton("🔌 Тест соединения", callback_data="test_xui")],
