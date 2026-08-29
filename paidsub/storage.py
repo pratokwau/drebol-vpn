@@ -35,7 +35,8 @@ async def get_paid_sub(sub_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
             SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at,
-                   status, payment_pending, ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url
+                   status, payment_pending, ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url,
+                   muted_until
             FROM paid_subs WHERE id = ?
         """, (sub_id,)) as cur:
             return await cur.fetchone()
@@ -86,7 +87,7 @@ async def get_all_paid_subs_with_tg() -> list:
 async def update_paid_sub_field(sub_id: int, field: str, value):
     allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending",
                 "ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url",
-                "times_renewed"}
+                "times_renewed", "muted_until"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:
@@ -136,3 +137,45 @@ async def resolve_request(tg_id: int, status: str):
             (status, tg_id),
         )
         await db.commit()
+
+
+# ── История действий ─────────────────────────────────────────────────────────
+
+HISTORY_PER_PAGE = 10
+
+
+async def add_history(tg_id: int, action: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO paid_sub_history (tg_id, action) VALUES (?, ?)",
+            (tg_id, action),
+        )
+        await db.commit()
+
+
+async def list_history(page: int = 1) -> tuple[list, int]:
+    offset = (page - 1) * HISTORY_PER_PAGE
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM paid_sub_history") as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute("""
+            SELECT h.id, h.tg_id, h.action, h.created_at
+            FROM paid_sub_history h
+            ORDER BY h.created_at DESC
+            LIMIT ? OFFSET ?
+        """, (HISTORY_PER_PAGE, offset)) as cur:
+            rows = await cur.fetchall()
+    total_pages = max(1, (total + HISTORY_PER_PAGE - 1) // HISTORY_PER_PAGE)
+    return rows, total_pages
+
+
+# ── Мьют ─────────────────────────────────────────────────────────────────────
+
+async def get_muted_until(tg_id: int) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT muted_until FROM paid_subs WHERE tg_id = ? ORDER BY created_at DESC LIMIT 1",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row and row[0] else None

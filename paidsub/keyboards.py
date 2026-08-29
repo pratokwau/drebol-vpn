@@ -22,6 +22,7 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
 
     create_label = "➕ Создать подписку" if presets_ready else "➕ Создать (сначала настройки)"
     kb.append([InlineKeyboardButton(create_label, callback_data="paid_create_sub")])
+    kb.append([InlineKeyboardButton("📜 История", callback_data="paid_history")])
     kb.append([InlineKeyboardButton("⚙️ Настройки", callback_data="paid_sub_presets")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     return InlineKeyboardMarkup(kb)
@@ -61,14 +62,17 @@ def paid_inbounds_keyboard(inbounds: list, selected_ids: list, mode: str = "crea
     return InlineKeyboardMarkup(kb)
 
 
-def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardMarkup:
+def paid_sub_view_keyboard(sub_id: int, enabled: bool = True, muted: bool = False) -> InlineKeyboardMarkup:
     toggle_label = "⏸ Отключить" if enabled else "▶️ Включить"
+    mute_label = "🔊 Разглушить" if muted else "🔇 Заглушить"
+    mute_data = f"paid_sub_unmute:{sub_id}" if muted else f"paid_sub_mute:{sub_id}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(toggle_label, callback_data=f"paid_sub_toggle:{sub_id}")],
         [
             InlineKeyboardButton("🧊 Заморозить", callback_data=f"paid_sub_freeze:{sub_id}"),
             InlineKeyboardButton("➕ Добавить срок", callback_data=f"paid_sub_extend:{sub_id}"),
         ],
+        [InlineKeyboardButton(mute_label, callback_data=mute_data)],
         [InlineKeyboardButton("⚙️ Настройки", callback_data=f"paid_sub_settings:{sub_id}")],
         [InlineKeyboardButton("🗑 Удалить", callback_data=f"paid_sub_delete:{sub_id}")],
         [InlineKeyboardButton("◀️ К списку", callback_data="paid_subs")],
@@ -88,6 +92,20 @@ def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔗 Ссылка на оплату", callback_data=f"paid_sub_edit_pay_url:{sub_id}")],
         [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"paid_sub_view:{sub_id}")],
     ])
+
+
+def paid_history_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    kb = []
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"paid_history_page:{page - 1}"))
+    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"paid_history_page:{page + 1}"))
+    if total_pages > 1:
+        kb.append(nav)
+    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
+    return InlineKeyboardMarkup(kb)
 
 
 def approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:

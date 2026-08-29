@@ -39,6 +39,7 @@ from paidsub.handlers import (
     handle_paid_sub_edit_trial, handle_paid_sub_edit_pay_period,
     handle_paid_sub_edit_renew_time, handle_paid_sub_edit_price, handle_paid_sub_edit_pay_url,
     handle_confirm_payment, handle_reject_payment,
+    handle_paid_history, handle_paid_sub_mute, handle_paid_sub_unmute,
 )
 
 
@@ -286,6 +287,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_edit_price(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_pay_url:"):
         await handle_paid_sub_edit_pay_url(query, int(data.split(":")[1]), context)
+    elif data == "paid_history":
+        await handle_paid_history(query)
+    elif data.startswith("paid_history_page:"):
+        await handle_paid_history(query, int(data.split(":")[1]))
+    elif data.startswith("paid_sub_mute:"):
+        await handle_paid_sub_mute(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_unmute:"):
+        await handle_paid_sub_unmute(query, int(data.split(":")[1]))
     elif data.startswith("paid_approve:"):
         await handle_approve(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_reject:"):

@@ -27,7 +27,7 @@ from states import (
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
     AWAITING_PAID_SUB_EDIT_TRIAL, AWAITING_PAID_SUB_EDIT_PAY_PERIOD,
     AWAITING_PAID_SUB_EDIT_RENEW_TIME, AWAITING_PAID_SUB_EDIT_PRICE,
-    AWAITING_PAID_SUB_EDIT_PAY_URL,
+    AWAITING_PAID_SUB_EDIT_PAY_URL, AWAITING_PAID_SUB_MUTE,
 )
 from handlers.broadcast import do_broadcast
 
@@ -428,11 +428,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
                 await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
                 await update_paid_sub_field(sub_id, "status", "active")
-                from xui_api import update_client_expire, toggle_client, get_client_info
+                from xui_api import update_client_expire, toggle_client, get_client_info, move_client_inbound
                 await update_client_expire(row[2], new_expire_str)
                 info = await get_client_info(row[2])
                 if info.get("success") and not info.get("enabled", True):
                     await toggle_client(row[2], True)
+                cfg = load_config()
+                create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
+                if create_inbound_ids:
+                    await move_client_inbound(row[2], create_inbound_ids)
                 from paidsub.time_parser import fmt_duration as fmt_dur
                 await update.message.reply_text(
                     f"✅ Срок продлён на <b>{fmt_dur(seconds)}</b>\n"
@@ -586,4 +590,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             from paidsub.storage import update_paid_sub_field
             await update_paid_sub_field(sub_id, "ind_pay_url", text)
         await update.message.reply_text("✅ Ссылка на оплату сохранена.", reply_markup=back_admin())
+        return
+
+    # ── Мьют пользователя ───────────────────────────────────────────────────────
+    if state == AWAITING_PAID_SUB_MUTE:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>5 часов</code>, <code>7 дней</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            muted_until = (datetime.now() + timedelta(seconds=seconds)).strftime("%d.%m.%Y %H:%M:%S")
+            await update_paid_sub_field(sub_id, "muted_until", muted_until)
+            await update.message.reply_text(
+                f"🔇 Заглушка установлена до <b>{muted_until}</b>\n"
+                f"({fmt_duration(seconds)})",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return

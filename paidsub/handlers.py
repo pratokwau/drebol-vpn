@@ -10,10 +10,12 @@ from paidsub.storage import (
     list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
     add_request, get_pending_request, resolve_request,
     update_paid_sub_field, get_expired_paid_subs,
+    add_history, list_history, get_muted_until,
 )
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
     paid_inbounds_keyboard, approve_keyboard, paid_sub_settings_keyboard,
+    paid_history_keyboard,
 )
 from paidsub.time_parser import fmt_duration
 
@@ -443,6 +445,25 @@ async def handle_request_sub(query, context):
         )
         return
 
+    muted = await get_muted_until(user.id)
+    if muted:
+        muted_dt = None
+        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+            try:
+                muted_dt = datetime.strptime(muted, fmt)
+                break
+            except ValueError:
+                continue
+        if muted_dt and datetime.now() < muted_dt:
+            await query.edit_message_text(
+                "👤 <b>Моя подписка</b>\n\n"
+                f"🔇 Запросы заблокированы до <b>{muted}</b>.\n"
+                "Обратитесь к администратору.",
+                parse_mode="HTML",
+                reply_markup=back_main(),
+            )
+            return
+
     pending = await get_pending_request(user.id)
     if pending:
         await query.edit_message_text(
@@ -508,6 +529,7 @@ async def handle_approve(query, tg_id: int, context):
         return
 
     await resolve_request(tg_id, "approved")
+    await add_history(tg_id, "trial_approved")
 
     async def _edit(txt, **kw):
         await query.edit_message_text(txt, **kw)
@@ -518,6 +540,7 @@ async def handle_approve(query, tg_id: int, context):
 async def handle_reject(query, tg_id: int, context):
     """Админ отклонил запрос."""
     await resolve_request(tg_id, "rejected")
+    await add_history(tg_id, "trial_rejected")
     await query.edit_message_text(
         f"❌ Запрос от <code>{tg_id}</code> отклонён.",
         parse_mode="HTML",
@@ -569,6 +592,22 @@ async def handle_paid_sub_view(query, sub_id: int):
     else:
         link_line = ""
 
+    muted_until = row[18] if len(row) > 18 else None
+    is_muted = False
+    mute_line = ""
+    if muted_until:
+        for fmt_m in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+            try:
+                muted_dt = datetime.strptime(muted_until, fmt_m)
+                break
+            except ValueError:
+                continue
+        else:
+            muted_dt = None
+        if muted_dt and datetime.now() < muted_dt:
+            is_muted = True
+            mute_line = f"\n🔇 Заглушен до: <b>{muted_until}</b>\n"
+
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b> {status_icon}\n\n"
         + tg_line +
@@ -579,10 +618,11 @@ async def handle_paid_sub_view(query, sub_id: int):
         f"🖥 Лимит HWID: <b>{limit_hwid}</b>\n"
         f"{traffic_line}\n"
         f"🕐 Создано: {created_at}\n"
+        + mute_line
         + (f"\n{link_line}\n" if link_line else "") +
         f"\n🔗 Ссылка:\n<code>{sub_url}</code>",
         parse_mode="HTML",
-        reply_markup=paid_sub_view_keyboard(sub_id, enabled),
+        reply_markup=paid_sub_view_keyboard(sub_id, enabled, is_muted),
         disable_web_page_preview=True,
     )
 
@@ -974,6 +1014,8 @@ async def handle_confirm_payment(query, tg_id: int, context):
         from xui_api import move_client_inbound
         await move_client_inbound(email, create_inbound_ids)
 
+    await add_history(tg_id, "payment_confirmed")
+
     await query.edit_message_text(
         f"✅ Оплата подтверждена для <code>{tg_id}</code>!\n\n"
         f"📅 Новая дата: <b>{new_expire_str}</b>",
@@ -989,6 +1031,7 @@ async def handle_confirm_payment(query, tg_id: int, context):
 
 async def handle_reject_payment(query, tg_id: int, context):
     """Админ отклонил заявку на оплату."""
+    await add_history(tg_id, "payment_rejected")
     row = await get_paid_sub_by_tg_id(tg_id)
     if row:
         await update_paid_sub_field(row[0], "payment_pending", 0)
@@ -1000,6 +1043,58 @@ async def handle_reject_payment(query, tg_id: int, context):
         "❌ Ваша заявка на оплату <b>отклонена</b> администратором.\n"
         "Если вы считаете это ошибкой, обратитесь в поддержку."
     )
+
+
+# ── История ──────────────────────────────────────────────────────────────────
+
+_ACTION_LABELS = {
+    "trial_approved": "✅ Пробный одобрен",
+    "trial_rejected": "❌ Пробный отклонён",
+    "payment_confirmed": "✅ Оплата подтверждена",
+    "payment_rejected": "❌ Оплата отклонена",
+}
+
+
+async def handle_paid_history(query, page: int = 1):
+    rows, total_pages = await list_history(page)
+    if not rows:
+        await query.edit_message_text(
+            "📜 <b>История</b>\n\nПока нет записей.",
+            parse_mode="HTML",
+            reply_markup=paid_history_keyboard(1, 1),
+        )
+        return
+    lines = []
+    for _, tg_id, action, created_at in rows:
+        label = _ACTION_LABELS.get(action, action)
+        ts = created_at[:16] if created_at else "?"
+        lines.append(f"<code>{ts}</code> · <code>{tg_id}</code> · {label}")
+    await query.edit_message_text(
+        f"📜 <b>История действий</b>\n\n" + "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=paid_history_keyboard(page, total_pages),
+    )
+
+
+# ── Мьют / Размьют ──────────────────────────────────────────────────────────
+
+async def handle_paid_sub_mute(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_MUTE
+    context.user_data["state"] = AWAITING_PAID_SUB_MUTE
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"🔇 <b>Заглушить подписку #{sub_id}</b>\n\n"
+        "Введи время блокировки запросов:\n"
+        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_unmute(query, sub_id: int):
+    await update_paid_sub_field(sub_id, "muted_until", None)
+    await query.answer("🔊 Заглушка снята", show_alert=True)
+    await handle_paid_sub_view(query, sub_id)
 
 
 def save_paid_preset(key: str, value):

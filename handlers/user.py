@@ -254,9 +254,30 @@ async def handle_renew_sub(query):
 
 async def handle_i_paid(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from datetime import datetime
     user = query.from_user
 
-    from paidsub.storage import is_payment_pending, get_paid_sub_by_tg_id, update_paid_sub_field
+    from paidsub.storage import is_payment_pending, get_paid_sub_by_tg_id, update_paid_sub_field, get_muted_until
+    muted = await get_muted_until(user.id)
+    if muted:
+        muted_dt = None
+        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+            try:
+                muted_dt = datetime.strptime(muted, fmt)
+                break
+            except ValueError:
+                continue
+        if muted_dt and datetime.now() < muted_dt:
+            await query.edit_message_text(
+                f"🔇 Запросы заблокированы до <b>{muted}</b>.\n"
+                "Обратитесь к администратору.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
+                ]),
+            )
+            return
+
     if await is_payment_pending(user.id):
         await query.edit_message_text(
             "⏳ <b>Заявка уже отправлена</b>\n\n"
