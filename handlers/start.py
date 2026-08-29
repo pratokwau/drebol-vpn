@@ -9,9 +9,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     is_admin = user.id == ADMIN_ID
     await update.message.reply_text(
-        f"Привет, {user.first_name}! 👋\n\n"
-        "Добро пожаловать в <b>Drebol VPN</b> — быстрый и надёжный VPN.\n\n"
-        "Выбери действие:",
+        f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+        "🔒 Быстрый и безопасный VPN\n"
+        "⚡️ Стабильное подключение\n"
+        "🌍 Доступ к популярным сервисам\n\n"
+        "Выберите нужный раздел ниже 👇",
         parse_mode="HTML",
         reply_markup=main_keyboard(is_admin),
     )
