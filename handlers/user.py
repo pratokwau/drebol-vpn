@@ -350,12 +350,22 @@ async def handle_news(query):
 async def handle_how_to(query):
     await query.edit_message_text(
         "<b>❓ Как подключиться?</b>\n\n"
+        "<b>Основной способ ⬇️</b>\n"
         "1. Оформи пробный период или подписку\n"
         "2. Установи приложение — рекомендуем Happ\n"
         "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>\n"
         "• <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Android</a>\n"
         "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n"
         "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">MacOS</a>\n"
+        "3. Скопируй ссылку подписки и вставь её в приложение\n"
+        "4. Выбери сервер и подключайся\n\n"
+        "<b>Альтернативный способ ⬇️</b>\n"
+        "1. Оформи пробный период или подписку\n"
+        "2. Установи приложение — INCY\n"
+        "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">iOS</a>\n"
+        "• <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Android</a>\n"
+        "• <a href=\"https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe\">Windows</a>\n"
+        "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">MacOS</a>\n"
         "3. Скопируй ссылку подписки и вставь её в приложение\n"
         "4. Выбери сервер и подключайся",
         parse_mode="HTML",
