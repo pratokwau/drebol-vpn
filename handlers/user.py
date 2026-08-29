@@ -225,6 +225,10 @@ async def handle_renew_sub(query):
         ind_pay_url = None
     price = ind_price if ind_price else cfg.get("paid_price", 0)
     pay_url = ind_pay_url if ind_pay_url else cfg.get("paid_pay_url", "")
+    ind_pay_period = full[14] if full and full[14] else None
+    pay_seconds = ind_pay_period if ind_pay_period else cfg.get("paid_pay_period", 2592000)
+    from paidsub.time_parser import fmt_duration
+    period_str = fmt_duration(pay_seconds)
 
     uname = f"@{user.username}" if user.username else f"id{user.id}"
     hint_text = f"{user.id} - {uname}"
@@ -237,7 +241,8 @@ async def handle_renew_sub(query):
 
     await query.edit_message_text(
         "💳 <b>Продление подписки</b>\n\n"
-        f"💵 Сумма: <b>{price} ₽</b>\n\n"
+        f"💵 Сумма: <b>{price} ₽</b>\n"
+        f"⏱ Срок: <b>{period_str}</b>\n\n"
         "При оплате в поле <b>обратная связь</b> введите:\n"
         f"<code>{hint_text}</code>\n\n"
         "Затем нажмите кнопку <b>✅ Я оплатил</b> — "
