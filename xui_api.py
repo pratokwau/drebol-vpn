@@ -355,14 +355,34 @@ async def create_client(
 
     s = _session(token)
     try:
+        # Всегда загружаем актуальные инбаунды из панели
+        real_data, real_err = await _get(s, f"{url}/panel/api/inbounds/list")
+        if not real_data or not real_data.get("success"):
+            return {"success": False, "error": f"Не удалось загрузить инбаунды: {real_err}"}
+        real_inbounds = real_data.get("obj") or []
+        real_ids = {inb.get("id") for inb in real_inbounds}
+
+        if not real_ids:
+            return {"success": False, "error": "На панели нет ни одного инбаунда"}
+
         preset_inbound_ids = cfg.get("preset_inbound_ids") or []
         if preset_inbound_ids:
-            inbound_ids = [int(i) for i in preset_inbound_ids]
+            # Фильтруем — оставляем только реально существующие
+            valid_ids = [int(i) for i in preset_inbound_ids if int(i) in real_ids]
+            if not valid_ids:
+                names = [f"{inb.get('tag') or inb.get('remark') or '?'} (id:{inb.get('id')})" for inb in real_inbounds]
+                return {"success": False, "error": f"Выбранные инбаунды ({preset_inbound_ids}) не найдены в панели.\nДоступные: {', '.join(names)}\n\nПерейди в Настройки → Инбаунды и выбери заново."}
+            inbound_ids = valid_ids
             inbound_id = inbound_ids[0]
         else:
-            inbound_id, ierr = await _fetch_inbound_id(s, url)
+            # Автодетект: первый VLESS, иначе первый любой
+            inbound_id = None
+            for inb in real_inbounds:
+                if inb.get("protocol") == "vless":
+                    inbound_id = inb.get("id")
+                    break
             if not inbound_id:
-                return {"success": False, "error": f"Не найден инбаунд: {ierr}"}
+                inbound_id = real_inbounds[0].get("id")
             inbound_ids = [int(inbound_id)]
 
         expire_ms = date_to_ms(expire_date)
