@@ -424,7 +424,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_expire = expire_dt + timedelta(seconds=seconds)
                 new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
                 await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
-                from xui_api import date_to_ms, get_client_info
+                await update_paid_sub_field(sub_id, "status", "active")
                 from paidsub.time_parser import fmt_duration as fmt_dur
                 await update.message.reply_text(
                     f"✅ Срок продлён на <b>{fmt_dur(seconds)}</b>\n"
@@ -454,6 +454,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sub_id:
             from paidsub.storage import update_paid_sub_field
             await update_paid_sub_field(sub_id, "expire_date", text)
+            await update_paid_sub_field(sub_id, "status", "active")
         await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 

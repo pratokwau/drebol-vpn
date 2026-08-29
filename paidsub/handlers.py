@@ -757,7 +757,7 @@ async def handle_paid_sub_edit_traffic(query, sub_id: int, context):
 # ── Job: проверка истечения подписок ──────────────────────────────────────────
 
 async def check_expired_subs(context):
-    """Проверяет истёкшие подписки: уведомляет, отключает и меняет инбаунды."""
+    """Проверяет подписки: уведомляет при смене статуса, отключает и меняет инбаунды."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     cfg = load_config()
     renew_seconds = cfg.get("paid_renew_time", 86400)
@@ -767,7 +767,7 @@ async def check_expired_subs(context):
     now = datetime.now()
 
     for row in subs:
-        sub_id, tg_id, email, uuid_val, sub_id_str, sub_url, expire_str = row
+        sub_id, tg_id, email, uuid_val, sub_id_str, sub_url, expire_str, status = row
         try:
             for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
                 try:
@@ -780,51 +780,55 @@ async def check_expired_subs(context):
         except Exception:
             continue
 
-        # Вычисляем дедлайн: expire_date уже включает renew_time
-        # Период основной = expire_date - renew_time
-        # Время на продление заканчивается = expire_date
+        # expire_date = creation + period + renew_time
+        # main_period_end = expire_date - renew_time (конец пробного/оплаченного)
+        # expire_date = конец времени на оплату
         main_period_end = expire_dt - timedelta(seconds=renew_seconds)
 
-        from xui_api import get_client_info, toggle_client
-        info = await get_client_info(email)
-        if not info.get("success"):
-            continue
-        enabled = info.get("enabled", True)
-
         if now < main_period_end:
-            # Основной период ещё не кончился
+            # Основной период ещё идёт — статус active
+            if status != "active":
+                await update_paid_sub_field(sub_id, "status", "active")
             continue
 
         if now < expire_dt:
-            # Основной период кончился, но ещё есть время на продление
-            if enabled and tg_id:
-                remaining = expire_dt - now
-                remaining_sec = int(remaining.total_seconds())
-                price = cfg.get("paid_price", 0)
-                pay_url = cfg.get("paid_pay_url", "")
-                pay_line = f'\n\n🔗 <a href="{pay_url}">Оплатить {price} ₽</a>' if pay_url else ""
-
-                kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")]
-                ])
-                try:
-                    await context.bot.send_message(
-                        chat_id=tg_id,
-                        text=(
-                            "⚠️ <b>Пробный период окончился!</b>\n\n"
-                            f"У вас осталось <b>{fmt_duration(remaining_sec)}</b> на продление.\n"
-                            f"Продлите подписку, чтобы не потерять доступ."
-                            f"{pay_line}"
-                        ),
-                        parse_mode="HTML",
-                        reply_markup=kb,
-                    )
-                except Exception:
-                    pass
+            # Основной период кончился, идёт время на оплату
+            if status == "active":
+                # Переход active → renewal: одноразовое уведомление
+                await update_paid_sub_field(sub_id, "status", "renewal")
+                if tg_id:
+                    price = cfg.get("paid_price", 0)
+                    pay_url = cfg.get("paid_pay_url", "")
+                    pay_line = f'\n\n🔗 <a href="{pay_url}">Оплатить {price} ₽</a>' if pay_url else ""
+                    kb = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")]
+                    ])
+                    try:
+                        await context.bot.send_message(
+                            chat_id=tg_id,
+                            text=(
+                                "⚠️ <b>Пробный период окончился!</b>\n\n"
+                                f"У вас есть <b>{fmt_duration(renew_seconds)}</b> на продление.\n"
+                                f"Продлите подписку, чтобы не потерять доступ."
+                                f"{pay_line}"
+                            ),
+                            parse_mode="HTML",
+                            reply_markup=kb,
+                        )
+                    except Exception:
+                        pass
         else:
-            # Время на продление вышло — отключаем
-            if enabled:
-                await toggle_client(email, False)
+            # Время на оплату вышло
+            if status != "expired":
+                # Переход → expired: одноразовое уведомление + отключение + смена инбаунда
+                await update_paid_sub_field(sub_id, "status", "expired")
+
+                from xui_api import get_client_info, toggle_client
+                info = await get_client_info(email)
+                enabled = info.get("enabled", True) if info.get("success") else False
+                if enabled:
+                    await toggle_client(email, False)
+
                 if tg_id:
                     kb = InlineKeyboardMarkup([
                         [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")]
@@ -843,10 +847,9 @@ async def check_expired_subs(context):
                     except Exception:
                         pass
 
-            # Меняем инбаунды если настроены инбаунды окончания
-            if expire_inbound_ids:
-                from xui_api import move_client_inbound
-                await move_client_inbound(email, expire_inbound_ids)
+                if expire_inbound_ids:
+                    from xui_api import move_client_inbound
+                    await move_client_inbound(email, expire_inbound_ids)
 
 
 def save_paid_preset(key: str, value):

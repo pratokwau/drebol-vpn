@@ -32,7 +32,7 @@ async def post_init(app: Application):
         app.job_queue.run_repeating(_sync_job, interval=24 * 3600, first=300)
 
         from paidsub.handlers import check_expired_subs
-        app.job_queue.run_repeating(check_expired_subs, interval=60, first=30)
+        app.job_queue.run_repeating(check_expired_subs, interval=10, first=10)
 
 
 def main():

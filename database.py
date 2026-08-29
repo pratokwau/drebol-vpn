@@ -64,9 +64,13 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # миграция для существующих баз
+        # миграции для существующих баз
         try:
             await db.execute("ALTER TABLE admin_subs ADD COLUMN tg_id INTEGER")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE paid_subs ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
         except Exception:
             pass
         # убираем :443/:80 из существующих sub_url
