@@ -29,7 +29,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "check_sub":
         user = update.effective_user
         if not await is_subscribed(context.bot, user.id):
-            await query.answer("❌ Вы всё ещё не подписаны на канал.", show_alert=True)
+            await query.edit_message_text(
+                f"👋 Привет, {user.first_name}!\n\n"
+                "Добро пожаловать в <b>Drebol VPN</b>.\n\n"
+                "❌ Вы не подписаны на канал.\n\n"
+                "Подпишитесь и снова нажмите <b>✅ Я подписался</b>.",
+                parse_mode="HTML",
+                reply_markup=subscribe_keyboard(),
+            )
             return
         is_admin = adm
         await query.edit_message_text(
