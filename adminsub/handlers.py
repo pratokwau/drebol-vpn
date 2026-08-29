@@ -97,31 +97,47 @@ async def handle_set_auto_update_days(query, context):
 
 async def handle_run_sync_now(query):
     await query.edit_message_text("⏳ Запускаю синхронизацию ников...")
-    await sync_usernames()
-    cfg = load_config()
-    from datetime import datetime
-    cfg["auto_update_last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
-    save_config(cfg)
-    await handle_auto_update_settings(query)
+    result = await sync_usernames()
+    lines = [f"🔄 <b>Синхронизация завершена</b>\n"]
+    lines.append(f"📊 Всего подписок с TG ID: <b>{result['total']}</b>")
+    lines.append(f"🔍 Нужно обновить: <b>{result['need_update']}</b>")
+    lines.append(f"✅ Успешно обновлено: <b>{result['updated']}</b>")
+    if result["errors"]:
+        lines.append(f"❌ Ошибки: <b>{len(result['errors'])}</b>")
+        for err in result["errors"][:5]:
+            lines.append(f"  • <code>{err}</code>")
+    if result["skipped"]:
+        lines.append(f"⏭ Юзер не в базе: <b>{result['skipped']}</b>")
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
 
 
-async def sync_usernames(context=None):
-    """Обновляет email в панели если юзернейм изменился."""
+async def sync_usernames(context=None) -> dict:
+    """Обновляет email в панели если юзернейм изменился. Возвращает отчёт."""
     from xui_api import update_client_email, build_email
     from database import get_user_info
     from datetime import datetime
 
     subs = await get_all_subs_with_tg()
     updated = 0
+    need_update = 0
+    skipped = 0
+    errors = []
+
     for row in subs:
         sub_id, tg_id, old_email, uuid_val, sub_id_str, expire_date, limit_ip, limit_hwid, total_gb = row
         user_row = await get_user_info(tg_id)
         if not user_row:
+            skipped += 1
             continue
         username = user_row[2]
         new_email = build_email(tg_id, username)
         if new_email == old_email:
             continue
+        need_update += 1
         result = await update_client_email(
             old_email=old_email,
             new_email=new_email,
@@ -135,12 +151,15 @@ async def sync_usernames(context=None):
         if result["success"]:
             await update_sub_email(sub_id, new_email)
             updated += 1
+        else:
+            errors.append(f"{old_email} → {new_email}: {result['error'][:100]}")
 
     cfg = load_config()
     cfg["auto_update_last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
     save_config(cfg)
     if updated:
         print(f"[sync_usernames] обновлено {updated} email(ов)")
+    return {"total": len(subs), "need_update": need_update, "updated": updated, "skipped": skipped, "errors": errors}
 
 
 async def handle_preset_expire(query, context: ContextTypes.DEFAULT_TYPE):

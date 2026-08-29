@@ -46,6 +46,14 @@ async def init_db():
             await db.execute("ALTER TABLE admin_subs ADD COLUMN tg_id INTEGER")
         except Exception:
             pass
+        # убираем :443/:80 из существующих sub_url
+        from xui_api import strip_default_port
+        async with db.execute("SELECT id, sub_url FROM admin_subs") as cur:
+            rows = await cur.fetchall()
+        for row_id, old_url in rows:
+            new_url = strip_default_port(old_url)
+            if new_url != old_url:
+                await db.execute("UPDATE admin_subs SET sub_url = ? WHERE id = ?", (new_url, row_id))
         await db.commit()
 
 

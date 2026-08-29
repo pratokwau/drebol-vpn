@@ -34,6 +34,25 @@ def gb_to_bytes(gb: float) -> int:
     return int(gb * 1024 ** 3)
 
 
+def _build_sub_url(scheme: str, hostname: str, port, sub_path: str, sub_id: str) -> str:
+    try:
+        p = int(port)
+    except (ValueError, TypeError):
+        p = 0
+    skip_port = (scheme == "https" and p == 443) or (scheme == "http" and p == 80)
+    if skip_port or p == 0:
+        return f"{scheme}://{hostname}{sub_path}{sub_id}"
+    return f"{scheme}://{hostname}:{p}{sub_path}{sub_id}"
+
+
+def strip_default_port(sub_url: str) -> str:
+    """Убирает :443 / :80 из готовой ссылки если они дефолтные для схемы."""
+    import re
+    sub_url = re.sub(r'^(https://[^/:]+):443(/)', r'\1\2', sub_url)
+    sub_url = re.sub(r'^(http://[^/:]+):80(/)', r'\1\2', sub_url)
+    return sub_url
+
+
 def _session(token: str) -> aiohttp.ClientSession:
     connector = aiohttp.TCPConnector(ssl=False)
     headers = {
@@ -137,7 +156,6 @@ async def update_client_email(old_email: str, new_email: str, client_uuid: str,
         return {"success": False, "error": "URL или токен не заданы"}
     s = _session(token)
     try:
-        safe_old = quote(old_email, safe="")
         expire_ms = date_to_ms(expire_date)
         payload = {
             "id": client_uuid,
@@ -152,10 +170,21 @@ async def update_client_email(old_email: str, new_email: str, client_uuid: str,
             "tgId": 0,
             "reset": 0,
         }
-        data, err = await _post(s, f"{url}/panel/api/clients/update/{safe_old}", payload)
-        if data and data.get("success"):
-            return {"success": True}
-        return {"success": False, "error": err or str(data)}
+        # Пробуем разные эндпоинты (зависит от версии 3x-UI)
+        safe_old = quote(old_email, safe="")
+        safe_uuid = quote(client_uuid, safe="")
+        paths = [
+            f"/panel/api/clients/update/{safe_uuid}",
+            f"/panel/api/clients/update/{safe_old}",
+            f"/panel/api/inbounds/updateClient/{safe_uuid}",
+        ]
+        last_err = ""
+        for path in paths:
+            data, err = await _post(s, f"{url}{path}", payload)
+            if data and data.get("success"):
+                return {"success": True}
+            last_err = err or str(data)
+        return {"success": False, "error": f"Все варианты API не сработали: {last_err}"}
     except Exception as e:
         return {"success": False, "error": f"{type(e).__name__}: {e}"}
     finally:
@@ -252,11 +281,7 @@ async def create_client(
             data = data2
 
         parsed = urlparse(url)
-        default_ports = {"https": "443", "http": "80"}
-        if str(sub_port) == default_ports.get(parsed.scheme, ""):
-            sub_url = f"{parsed.scheme}://{parsed.hostname}{sub_path}{sub_id}"
-        else:
-            sub_url = f"{parsed.scheme}://{parsed.hostname}:{sub_port}{sub_path}{sub_id}"
+        sub_url = _build_sub_url(parsed.scheme, parsed.hostname, sub_port, sub_path, sub_id)
         return {
             "success": True,
             "sub_url": sub_url,
