@@ -1,7 +1,9 @@
 from telegram import Update
 from telegram.ext import ContextTypes
-from config import ADMIN_ID
+from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
+from subscription import is_subscribed, subscribe_keyboard
+from keyboards import main_keyboard
 from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_news, handle_how_to
 from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update
 from handlers.support import open_support
@@ -23,6 +25,24 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "noop":
         return
 
+    # ── Проверка подписки после нажатия "Я подписался" ───────────────────────
+    if data == "check_sub":
+        user = update.effective_user
+        if not await is_subscribed(context.bot, user.id):
+            await query.answer("❌ Вы всё ещё не подписаны на канал.", show_alert=True)
+            return
+        is_admin = adm
+        await query.edit_message_text(
+            f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+            "🔒 Быстрый и безопасный VPN\n"
+            "⚡️ Стабильное подключение\n"
+            "🌍 Доступ к популярным сервисам\n\n"
+            "Выберите нужный раздел ниже 👇",
+            parse_mode="HTML",
+            reply_markup=main_keyboard(is_admin),
+        )
+        return
+
     # ── Пользовательские ─────────────────────────────────────────────────────
     if data == "back_start":
         context.user_data.pop("state", None)
@@ -33,6 +53,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "news":
         await handle_news(query)
+
+    elif data == "news_no_channel":
+        await query.answer("Канал пока не настроен.", show_alert=True)
 
     elif data == "how_to":
         await handle_how_to(query)
@@ -54,6 +77,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("⛔ Нет доступа.")
             return
         context.user_data.pop("state", None)
+        await handle_admin_panel(query)
+
+    elif data == "toggle_force_sub":
+        if not adm:
+            await query.edit_message_text("⛔ Нет доступа.")
+            return
+        cfg = load_config()
+        cfg["force_subscribe"] = not cfg.get("force_subscribe", False)
+        save_config(cfg)
         await handle_admin_panel(query)
 
     elif data == "set_channel":

@@ -6,19 +6,23 @@ from config import load_config
 
 def main_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     cfg = load_config()
+    channel_url = cfg.get("channel_url")
+
+    # Кнопка "Новости" — ссылка на канал если задан, иначе заглушка
+    news_btn = (
+        InlineKeyboardButton("📰 Новости", url=channel_url)
+        if channel_url
+        else InlineKeyboardButton("📰 Новости", callback_data="news_no_channel")
+    )
+
     rows = [
         [InlineKeyboardButton("📦 Моя подписка", callback_data="my_sub")],
-        [
-            InlineKeyboardButton("📰 Новости", callback_data="news"),
-            InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1"),
-        ],
+        [news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1")],
         [
             InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to"),
             InlineKeyboardButton("ℹ️ О сервисе", callback_data="about"),
         ],
     ]
-    if cfg.get("channel_url"):
-        rows.append([InlineKeyboardButton("📢 Наш канал", url=cfg["channel_url"])])
     if is_admin:
         rows.append([InlineKeyboardButton("⚙️ Админка", callback_data="admin_panel")])
     return InlineKeyboardMarkup(rows)
@@ -29,9 +33,12 @@ def main_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
 def admin_keyboard() -> InlineKeyboardMarkup:
     cfg = load_config()
     channel_label = "📢 Изменить канал" if cfg.get("channel_url") else "📢 Установить канал"
+    sub_enabled = cfg.get("force_subscribe", False)
+    sub_label = "🔔 Подписка на канал: ВКЛ" if sub_enabled else "🔕 Подписка на канал: ВЫКЛ"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton("🎫 Тикеты", callback_data="ticket_list:1")],
+        [InlineKeyboardButton(sub_label, callback_data="toggle_force_sub")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
         [InlineKeyboardButton(channel_label, callback_data="set_channel")],
         [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
