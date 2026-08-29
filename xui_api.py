@@ -375,7 +375,6 @@ async def create_client(
             "email": email,
             "flow": "xtls-rprx-vision",
             "limitIp": limit_ip,
-            "limitHwId": limit_hwid,
             "totalGB": gb_to_bytes(total_gb) if total_gb > 0 else 0,
             "expiryTime": expire_ms,
             "enable": True,
@@ -384,21 +383,31 @@ async def create_client(
             "reset": 0,
         }
 
+        # Пробуем новый API
         payload = {"inboundIds": inbound_ids, "client": client}
         data, err = await _post(s, f"{url}/panel/api/clients/add", payload)
 
-        if data is None or not data.get("success"):
-            # Фолбэк на старое API
+        if data and data.get("success"):
+            pass  # OK
+        else:
+            err1 = err or str(data)
+            # Фолбэк 1: /panel/api/inbounds/{id}/addClient
             old_payload = {
                 "id": int(inbound_id),
                 "settings": json.dumps({"clients": [client]}),
             }
-            data2, err2 = await _post(s, f"{url}/panel/api/inbounds/addClient", old_payload)
-            if data2 is None:
-                return {"success": False, "error": f"clients/add: {err}\naddClient: {err2}"}
-            if not data2.get("success"):
-                return {"success": False, "error": f"clients/add: {data}\naddClient: {data2}"}
-            data = data2
+            data2, err2 = await _post(s, f"{url}/panel/api/inbounds/{inbound_id}/addClient", old_payload)
+            if data2 and data2.get("success"):
+                data = data2
+            else:
+                err2 = err2 or str(data2)
+                # Фолбэк 2: /panel/api/inbounds/addClient
+                data3, err3 = await _post(s, f"{url}/panel/api/inbounds/addClient", old_payload)
+                if data3 and data3.get("success"):
+                    data = data3
+                else:
+                    err3 = err3 or str(data3)
+                    return {"success": False, "error": f"1) clients/add: {err1}\n2) inbounds/{inbound_id}/addClient: {err2}\n3) inbounds/addClient: {err3}"}
 
         parsed = urlparse(url)
         sub_url = _build_sub_url(parsed.scheme, parsed.hostname, sub_port, sub_path, sub_id)
