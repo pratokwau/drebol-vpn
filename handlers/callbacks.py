@@ -12,9 +12,13 @@ from handlers.tickets import handle_ticket_list, handle_ticket_view, handle_tick
 from handlers.xui_settings import (
     handle_xui_settings, handle_set_xui_url, handle_set_xui_login,
     handle_set_xui_pass, handle_set_xui_sub_port, handle_set_xui_sub_path,
-    handle_set_xui_inbound_id,
+    handle_test_xui,
 )
-from adminsub.handlers import handle_admin_subs_menu, handle_create_sub_start
+from adminsub.handlers import (
+    handle_admin_subs_menu, handle_presets_menu,
+    handle_preset_expire, handle_preset_ip, handle_preset_hwid, handle_preset_traffic,
+    handle_create_sub, handle_sub_view, handle_sub_delete,
+)
 
 
 def _is_admin(update: Update) -> bool:
@@ -30,7 +34,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "noop":
         return
 
-    # ── Глобальная проверка подписки ─────────────────────────────────────────
+    # Проверка подписки для не-админов
     if data != "check_sub" and not adm:
         if not await is_subscribed(context.bot, update.effective_user.id):
             await query.edit_message_text(
@@ -43,7 +47,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # ── Проверка "Я подписался" ───────────────────────────────────────────────
     if data == "check_sub":
         user = update.effective_user
         if not await is_subscribed(context.bot, user.id):
@@ -67,7 +70,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ── Пользовательские ─────────────────────────────────────────────────────
+    # ── Юзер ─────────────────────────────────────────────────────────────────
     if data == "back_start":
         context.user_data.pop("state", None)
         await handle_back_start(query, update.effective_user)
@@ -88,7 +91,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["state"] = AWAITING_SUPPORT_MSG
         await open_support(query, update.effective_user.id, page)
 
-    # ── Админские ────────────────────────────────────────────────────────────
+    # ── Только админ ─────────────────────────────────────────────────────────
     elif not adm:
         await query.edit_message_text("⛔ Нет доступа.")
 
@@ -120,7 +123,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("ticket_reply:"):
         await handle_ticket_reply_start(query, int(data.split(":")[1]), context)
 
-    # 3x-UI настройки
+    # 3x-UI
     elif data == "xui_settings":
         await handle_xui_settings(query)
     elif data == "set_xui_url":
@@ -133,11 +136,27 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_xui_sub_port(query, context)
     elif data == "set_xui_sub_path":
         await handle_set_xui_sub_path(query, context)
-    elif data == "set_xui_inbound_id":
-        await handle_set_xui_inbound_id(query, context)
+    elif data == "test_xui":
+        await handle_test_xui(query)
 
     # Админские подписки
     elif data == "admin_subs":
         await handle_admin_subs_menu(query)
+    elif data.startswith("subs_page:"):
+        await handle_admin_subs_menu(query, int(data.split(":")[1]))
     elif data == "create_sub":
-        await handle_create_sub_start(query, context)
+        await handle_create_sub(query)
+    elif data == "sub_presets":
+        await handle_presets_menu(query)
+    elif data == "preset_expire":
+        await handle_preset_expire(query, context)
+    elif data == "preset_ip":
+        await handle_preset_ip(query, context)
+    elif data == "preset_hwid":
+        await handle_preset_hwid(query, context)
+    elif data == "preset_traffic":
+        await handle_preset_traffic(query, context)
+    elif data.startswith("sub_view:"):
+        await handle_sub_view(query, int(data.split(":")[1]))
+    elif data.startswith("sub_delete:"):
+        await handle_sub_delete(query, int(data.split(":")[1]))

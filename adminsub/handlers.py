@@ -1,24 +1,181 @@
 from telegram.ext import ContextTypes
-from keyboards import admin_subs_keyboard, cancel_admin
-from states import AWAITING_SUB_EXPIRE
+
+from config import load_config, save_config
+from keyboards import back_admin
+from adminsub.storage import list_subs, add_sub, get_sub, delete_sub
+from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard
 
 
-async def handle_admin_subs_menu(query):
-    await query.edit_message_text(
-        "📋 <b>Админские подписки</b>\n\nВыберите действие:",
-        parse_mode="HTML",
-        reply_markup=admin_subs_keyboard(),
+def _presets_ready(cfg: dict) -> bool:
+    return all(cfg.get(k) is not None for k in ("preset_expire", "preset_ip", "preset_hwid", "preset_traffic"))
+
+
+def _fmt_presets(cfg: dict) -> str:
+    exp = cfg.get("preset_expire", "не задан")
+    ip = cfg.get("preset_ip", "не задан")
+    hwid = cfg.get("preset_hwid", "не задан")
+    traf_raw = cfg.get("preset_traffic")
+    if traf_raw is None:
+        traf = "не задан"
+    elif traf_raw == 0:
+        traf = "безлимит"
+    else:
+        traf = f"{traf_raw} ГБ"
+    return (
+        f"📅 Дата окончания: <b>{exp}</b>\n"
+        f"🌐 Лимит IP: <b>{ip}</b>\n"
+        f"🖥 Лимит HWID: <b>{hwid}</b>\n"
+        f"📶 Трафик: <b>{traf}</b>"
     )
 
 
-async def handle_create_sub_start(query, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["state"] = AWAITING_SUB_EXPIRE
-    context.user_data["new_sub"] = {}
+async def handle_admin_subs_menu(query, page: int = 1):
+    rows, total_pages = await list_subs(page)
+    cfg = load_config()
+    ready = _presets_ready(cfg)
+    header = "📋 <b>Админские подписки</b>\n"
+    body = "\n\nПодписок пока нет." if not rows else f"\n\nСтр. {page}/{total_pages}"
+    if not ready:
+        body += "\n\n⚠️ Задай настройки, чтобы создавать подписки в один клик."
     await query.edit_message_text(
-        "➕ <b>Создание подписки</b>\n\n"
-        "<b>Шаг 1/4</b> — Дата окончания\n\n"
-        "Введи дату в формате <code>дд.мм.гггг</code>\n"
-        "Например: <code>31.12.2025</code>",
+        header + body,
         parse_mode="HTML",
-        reply_markup=cancel_admin(),
+        reply_markup=subs_list_keyboard(rows, page, total_pages, ready),
     )
+
+
+async def handle_presets_menu(query):
+    cfg = load_config()
+    await query.edit_message_text(
+        "⚙️ <b>Настройки подписки (по умолчанию)</b>\n\n"
+        + _fmt_presets(cfg)
+        + "\n\nВыбери параметр для изменения:",
+        parse_mode="HTML",
+        reply_markup=presets_keyboard(),
+    )
+
+
+async def handle_preset_expire(query, context: ContextTypes.DEFAULT_TYPE):
+    from states import AWAITING_PRESET_EXPIRE
+    context.user_data["state"] = AWAITING_PRESET_EXPIRE
+    await query.edit_message_text(
+        "📅 <b>Дата окончания</b>\n\nВведи в формате <code>дд.мм.гггг</code>:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_preset_ip(query, context: ContextTypes.DEFAULT_TYPE):
+    from states import AWAITING_PRESET_IP
+    context.user_data["state"] = AWAITING_PRESET_IP
+    await query.edit_message_text(
+        "🌐 <b>Лимит IP</b>\n\nВведи число (0 = безлимит):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_preset_hwid(query, context: ContextTypes.DEFAULT_TYPE):
+    from states import AWAITING_PRESET_HWID
+    context.user_data["state"] = AWAITING_PRESET_HWID
+    await query.edit_message_text(
+        "🖥 <b>Лимит HWID</b>\n\nВведи число (0 = безлимит):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_preset_traffic(query, context: ContextTypes.DEFAULT_TYPE):
+    from states import AWAITING_PRESET_TRAFFIC
+    context.user_data["state"] = AWAITING_PRESET_TRAFFIC
+    await query.edit_message_text(
+        "📶 <b>Трафик (ГБ)</b>\n\nВведи число в ГБ или <code>-</code> для безлимита:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_create_sub(query):
+    cfg = load_config()
+    if not _presets_ready(cfg):
+        await query.edit_message_text(
+            "⚠️ Сначала задай все настройки (кнопка ⚙️ Настройки).",
+            reply_markup=back_admin(),
+        )
+        return
+
+    await query.edit_message_text("⏳ Создаю подписку в 3x-UI...")
+
+    from xui_api import create_client
+    result = await create_client(
+        expire_date=cfg["preset_expire"],
+        limit_ip=int(cfg["preset_ip"]),
+        limit_hwid=int(cfg["preset_hwid"]),
+        total_gb=int(cfg["preset_traffic"]),
+    )
+
+    if not result["success"]:
+        await query.edit_message_text(
+            f"❌ <b>Ошибка создания подписки</b>\n\n<code>{result['error']}</code>",
+            parse_mode="HTML",
+            reply_markup=back_admin(),
+        )
+        return
+
+    await add_sub(
+        email=result["email"],
+        uuid_val=result["uuid"],
+        sub_id=result["sub_id"],
+        sub_url=result["sub_url"],
+        expire_date=result["expire"],
+        limit_ip=int(cfg["preset_ip"]),
+        limit_hwid=int(cfg["preset_hwid"]),
+        total_gb=int(cfg["preset_traffic"]),
+    )
+
+    traffic_str = f"{cfg['preset_traffic']} ГБ" if int(cfg["preset_traffic"]) > 0 else "безлимит"
+    await query.edit_message_text(
+        "✅ <b>Подписка создана!</b>\n\n"
+        f"👤 Email: <code>{result['email']}</code>\n"
+        f"📅 До: <b>{result['expire']}</b>\n"
+        f"📶 Трафик: <b>{traffic_str}</b>\n\n"
+        f"🔗 Ссылка:\n<code>{result['sub_url']}</code>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_sub_view(query, sub_id: int):
+    row = await get_sub(sub_id)
+    if not row:
+        await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+    _, email, uuid_val, sub_id_str, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
+    traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
+    await query.edit_message_text(
+        f"📄 <b>Подписка #{sub_id}</b>\n\n"
+        f"👤 Email: <code>{email}</code>\n"
+        f"🆔 UUID: <code>{uuid_val}</code>\n"
+        f"📅 До: <b>{expire}</b>\n"
+        f"🌐 Лимит IP: <b>{limit_ip}</b>\n"
+        f"🖥 Лимит HWID: <b>{limit_hwid}</b>\n"
+        f"📶 Трафик: <b>{traffic}</b>\n"
+        f"🕐 Создано: {created_at}\n\n"
+        f"🔗 Ссылка:\n<code>{sub_url}</code>",
+        parse_mode="HTML",
+        reply_markup=sub_view_keyboard(sub_id),
+    )
+
+
+async def handle_sub_delete(query, sub_id: int):
+    await delete_sub(sub_id)
+    await query.edit_message_text(
+        "🗑 Подписка удалена из базы бота (в панели она осталась).",
+        reply_markup=back_admin(),
+    )
+
+
+def save_preset(key: str, value):
+    cfg = load_config()
+    cfg[key] = value
+    save_config(cfg)

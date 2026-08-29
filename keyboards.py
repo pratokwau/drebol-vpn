@@ -110,16 +110,7 @@ def xui_settings_keyboard() -> InlineKeyboardMarkup:
          InlineKeyboardButton("🔑 Пароль", callback_data="set_xui_pass")],
         [InlineKeyboardButton("🔌 Порт подписки", callback_data="set_xui_sub_port")],
         [InlineKeyboardButton("📂 Путь подписки", callback_data="set_xui_sub_path")],
-        [InlineKeyboardButton("📥 ID инбаунда", callback_data="set_xui_inbound_id")],
-        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
-    ])
-
-
-# ── Админские подписки ────────────────────────────────────────────────────────
-
-def admin_subs_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Создать подписку", callback_data="create_sub")],
+        [InlineKeyboardButton("🔌 Тест соединения", callback_data="test_xui")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
 

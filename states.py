@@ -12,10 +12,9 @@ AWAITING_XUI_LOGIN = "awaiting_xui_login"
 AWAITING_XUI_PASS = "awaiting_xui_pass"
 AWAITING_XUI_SUB_PORT = "awaiting_xui_sub_port"
 AWAITING_XUI_SUB_PATH = "awaiting_xui_sub_path"
-AWAITING_XUI_INBOUND_ID = "awaiting_xui_inbound_id"
 
-# Создание подписки (мастер)
-AWAITING_SUB_EXPIRE = "awaiting_sub_expire"
-AWAITING_SUB_IP_LIMIT = "awaiting_sub_ip_limit"
-AWAITING_SUB_HWID_LIMIT = "awaiting_sub_hwid_limit"
-AWAITING_SUB_TRAFFIC = "awaiting_sub_traffic"
+# Настройки-пресеты для админских подписок
+AWAITING_PRESET_EXPIRE = "awaiting_preset_expire"
+AWAITING_PRESET_IP = "awaiting_preset_ip"
+AWAITING_PRESET_HWID = "awaiting_preset_hwid"
+AWAITING_PRESET_TRAFFIC = "awaiting_preset_traffic"

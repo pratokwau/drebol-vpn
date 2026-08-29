@@ -18,7 +18,6 @@ def generate_email(length: int = 8) -> str:
 
 
 def date_to_ms(date_str: str) -> int:
-    """'дд.мм.гггг' → Unix timestamp в миллисекундах."""
     dt = datetime.strptime(date_str, "%d.%m.%Y")
     return int(dt.timestamp() * 1000)
 
@@ -31,36 +30,79 @@ def _connector() -> aiohttp.TCPConnector:
     return aiohttp.TCPConnector(ssl=False)
 
 
-async def _login(url: str, login: str, password: str) -> aiohttp.ClientSession | None:
+async def _login(url: str, login: str, password: str) -> tuple[aiohttp.ClientSession | None, str]:
+    """Возвращает (session, error). Если session None — error содержит подробности."""
     session = aiohttp.ClientSession(connector=_connector())
     try:
         async with session.post(
             f"{url}/login",
             json={"username": login, "password": password},
-            timeout=aiohttp.ClientTimeout(total=10),
+            timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
-            data = await resp.json(content_type=None)
+            status = resp.status
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                body = await resp.text()
+                await session.close()
+                return None, f"HTTP {status}, ответ не JSON: {body[:300]}"
             if data.get("success"):
-                return session
-    except Exception:
-        pass
-    await session.close()
-    return None
+                return session, ""
+            await session.close()
+            return None, f"HTTP {status}, ответ: {data}"
+    except aiohttp.ClientConnectorError as e:
+        await session.close()
+        return None, f"Не удалось подключиться: {e}"
+    except aiohttp.ClientResponseError as e:
+        await session.close()
+        return None, f"Ошибка ответа: {e}"
+    except Exception as e:
+        await session.close()
+        return None, f"{type(e).__name__}: {e}"
 
 
 async def test_connection() -> dict:
-    """Проверить соединение с панелью."""
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")
     login = cfg.get("xui_login", "")
     password = cfg.get("xui_password", "")
     if not all([url, login, password]):
-        return {"success": False, "error": "Параметры панели не заданы"}
-    session = await _login(url, login, password)
+        return {"success": False, "error": "URL / логин / пароль не заданы"}
+    session, err = await _login(url, login, password)
     if not session:
-        return {"success": False, "error": "Неверный логин/пароль или панель недоступна"}
+        return {"success": False, "error": err, "url": url, "login": login}
     await session.close()
     return {"success": True}
+
+
+async def _fetch_inbound_id(session: aiohttp.ClientSession, url: str) -> tuple[int | None, str]:
+    """Найти первый подходящий VLESS-инбаунд. Возвращает (id, error)."""
+    try:
+        async with session.get(
+            f"{url}/panel/api/inbounds/list",
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            status = resp.status
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                body = await resp.text()
+                return None, f"list HTTP {status}, ответ не JSON: {body[:300]}"
+
+            if not data.get("success"):
+                return None, f"list HTTP {status}: {data}"
+
+            inbounds = data.get("obj", []) or []
+            if not inbounds:
+                return None, "На панели нет ни одного инбаунда"
+
+            # ищем VLESS с XTLS
+            for inb in inbounds:
+                if inb.get("protocol") == "vless":
+                    return inb.get("id"), ""
+            return inbounds[0].get("id"), ""
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
 
 
 async def create_client(
@@ -73,50 +115,62 @@ async def create_client(
     url = cfg.get("xui_url", "").rstrip("/")
     login = cfg.get("xui_login", "")
     password = cfg.get("xui_password", "")
-    inbound_id = int(cfg.get("xui_inbound_id", 1))
     sub_port = cfg.get("xui_sub_port", "")
     sub_path = cfg.get("xui_sub_path", "/sub/")
 
-    if not all([url, login, password, sub_port]):
-        return {"success": False, "error": "Настройте параметры 3x-UI в админке"}
+    missing = [k for k, v in [("URL", url), ("логин", login), ("пароль", password), ("порт подписки", sub_port)] if not v]
+    if missing:
+        return {"success": False, "error": f"Не заданы: {', '.join(missing)}. Открой «Параметры 3x-UI»."}
 
-    expire_ms = date_to_ms(expire_date)
-    client_uuid = str(uuid.uuid4())
-    sub_id = generate_sub_id()
-    email = generate_email()
-
-    client = {
-        "id": client_uuid,
-        "email": email,
-        "flow": "xtls-rprx-vision",
-        "limitIp": limit_ip,
-        "limitHwId": limit_hwid,
-        "totalGB": gb_to_bytes(total_gb) if total_gb > 0 else 0,
-        "expiryTime": expire_ms,
-        "enable": True,
-        "tgId": "",
-        "subId": sub_id,
-        "comment": "",
-    }
-
-    session = await _login(url, login, password)
+    session, err = await _login(url, login, password)
     if not session:
-        return {"success": False, "error": "Ошибка авторизации на панели"}
+        return {"success": False, "error": f"Авторизация: {err}"}
 
     try:
-        # Новый API: /panel/api/clients/add
+        inbound_id = cfg.get("xui_inbound_id")
+        if not inbound_id:
+            inbound_id, ierr = await _fetch_inbound_id(session, url)
+            if not inbound_id:
+                return {"success": False, "error": f"Не найден инбаунд: {ierr}"}
+
+        expire_ms = date_to_ms(expire_date)
+        client_uuid = str(uuid.uuid4())
+        sub_id = generate_sub_id()
+        email = generate_email()
+
+        client = {
+            "id": client_uuid,
+            "email": email,
+            "flow": "xtls-rprx-vision",
+            "limitIp": limit_ip,
+            "limitHwId": limit_hwid,
+            "totalGB": gb_to_bytes(total_gb) if total_gb > 0 else 0,
+            "expiryTime": expire_ms,
+            "enable": True,
+            "tgId": "",
+            "subId": sub_id,
+            "comment": "",
+        }
+
+        payload = {"inboundIds": [int(inbound_id)], "client": client}
+
         async with session.post(
             f"{url}/panel/api/clients/add",
-            json={"inboundIds": [inbound_id], "client": client},
+            json=payload,
             timeout=aiohttp.ClientTimeout(total=15),
         ) as resp:
-            data = await resp.json(content_type=None)
+            status = resp.status
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                body = await resp.text()
+                return {"success": False, "error": f"clients/add HTTP {status}, ответ не JSON: {body[:400]}"}
 
         if not data.get("success"):
-            # Фолбэк на старый API: /panel/api/inbounds/addClient
+            # Фолбэк на старое API
             import json as _json
             old_body = {
-                "id": inbound_id,
+                "id": int(inbound_id),
                 "settings": _json.dumps({"clients": [client]}),
             }
             async with session.post(
@@ -124,7 +178,12 @@ async def create_client(
                 json=old_body,
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp2:
-                data = await resp2.json(content_type=None)
+                status2 = resp2.status
+                try:
+                    data = await resp2.json(content_type=None)
+                except Exception:
+                    body = await resp2.text()
+                    return {"success": False, "error": f"addClient HTTP {status2}: {body[:400]}"}
 
         if data.get("success"):
             parsed = urlparse(url)
@@ -136,10 +195,11 @@ async def create_client(
                 "email": email,
                 "sub_id": sub_id,
                 "expire": expire_date,
+                "inbound_id": inbound_id,
             }
-        return {"success": False, "error": data.get("msg", "Ошибка API панели")}
+        return {"success": False, "error": f"API вернул: {data}"}
 
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
     finally:
         await session.close()

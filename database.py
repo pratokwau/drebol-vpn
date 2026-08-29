@@ -26,6 +26,20 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS admin_subs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                uuid TEXT NOT NULL,
+                sub_id TEXT NOT NULL,
+                sub_url TEXT NOT NULL,
+                expire_date TEXT NOT NULL,
+                limit_ip INTEGER NOT NULL DEFAULT 0,
+                limit_hwid INTEGER NOT NULL DEFAULT 0,
+                total_gb INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await db.commit()
 
 
