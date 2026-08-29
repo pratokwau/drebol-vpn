@@ -32,11 +32,11 @@ async def init_db():
 async def upsert_user(user_id: int, first_name: str, username: str | None):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
-            INSERT INTO users (id, first_name, username) VALUES (?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                first_name = excluded.first_name,
-                username = excluded.username
+            INSERT OR IGNORE INTO users (id, first_name, username) VALUES (?, ?, ?)
         """, (user_id, first_name, username or ""))
+        await db.execute("""
+            UPDATE users SET first_name = ?, username = ? WHERE id = ?
+        """, (first_name, username or "", user_id))
         await db.commit()
 
 

@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID
 from states import AWAITING_SUPPORT_MSG
-from handlers.user import handle_buy, handle_about, handle_back_start
+from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_news, handle_how_to
 from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
@@ -27,6 +27,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "back_start":
         context.user_data.pop("state", None)
         await handle_back_start(query, update.effective_user)
+
+    elif data == "my_sub":
+        await handle_my_sub(query)
+
+    elif data == "news":
+        await handle_news(query)
+
+    elif data == "how_to":
+        await handle_how_to(query)
 
     elif data == "buy":
         await handle_buy(query)

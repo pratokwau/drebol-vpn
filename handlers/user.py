@@ -1,7 +1,29 @@
-from telegram import Update
-from telegram.ext import ContextTypes
 from config import ADMIN_ID
 from keyboards import main_keyboard, back_main
+
+
+async def handle_my_sub(query):
+    await query.edit_message_text(
+        "📦 <b>Моя подписка</b>\n\nУ вас пока нет активной подписки.",
+        parse_mode="HTML",
+        reply_markup=back_main(),
+    )
+
+
+async def handle_news(query):
+    await query.edit_message_text(
+        "📰 <b>Новости</b>\n\nНовостей пока нет. Следите за обновлениями!",
+        parse_mode="HTML",
+        reply_markup=back_main(),
+    )
+
+
+async def handle_how_to(query):
+    await query.edit_message_text(
+        "❓ <b>Как подключиться?</b>\n\nИнструкция по подключению скоро появится здесь.",
+        parse_mode="HTML",
+        reply_markup=back_main(),
+    )
 
 
 async def handle_buy(query):

@@ -7,9 +7,15 @@ from config import load_config
 def main_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     cfg = load_config()
     rows = [
-        [InlineKeyboardButton("🛒 Купить VPN", callback_data="buy")],
-        [InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1")],
-        [InlineKeyboardButton("ℹ️ О сервисе", callback_data="about")],
+        [InlineKeyboardButton("📦 Моя подписка", callback_data="my_sub")],
+        [
+            InlineKeyboardButton("📰 Новости", callback_data="news"),
+            InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1"),
+        ],
+        [
+            InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to"),
+            InlineKeyboardButton("ℹ️ О сервисе", callback_data="about"),
+        ],
     ]
     if cfg.get("channel_url"):
         rows.append([InlineKeyboardButton("📢 Наш канал", url=cfg["channel_url"])])

@@ -55,10 +55,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Админ пишет рассылку ──────────────────────────────────────────────────
     if state == AWAITING_BROADCAST and is_admin:
         context.user_data.pop("state", None)
-        msg = await update.message.reply_text("⏳ Отправляю рассылку...")
+        from database import get_all_user_ids
+        user_ids = await get_all_user_ids()
+        msg = await update.message.reply_text(f"⏳ Отправляю рассылку {len(user_ids)} пользователям...")
         ok, fail = await do_broadcast(context.bot, text)
         await msg.edit_text(
-            f"✅ Рассылка завершена.\n\n📨 Доставлено: {ok}\n❌ Ошибок: {fail}",
+            f"✅ Рассылка завершена.\n\n👥 В базе: {len(user_ids)}\n📨 Доставлено: {ok}\n❌ Ошибок: {fail}",
             reply_markup=back_admin(),
         )
         return
