@@ -24,9 +24,13 @@ from adminsub.handlers import (
 )
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
-    handle_paid_preset_expire, handle_paid_preset_ip, handle_paid_preset_hwid, handle_paid_preset_traffic,
+    handle_paid_preset_ip, handle_paid_preset_hwid, handle_paid_preset_traffic,
+    handle_paid_preset_trial, handle_paid_preset_pay_period, handle_paid_preset_renew,
+    handle_paid_preset_price, handle_paid_preset_pay_url,
     handle_paid_create_sub, handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
     handle_paid_inbounds_menu, handle_paid_toggle_inbound,
+    handle_paid_inbounds_expire_menu, handle_paid_toggle_inbound_expire,
+    handle_approve, handle_reject, handle_request_sub,
 )
 
 
@@ -91,7 +95,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         await handle_back_start(query, update.effective_user)
     elif data == "my_paid_sub":
-        await handle_my_paid_sub(query)
+        from paidsub.storage import get_paid_sub_by_tg_id
+        if await get_paid_sub_by_tg_id(update.effective_user.id):
+            await handle_my_paid_sub(query)
+        else:
+            await handle_request_sub(query, context)
     elif data == "my_sub":
         await handle_my_sub(query)
     elif data == "news":
@@ -200,8 +208,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_create_sub(query, context)
     elif data == "paid_sub_presets":
         await handle_paid_presets_menu(query)
-    elif data == "paid_preset_expire":
-        await handle_paid_preset_expire(query, context)
+    elif data == "paid_preset_trial":
+        await handle_paid_preset_trial(query, context)
+    elif data == "paid_preset_pay_period":
+        await handle_paid_preset_pay_period(query, context)
+    elif data == "paid_preset_renew":
+        await handle_paid_preset_renew(query, context)
+    elif data == "paid_preset_price":
+        await handle_paid_preset_price(query, context)
+    elif data == "paid_preset_pay_url":
+        await handle_paid_preset_pay_url(query, context)
     elif data == "paid_preset_ip":
         await handle_paid_preset_ip(query, context)
     elif data == "paid_preset_hwid":
@@ -218,3 +234,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_inbounds_menu(query)
     elif data.startswith("paid_toggle_inbound:"):
         await handle_paid_toggle_inbound(query, int(data.split(":")[1]))
+    elif data == "paid_inbounds_expire_menu":
+        await handle_paid_inbounds_expire_menu(query)
+    elif data.startswith("paid_toggle_inbound_expire:"):
+        await handle_paid_toggle_inbound_expire(query, int(data.split(":")[1]))
+    elif data.startswith("paid_approve:"):
+        await handle_approve(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_reject:"):
+        await handle_reject(query, int(data.split(":")[1]), context)

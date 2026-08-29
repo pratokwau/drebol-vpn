@@ -24,7 +24,11 @@ AWAITING_PRESET_TRAFFIC = "awaiting_preset_traffic"
 
 # Платные подписки
 AWAITING_PAID_SUB_TG_ID = "awaiting_paid_sub_tg_id"
-AWAITING_PAID_PRESET_EXPIRE = "awaiting_paid_preset_expire"
 AWAITING_PAID_PRESET_IP = "awaiting_paid_preset_ip"
 AWAITING_PAID_PRESET_HWID = "awaiting_paid_preset_hwid"
 AWAITING_PAID_PRESET_TRAFFIC = "awaiting_paid_preset_traffic"
+AWAITING_PAID_TRIAL_PERIOD = "awaiting_paid_trial_period"
+AWAITING_PAID_PAY_PERIOD = "awaiting_paid_pay_period"
+AWAITING_PAID_RENEW_TIME = "awaiting_paid_renew_time"
+AWAITING_PAID_PRICE = "awaiting_paid_price"
+AWAITING_PAID_PAY_URL = "awaiting_paid_pay_url"

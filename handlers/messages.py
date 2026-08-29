@@ -15,9 +15,11 @@ from states import (
     AWAITING_PRESET_EXPIRE, AWAITING_PRESET_IP,
     AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC,
     AWAITING_SUB_TG_ID, AWAITING_AUTO_UPDATE_DAYS,
-    AWAITING_PAID_SUB_TG_ID, AWAITING_PAID_PRESET_EXPIRE,
+    AWAITING_PAID_SUB_TG_ID,
     AWAITING_PAID_PRESET_IP, AWAITING_PAID_PRESET_HWID,
     AWAITING_PAID_PRESET_TRAFFIC,
+    AWAITING_PAID_TRIAL_PERIOD, AWAITING_PAID_PAY_PERIOD,
+    AWAITING_PAID_RENEW_TIME, AWAITING_PAID_PRICE, AWAITING_PAID_PAY_URL,
 )
 from handlers.broadcast import do_broadcast
 
@@ -237,18 +239,67 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await do_create_paid_sub(sent, tg_id, context, _edit_paid)
         return
 
-    # ── Платные подписки: пресеты ────────────────────────────────────────────────
-    if state == AWAITING_PAID_PRESET_EXPIRE:
-        try:
-            datetime.strptime(text, "%d.%m.%Y")
-        except ValueError:
-            await update.message.reply_text("❌ Формат: <code>дд.мм.гггг</code>", parse_mode="HTML", reply_markup=back_admin())
+    # ── Платные подписки: время-пресеты ──────────────────────────────────────────
+    from paidsub.time_parser import parse_duration, fmt_duration
+
+    if state == AWAITING_PAID_TRIAL_PERIOD:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
             return
-        _save("paid_preset_expire", text)
+        _save("paid_trial_period", seconds)
         context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Дата окончания: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Пробный период: <b>{fmt_duration(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
+    if state == AWAITING_PAID_PAY_PERIOD:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>30 дней</code>, <code>1 месяц</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        _save("paid_pay_period", seconds)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Период оплаты: <b>{fmt_duration(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_RENEW_TIME:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>3 дня</code>, <code>12 часов</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        _save("paid_renew_time", seconds)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Время на продление: <b>{fmt_duration(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_PRICE:
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число (сумма в рублях).", reply_markup=back_admin())
+            return
+        _save("paid_price", int(text))
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Сумма: <b>{text} ₽</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_PAY_URL:
+        if not text.startswith("http"):
+            await update.message.reply_text("❌ Ссылка должна начинаться с http.", reply_markup=back_admin())
+            return
+        _save("paid_pay_url", text)
+        context.user_data.pop("state", None)
+        await update.message.reply_text("✅ Ссылка на оплату сохранена.", reply_markup=back_admin())
+        return
+
+    # ── Платные подписки: обычные пресеты ────────────────────────────────────────
     if state == AWAITING_PAID_PRESET_IP:
         if not text.isdigit():
             await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())

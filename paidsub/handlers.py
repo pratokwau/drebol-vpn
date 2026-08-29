@@ -1,11 +1,17 @@
+from datetime import datetime, timedelta
+
 from telegram import Bot
 from telegram.ext import ContextTypes
 
-from config import load_config, save_config
-from keyboards import back_admin
+from config import ADMIN_ID, load_config, save_config
+from keyboards import back_admin, back_main
 
-from paidsub.storage import list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub
-from paidsub.keyboards import paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard, paid_inbounds_keyboard
+from paidsub.storage import list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id
+from paidsub.keyboards import (
+    paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
+    paid_inbounds_keyboard, approve_keyboard,
+)
+from paidsub.time_parser import fmt_duration
 
 
 async def _notify_user(bot: Bot, tg_id: int | None, text: str):
@@ -18,11 +24,32 @@ async def _notify_user(bot: Bot, tg_id: int | None, text: str):
 
 
 def _paid_presets_ready(cfg: dict) -> bool:
-    return all(cfg.get(k) is not None for k in ("paid_preset_expire", "paid_preset_ip", "paid_preset_hwid", "paid_preset_traffic"))
+    return all([
+        cfg.get("paid_trial_period") is not None,
+        cfg.get("paid_pay_period") is not None,
+        cfg.get("paid_renew_time") is not None,
+        cfg.get("paid_preset_ip") is not None,
+        cfg.get("paid_preset_hwid") is not None,
+        cfg.get("paid_preset_traffic") is not None,
+        cfg.get("paid_price") is not None,
+    ])
 
 
 def _fmt_presets(cfg: dict, inbound_names: dict | None = None) -> str:
-    exp = cfg.get("paid_preset_expire", "не задан")
+    trial = cfg.get("paid_trial_period")
+    trial_str = fmt_duration(trial) if trial else "не задан"
+
+    pay_period = cfg.get("paid_pay_period")
+    pay_str = fmt_duration(pay_period) if pay_period else "не задан"
+
+    renew = cfg.get("paid_renew_time")
+    renew_str = fmt_duration(renew) if renew else "не задан"
+
+    price = cfg.get("paid_price")
+    price_str = f"{price} ₽" if price is not None else "не задана"
+
+    pay_url = cfg.get("paid_pay_url") or "не задана"
+
     ip = cfg.get("paid_preset_ip", "не задан")
     hwid = cfg.get("paid_preset_hwid", "не задан")
     traf_raw = cfg.get("paid_preset_traffic")
@@ -32,20 +59,34 @@ def _fmt_presets(cfg: dict, inbound_names: dict | None = None) -> str:
         traf = "безлимит"
     else:
         traf = f"{traf_raw} ГБ"
-    inbound_ids = cfg.get("paid_preset_inbound_ids") or []
-    if inbound_ids and inbound_names:
-        names = [inbound_names.get(i, f"#{i}") for i in inbound_ids]
-        inb_label = ", ".join(names)
-    elif inbound_ids:
-        inb_label = ", ".join(str(i) for i in inbound_ids)
+
+    create_ids = cfg.get("paid_preset_inbound_ids") or []
+    if create_ids and inbound_names:
+        create_label = ", ".join(inbound_names.get(i, f"#{i}") for i in create_ids)
+    elif create_ids:
+        create_label = ", ".join(str(i) for i in create_ids)
     else:
-        inb_label = "авто (первый VLESS)"
+        create_label = "авто (первый VLESS)"
+
+    expire_ids = cfg.get("paid_expire_inbound_ids") or []
+    if expire_ids and inbound_names:
+        expire_label = ", ".join(inbound_names.get(i, f"#{i}") for i in expire_ids)
+    elif expire_ids:
+        expire_label = ", ".join(str(i) for i in expire_ids)
+    else:
+        expire_label = "не заданы"
+
     return (
-        f"📅 Дата окончания: <b>{exp}</b>\n"
+        f"🆓 Пробный период: <b>{trial_str}</b>\n"
+        f"💰 Период оплаты: <b>{pay_str}</b>\n"
+        f"⏳ Время на продление: <b>{renew_str}</b>\n"
+        f"💵 Сумма: <b>{price_str}</b>\n"
+        f"🔗 Ссылка на оплату: <b>{pay_url}</b>\n"
         f"🌐 Лимит IP: <b>{ip}</b>\n"
         f"🖥 Лимит HWID: <b>{hwid}</b>\n"
         f"📶 Трафик: <b>{traf}</b>\n"
-        f"📡 Инбаунды: <b>{inb_label}</b>"
+        f"📡 Инбаунды создания: <b>{create_label}</b>\n"
+        f"📡 Инбаунды окончания: <b>{expire_label}</b>"
     )
 
 
@@ -71,14 +112,13 @@ async def handle_paid_subs_menu(query, page: int = 1):
 async def handle_paid_presets_menu(query):
     cfg = load_config()
     inbound_names = {}
-    inbound_ids = cfg.get("paid_preset_inbound_ids") or []
-    if inbound_ids:
+    all_ids = list(cfg.get("paid_preset_inbound_ids") or []) + list(cfg.get("paid_expire_inbound_ids") or [])
+    if all_ids:
         from xui_api import get_inbounds
         result = await get_inbounds()
         if result["success"]:
             for inb in result["inbounds"]:
-                name = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
-                inbound_names[inb.get("id")] = name
+                inbound_names[inb.get("id")] = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
     await query.edit_message_text(
         "⚙️ <b>Настройки платной подписки</b>\n\n"
         + _fmt_presets(cfg, inbound_names)
@@ -88,17 +128,81 @@ async def handle_paid_presets_menu(query):
     )
 
 
-async def handle_paid_preset_expire(query, context: ContextTypes.DEFAULT_TYPE):
-    from states import AWAITING_PAID_PRESET_EXPIRE
-    context.user_data["state"] = AWAITING_PAID_PRESET_EXPIRE
+_TIME_HINT = (
+    "Введи время в свободной форме:\n"
+    "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, "
+    "<code>44 минуты</code>, <code>3 месяца</code>"
+)
+
+
+async def handle_paid_preset_trial(query, context):
+    from states import AWAITING_PAID_TRIAL_PERIOD
+    context.user_data["state"] = AWAITING_PAID_TRIAL_PERIOD
+    cfg = load_config()
+    current = cfg.get("paid_trial_period")
+    cur_str = fmt_duration(current) if current else "не задан"
     await query.edit_message_text(
-        "📅 <b>Дата окончания</b>\n\nВведи в формате <code>дд.мм.гггг</code>:",
+        f"🆓 <b>Пробный период</b>\n\nСейчас: <b>{cur_str}</b>\n\n{_TIME_HINT}",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
 
 
-async def handle_paid_preset_ip(query, context: ContextTypes.DEFAULT_TYPE):
+async def handle_paid_preset_pay_period(query, context):
+    from states import AWAITING_PAID_PAY_PERIOD
+    context.user_data["state"] = AWAITING_PAID_PAY_PERIOD
+    cfg = load_config()
+    current = cfg.get("paid_pay_period")
+    cur_str = fmt_duration(current) if current else "не задан"
+    await query.edit_message_text(
+        f"💰 <b>Период оплаты</b>\n\nВремя действия подписки после оплаты.\n"
+        f"Сейчас: <b>{cur_str}</b>\n\n{_TIME_HINT}",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_preset_renew(query, context):
+    from states import AWAITING_PAID_RENEW_TIME
+    context.user_data["state"] = AWAITING_PAID_RENEW_TIME
+    cfg = load_config()
+    current = cfg.get("paid_renew_time")
+    cur_str = fmt_duration(current) if current else "не задан"
+    await query.edit_message_text(
+        f"⏳ <b>Время на продление</b>\n\nПосле окончания пробного или оплаченного периода "
+        f"у пользователя будет это время чтобы продлить.\n"
+        f"Сейчас: <b>{cur_str}</b>\n\n{_TIME_HINT}",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_preset_price(query, context):
+    from states import AWAITING_PAID_PRICE
+    context.user_data["state"] = AWAITING_PAID_PRICE
+    cfg = load_config()
+    current = cfg.get("paid_price")
+    cur_str = f"{current} ₽" if current is not None else "не задана"
+    await query.edit_message_text(
+        f"💵 <b>Сумма подписки</b>\n\nСейчас: <b>{cur_str}</b>\n\nВведи сумму в рублях (число):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_preset_pay_url(query, context):
+    from states import AWAITING_PAID_PAY_URL
+    context.user_data["state"] = AWAITING_PAID_PAY_URL
+    cfg = load_config()
+    current = cfg.get("paid_pay_url") or "не задана"
+    await query.edit_message_text(
+        f"🔗 <b>Ссылка на оплату</b>\n\nСейчас: <b>{current}</b>\n\nВведи URL:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_preset_ip(query, context):
     from states import AWAITING_PAID_PRESET_IP
     context.user_data["state"] = AWAITING_PAID_PRESET_IP
     await query.edit_message_text(
@@ -108,7 +212,7 @@ async def handle_paid_preset_ip(query, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def handle_paid_preset_hwid(query, context: ContextTypes.DEFAULT_TYPE):
+async def handle_paid_preset_hwid(query, context):
     from states import AWAITING_PAID_PRESET_HWID
     context.user_data["state"] = AWAITING_PAID_PRESET_HWID
     await query.edit_message_text(
@@ -118,7 +222,7 @@ async def handle_paid_preset_hwid(query, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def handle_paid_preset_traffic(query, context: ContextTypes.DEFAULT_TYPE):
+async def handle_paid_preset_traffic(query, context):
     from states import AWAITING_PAID_PRESET_TRAFFIC
     context.user_data["state"] = AWAITING_PAID_PRESET_TRAFFIC
     await query.edit_message_text(
@@ -128,7 +232,7 @@ async def handle_paid_preset_traffic(query, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ── Инбаунды ──────────────────────────────────────────────────────────────────
+# ── Инбаунды создания ────────────────────────────────────────────────────────
 
 async def handle_paid_inbounds_menu(query):
     from xui_api import get_inbounds
@@ -137,23 +241,20 @@ async def handle_paid_inbounds_menu(query):
     if not result["success"]:
         await query.edit_message_text(
             f"❌ Не удалось загрузить инбаунды:\n<code>{result['error']}</code>",
-            parse_mode="HTML",
-            reply_markup=back_admin(),
+            parse_mode="HTML", reply_markup=back_admin(),
         )
         return
-    inbounds = result["inbounds"]
-    if not inbounds:
+    if not result["inbounds"]:
         await query.edit_message_text("❌ На панели нет инбаундов.", reply_markup=back_admin())
         return
     cfg = load_config()
     selected = cfg.get("paid_preset_inbound_ids") or []
     await query.edit_message_text(
-        "📡 <b>Инбаунды платной подписки</b>\n\n"
-        "Нажми на инбаунд чтобы выбрать/снять.\n"
-        "✅ — выбран, 🔘 — не выбран\n\n"
-        "Если ничего не выбрано — автоматически берётся первый VLESS.",
+        "📡 <b>Инбаунды создания</b>\n\n"
+        "Эти инбаунды будут использоваться при создании подписки.\n"
+        "✅ — выбран, 🔘 — не выбран",
         parse_mode="HTML",
-        reply_markup=paid_inbounds_keyboard(inbounds, selected),
+        reply_markup=paid_inbounds_keyboard(result["inbounds"], selected, "create"),
     )
 
 
@@ -167,24 +268,71 @@ async def handle_paid_toggle_inbound(query, inbound_id: int):
         selected.append(inbound_id)
     cfg["paid_preset_inbound_ids"] = selected
     save_config(cfg)
-
     result = await get_inbounds()
     if not result["success"]:
-        await query.answer("Список инбаундов обновить не удалось", show_alert=True)
+        await query.answer("Не удалось обновить", show_alert=True)
         return
     await query.edit_message_text(
-        "📡 <b>Инбаунды платной подписки</b>\n\n"
-        "Нажми на инбаунд чтобы выбрать/снять.\n"
-        "✅ — выбран, 🔘 — не выбран\n\n"
-        "Если ничего не выбрано — автоматически берётся первый VLESS.",
+        "📡 <b>Инбаунды создания</b>\n\n"
+        "Эти инбаунды будут использоваться при создании подписки.\n"
+        "✅ — выбран, 🔘 — не выбран",
         parse_mode="HTML",
-        reply_markup=paid_inbounds_keyboard(result["inbounds"], selected),
+        reply_markup=paid_inbounds_keyboard(result["inbounds"], selected, "create"),
     )
 
 
-# ── Создание подписки ─────────────────────────────────────────────────────────
+# ── Инбаунды окончания ───────────────────────────────────────────────────────
 
-async def handle_paid_create_sub(query, context: ContextTypes.DEFAULT_TYPE):
+async def handle_paid_inbounds_expire_menu(query):
+    from xui_api import get_inbounds
+    await query.edit_message_text("⏳ Загружаю инбаунды из панели...")
+    result = await get_inbounds()
+    if not result["success"]:
+        await query.edit_message_text(
+            f"❌ Не удалось загрузить инбаунды:\n<code>{result['error']}</code>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+    if not result["inbounds"]:
+        await query.edit_message_text("❌ На панели нет инбаундов.", reply_markup=back_admin())
+        return
+    cfg = load_config()
+    selected = cfg.get("paid_expire_inbound_ids") or []
+    await query.edit_message_text(
+        "📡 <b>Инбаунды окончания</b>\n\n"
+        "Бот переключит подписку на эти инбаунды если не продлили.\n"
+        "✅ — выбран, 🔘 — не выбран",
+        parse_mode="HTML",
+        reply_markup=paid_inbounds_keyboard(result["inbounds"], selected, "expire"),
+    )
+
+
+async def handle_paid_toggle_inbound_expire(query, inbound_id: int):
+    from xui_api import get_inbounds
+    cfg = load_config()
+    selected = list(cfg.get("paid_expire_inbound_ids") or [])
+    if inbound_id in selected:
+        selected.remove(inbound_id)
+    else:
+        selected.append(inbound_id)
+    cfg["paid_expire_inbound_ids"] = selected
+    save_config(cfg)
+    result = await get_inbounds()
+    if not result["success"]:
+        await query.answer("Не удалось обновить", show_alert=True)
+        return
+    await query.edit_message_text(
+        "📡 <b>Инбаунды окончания</b>\n\n"
+        "Бот переключит подписку на эти инбаунды если не продлили.\n"
+        "✅ — выбран, 🔘 — не выбран",
+        parse_mode="HTML",
+        reply_markup=paid_inbounds_keyboard(result["inbounds"], selected, "expire"),
+    )
+
+
+# ── Ручное создание подписки (админ) ─────────────────────────────────────────
+
+async def handle_paid_create_sub(query, context):
     cfg = load_config()
     if not _paid_presets_ready(cfg):
         await query.edit_message_text(
@@ -196,15 +344,14 @@ async def handle_paid_create_sub(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_PAID_SUB_TG_ID
     await query.edit_message_text(
         "👤 <b>Введи Telegram ID пользователя</b>\n\n"
-        "Пользователь должен написать боту хотя бы раз.\n"
-        "ID можно узнать через @userinfobot\n\n"
         "Введи числовой ID:",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
 
 
-async def do_create_paid_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_TYPE, reply_func):
+async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, trial: bool = False):
+    """Создаёт платную подписку. trial=True — пробный период."""
     cfg = load_config()
     await reply_func("⏳ Создаю подписку в 3x-UI...")
 
@@ -214,11 +361,19 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context: ContextTypes.DEF
     username = user_row[2] if user_row else None
     email = build_email(tg_id, username)
 
+    if trial:
+        seconds = cfg.get("paid_trial_period", 86400)
+    else:
+        seconds = cfg.get("paid_pay_period", 2592000)
+
+    expire_dt = datetime.now() + timedelta(seconds=seconds)
+    expire_date = expire_dt.strftime("%d.%m.%Y")
+
     result = await create_client(
-        expire_date=cfg["paid_preset_expire"],
-        limit_ip=int(cfg["paid_preset_ip"]),
-        limit_hwid=int(cfg["paid_preset_hwid"]),
-        total_gb=int(cfg["paid_preset_traffic"]),
+        expire_date=expire_date,
+        limit_ip=int(cfg.get("paid_preset_ip", 0)),
+        limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
+        total_gb=int(cfg.get("paid_preset_traffic", 0)),
         email=email,
     )
 
@@ -236,14 +391,16 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context: ContextTypes.DEF
         sub_id=result["sub_id"],
         sub_url=result["sub_url"],
         expire_date=result["expire"],
-        limit_ip=int(cfg["paid_preset_ip"]),
-        limit_hwid=int(cfg["paid_preset_hwid"]),
-        total_gb=int(cfg["paid_preset_traffic"]),
+        limit_ip=int(cfg.get("paid_preset_ip", 0)),
+        limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
+        total_gb=int(cfg.get("paid_preset_traffic", 0)),
     )
 
-    traffic_str = f"{cfg['paid_preset_traffic']} ГБ" if int(cfg["paid_preset_traffic"]) > 0 else "безлимит"
+    traffic_str = f"{cfg.get('paid_preset_traffic', 0)} ГБ" if int(cfg.get("paid_preset_traffic", 0)) > 0 else "безлимит"
+    period_label = "пробный период" if trial else "оплаченный период"
+
     await reply_func(
-        "✅ <b>Подписка создана!</b>\n\n"
+        f"✅ <b>Подписка создана ({period_label})!</b>\n\n"
         f"👤 TG ID: <code>{tg_id}</code>\n"
         f"📧 Email: <code>{result['email']}</code>\n"
         f"📅 До: <b>{result['expire']}</b>\n"
@@ -255,12 +412,78 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context: ContextTypes.DEF
     bot = context.bot if hasattr(context, 'bot') else None
     if bot:
         await _notify_user(bot, tg_id,
-            "🎉 <b>Вам выдана VPN подписка!</b>\n\n"
+            f"🎉 <b>Вам выдана VPN подписка ({period_label})!</b>\n\n"
             f"📅 Действует до: <b>{result['expire']}</b>\n"
             f"📶 Трафик: <b>{traffic_str}</b>\n\n"
             f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
             "Скопируй ссылку и вставь в приложение (Happ, v2rayNG и др.)"
         )
+
+
+# ── Запрос на одобрение подписки (от юзера) ──────────────────────────────────
+
+async def handle_request_sub(query, context):
+    """Юзер нажал '👤 Моя подписка' и у него нет подписки — отправляем запрос админу."""
+    user = query.from_user
+    cfg = load_config()
+    if not _paid_presets_ready(cfg):
+        await query.edit_message_text(
+            "👤 <b>Моя подписка</b>\n\nПодписки пока недоступны. Попробуйте позже.",
+            parse_mode="HTML",
+            reply_markup=back_main(),
+        )
+        return
+
+    uname = f"@{user.username}" if user.username else f"id{user.id}"
+    trial_str = fmt_duration(cfg.get("paid_trial_period", 86400))
+
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=(
+            f"🆕 <b>Запрос на подписку</b>\n\n"
+            f"👤 {user.first_name} ({uname})\n"
+            f"🆔 TG ID: <code>{user.id}</code>\n\n"
+            f"Пробный период: <b>{trial_str}</b>\n\n"
+            "Одобрить?"
+        ),
+        parse_mode="HTML",
+        reply_markup=approve_keyboard(user.id),
+    )
+
+    await query.edit_message_text(
+        "👤 <b>Моя подписка</b>\n\n"
+        "📨 Ваш запрос отправлен администратору.\n"
+        "Ожидайте одобрения — вам придёт уведомление.",
+        parse_mode="HTML",
+        reply_markup=back_main(),
+    )
+
+
+async def handle_approve(query, tg_id: int, context):
+    """Админ одобрил подписку — создаём пробный период."""
+    existing = await get_paid_sub_by_tg_id(tg_id)
+    if existing:
+        await query.edit_message_text(
+            f"⚠️ У пользователя <code>{tg_id}</code> уже есть подписка.",
+            parse_mode="HTML",
+        )
+        return
+
+    async def _edit(txt, **kw):
+        await query.edit_message_text(txt, **kw)
+
+    await do_create_paid_sub(query, tg_id, context, _edit, trial=True)
+
+
+async def handle_reject(query, tg_id: int, context):
+    """Админ отклонил запрос."""
+    await query.edit_message_text(
+        f"❌ Запрос от <code>{tg_id}</code> отклонён.",
+        parse_mode="HTML",
+    )
+    await _notify_user(context.bot, tg_id,
+        "❌ Ваш запрос на подписку был <b>отклонён</b> администратором."
+    )
 
 
 # ── Просмотр подписки ─────────────────────────────────────────────────────────
@@ -335,16 +558,13 @@ async def handle_paid_sub_toggle(query, sub_id: int, context=None):
     if not result["success"]:
         await query.edit_message_text(
             f"❌ Ошибка: <code>{result['error']}</code>",
-            parse_mode="HTML",
-            reply_markup=back_admin(),
+            parse_mode="HTML", reply_markup=back_admin(),
         )
         return
 
     if context and tg_id:
         status_text = "✅ включена" if new_state else "⏸ приостановлена"
-        await _notify_user(context.bot, tg_id,
-            f"ℹ️ Ваша подписка <b>{status_text}</b>."
-        )
+        await _notify_user(context.bot, tg_id, f"ℹ️ Ваша подписка <b>{status_text}</b>.")
 
     await handle_paid_sub_view(query, sub_id)
 
@@ -367,9 +587,7 @@ async def handle_paid_sub_delete(query, sub_id: int, context=None):
     await delete_paid_sub(sub_id)
 
     if context and tg_id:
-        await _notify_user(context.bot, tg_id,
-            "🗑 Ваша подписка была <b>удалена</b>."
-        )
+        await _notify_user(context.bot, tg_id, "🗑 Ваша подписка была <b>удалена</b>.")
 
     await query.edit_message_text(
         f"🗑 Подписка удалена из базы.\n{panel_status}",

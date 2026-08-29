@@ -29,18 +29,24 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
 
 def paid_presets_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📅 Дата окончания", callback_data="paid_preset_expire")],
+        [InlineKeyboardButton("🆓 Пробный период", callback_data="paid_preset_trial")],
+        [InlineKeyboardButton("💰 Период оплаты", callback_data="paid_preset_pay_period")],
+        [InlineKeyboardButton("⏳ Время на продление", callback_data="paid_preset_renew")],
+        [InlineKeyboardButton("💵 Сумма подписки", callback_data="paid_preset_price")],
+        [InlineKeyboardButton("🔗 Ссылка на оплату", callback_data="paid_preset_pay_url")],
         [InlineKeyboardButton("🌐 Лимит IP", callback_data="paid_preset_ip")],
         [InlineKeyboardButton("🖥 Лимит HWID", callback_data="paid_preset_hwid")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="paid_preset_traffic")],
-        [InlineKeyboardButton("📡 Инбаунды подписки", callback_data="paid_inbounds_menu")],
+        [InlineKeyboardButton("📡 Инбаунды создания", callback_data="paid_inbounds_menu")],
+        [InlineKeyboardButton("📡 Инбаунды окончания", callback_data="paid_inbounds_expire_menu")],
         [InlineKeyboardButton("◀️ Назад к подпискам", callback_data="paid_subs")],
     ])
 
 
-def paid_inbounds_keyboard(inbounds: list, selected_ids: list) -> InlineKeyboardMarkup:
+def paid_inbounds_keyboard(inbounds: list, selected_ids: list, mode: str = "create") -> InlineKeyboardMarkup:
     kb = []
     selected_set = set(int(i) for i in selected_ids)
+    prefix = "paid_toggle_inbound" if mode == "create" else "paid_toggle_inbound_expire"
     for inb in inbounds:
         ib_id = inb.get("id")
         protocol = inb.get("protocol", "?")
@@ -49,7 +55,7 @@ def paid_inbounds_keyboard(inbounds: list, selected_ids: list) -> InlineKeyboard
         mark = "✅" if ib_id in selected_set else "🔘"
         kb.append([InlineKeyboardButton(
             f"{mark} {tag} ({protocol}:{port})",
-            callback_data=f"paid_toggle_inbound:{ib_id}",
+            callback_data=f"{prefix}:{ib_id}",
         )])
     kb.append([InlineKeyboardButton("◀️ Назад к настройкам", callback_data="paid_sub_presets")])
     return InlineKeyboardMarkup(kb)
@@ -61,4 +67,11 @@ def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardM
         [InlineKeyboardButton(toggle_label, callback_data=f"paid_sub_toggle:{sub_id}")],
         [InlineKeyboardButton("🗑 Удалить", callback_data=f"paid_sub_delete:{sub_id}")],
         [InlineKeyboardButton("◀️ К списку", callback_data="paid_subs")],
+    ])
+
+
+def approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Одобрить", callback_data=f"paid_approve:{tg_id}")],
+        [InlineKeyboardButton("❌ Отклонить", callback_data=f"paid_reject:{tg_id}")],
     ])
