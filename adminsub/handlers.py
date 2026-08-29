@@ -3,7 +3,7 @@ from telegram.ext import ContextTypes
 from config import load_config, save_config
 from keyboards import back_admin
 from adminsub.storage import list_subs, add_sub, get_sub, delete_sub
-from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard
+from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard, inbounds_keyboard
 
 
 def _presets_ready(cfg: dict) -> bool:
@@ -21,11 +21,14 @@ def _fmt_presets(cfg: dict) -> str:
         traf = "безлимит"
     else:
         traf = f"{traf_raw} ГБ"
+    inbound_ids = cfg.get("preset_inbound_ids") or []
+    inb_label = ", ".join(str(i) for i in inbound_ids) if inbound_ids else "авто (первый VLESS)"
     return (
         f"📅 Дата окончания: <b>{exp}</b>\n"
         f"🌐 Лимит IP: <b>{ip}</b>\n"
         f"🖥 Лимит HWID: <b>{hwid}</b>\n"
-        f"📶 Трафик: <b>{traf}</b>"
+        f"📶 Трафик: <b>{traf}</b>\n"
+        f"📡 Инбаунды: <b>{inb_label}</b>"
     )
 
 
@@ -95,7 +98,64 @@ async def handle_preset_traffic(query, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def handle_create_sub(query):
+async def handle_inbounds_menu(query):
+    from xui_api import get_inbounds
+    await query.edit_message_text("⏳ Загружаю инбаунды из панели...")
+    result = await get_inbounds()
+    if not result["success"]:
+        await query.edit_message_text(
+            f"❌ Не удалось загрузить инбаунды:\n<code>{result['error']}</code>",
+            parse_mode="HTML",
+            reply_markup=back_admin(),
+        )
+        return
+    inbounds = result["inbounds"]
+    if not inbounds:
+        await query.edit_message_text(
+            "❌ На панели нет инбаундов.",
+            reply_markup=back_admin(),
+        )
+        return
+    cfg = load_config()
+    selected = cfg.get("preset_inbound_ids") or []
+    await query.edit_message_text(
+        "📡 <b>Инбаунды подписки</b>\n\n"
+        "Нажми на инбаунд чтобы выбрать/снять.\n"
+        "✅ — выбран, 🔘 — не выбран\n\n"
+        "Если ничего не выбрано — автоматически берётся первый VLESS.",
+        parse_mode="HTML",
+        reply_markup=inbounds_keyboard(inbounds, selected),
+    )
+
+
+async def handle_toggle_inbound(query, inbound_id: int):
+    from xui_api import get_inbounds
+    cfg = load_config()
+    selected = list(cfg.get("preset_inbound_ids") or [])
+    if inbound_id in selected:
+        selected.remove(inbound_id)
+    else:
+        selected.append(inbound_id)
+    cfg["preset_inbound_ids"] = selected
+    save_config(cfg)
+
+    # перезагрузить список
+    result = await get_inbounds()
+    if not result["success"]:
+        await query.answer("Список инбаундов обновить не удалось", show_alert=True)
+        return
+    inbounds = result["inbounds"]
+    await query.edit_message_text(
+        "📡 <b>Инбаунды подписки</b>\n\n"
+        "Нажми на инбаунд чтобы выбрать/снять.\n"
+        "✅ — выбран, 🔘 — не выбран\n\n"
+        "Если ничего не выбрано — автоматически берётся первый VLESS.",
+        parse_mode="HTML",
+        reply_markup=inbounds_keyboard(inbounds, selected),
+    )
+
+
+async def handle_create_sub(query, context: ContextTypes.DEFAULT_TYPE):
     cfg = load_config()
     if not _presets_ready(cfg):
         await query.edit_message_text(
@@ -103,8 +163,21 @@ async def handle_create_sub(query):
             reply_markup=back_admin(),
         )
         return
+    from states import AWAITING_SUB_TG_ID
+    context.user_data["state"] = AWAITING_SUB_TG_ID
+    await query.edit_message_text(
+        "👤 <b>Введи Telegram ID пользователя</b>\n\n"
+        "Пользователь должен написать боту хотя бы раз.\n"
+        "ID можно узнать через @userinfobot\n\n"
+        "Введи числовой ID:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
 
-    await query.edit_message_text("⏳ Создаю подписку в 3x-UI...")
+
+async def do_create_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_TYPE, reply_func):
+    cfg = load_config()
+    await reply_func("⏳ Создаю подписку в 3x-UI...")
 
     from xui_api import create_client
     result = await create_client(
@@ -115,10 +188,9 @@ async def handle_create_sub(query):
     )
 
     if not result["success"]:
-        await query.edit_message_text(
+        await reply_func(
             f"❌ <b>Ошибка создания подписки</b>\n\n<code>{result['error']}</code>",
             parse_mode="HTML",
-            reply_markup=back_admin(),
         )
         return
 
@@ -131,17 +203,18 @@ async def handle_create_sub(query):
         limit_ip=int(cfg["preset_ip"]),
         limit_hwid=int(cfg["preset_hwid"]),
         total_gb=int(cfg["preset_traffic"]),
+        tg_id=tg_id,
     )
 
     traffic_str = f"{cfg['preset_traffic']} ГБ" if int(cfg["preset_traffic"]) > 0 else "безлимит"
-    await query.edit_message_text(
+    await reply_func(
         "✅ <b>Подписка создана!</b>\n\n"
-        f"👤 Email: <code>{result['email']}</code>\n"
+        f"👤 TG ID: <code>{tg_id}</code>\n"
+        f"📧 Email: <code>{result['email']}</code>\n"
         f"📅 До: <b>{result['expire']}</b>\n"
         f"📶 Трафик: <b>{traffic_str}</b>\n\n"
         f"🔗 Ссылка:\n<code>{result['sub_url']}</code>",
         parse_mode="HTML",
-        reply_markup=back_admin(),
     )
 
 
@@ -150,11 +223,13 @@ async def handle_sub_view(query, sub_id: int):
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    _, email, uuid_val, sub_id_str, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
+    _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
+    tg_line = f"👤 TG ID: <code>{tg_id}</code>\n" if tg_id else ""
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b>\n\n"
-        f"👤 Email: <code>{email}</code>\n"
+        + tg_line +
+        f"📧 Email: <code>{email}</code>\n"
         f"🆔 UUID: <code>{uuid_val}</code>\n"
         f"📅 До: <b>{expire}</b>\n"
         f"🌐 Лимит IP: <b>{limit_ip}</b>\n"

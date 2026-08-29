@@ -3,10 +3,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 def subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bool) -> InlineKeyboardMarkup:
     kb = []
-    for sub_id, email, expire, total_gb, _ in rows:
+    for row in rows:
+        sub_id, tg_id, email, expire, total_gb, _ = row
         traffic = f"{total_gb}ГБ" if total_gb > 0 else "∞"
+        tg_label = f"tg:{tg_id} · " if tg_id else ""
         kb.append([InlineKeyboardButton(
-            f"{email} · до {expire} · {traffic}",
+            f"{tg_label}{email} · до {expire} · {traffic}",
             callback_data=f"sub_view:{sub_id}",
         )])
     if total_pages > 1:
@@ -31,8 +33,26 @@ def presets_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🌐 Лимит IP", callback_data="preset_ip")],
         [InlineKeyboardButton("🖥 Лимит HWID", callback_data="preset_hwid")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="preset_traffic")],
+        [InlineKeyboardButton("📡 Инбаунды подписки", callback_data="inbounds_menu")],
         [InlineKeyboardButton("◀️ Назад к подпискам", callback_data="admin_subs")],
     ])
+
+
+def inbounds_keyboard(inbounds: list, selected_ids: list) -> InlineKeyboardMarkup:
+    kb = []
+    selected_set = set(int(i) for i in selected_ids)
+    for inb in inbounds:
+        ib_id = inb.get("id")
+        protocol = inb.get("protocol", "?")
+        tag = inb.get("tag") or inb.get("remark") or f"#{ib_id}"
+        port = inb.get("port", "")
+        mark = "✅" if ib_id in selected_set else "🔘"
+        kb.append([InlineKeyboardButton(
+            f"{mark} {tag} ({protocol}:{port})",
+            callback_data=f"toggle_inbound:{ib_id}",
+        )])
+    kb.append([InlineKeyboardButton("◀️ Назад к настройкам", callback_data="sub_presets")])
+    return InlineKeyboardMarkup(kb)
 
 
 def sub_view_keyboard(sub_id: int) -> InlineKeyboardMarkup:

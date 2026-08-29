@@ -5,12 +5,13 @@ SUBS_PER_PAGE = 8
 
 
 async def add_sub(email: str, uuid_val: str, sub_id: str, sub_url: str,
-                  expire_date: str, limit_ip: int, limit_hwid: int, total_gb: int) -> int:
+                  expire_date: str, limit_ip: int, limit_hwid: int, total_gb: int,
+                  tg_id: int | None = None) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
-            INSERT INTO admin_subs (email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (email, uuid_val, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb))
+            INSERT INTO admin_subs (tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (tg_id, email, uuid_val, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb))
         await db.commit()
         return cur.lastrowid
 
@@ -21,7 +22,7 @@ async def list_subs(page: int = 1) -> tuple[list, int]:
         async with db.execute("SELECT COUNT(*) FROM admin_subs") as cur:
             total = (await cur.fetchone())[0]
         async with db.execute("""
-            SELECT id, email, expire_date, total_gb, created_at
+            SELECT id, tg_id, email, expire_date, total_gb, created_at
             FROM admin_subs
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
@@ -34,9 +35,19 @@ async def list_subs(page: int = 1) -> tuple[list, int]:
 async def get_sub(sub_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at
+            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at
             FROM admin_subs WHERE id = ?
         """, (sub_id,)) as cur:
+            return await cur.fetchone()
+
+
+async def get_sub_by_tg_id(tg_id: int) -> tuple | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at
+            FROM admin_subs WHERE tg_id = ?
+            ORDER BY created_at DESC LIMIT 1
+        """, (tg_id,)) as cur:
             return await cur.fetchone()
 
 

@@ -12,6 +12,9 @@ AWAITING_XUI_TOKEN = "awaiting_xui_token"
 AWAITING_XUI_SUB_PORT = "awaiting_xui_sub_port"
 AWAITING_XUI_SUB_PATH = "awaiting_xui_sub_path"
 
+# Создание подписки
+AWAITING_SUB_TG_ID = "awaiting_sub_tg_id"
+
 # Настройки-пресеты для админских подписок
 AWAITING_PRESET_EXPIRE = "awaiting_preset_expire"
 AWAITING_PRESET_IP = "awaiting_preset_ip"

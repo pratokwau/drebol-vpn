@@ -67,6 +67,24 @@ async def _post(session: aiohttp.ClientSession, url: str, body: dict) -> tuple[d
         return None, f"{type(e).__name__}: {e}"
 
 
+async def get_inbounds() -> dict:
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "URL или токен не заданы"}
+    s = _session(token)
+    try:
+        data, err = await _get(s, f"{url}/panel/api/inbounds/list")
+        if data is None:
+            return {"success": False, "error": err}
+        if not data.get("success"):
+            return {"success": False, "error": str(data)}
+        return {"success": True, "inbounds": data.get("obj") or []}
+    finally:
+        await s.close()
+
+
 async def test_connection() -> dict:
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")
@@ -120,9 +138,15 @@ async def create_client(
 
     s = _session(token)
     try:
-        inbound_id, ierr = await _fetch_inbound_id(s, url)
-        if not inbound_id:
-            return {"success": False, "error": f"Не найден инбаунд: {ierr}"}
+        preset_inbound_ids = cfg.get("preset_inbound_ids") or []
+        if preset_inbound_ids:
+            inbound_ids = [int(i) for i in preset_inbound_ids]
+            inbound_id = inbound_ids[0]
+        else:
+            inbound_id, ierr = await _fetch_inbound_id(s, url)
+            if not inbound_id:
+                return {"success": False, "error": f"Не найден инбаунд: {ierr}"}
+            inbound_ids = [int(inbound_id)]
 
         expire_ms = date_to_ms(expire_date)
         client_uuid = str(uuid.uuid4())
@@ -143,7 +167,7 @@ async def create_client(
             "reset": 0,
         }
 
-        payload = {"inboundIds": [int(inbound_id)], "client": client}
+        payload = {"inboundIds": inbound_ids, "client": client}
         data, err = await _post(s, f"{url}/panel/api/clients/add", payload)
 
         if data is None or not data.get("success"):

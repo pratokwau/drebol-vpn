@@ -29,6 +29,7 @@ async def init_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS admin_subs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER,
                 email TEXT NOT NULL,
                 uuid TEXT NOT NULL,
                 sub_id TEXT NOT NULL,
@@ -40,6 +41,11 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # миграция для существующих баз
+        try:
+            await db.execute("ALTER TABLE admin_subs ADD COLUMN tg_id INTEGER")
+        except Exception:
+            pass
         await db.commit()
 
 

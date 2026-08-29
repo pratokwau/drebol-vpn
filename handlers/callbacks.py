@@ -18,6 +18,7 @@ from adminsub.handlers import (
     handle_admin_subs_menu, handle_presets_menu,
     handle_preset_expire, handle_preset_ip, handle_preset_hwid, handle_preset_traffic,
     handle_create_sub, handle_sub_view, handle_sub_delete,
+    handle_inbounds_menu, handle_toggle_inbound,
 )
 
 
@@ -143,7 +144,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("subs_page:"):
         await handle_admin_subs_menu(query, int(data.split(":")[1]))
     elif data == "create_sub":
-        await handle_create_sub(query)
+        await handle_create_sub(query, context)
     elif data == "sub_presets":
         await handle_presets_menu(query)
     elif data == "preset_expire":
@@ -158,3 +159,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_sub_view(query, int(data.split(":")[1]))
     elif data.startswith("sub_delete:"):
         await handle_sub_delete(query, int(data.split(":")[1]))
+    elif data == "inbounds_menu":
+        await handle_inbounds_menu(query)
+    elif data.startswith("toggle_inbound:"):
+        await handle_toggle_inbound(query, int(data.split(":")[1]))
