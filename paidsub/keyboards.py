@@ -22,7 +22,10 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
 
     create_label = "➕ Создать подписку" if presets_ready else "➕ Создать (сначала настройки)"
     kb.append([InlineKeyboardButton(create_label, callback_data="paid_create_sub")])
-    kb.append([InlineKeyboardButton("📜 История", callback_data="paid_history")])
+    kb.append([
+        InlineKeyboardButton("📜 История", callback_data="paid_history"),
+        InlineKeyboardButton("🔇 Заглушённые", callback_data="paid_muted_list"),
+    ])
     kb.append([InlineKeyboardButton("⚙️ Настройки", callback_data="paid_sub_presets")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     return InlineKeyboardMarkup(kb)
@@ -62,17 +65,14 @@ def paid_inbounds_keyboard(inbounds: list, selected_ids: list, mode: str = "crea
     return InlineKeyboardMarkup(kb)
 
 
-def paid_sub_view_keyboard(sub_id: int, enabled: bool = True, muted: bool = False) -> InlineKeyboardMarkup:
+def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardMarkup:
     toggle_label = "⏸ Отключить" if enabled else "▶️ Включить"
-    mute_label = "🔊 Разглушить" if muted else "🔇 Заглушить"
-    mute_data = f"paid_sub_unmute:{sub_id}" if muted else f"paid_sub_mute:{sub_id}"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(toggle_label, callback_data=f"paid_sub_toggle:{sub_id}")],
         [
             InlineKeyboardButton("🧊 Заморозить", callback_data=f"paid_sub_freeze:{sub_id}"),
             InlineKeyboardButton("➕ Добавить срок", callback_data=f"paid_sub_extend:{sub_id}"),
         ],
-        [InlineKeyboardButton(mute_label, callback_data=mute_data)],
         [InlineKeyboardButton("⚙️ Настройки", callback_data=f"paid_sub_settings:{sub_id}")],
         [InlineKeyboardButton("🗑 Удалить", callback_data=f"paid_sub_delete:{sub_id}")],
         [InlineKeyboardButton("◀️ К списку", callback_data="paid_subs")],
@@ -112,4 +112,24 @@ def approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Одобрить", callback_data=f"paid_approve:{tg_id}")],
         [InlineKeyboardButton("❌ Отклонить", callback_data=f"paid_reject:{tg_id}")],
+        [InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}")],
     ])
+
+
+def payment_approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"confirm_payment:{tg_id}")],
+        [InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_payment:{tg_id}")],
+        [InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}")],
+    ])
+
+
+def muted_list_keyboard(muted_rows: list) -> InlineKeyboardMarkup:
+    kb = []
+    for tg_id, muted_until in muted_rows:
+        kb.append([InlineKeyboardButton(
+            f"🔇 {tg_id} · до {muted_until}",
+            callback_data=f"paid_unmute_user:{tg_id}",
+        )])
+    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
+    return InlineKeyboardMarkup(kb)

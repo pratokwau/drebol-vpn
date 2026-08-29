@@ -10,12 +10,13 @@ from paidsub.storage import (
     list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
     add_request, get_pending_request, resolve_request,
     update_paid_sub_field, get_expired_paid_subs,
-    add_history, list_history, get_muted_until,
+    add_history, list_history,
+    get_muted_until, set_mute, clear_mute, list_muted,
 )
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
     paid_inbounds_keyboard, approve_keyboard, paid_sub_settings_keyboard,
-    paid_history_keyboard,
+    paid_history_keyboard, payment_approve_keyboard, muted_list_keyboard,
 )
 from paidsub.time_parser import fmt_duration
 
@@ -592,21 +593,19 @@ async def handle_paid_sub_view(query, sub_id: int):
     else:
         link_line = ""
 
-    muted_until = row[18] if len(row) > 18 else None
-    is_muted = False
     mute_line = ""
-    if muted_until:
-        for fmt_m in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-            try:
-                muted_dt = datetime.strptime(muted_until, fmt_m)
-                break
-            except ValueError:
-                continue
-        else:
+    if tg_id:
+        muted_until = await get_muted_until(tg_id)
+        if muted_until:
             muted_dt = None
-        if muted_dt and datetime.now() < muted_dt:
-            is_muted = True
-            mute_line = f"\n🔇 Заглушен до: <b>{muted_until}</b>\n"
+            for fmt_m in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                try:
+                    muted_dt = datetime.strptime(muted_until, fmt_m)
+                    break
+                except ValueError:
+                    continue
+            if muted_dt and datetime.now() < muted_dt:
+                mute_line = f"\n🔇 Заглушен до: <b>{muted_until}</b>\n"
 
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b> {status_icon}\n\n"
@@ -622,7 +621,7 @@ async def handle_paid_sub_view(query, sub_id: int):
         + (f"\n{link_line}\n" if link_line else "") +
         f"\n🔗 Ссылка:\n<code>{sub_url}</code>",
         parse_mode="HTML",
-        reply_markup=paid_sub_view_keyboard(sub_id, enabled, is_muted),
+        reply_markup=paid_sub_view_keyboard(sub_id, enabled),
         disable_web_page_preview=True,
     )
 
@@ -1078,12 +1077,12 @@ async def handle_paid_history(query, page: int = 1):
 
 # ── Мьют / Размьют ──────────────────────────────────────────────────────────
 
-async def handle_paid_sub_mute(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_MUTE
-    context.user_data["state"] = AWAITING_PAID_SUB_MUTE
-    context.user_data["edit_sub_id"] = sub_id
+async def handle_mute_user(query, tg_id: int, context):
+    from states import AWAITING_PAID_MUTE_USER
+    context.user_data["state"] = AWAITING_PAID_MUTE_USER
+    context.user_data["mute_tg_id"] = tg_id
     await query.edit_message_text(
-        f"🔇 <b>Заглушить подписку #{sub_id}</b>\n\n"
+        f"🔇 <b>Заглушить пользователя {tg_id}</b>\n\n"
         "Введи время блокировки запросов:\n"
         "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
         parse_mode="HTML",
@@ -1091,10 +1090,38 @@ async def handle_paid_sub_mute(query, sub_id: int, context):
     )
 
 
-async def handle_paid_sub_unmute(query, sub_id: int):
-    await update_paid_sub_field(sub_id, "muted_until", None)
-    await query.answer("🔊 Заглушка снята", show_alert=True)
-    await handle_paid_sub_view(query, sub_id)
+async def handle_unmute_user(query, tg_id: int):
+    await clear_mute(tg_id)
+    await query.answer(f"🔊 Пользователь {tg_id} разглушён", show_alert=True)
+    await handle_muted_list(query)
+
+
+async def handle_muted_list(query):
+    from datetime import datetime as dt
+    rows = await list_muted()
+    active = [(tg_id, mu) for tg_id, mu in rows if _is_mute_active(mu)]
+    if not active:
+        await query.edit_message_text(
+            "🔇 <b>Заглушённые</b>\n\nНет заглушённых пользователей.",
+            parse_mode="HTML",
+            reply_markup=muted_list_keyboard([]),
+        )
+        return
+    await query.edit_message_text(
+        "🔇 <b>Заглушённые</b>\n\n"
+        "Нажми на пользователя, чтобы разглушить:",
+        parse_mode="HTML",
+        reply_markup=muted_list_keyboard(active),
+    )
+
+
+def _is_mute_active(muted_until: str) -> bool:
+    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+        try:
+            return datetime.now() < datetime.strptime(muted_until, fmt)
+        except ValueError:
+            continue
+    return False
 
 
 def save_paid_preset(key: str, value):

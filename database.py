@@ -89,16 +89,18 @@ async def init_db():
                     await db.execute(f"ALTER TABLE paid_subs ADD COLUMN {col} INTEGER")
             except Exception:
                 pass
-        try:
-            await db.execute("ALTER TABLE paid_subs ADD COLUMN muted_until TEXT")
-        except Exception:
-            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS paid_sub_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tg_id INTEGER NOT NULL,
                 action TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS paid_mutes (
+                tg_id INTEGER PRIMARY KEY,
+                muted_until TEXT NOT NULL
             )
         """)
         # убираем :443/:80 из существующих sub_url

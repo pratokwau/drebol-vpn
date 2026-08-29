@@ -320,10 +320,8 @@ async def handle_i_paid(query, context):
     else:
         link_line = f'⛓‍💥 <a href="tg://user?id={user.id}">Написать</a>'
 
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"confirm_payment:{user.id}")],
-        [InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_payment:{user.id}")],
-    ])
+    from paidsub.keyboards import payment_approve_keyboard
+    kb = payment_approve_keyboard(user.id)
 
     await context.bot.send_message(
         chat_id=ADMIN_ID,

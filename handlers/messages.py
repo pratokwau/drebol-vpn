@@ -27,7 +27,7 @@ from states import (
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
     AWAITING_PAID_SUB_EDIT_TRIAL, AWAITING_PAID_SUB_EDIT_PAY_PERIOD,
     AWAITING_PAID_SUB_EDIT_RENEW_TIME, AWAITING_PAID_SUB_EDIT_PRICE,
-    AWAITING_PAID_SUB_EDIT_PAY_URL, AWAITING_PAID_SUB_MUTE,
+    AWAITING_PAID_SUB_EDIT_PAY_URL, AWAITING_PAID_MUTE_USER,
 )
 from handlers.broadcast import do_broadcast
 
@@ -593,7 +593,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Мьют пользователя ───────────────────────────────────────────────────────
-    if state == AWAITING_PAID_SUB_MUTE:
+    if state == AWAITING_PAID_MUTE_USER:
         seconds = parse_duration(text)
         if not seconds:
             await update.message.reply_text(
@@ -601,17 +601,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML", reply_markup=back_admin(),
             )
             return
-        sub_id = context.user_data.pop("edit_sub_id", None)
+        mute_tg_id = context.user_data.pop("mute_tg_id", None)
         context.user_data.pop("state", None)
-        if sub_id:
-            from paidsub.storage import update_paid_sub_field
+        if mute_tg_id:
+            from paidsub.storage import set_mute
             muted_until = (datetime.now() + timedelta(seconds=seconds)).strftime("%d.%m.%Y %H:%M:%S")
-            await update_paid_sub_field(sub_id, "muted_until", muted_until)
+            await set_mute(mute_tg_id, muted_until)
             await update.message.reply_text(
-                f"🔇 Заглушка установлена до <b>{muted_until}</b>\n"
+                f"🔇 Пользователь <code>{mute_tg_id}</code> заглушён до <b>{muted_until}</b>\n"
                 f"({fmt_duration(seconds)})",
                 parse_mode="HTML", reply_markup=back_admin(),
             )
             return
-        await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        await update.message.reply_text("❌ Пользователь не найден.", reply_markup=back_admin())
         return
