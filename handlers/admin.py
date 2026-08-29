@@ -6,11 +6,8 @@ from states import AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL
 
 
 async def handle_admin_panel(query):
-    cfg = load_config()
-    channel_url = cfg.get("channel_url", "")
-    channel_info = f"\n📢 Канал: <code>{channel_url}</code>" if channel_url else "\n📢 Канал: не задан"
     await query.edit_message_text(
-        f"⚙️ <b>Панель администратора</b>{channel_info}\n\nВыбери действие:",
+        "⚙️ <b>Панель администратора</b>\n\nВыбери действие:",
         parse_mode="HTML",
         reply_markup=admin_keyboard(),
     )
