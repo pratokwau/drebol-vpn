@@ -155,32 +155,35 @@ async def get_client_traffic(email: str) -> dict:
         return {"success": False, "error": "URL или токен не заданы"}
     s = _session(token)
     try:
-        safe_email = quote(email, safe="")
-        data, err = await _get(s, f"{url}/panel/api/clients/get/{safe_email}")
+        # clientStats лежат внутри инбаундов
+        data, err = await _get(s, f"{url}/panel/api/inbounds/list")
         if data and data.get("success"):
-            obj = data.get("obj") or {}
-            if isinstance(obj, dict):
-                client = obj.get("client") or obj
-            else:
-                client = obj
-            if isinstance(client, dict):
-                return {"success": True, "up": client.get("up", 0), "down": client.get("down", 0)}
-        # фолбэк: ищем в инбаундах
-        data2, err2 = await _get(s, f"{url}/panel/api/inbounds/list")
-        if data2 and data2.get("success"):
-            for inb in (data2.get("obj") or []):
-                clients_str = (inb.get("settings") or "")
-                try:
-                    settings = json.loads(clients_str) if isinstance(clients_str, str) else clients_str
-                    for c in settings.get("clients", []):
-                        if c.get("email") == email:
-                            stats = inb.get("clientStats") or []
-                            for st in stats:
-                                if st.get("email") == email:
-                                    return {"success": True, "up": st.get("up", 0), "down": st.get("down", 0)}
-                except Exception:
-                    pass
-        return {"success": False, "error": "Клиент не найден"}
+            for inb in (data.get("obj") or []):
+                stats = inb.get("clientStats") or []
+                for st in stats:
+                    if st.get("email") == email:
+                        return {"success": True, "up": st.get("up", 0), "down": st.get("down", 0)}
+
+        # отдельный эндпоинт (некоторые версии)
+        safe_email = quote(email, safe="")
+        for path in (
+            f"/panel/api/clients/get/{safe_email}",
+            f"/panel/api/inbounds/getClientTraffics/{safe_email}",
+        ):
+            data2, _ = await _get(s, f"{url}{path}")
+            if data2 and data2.get("success"):
+                obj = data2.get("obj")
+                if isinstance(obj, dict):
+                    up = obj.get("up", 0)
+                    down = obj.get("down", 0)
+                    if up or down:
+                        return {"success": True, "up": up, "down": down}
+                elif isinstance(obj, list):
+                    for item in obj:
+                        if isinstance(item, dict) and item.get("email") == email:
+                            return {"success": True, "up": item.get("up", 0), "down": item.get("down", 0)}
+
+        return {"success": True, "up": 0, "down": 0}
     except Exception as e:
         return {"success": False, "error": f"{type(e).__name__}: {e}"}
     finally:
