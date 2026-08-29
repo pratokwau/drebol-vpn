@@ -25,6 +25,9 @@ from states import (
     AWAITING_PAID_SUB_EXTEND,
     AWAITING_PAID_SUB_EDIT_EXPIRE, AWAITING_PAID_SUB_EDIT_IP,
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
+    AWAITING_PAID_SUB_EDIT_TRIAL, AWAITING_PAID_SUB_EDIT_PAY_PERIOD,
+    AWAITING_PAID_SUB_EDIT_RENEW_TIME, AWAITING_PAID_SUB_EDIT_PRICE,
+    AWAITING_PAID_SUB_EDIT_PAY_URL,
 )
 from handlers.broadcast import do_broadcast
 
@@ -425,6 +428,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
                 await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
                 await update_paid_sub_field(sub_id, "status", "active")
+                from xui_api import update_client_expire, toggle_client, get_client_info
+                await update_client_expire(row[2], new_expire_str)
+                info = await get_client_info(row[2])
+                if info.get("success") and not info.get("enabled", True):
+                    await toggle_client(row[2], True)
                 from paidsub.time_parser import fmt_duration as fmt_dur
                 await update.message.reply_text(
                     f"✅ Срок продлён на <b>{fmt_dur(seconds)}</b>\n"
@@ -452,9 +460,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
         if sub_id:
-            from paidsub.storage import update_paid_sub_field
+            from paidsub.storage import update_paid_sub_field, get_paid_sub
             await update_paid_sub_field(sub_id, "expire_date", text)
             await update_paid_sub_field(sub_id, "status", "active")
+            r = await get_paid_sub(sub_id)
+            if r:
+                from xui_api import update_client_expire
+                await update_client_expire(r[2], text)
         await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -498,4 +510,80 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             from paidsub.storage import update_paid_sub_field
             await update_paid_sub_field(sub_id, "total_gb", val)
         await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Платные подписки: индивидуальные время-настройки ─────────────────────────
+    if state == AWAITING_PAID_SUB_EDIT_TRIAL:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>5 часов</code>, <code>7 дней</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            await update_paid_sub_field(sub_id, "ind_trial_period", seconds)
+        from paidsub.time_parser import fmt_duration as fmt_dur
+        await update.message.reply_text(f"✅ Пробный период: <b>{fmt_dur(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_SUB_EDIT_PAY_PERIOD:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>30 дней</code>, <code>1 месяц</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            await update_paid_sub_field(sub_id, "ind_pay_period", seconds)
+        from paidsub.time_parser import fmt_duration as fmt_dur
+        await update.message.reply_text(f"✅ Период оплаты: <b>{fmt_dur(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_SUB_EDIT_RENEW_TIME:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>3 дня</code>, <code>12 часов</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            await update_paid_sub_field(sub_id, "ind_renew_time", seconds)
+        from paidsub.time_parser import fmt_duration as fmt_dur
+        await update.message.reply_text(f"✅ Время на продление: <b>{fmt_dur(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_SUB_EDIT_PRICE:
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число (сумма в рублях).", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            await update_paid_sub_field(sub_id, "ind_price", int(text))
+        await update.message.reply_text(f"✅ Сумма: <b>{text} ₽</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_SUB_EDIT_PAY_URL:
+        if not text.startswith("http"):
+            await update.message.reply_text("❌ Ссылка должна начинаться с http.", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            await update_paid_sub_field(sub_id, "ind_pay_url", text)
+        await update.message.reply_text("✅ Ссылка на оплату сохранена.", reply_markup=back_admin())
         return

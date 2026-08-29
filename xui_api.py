@@ -208,6 +208,7 @@ async def toggle_client(email: str, enable: bool) -> dict:
             return {"success": False, "error": "Клиент не найден в панели"}
 
         client_obj["enable"] = enable
+        client_obj["flow"] = "xtls-rprx-vision"
         safe_uuid = quote(client_obj.get("id", ""), safe="")
         safe_email = quote(email, safe="")
 
@@ -372,6 +373,7 @@ async def update_client_expire(email: str, new_expire_str: str) -> dict:
 
         new_expire_ms = date_to_ms(new_expire_str)
         client_obj["expiryTime"] = new_expire_ms
+        client_obj["flow"] = "xtls-rprx-vision"
 
         safe_uuid = quote(client_obj.get("id", ""), safe="")
         safe_email = quote(email, safe="")
@@ -422,6 +424,7 @@ async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
         if not client_obj:
             return {"success": False, "error": "Клиент не найден в панели"}
 
+        client_obj["flow"] = "xtls-rprx-vision"
         real_ids = {inb.get("id") for inb in (data.get("obj") or [])}
         valid_targets = [int(i) for i in target_inbound_ids if int(i) in real_ids]
         if not valid_targets:

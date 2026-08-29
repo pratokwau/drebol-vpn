@@ -34,7 +34,8 @@ async def list_paid_subs(page: int = 1) -> tuple[list, int]:
 async def get_paid_sub(sub_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at
+            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at,
+                   status, payment_pending, ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url
             FROM paid_subs WHERE id = ?
         """, (sub_id,)) as cur:
             return await cur.fetchone()
@@ -83,7 +84,8 @@ async def get_all_paid_subs_with_tg() -> list:
 
 
 async def update_paid_sub_field(sub_id: int, field: str, value):
-    allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending"}
+    allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending",
+                "ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:

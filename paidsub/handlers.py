@@ -695,16 +695,39 @@ async def handle_paid_sub_settings(query, sub_id: int):
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    _, tg_id, email, _, _, _, expire, limit_ip, limit_hwid, total_gb, _ = row
+    # row: id,tg_id,email,uuid,sub_id,sub_url,expire,ip,hwid,traffic,created,status,payment_pending,
+    #       ind_trial,ind_pay_period,ind_renew,ind_price,ind_pay_url
+    expire = row[6]
+    limit_ip = row[7]
+    limit_hwid = row[8]
+    total_gb = row[9]
+    ind_trial = row[13] if len(row) > 13 else None
+    ind_pay = row[14] if len(row) > 14 else None
+    ind_renew = row[15] if len(row) > 15 else None
+    ind_price = row[16] if len(row) > 16 else None
+    ind_pay_url = row[17] if len(row) > 17 else None
+
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
     ip_str = str(limit_ip) if limit_ip > 0 else "безлимит"
     hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
+
+    trial_str = fmt_duration(ind_trial) if ind_trial else "общие"
+    pay_str = fmt_duration(ind_pay) if ind_pay else "общие"
+    renew_str = fmt_duration(ind_renew) if ind_renew else "общие"
+    price_str = f"{ind_price} ₽" if ind_price is not None else "общие"
+    pay_url_str = ind_pay_url if ind_pay_url else "общие"
+
     await query.edit_message_text(
         f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
         f"📅 Дата окончания: <b>{expire}</b>\n"
         f"🌐 Лимит IP: <b>{ip_str}</b>\n"
         f"🖥 Лимит HWID: <b>{hwid_str}</b>\n"
-        f"📶 Трафик: <b>{traffic}</b>\n\n"
+        f"📶 Трафик: <b>{traffic}</b>\n"
+        f"🆓 Пробный период: <b>{trial_str}</b>\n"
+        f"💰 Период оплаты: <b>{pay_str}</b>\n"
+        f"⏳ На продление: <b>{renew_str}</b>\n"
+        f"💵 Сумма: <b>{price_str}</b>\n"
+        f"🔗 Ссылка на оплату: <b>{pay_url_str}</b>\n\n"
         "Выбери параметр для изменения:",
         parse_mode="HTML",
         reply_markup=paid_sub_settings_keyboard(sub_id),
@@ -750,6 +773,56 @@ async def handle_paid_sub_edit_traffic(query, sub_id: int, context):
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
         f"📶 <b>Трафик подписки #{sub_id}</b>\n\nВведи число ГБ или <code>-</code> для безлимита:",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_edit_trial(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_TRIAL
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_TRIAL
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"🆓 <b>Пробный период подписки #{sub_id}</b>\n\n{_TIME_HINT}",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_edit_pay_period(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_PAY_PERIOD
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_PAY_PERIOD
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"💰 <b>Период оплаты подписки #{sub_id}</b>\n\n{_TIME_HINT}",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_edit_renew_time(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_RENEW_TIME
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_RENEW_TIME
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"⏳ <b>Время на продление подписки #{sub_id}</b>\n\n{_TIME_HINT}",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_edit_price(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_PRICE
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_PRICE
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"💵 <b>Сумма подписки #{sub_id}</b>\n\nВведи сумму в рублях (число):",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_edit_pay_url(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_PAY_URL
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_PAY_URL
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"🔗 <b>Ссылка на оплату подписки #{sub_id}</b>\n\nВведи URL:",
         parse_mode="HTML", reply_markup=back_admin(),
     )
 

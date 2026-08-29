@@ -81,6 +81,11 @@ def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🌐 Лимит IP", callback_data=f"paid_sub_edit_ip:{sub_id}")],
         [InlineKeyboardButton("🖥 Лимит HWID", callback_data=f"paid_sub_edit_hwid:{sub_id}")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data=f"paid_sub_edit_traffic:{sub_id}")],
+        [InlineKeyboardButton("🆓 Пробный период", callback_data=f"paid_sub_edit_trial:{sub_id}")],
+        [InlineKeyboardButton("💰 Период оплаты", callback_data=f"paid_sub_edit_pay_period:{sub_id}")],
+        [InlineKeyboardButton("⏳ Время на продление", callback_data=f"paid_sub_edit_renew:{sub_id}")],
+        [InlineKeyboardButton("💵 Сумма подписки", callback_data=f"paid_sub_edit_price:{sub_id}")],
+        [InlineKeyboardButton("🔗 Ссылка на оплату", callback_data=f"paid_sub_edit_pay_url:{sub_id}")],
         [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"paid_sub_view:{sub_id}")],
     ])
 
