@@ -18,10 +18,9 @@ def generate_email(length: int = 8) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
-def build_email(tg_id: int, username: str | None) -> str:
-    suffix = username.lower() if username else "nousername"
-    raw = f"{tg_id}_{suffix}"
-    # оставляем только допустимые символы для email-поля 3x-UI
+def build_email(tg_id: int, username: str | None, prefix: str = "") -> str:
+    suffix = username.strip().lower() if username else "nousername"
+    raw = f"{prefix}{tg_id}_{suffix}"
     return "".join(c for c in raw if c.isalnum() or c in ("_", "-", "."))[:50]
 
 

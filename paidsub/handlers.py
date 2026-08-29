@@ -362,7 +362,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
     from database import get_user_info
     user_row = await get_user_info(tg_id)
     username = user_row[2] if user_row else None
-    email = build_email(tg_id, username)
+    email = build_email(tg_id, username, prefix="paid_")
 
     if trial:
         seconds = cfg.get("paid_trial_period", 86400)
