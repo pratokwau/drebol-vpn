@@ -9,10 +9,11 @@ from keyboards import back_admin, back_main
 from paidsub.storage import (
     list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
     add_request, get_pending_request, resolve_request,
+    update_paid_sub_field, get_expired_paid_subs,
 )
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
-    paid_inbounds_keyboard, approve_keyboard,
+    paid_inbounds_keyboard, approve_keyboard, paid_sub_settings_keyboard,
 )
 from paidsub.time_parser import fmt_duration
 
@@ -370,7 +371,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
         seconds = cfg.get("paid_pay_period", 2592000)
 
     expire_dt = datetime.now() + timedelta(seconds=seconds)
-    expire_date = expire_dt.strftime("%d.%m.%Y")
+    expire_date = expire_dt.strftime("%d.%m.%Y %H:%M")
 
     result = await create_client(
         expire_date=expire_date,
@@ -636,6 +637,180 @@ async def handle_paid_sub_delete(query, sub_id: int, context=None):
         f"🗑 Подписка удалена из базы.\n{panel_status}",
         reply_markup=back_admin(),
     )
+
+
+# ── Заморозка ─────────────────────────────────────────────────────────────────
+
+async def handle_paid_sub_freeze(query, sub_id: int, context=None):
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+    tg_id = row[1]
+    email = row[2]
+    from xui_api import get_client_info, toggle_client
+    info = await get_client_info(email)
+    enabled = info.get("enabled", True) if info.get("success") else True
+    if not enabled:
+        await query.answer("Подписка уже заморожена", show_alert=True)
+        return
+    await query.edit_message_text("🧊 Замораживаю подписку...")
+    result = await toggle_client(email, False)
+    if not result["success"]:
+        await query.edit_message_text(
+            f"❌ Ошибка: <code>{result['error']}</code>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+
+    if context and tg_id:
+        await _notify_user(context.bot, tg_id,
+            "🧊 Ваша подписка <b>заморожена</b>. Время действия приостановлено."
+        )
+
+    await handle_paid_sub_view(query, sub_id)
+
+
+# ── Продление срока ──────────────────────────────────────────────────────────
+
+async def handle_paid_sub_extend(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EXTEND
+    context.user_data["state"] = AWAITING_PAID_SUB_EXTEND
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"➕ <b>Добавить срок к подписке #{sub_id}</b>\n\n"
+        "Введи время в свободной форме:\n"
+        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+# ── Индивидуальные настройки платной подписки ─────────────────────────────────
+
+async def handle_paid_sub_settings(query, sub_id: int):
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+    _, tg_id, email, _, _, _, expire, limit_ip, limit_hwid, total_gb, _ = row
+    traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
+    ip_str = str(limit_ip) if limit_ip > 0 else "безлимит"
+    hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
+    await query.edit_message_text(
+        f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
+        f"📅 Дата окончания: <b>{expire}</b>\n"
+        f"🌐 Лимит IP: <b>{ip_str}</b>\n"
+        f"🖥 Лимит HWID: <b>{hwid_str}</b>\n"
+        f"📶 Трафик: <b>{traffic}</b>\n\n"
+        "Выбери параметр для изменения:",
+        parse_mode="HTML",
+        reply_markup=paid_sub_settings_keyboard(sub_id),
+    )
+
+
+async def handle_paid_sub_edit_expire(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_EXPIRE
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_EXPIRE
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"📅 <b>Дата окончания подписки #{sub_id}</b>\n\n"
+        "Введи новую дату:\n"
+        "<code>дд.мм.гггг</code> или <code>дд.мм.гггг чч:мм</code>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_edit_ip(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_IP
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_IP
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"🌐 <b>Лимит IP подписки #{sub_id}</b>\n\nВведи число (0 = безлимит):",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_edit_hwid(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_HWID
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_HWID
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"🖥 <b>Лимит HWID подписки #{sub_id}</b>\n\nВведи число (0 = безлимит):",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_edit_traffic(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_TRAFFIC
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_TRAFFIC
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"📶 <b>Трафик подписки #{sub_id}</b>\n\nВведи число ГБ или <code>-</code> для безлимита:",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+# ── Job: проверка истечения подписок ──────────────────────────────────────────
+
+async def check_expired_subs(context):
+    """Проверяет истёкшие подписки: отключает и меняет инбаунды."""
+    cfg = load_config()
+    renew_seconds = cfg.get("paid_renew_time", 86400)
+    expire_inbound_ids = cfg.get("paid_expire_inbound_ids") or []
+
+    subs = await get_expired_paid_subs()
+    now = datetime.now()
+
+    for row in subs:
+        sub_id, tg_id, email, uuid_val, sub_id_str, sub_url, expire_str = row
+        try:
+            for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                try:
+                    expire_dt = datetime.strptime(expire_str, fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                continue
+        except Exception:
+            continue
+
+        if now < expire_dt:
+            continue
+
+        # Подписка истекла — проверяем время на продление
+        renew_deadline = expire_dt + timedelta(seconds=renew_seconds)
+
+        from xui_api import get_client_info, toggle_client
+        info = await get_client_info(email)
+        if not info.get("success"):
+            continue
+        enabled = info.get("enabled", True)
+
+        if now < renew_deadline:
+            # Ещё есть время на продление — уведомляем если ещё включена
+            if enabled and tg_id:
+                price = cfg.get("paid_price", 0)
+                pay_url = cfg.get("paid_pay_url", "")
+                pay_line = f'\n\n🔗 <a href="{pay_url}">Оплатить {price} ₽</a>' if pay_url else ""
+                await _notify_user(context.bot, tg_id,
+                    f"⚠️ Ваша подписка <b>истекла</b>.\n"
+                    f"У вас есть <b>{fmt_duration(renew_seconds)}</b> на продление."
+                    f"{pay_line}"
+                )
+        else:
+            # Время на продление вышло — отключаем
+            if enabled:
+                await toggle_client(email, False)
+                if tg_id:
+                    await _notify_user(context.bot, tg_id,
+                        "🔴 Ваша подписка <b>отключена</b>. Время на продление истекло."
+                    )
+
+            # Меняем инбаунды если настроены инбаунды окончания
+            # TODO: реализовать смену инбаундов через API когда 3x-UI поддержит
 
 
 def save_paid_preset(key: str, value):

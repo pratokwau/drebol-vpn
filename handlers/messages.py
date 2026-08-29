@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -22,6 +22,9 @@ from states import (
     AWAITING_PAID_PRESET_TRAFFIC,
     AWAITING_PAID_TRIAL_PERIOD, AWAITING_PAID_PAY_PERIOD,
     AWAITING_PAID_RENEW_TIME, AWAITING_PAID_PRICE, AWAITING_PAID_PAY_URL,
+    AWAITING_PAID_SUB_EXTEND,
+    AWAITING_PAID_SUB_EDIT_EXPIRE, AWAITING_PAID_SUB_EDIT_IP,
+    AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
 )
 from handlers.broadcast import do_broadcast
 
@@ -390,4 +393,108 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("paid_preset_traffic", val)
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Трафик: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Платные подписки: продление срока ────────────────────────────────────────
+    if state == AWAITING_PAID_SUB_EXTEND:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>5 часов</code>, <code>7 дней</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import get_paid_sub, update_paid_sub_field
+            row = await get_paid_sub(sub_id)
+            if row:
+                expire_str = row[6]
+                for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                    try:
+                        expire_dt = datetime.strptime(expire_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    expire_dt = datetime.now()
+                if expire_dt < datetime.now():
+                    expire_dt = datetime.now()
+                new_expire = expire_dt + timedelta(seconds=seconds)
+                new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M")
+                await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
+                from xui_api import date_to_ms, get_client_info
+                from paidsub.time_parser import fmt_duration as fmt_dur
+                await update.message.reply_text(
+                    f"✅ Срок продлён на <b>{fmt_dur(seconds)}</b>\n"
+                    f"📅 Новая дата: <b>{new_expire_str}</b>",
+                    parse_mode="HTML", reply_markup=back_admin(),
+                )
+                return
+        await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+
+    # ── Платные подписки: индивидуальные настройки ──────────────────────────────
+    if state == AWAITING_PAID_SUB_EDIT_EXPIRE:
+        for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y"):
+            try:
+                datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            await update.message.reply_text(
+                "❌ Формат: <code>дд.мм.гггг</code> или <code>дд.мм.гггг чч:мм</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            await update_paid_sub_field(sub_id, "expire_date", text)
+        await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_SUB_EDIT_IP:
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            await update_paid_sub_field(sub_id, "limit_ip", int(text))
+        await update.message.reply_text(f"✅ Лимит IP обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_SUB_EDIT_HWID:
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            await update_paid_sub_field(sub_id, "limit_hwid", int(text))
+        await update.message.reply_text(f"✅ Лимит HWID обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_SUB_EDIT_TRAFFIC:
+        if text == "-":
+            val = 0
+            label = "безлимит"
+        elif text.isdigit():
+            val = int(text)
+            label = f"{val} ГБ" if val > 0 else "безлимит"
+        else:
+            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field
+            await update_paid_sub_field(sub_id, "total_gb", val)
+        await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return

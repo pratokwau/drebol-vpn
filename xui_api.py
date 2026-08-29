@@ -25,8 +25,13 @@ def build_email(tg_id: int, username: str | None, prefix: str = "") -> str:
 
 
 def date_to_ms(date_str: str) -> int:
-    dt = datetime.strptime(date_str, "%d.%m.%Y")
-    return int(dt.timestamp() * 1000)
+    for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y"):
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            return int(dt.timestamp() * 1000)
+        except ValueError:
+            continue
+    raise ValueError(f"Cannot parse date: {date_str}")
 
 
 def gb_to_bytes(gb: float) -> int:

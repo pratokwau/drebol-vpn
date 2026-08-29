@@ -65,8 +65,23 @@ def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardM
     toggle_label = "⏸ Отключить" if enabled else "▶️ Включить"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(toggle_label, callback_data=f"paid_sub_toggle:{sub_id}")],
+        [
+            InlineKeyboardButton("🧊 Заморозить", callback_data=f"paid_sub_freeze:{sub_id}"),
+            InlineKeyboardButton("➕ Добавить срок", callback_data=f"paid_sub_extend:{sub_id}"),
+        ],
+        [InlineKeyboardButton("⚙️ Настройки", callback_data=f"paid_sub_settings:{sub_id}")],
         [InlineKeyboardButton("🗑 Удалить", callback_data=f"paid_sub_delete:{sub_id}")],
         [InlineKeyboardButton("◀️ К списку", callback_data="paid_subs")],
+    ])
+
+
+def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📅 Дата окончания", callback_data=f"paid_sub_edit_expire:{sub_id}")],
+        [InlineKeyboardButton("🌐 Лимит IP", callback_data=f"paid_sub_edit_ip:{sub_id}")],
+        [InlineKeyboardButton("🖥 Лимит HWID", callback_data=f"paid_sub_edit_hwid:{sub_id}")],
+        [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data=f"paid_sub_edit_traffic:{sub_id}")],
+        [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"paid_sub_view:{sub_id}")],
     ])
 
 

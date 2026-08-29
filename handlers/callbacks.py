@@ -33,6 +33,9 @@ from paidsub.handlers import (
     handle_paid_inbounds_menu, handle_paid_toggle_inbound,
     handle_paid_inbounds_expire_menu, handle_paid_toggle_inbound_expire,
     handle_approve, handle_reject, handle_request_sub,
+    handle_paid_sub_freeze, handle_paid_sub_extend,
+    handle_paid_sub_settings, handle_paid_sub_edit_expire,
+    handle_paid_sub_edit_ip, handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
 )
 
 
@@ -250,6 +253,20 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_inbounds_expire_menu(query)
     elif data.startswith("paid_toggle_inbound_expire:"):
         await handle_paid_toggle_inbound_expire(query, int(data.split(":")[1]))
+    elif data.startswith("paid_sub_freeze:"):
+        await handle_paid_sub_freeze(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_extend:"):
+        await handle_paid_sub_extend(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_settings:"):
+        await handle_paid_sub_settings(query, int(data.split(":")[1]))
+    elif data.startswith("paid_sub_edit_expire:"):
+        await handle_paid_sub_edit_expire(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_edit_ip:"):
+        await handle_paid_sub_edit_ip(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_edit_hwid:"):
+        await handle_paid_sub_edit_hwid(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_edit_traffic:"):
+        await handle_paid_sub_edit_traffic(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_approve:"):
         await handle_approve(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_reject:"):

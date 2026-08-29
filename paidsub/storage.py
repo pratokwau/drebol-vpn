@@ -65,6 +65,24 @@ async def get_all_paid_subs_with_tg() -> list:
             return await cur.fetchall()
 
 
+async def update_paid_sub_field(sub_id: int, field: str, value):
+    allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb"}
+    if field not in allowed:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"UPDATE paid_subs SET {field} = ? WHERE id = ?", (value, sub_id))
+        await db.commit()
+
+
+async def get_expired_paid_subs() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date
+            FROM paid_subs
+        """) as cur:
+            return await cur.fetchall()
+
+
 async def update_paid_sub_email(sub_id: int, new_email: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE paid_subs SET email = ? WHERE id = ?", (new_email, sub_id))
