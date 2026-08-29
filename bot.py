@@ -17,7 +17,8 @@ async def post_init(app: Application):
         if cfg.get("auto_update_usernames", False):
             await sync_usernames(ctx)
 
-    app.job_queue.run_repeating(_sync_job, interval=2 * 24 * 3600, first=60)
+    if app.job_queue:
+        app.job_queue.run_repeating(_sync_job, interval=2 * 24 * 3600, first=60)
 
 
 def main():
