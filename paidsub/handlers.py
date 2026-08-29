@@ -539,7 +539,7 @@ async def handle_paid_sub_view(query, sub_id: int):
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
+    _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row[:11]
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
     from xui_api import get_client_traffic, get_client_info
