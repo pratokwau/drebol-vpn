@@ -90,12 +90,14 @@ async def handle_about(query):
 
 async def handle_back_start(query, user):
     is_admin = user.id == ADMIN_ID
+    from adminsub.storage import get_sub_by_tg_id
+    has_sub = bool(await get_sub_by_tg_id(user.id))
     await query.edit_message_text(
         f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
         "🔒 Быстрый и безопасный VPN\n"
         "⚡️ Стабильное подключение\n"
-        "🌍 Доступ к популярным сервисам\n\n"
+        "🌍 Доступ к популярным сервисами\n\n"
         "Выберите нужный раздел ниже 👇",
         parse_mode="HTML",
-        reply_markup=main_keyboard(is_admin),
+        reply_markup=main_keyboard(is_admin, has_sub),
     )

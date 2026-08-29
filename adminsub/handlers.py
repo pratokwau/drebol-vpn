@@ -179,12 +179,18 @@ async def do_create_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_
     cfg = load_config()
     await reply_func("⏳ Создаю подписку в 3x-UI...")
 
-    from xui_api import create_client
+    from xui_api import create_client, build_email
+    from database import get_user_info
+    user_row = await get_user_info(tg_id)
+    username = user_row[2] if user_row else None
+    email = build_email(tg_id, username)
+
     result = await create_client(
         expire_date=cfg["preset_expire"],
         limit_ip=int(cfg["preset_ip"]),
         limit_hwid=int(cfg["preset_hwid"]),
         total_gb=int(cfg["preset_traffic"]),
+        email=email,
     )
 
     if not result["success"]:
@@ -243,9 +249,20 @@ async def handle_sub_view(query, sub_id: int):
 
 
 async def handle_sub_delete(query, sub_id: int):
+    row = await get_sub(sub_id)
+    email = row[2] if row else None  # row: id, tg_id, email, ...
+
+    if email:
+        from xui_api import delete_client
+        await query.edit_message_text("⏳ Удаляю из панели...")
+        panel_result = await delete_client(email)
+        panel_status = "✅ удалена из панели" if panel_result["success"] else f"⚠️ панель: {panel_result.get('error', '?')}"
+    else:
+        panel_status = "⚠️ email не найден, из панели не удалено"
+
     await delete_sub(sub_id)
     await query.edit_message_text(
-        "🗑 Подписка удалена из базы бота (в панели она осталась).",
+        f"🗑 Подписка удалена из базы.\n{panel_status}",
         reply_markup=back_admin(),
     )
 

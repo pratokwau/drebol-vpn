@@ -18,6 +18,13 @@ def generate_email(length: int = 8) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
+def build_email(tg_id: int, username: str | None) -> str:
+    suffix = username.lower() if username else "nousername"
+    raw = f"{tg_id}_{suffix}"
+    # оставляем только допустимые символы для email-поля 3x-UI
+    return "".join(c for c in raw if c.isalnum() or c in ("_", "-", "."))[:50]
+
+
 def date_to_ms(date_str: str) -> int:
     dt = datetime.strptime(date_str, "%d.%m.%Y")
     return int(dt.timestamp() * 1000)
@@ -120,11 +127,37 @@ async def _fetch_inbound_id(session: aiohttp.ClientSession, url: str) -> tuple[i
     return inbounds[0].get("id"), ""
 
 
+async def delete_client(email: str) -> dict:
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "URL или токен не заданы"}
+    s = _session(token)
+    try:
+        safe_email = quote(email, safe="")
+        data, err = await _post(s, f"{url}/panel/api/clients/del/{safe_email}", {})
+        if data and data.get("success"):
+            return {"success": True}
+        # фолбэк: удалить из каждого инбаунда
+        inbounds_result = await get_inbounds()
+        if inbounds_result["success"]:
+            for inb in inbounds_result["inbounds"]:
+                ib_id = inb.get("id")
+                await _post(s, f"{url}/panel/api/inbounds/delClient/{ib_id}/{safe_email}", {})
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        await s.close()
+
+
 async def create_client(
     expire_date: str,
     limit_ip: int,
     limit_hwid: int,
     total_gb: int,
+    email: str | None = None,
 ) -> dict:
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")
@@ -151,7 +184,7 @@ async def create_client(
         expire_ms = date_to_ms(expire_date)
         client_uuid = str(uuid.uuid4())
         sub_id = generate_sub_id()
-        email = generate_email()
+        email = email or generate_email()
 
         client = {
             "id": client_uuid,

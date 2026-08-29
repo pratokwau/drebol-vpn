@@ -60,6 +60,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=subscribe_keyboard(),
             )
             return
+        from adminsub.storage import get_sub_by_tg_id
+        has_sub = bool(await get_sub_by_tg_id(user.id))
         await query.edit_message_text(
             f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
             "🔒 Быстрый и безопасный VPN\n"
@@ -67,7 +69,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🌍 Доступ к популярным сервисам\n\n"
             "Выберите нужный раздел ниже 👇",
             parse_mode="HTML",
-            reply_markup=main_keyboard(adm),
+            reply_markup=main_keyboard(adm, has_sub),
         )
         return
 

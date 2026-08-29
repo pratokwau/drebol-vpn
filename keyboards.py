@@ -4,25 +4,24 @@ from config import load_config
 
 # ── Главное меню ──────────────────────────────────────────────────────────────
 
-def main_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
+def main_keyboard(is_admin: bool, has_sub: bool = False) -> InlineKeyboardMarkup:
     cfg = load_config()
     channel_url = cfg.get("channel_url")
 
-    # Кнопка "Новости" — ссылка на канал если задан, иначе заглушка
     news_btn = (
         InlineKeyboardButton("📰 Новости", url=channel_url)
         if channel_url
         else InlineKeyboardButton("📰 Новости", callback_data="news_no_channel")
     )
 
-    rows = [
-        [InlineKeyboardButton("📦 Моя подписка", callback_data="my_sub")],
-        [news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1")],
-        [
-            InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to"),
-            InlineKeyboardButton("ℹ️ О сервисе", callback_data="about"),
-        ],
-    ]
+    rows = []
+    if has_sub:
+        rows.append([InlineKeyboardButton("📦 Моя подписка", callback_data="my_sub")])
+    rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1")])
+    rows.append([
+        InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to"),
+        InlineKeyboardButton("ℹ️ О сервисе", callback_data="about"),
+    ])
     if is_admin:
         rows.append([InlineKeyboardButton("⚙️ Админка", callback_data="admin_panel")])
     return InlineKeyboardMarkup(rows)
