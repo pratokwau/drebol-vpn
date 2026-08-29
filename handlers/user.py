@@ -181,16 +181,12 @@ async def handle_my_paid_sub(query):
         f"{'━' * 28}\n"
         f"🔗 <b>Ссылка подписки:</b>\n"
         f"<code>{sub_url}</code>\n\n"
-        f"<i>Нажми на ссылку чтобы скопировать → вставь в Happ или v2rayNG</i>"
+        f"<i>Нажми на ссылку чтобы скопировать → вставь в Happ или INCY</i>"
     )
 
     kb_rows = []
     if status in ("renewal", "expired"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
-    kb_rows.append([
-        InlineKeyboardButton("❓ Как подключиться", callback_data="how_to"),
-        InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1"),
-    ])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
