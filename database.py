@@ -41,6 +41,21 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS paid_subs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER,
+                email TEXT NOT NULL,
+                uuid TEXT NOT NULL,
+                sub_id TEXT NOT NULL,
+                sub_url TEXT NOT NULL,
+                expire_date TEXT NOT NULL,
+                limit_ip INTEGER NOT NULL DEFAULT 0,
+                limit_hwid INTEGER NOT NULL DEFAULT 0,
+                total_gb INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         # миграция для существующих баз
         try:
             await db.execute("ALTER TABLE admin_subs ADD COLUMN tg_id INTEGER")

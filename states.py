@@ -21,3 +21,10 @@ AWAITING_PRESET_EXPIRE = "awaiting_preset_expire"
 AWAITING_PRESET_IP = "awaiting_preset_ip"
 AWAITING_PRESET_HWID = "awaiting_preset_hwid"
 AWAITING_PRESET_TRAFFIC = "awaiting_preset_traffic"
+
+# Платные подписки
+AWAITING_PAID_SUB_TG_ID = "awaiting_paid_sub_tg_id"
+AWAITING_PAID_PRESET_EXPIRE = "awaiting_paid_preset_expire"
+AWAITING_PAID_PRESET_IP = "awaiting_paid_preset_ip"
+AWAITING_PAID_PRESET_HWID = "awaiting_paid_preset_hwid"
+AWAITING_PAID_PRESET_TRAFFIC = "awaiting_paid_preset_traffic"

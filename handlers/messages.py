@@ -15,6 +15,9 @@ from states import (
     AWAITING_PRESET_EXPIRE, AWAITING_PRESET_IP,
     AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC,
     AWAITING_SUB_TG_ID, AWAITING_AUTO_UPDATE_DAYS,
+    AWAITING_PAID_SUB_TG_ID, AWAITING_PAID_PRESET_EXPIRE,
+    AWAITING_PAID_PRESET_IP, AWAITING_PAID_PRESET_HWID,
+    AWAITING_PAID_PRESET_TRAFFIC,
 )
 from handlers.broadcast import do_broadcast
 
@@ -212,6 +215,69 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
             return
         _save("preset_traffic", val)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Трафик: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Платные подписки: TG ID ──────────────────────────────────────────────────
+    if state == AWAITING_PAID_SUB_TG_ID:
+        if not text.isdigit():
+            await update.message.reply_text(
+                "❌ TG ID — это число. Попробуй ещё раз:", reply_markup=back_admin()
+            )
+            return
+        tg_id = int(text)
+        context.user_data.pop("state", None)
+        from paidsub.handlers import do_create_paid_sub
+        sent = await update.message.reply_text("⏳ Создаю подписку...")
+
+        async def _edit_paid(txt, **kw):
+            await sent.edit_text(txt, reply_markup=back_admin(), **kw)
+
+        await do_create_paid_sub(sent, tg_id, context, _edit_paid)
+        return
+
+    # ── Платные подписки: пресеты ────────────────────────────────────────────────
+    if state == AWAITING_PAID_PRESET_EXPIRE:
+        try:
+            datetime.strptime(text, "%d.%m.%Y")
+        except ValueError:
+            await update.message.reply_text("❌ Формат: <code>дд.мм.гггг</code>", parse_mode="HTML", reply_markup=back_admin())
+            return
+        _save("paid_preset_expire", text)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Дата окончания: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_PRESET_IP:
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
+            return
+        _save("paid_preset_ip", int(text))
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Лимит IP: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_PRESET_HWID:
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
+            return
+        _save("paid_preset_hwid", int(text))
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Лимит HWID: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_PRESET_TRAFFIC:
+        if text == "-":
+            val = 0
+            label = "безлимит"
+        elif text.isdigit():
+            val = int(text)
+            label = f"{val} ГБ" if val > 0 else "безлимит"
+        else:
+            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
+            return
+        _save("paid_preset_traffic", val)
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Трафик: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return

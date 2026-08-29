@@ -4,7 +4,7 @@ from config import load_config
 
 # ── Главное меню ──────────────────────────────────────────────────────────────
 
-def main_keyboard(is_admin: bool, has_sub: bool = False) -> InlineKeyboardMarkup:
+def main_keyboard(is_admin: bool, has_sub: bool = False, has_paid_sub: bool = False) -> InlineKeyboardMarkup:
     cfg = load_config()
     channel_url = cfg.get("channel_url")
 
@@ -15,6 +15,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False) -> InlineKeyboardMarkup
     )
 
     rows = []
+    rows.append([InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")])
     if has_sub:
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
     rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1")])
@@ -37,6 +38,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     privacy_label = "📋 Изменить политику конф." if cfg.get("privacy_url") else "📋 Политика конфиденциальности"
     terms_label = "📄 Изменить польз. соглашение" if cfg.get("terms_url") else "📄 Пользовательское соглашение"
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs")],
         [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton("🎫 Тикеты", callback_data="ticket_list:1")],

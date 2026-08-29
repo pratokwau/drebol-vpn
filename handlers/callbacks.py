@@ -4,7 +4,7 @@ from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard
 from keyboards import main_keyboard
-from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_news, handle_how_to
+from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to
 from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
@@ -21,6 +21,12 @@ from adminsub.handlers import (
     handle_inbounds_menu, handle_toggle_inbound,
     handle_auto_update_settings, handle_toggle_auto_update,
     handle_set_auto_update_days, handle_run_sync_now,
+)
+from paidsub.handlers import (
+    handle_paid_subs_menu, handle_paid_presets_menu,
+    handle_paid_preset_expire, handle_paid_preset_ip, handle_paid_preset_hwid, handle_paid_preset_traffic,
+    handle_paid_create_sub, handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
+    handle_paid_inbounds_menu, handle_paid_toggle_inbound,
 )
 
 
@@ -84,6 +90,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "back_start":
         context.user_data.pop("state", None)
         await handle_back_start(query, update.effective_user)
+    elif data == "my_paid_sub":
+        await handle_my_paid_sub(query)
     elif data == "my_sub":
         await handle_my_sub(query)
     elif data == "news":
@@ -182,3 +190,31 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_auto_update_days(query, context)
     elif data == "run_sync_now":
         await handle_run_sync_now(query)
+
+    # Платные подписки
+    elif data == "paid_subs":
+        await handle_paid_subs_menu(query)
+    elif data.startswith("paid_subs_page:"):
+        await handle_paid_subs_menu(query, int(data.split(":")[1]))
+    elif data == "paid_create_sub":
+        await handle_paid_create_sub(query, context)
+    elif data == "paid_sub_presets":
+        await handle_paid_presets_menu(query)
+    elif data == "paid_preset_expire":
+        await handle_paid_preset_expire(query, context)
+    elif data == "paid_preset_ip":
+        await handle_paid_preset_ip(query, context)
+    elif data == "paid_preset_hwid":
+        await handle_paid_preset_hwid(query, context)
+    elif data == "paid_preset_traffic":
+        await handle_paid_preset_traffic(query, context)
+    elif data.startswith("paid_sub_view:"):
+        await handle_paid_sub_view(query, int(data.split(":")[1]))
+    elif data.startswith("paid_sub_toggle:"):
+        await handle_paid_sub_toggle(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_delete:"):
+        await handle_paid_sub_delete(query, int(data.split(":")[1]), context)
+    elif data == "paid_inbounds_menu":
+        await handle_paid_inbounds_menu(query)
+    elif data.startswith("paid_toggle_inbound:"):
+        await handle_paid_toggle_inbound(query, int(data.split(":")[1]))

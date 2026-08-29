@@ -36,6 +36,40 @@ async def handle_my_sub(query):
     )
 
 
+async def handle_my_paid_sub(query):
+    user_id = query.from_user.id
+    from paidsub.storage import get_paid_sub_by_tg_id
+    row = await get_paid_sub_by_tg_id(user_id)
+    if not row:
+        await query.edit_message_text(
+            "👤 <b>Моя подписка</b>\n\nУ вас пока нет активной подписки.",
+            parse_mode="HTML",
+            reply_markup=back_main(),
+        )
+        return
+    _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
+    traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
+
+    from xui_api import get_client_info
+    info = await get_client_info(email)
+    if info.get("success"):
+        enabled = info.get("enabled", True)
+        status_line = "🟢 Статус: <b>активна</b>" if enabled else "🔴 Статус: <b>отключена</b>"
+    else:
+        status_line = "⚪ Статус: <b>неизвестен</b>"
+
+    await query.edit_message_text(
+        "👤 <b>Моя подписка</b>\n\n"
+        f"📅 Действует до: <b>{expire}</b>\n"
+        f"📶 Трафик: <b>{traffic}</b>\n"
+        f"{status_line}\n\n"
+        f"🔗 <b>Ссылка подписки:</b>\n<code>{sub_url}</code>\n\n"
+        "Скопируй ссылку и вставь в приложение (Happ, v2rayNG и др.)",
+        parse_mode="HTML",
+        reply_markup=back_main(),
+    )
+
+
 async def handle_news(query):
     await query.edit_message_text(
         "📰 <b>Новости</b>\n\nНовостей пока нет. Следите за обновлениями!",
