@@ -18,14 +18,14 @@ def generate_email(length: int = 8) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
-def build_email(tg_id: int, username: str | None, prefix: str = "") -> str:
+def build_email(tg_id: int, username=None, prefix: str = "") -> str:
     suffix = username.strip().lower() if username else "nousername"
     raw = f"{prefix}{tg_id}_{suffix}"
     return "".join(c for c in raw if c.isalnum() or c in ("_", "-", "."))[:50]
 
 
 def date_to_ms(date_str: str) -> int:
-    for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y"):
+    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
         try:
             dt = datetime.strptime(date_str, fmt)
             return int(dt.timestamp() * 1000)
@@ -340,12 +340,85 @@ async def delete_client(email: str) -> dict:
         await s.close()
 
 
+async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
+    """Перемещает клиента из текущего инбаунда в целевые инбаунды."""
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "URL или токен не заданы"}
+    s = _session(token)
+    try:
+        data, err = await _get(s, f"{url}/panel/api/inbounds/list")
+        if not data or not data.get("success"):
+            return {"success": False, "error": f"Не удалось загрузить инбаунды: {err}"}
+
+        client_obj = None
+        old_inbound_id = None
+        for inb in (data.get("obj") or []):
+            settings_str = inb.get("settings") or "{}"
+            try:
+                settings = json.loads(settings_str) if isinstance(settings_str, str) else settings_str
+            except Exception:
+                continue
+            for c in settings.get("clients", []):
+                if c.get("email") == email:
+                    client_obj = dict(c)
+                    old_inbound_id = inb.get("id")
+                    break
+            if client_obj:
+                break
+
+        if not client_obj:
+            return {"success": False, "error": "Клиент не найден в панели"}
+
+        real_ids = {inb.get("id") for inb in (data.get("obj") or [])}
+        valid_targets = [int(i) for i in target_inbound_ids if int(i) in real_ids]
+        if not valid_targets:
+            return {"success": False, "error": "Целевые инбаунды не найдены"}
+
+        if old_inbound_id in valid_targets:
+            return {"success": True, "moved": False}
+
+        safe_email = quote(email, safe="")
+        safe_uuid = quote(client_obj.get("id", ""), safe="")
+
+        # Удаляем из старого инбаунда
+        for path in (
+            f"/panel/api/clients/del/{safe_email}",
+            f"/panel/api/inbounds/{old_inbound_id}/delClient/{safe_email}",
+        ):
+            await _post(s, f"{url}{path}", {})
+
+        # Добавляем в новые инбаунды
+        payload_new = {"inboundIds": valid_targets, "client": client_obj}
+        result, err2 = await _post(s, f"{url}/panel/api/clients/add", payload_new)
+        if result and result.get("success"):
+            return {"success": True, "moved": True}
+
+        # Фолбэк: добавляем в первый целевой
+        target_id = valid_targets[0]
+        old_payload = {
+            "id": target_id,
+            "settings": json.dumps({"clients": [client_obj]}),
+        }
+        result2, err3 = await _post(s, f"{url}/panel/api/inbounds/{target_id}/addClient", old_payload)
+        if result2 and result2.get("success"):
+            return {"success": True, "moved": True}
+
+        return {"success": False, "error": f"Не удалось добавить в новый инбаунд: {err3}"}
+    except Exception as e:
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        await s.close()
+
+
 async def create_client(
     expire_date: str,
     limit_ip: int,
     limit_hwid: int,
     total_gb: int,
-    email: str | None = None,
+    email=None,
 ) -> dict:
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")

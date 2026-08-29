@@ -411,7 +411,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             row = await get_paid_sub(sub_id)
             if row:
                 expire_str = row[6]
-                for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
                     try:
                         expire_dt = datetime.strptime(expire_str, fmt)
                         break
@@ -422,7 +422,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if expire_dt < datetime.now():
                     expire_dt = datetime.now()
                 new_expire = expire_dt + timedelta(seconds=seconds)
-                new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M")
+                new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
                 await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
                 from xui_api import date_to_ms, get_client_info
                 from paidsub.time_parser import fmt_duration as fmt_dur
@@ -437,7 +437,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Платные подписки: индивидуальные настройки ──────────────────────────────
     if state == AWAITING_PAID_SUB_EDIT_EXPIRE:
-        for fmt in ("%d.%m.%Y %H:%M", "%d.%m.%Y"):
+        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
             try:
                 datetime.strptime(text, fmt)
                 break
@@ -445,7 +445,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 continue
         else:
             await update.message.reply_text(
-                "❌ Формат: <code>дд.мм.гггг</code> или <code>дд.мм.гггг чч:мм</code>",
+                "❌ Формат: <code>дд.мм.гггг</code>, <code>дд.мм.гггг чч:мм</code> или <code>дд.мм.гггг чч:мм:сс</code>",
                 parse_mode="HTML", reply_markup=back_admin(),
             )
             return
