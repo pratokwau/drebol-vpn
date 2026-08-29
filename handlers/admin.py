@@ -1,14 +1,8 @@
 import subprocess
-from telegram import Update
 from telegram.ext import ContextTypes
-from config import ADMIN_ID, INSTALL_DIR, load_config
+from config import INSTALL_DIR, load_config
 from keyboards import admin_keyboard, back_admin
-
-AWAITING_CHANNEL = "awaiting_channel"
-
-
-def _is_admin(update: Update) -> bool:
-    return update.effective_user.id == ADMIN_ID
+from states import AWAITING_CHANNEL
 
 
 async def handle_admin_panel(query):
@@ -56,9 +50,6 @@ async def handle_git_update(query):
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
-        await query.edit_message_text(
-            "❌ Таймаут при обновлении. Попробуй позже.",
-            reply_markup=back_admin(),
-        )
+        await query.edit_message_text("❌ Таймаут при обновлении. Попробуй позже.", reply_markup=back_admin())
     except Exception as e:
         await query.edit_message_text(f"❌ Ошибка: {e}", reply_markup=back_admin())
