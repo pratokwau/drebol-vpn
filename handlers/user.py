@@ -36,36 +36,68 @@ async def handle_my_sub(query):
     )
 
 
+def _fmt_bytes_user(b: int) -> str:
+    if b < 1024 ** 2:
+        return f"{b / 1024:.1f} КБ"
+    if b < 1024 ** 3:
+        return f"{b / 1024 ** 2:.1f} МБ"
+    return f"{b / 1024 ** 3:.2f} ГБ"
+
+
+def _progress_bar(used_gb: float, total_gb: int) -> str:
+    if total_gb <= 0:
+        return ""
+    ratio = min(used_gb / total_gb, 1.0)
+    filled = int(ratio * 10)
+    empty = 10 - filled
+    bar = "▓" * filled + "░" * empty
+    pct = int(ratio * 100)
+    return f"[{bar}] {pct}%"
+
+
 async def handle_my_paid_sub(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from datetime import datetime, timedelta
     user_id = query.from_user.id
     from paidsub.storage import get_paid_sub_by_tg_id
     row = await get_paid_sub_by_tg_id(user_id)
     if not row:
         await query.edit_message_text(
-            "👤 <b>Моя подписка</b>\n\nУ вас пока нет активной подписки.",
+            "🔐 <b>Drebol VPN</b>\n\n"
+            "У вас пока нет подписки.\n"
+            "Нажмите <b>👤 Моя подписка</b> чтобы оформить пробный период.",
             parse_mode="HTML",
             reply_markup=back_main(),
         )
         return
     _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at, status = row
-    traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
-    from xui_api import get_client_info
+    from xui_api import get_client_info, get_client_traffic
     info = await get_client_info(email)
-    if info.get("success"):
-        enabled = info.get("enabled", True)
-    else:
-        enabled = True
+    enabled = info.get("enabled", True) if info.get("success") else True
 
+    t = await get_client_traffic(email)
+    if t.get("success"):
+        up = t.get("up", 0)
+        down = t.get("down", 0)
+        total_used = up + down
+        used_str = _fmt_bytes_user(total_used)
+        up_str = _fmt_bytes_user(up)
+        down_str = _fmt_bytes_user(down)
+    else:
+        total_used = 0
+        used_str = "0 КБ"
+        up_str = "0 КБ"
+        down_str = "0 КБ"
+
+    # --- Статус ---
     if status == "expired":
-        status_line = "🔴 Статус: <b>отключена</b>"
-        status_note = "\n\n⚠️ Время на продление истекло. Продлите подписку!"
+        status_emoji = "🔴"
+        status_text = "отключена"
+        status_detail = "Время на продление истекло"
     elif status == "renewal":
-        status_line = "🟡 Статус: <b>ожидает оплаты</b>"
-        from datetime import datetime, timedelta
-        cfg = load_config()
-        renew_sec = cfg.get("paid_renew_time", 86400)
+        status_emoji = "🟡"
+        status_text = "ожидает оплаты"
         for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
             try:
                 expire_dt = datetime.strptime(expire, fmt)
@@ -77,27 +109,92 @@ async def handle_my_paid_sub(query):
         remaining = expire_dt - datetime.now()
         remaining_sec = max(0, int(remaining.total_seconds()))
         from paidsub.time_parser import fmt_duration
-        status_note = f"\n\n⏳ Осталось <b>{fmt_duration(remaining_sec)}</b> на продление."
+        status_detail = f"Осталось {fmt_duration(remaining_sec)} на продление"
     elif not enabled:
-        status_line = "🔴 Статус: <b>заморожена</b>"
-        status_note = ""
+        status_emoji = "❄️"
+        status_text = "заморожена"
+        status_detail = "Подписка приостановлена"
     else:
-        status_line = "🟢 Статус: <b>активна</b>"
-        status_note = ""
+        status_emoji = "🟢"
+        status_text = "активна"
+        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+            try:
+                expire_dt = datetime.strptime(expire, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            expire_dt = datetime.now()
+        days_left = (expire_dt - datetime.now()).days
+        cfg_tmp = load_config()
+        renew_sec = cfg_tmp.get("paid_renew_time", 86400)
+        real_days = max(0, days_left - int(renew_sec / 86400))
+        if real_days > 0:
+            status_detail = f"Осталось {real_days} дн."
+        else:
+            from paidsub.time_parser import fmt_duration
+            real_sec = max(0, int((expire_dt - datetime.now()).total_seconds()) - renew_sec)
+            status_detail = f"Осталось {fmt_duration(real_sec)}" if real_sec > 0 else "Скоро закончится"
+
+    # --- Трафик ---
+    if total_gb > 0:
+        traffic_limit = f"{total_gb} ГБ"
+        used_gb = total_used / (1024 ** 3)
+        bar = _progress_bar(used_gb, total_gb)
+        traffic_block = (
+            f"📊 <b>Трафик:</b> {used_str} / {traffic_limit}\n"
+            f"<code>{bar}</code>\n"
+            f"     ⬆ {up_str}  ⬇ {down_str}"
+        )
+    else:
+        traffic_block = (
+            f"📊 <b>Трафик:</b> безлимит\n"
+            f"     ⬆ {up_str}  ⬇ {down_str}  ∑ {used_str}"
+        )
+
+    # --- Дата ---
+    try:
+        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+            try:
+                created_dt = datetime.strptime(created_at, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            created_dt = None
+        created_str = created_dt.strftime("%d.%m.%Y") if created_dt else created_at[:10]
+    except Exception:
+        created_str = str(created_at)[:10]
+
+    text = (
+        f"🔐 <b>Drebol VPN — Моя подписка</b>\n"
+        f"{'━' * 28}\n\n"
+
+        f"{status_emoji} Статус: <b>{status_text}</b>\n"
+        f"     <i>{status_detail}</i>\n\n"
+
+        f"📅 Активна до: <b>{expire}</b>\n"
+        f"📆 Подключён с: {created_str}\n\n"
+
+        f"{traffic_block}\n\n"
+
+        f"{'━' * 28}\n"
+        f"🔗 <b>Ссылка подписки:</b>\n"
+        f"<code>{sub_url}</code>\n\n"
+        f"<i>Нажми на ссылку чтобы скопировать → вставь в Happ или v2rayNG</i>"
+    )
 
     kb_rows = []
     if status in ("renewal", "expired"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
+    kb_rows.append([
+        InlineKeyboardButton("❓ Как подключиться", callback_data="how_to"),
+        InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1"),
+    ])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
-        "👤 <b>Моя подписка</b>\n\n"
-        f"{status_line}\n"
-        f"📅 Действует до: <b>{expire}</b>\n"
-        f"📶 Трафик: <b>{traffic}</b>"
-        f"{status_note}\n\n"
-        f"🔗 <b>Ссылка подписки:</b>\n<code>{sub_url}</code>\n\n"
-        "Скопируй ссылку и вставь в приложение (Happ, v2rayNG и др.)",
+        text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb_rows),
     )
