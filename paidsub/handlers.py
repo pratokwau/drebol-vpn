@@ -379,12 +379,14 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
     expire_dt = datetime.now() + timedelta(seconds=total_seconds)
     expire_date = expire_dt.strftime("%d.%m.%Y %H:%M:%S")
 
+    paid_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
     result = await create_client(
         expire_date=expire_date,
         limit_ip=int(cfg.get("paid_preset_ip", 0)),
         limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
         total_gb=int(cfg.get("paid_preset_traffic", 0)),
         email=email,
+        preset_inbound_ids_override=paid_inbound_ids if paid_inbound_ids else None,
     )
 
     if not result["success"]:

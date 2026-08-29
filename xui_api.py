@@ -472,6 +472,7 @@ async def create_client(
     limit_hwid: int,
     total_gb: int,
     email=None,
+    preset_inbound_ids_override=None,
 ) -> dict:
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")
@@ -495,7 +496,7 @@ async def create_client(
         if not real_ids:
             return {"success": False, "error": "На панели нет ни одного инбаунда"}
 
-        preset_inbound_ids = cfg.get("preset_inbound_ids") or []
+        preset_inbound_ids = preset_inbound_ids_override or cfg.get("preset_inbound_ids") or []
         if preset_inbound_ids:
             # Фильтруем — оставляем только реально существующие
             valid_ids = [int(i) for i in preset_inbound_ids if int(i) in real_ids]
