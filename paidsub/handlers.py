@@ -801,7 +801,7 @@ async def check_expired_subs(context):
                     pay_url = cfg.get("paid_pay_url", "")
                     pay_line = f'\n\n🔗 <a href="{pay_url}">Оплатить {price} ₽</a>' if pay_url else ""
                     kb = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")]
+                        [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
                     ])
                     try:
                         await context.bot.send_message(
@@ -831,7 +831,7 @@ async def check_expired_subs(context):
 
                 if tg_id:
                     kb = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")]
+                        [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
                     ])
                     try:
                         await context.bot.send_message(
