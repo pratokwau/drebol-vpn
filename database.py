@@ -103,6 +103,16 @@ async def init_db():
                 muted_until TEXT NOT NULL
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS referrals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER NOT NULL,
+                referred_by INTEGER NOT NULL,
+                rewarded INTEGER NOT NULL DEFAULT 0,
+                bonus_seconds INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         # убираем :443/:80 из существующих sub_url
         from xui_api import strip_default_port
         async with db.execute("SELECT id, sub_url FROM admin_subs") as cur:

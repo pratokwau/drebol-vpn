@@ -221,3 +221,82 @@ async def list_muted() -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT tg_id, muted_until FROM paid_mutes ORDER BY muted_until DESC") as cur:
             return await cur.fetchall()
+
+
+# ── Рефералы ────────────────────────────────────────────────────────────────
+
+async def save_referral(tg_id: int, referred_by: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id FROM referrals WHERE tg_id = ?", (tg_id,)
+        )
+        if await cur.fetchone():
+            return
+        await db.execute(
+            "INSERT INTO referrals (tg_id, referred_by) VALUES (?, ?)",
+            (tg_id, referred_by),
+        )
+        await db.commit()
+
+
+async def get_referrer(tg_id: int) -> int | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT referred_by FROM referrals WHERE tg_id = ?", (tg_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+
+async def mark_referral_rewarded(tg_id: int, bonus_seconds: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE referrals SET rewarded = 1, bonus_seconds = ? WHERE tg_id = ? AND rewarded = 0",
+            (bonus_seconds, tg_id),
+        )
+        await db.commit()
+
+
+async def get_referral_stats(referrer_tg_id: int) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM referrals WHERE referred_by = ?", (referrer_tg_id,)
+        ) as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COUNT(*) FROM referrals WHERE referred_by = ? AND rewarded = 1", (referrer_tg_id,)
+        ) as cur:
+            rewarded = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COALESCE(SUM(bonus_seconds), 0) FROM referrals WHERE referred_by = ? AND rewarded = 1",
+            (referrer_tg_id,),
+        ) as cur:
+            total_bonus = (await cur.fetchone())[0]
+    return {"total": total, "rewarded": rewarded, "total_bonus": total_bonus}
+
+
+async def get_referral_list(referrer_tg_id: int) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT r.tg_id, r.rewarded, r.bonus_seconds, r.created_at
+            FROM referrals r
+            WHERE r.referred_by = ?
+            ORDER BY r.created_at DESC
+        """, (referrer_tg_id,)) as cur:
+            return await cur.fetchall()
+
+
+async def get_all_referral_stats() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM referrals") as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute("SELECT COUNT(*) FROM referrals WHERE rewarded = 1") as cur:
+            rewarded = (await cur.fetchone())[0]
+        async with db.execute("SELECT COALESCE(SUM(bonus_seconds), 0) FROM referrals WHERE rewarded = 1") as cur:
+            total_bonus = (await cur.fetchone())[0]
+        async with db.execute("""
+            SELECT referred_by, COUNT(*) as cnt
+            FROM referrals GROUP BY referred_by ORDER BY cnt DESC LIMIT 10
+        """) as cur:
+            top_referrers = await cur.fetchall()
+    return {"total": total, "rewarded": rewarded, "total_bonus": total_bonus, "top_referrers": top_referrers}

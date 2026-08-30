@@ -20,6 +20,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
         rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
     if has_sub:
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
+    rows.append([InlineKeyboardButton("👥 Пригласить друга", callback_data="referral")])
     rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1")])
     rows.append([
         InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to"),

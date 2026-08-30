@@ -11,6 +11,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await upsert_user(user.id, user.first_name, user.username)
 
+    # Реферальная ссылка: /start ref_123456
+    if context.args and context.args[0].startswith("ref_"):
+        try:
+            referrer_id = int(context.args[0][4:])
+            if referrer_id != user.id:
+                from paidsub.storage import save_referral
+                await save_referral(user.id, referrer_id)
+        except (ValueError, IndexError):
+            pass
+
     if not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(
             f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
@@ -38,4 +48,3 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         reply_markup=main_keyboard(is_admin, has_sub, paid_status),
     )
-

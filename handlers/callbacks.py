@@ -4,7 +4,7 @@ from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard
 from keyboards import main_keyboard
-from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to, handle_renew_sub, handle_i_paid
+from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral
 from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
@@ -43,6 +43,7 @@ from paidsub.handlers import (
     handle_paid_requests,
     handle_paid_auto_update_settings, handle_paid_toggle_auto_update,
     handle_paid_set_auto_update_days, handle_paid_run_sync_now,
+    handle_referral_settings, handle_set_referral_bonus,
 )
 
 
@@ -130,6 +131,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_buy(query)
     elif data == "about":
         await handle_about(query)
+    elif data == "referral":
+        await handle_referral(query, context)
     elif data.startswith("support_page:"):
         page = int(data.split(":")[1])
         context.user_data["state"] = AWAITING_SUPPORT_MSG
@@ -294,6 +297,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_history(query)
     elif data.startswith("paid_history_page:"):
         await handle_paid_history(query, int(data.split(":")[1]))
+    elif data == "referral_settings":
+        await handle_referral_settings(query)
+    elif data == "set_referral_bonus":
+        await handle_set_referral_bonus(query, context)
     elif data == "paid_auto_update_settings":
         await handle_paid_auto_update_settings(query)
     elif data == "paid_toggle_auto_update":
