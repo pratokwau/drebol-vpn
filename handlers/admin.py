@@ -6,10 +6,13 @@ from states import AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL
 
 
 async def handle_admin_panel(query):
+    from database import get_unread_tickets_count
+    unread = await get_unread_tickets_count()
+    badge = f"\n\n🔴 Непрочитанных тикетов: <b>{unread}</b>" if unread else ""
     await query.edit_message_text(
-        "⚙️ <b>Панель администратора</b>\n\nВыбери действие:",
+        "⚙️ <b>Панель администратора</b>\n\nВыбери действие:" + badge,
         parse_mode="HTML",
-        reply_markup=admin_keyboard(),
+        reply_markup=admin_keyboard(unread),
     )
 
 

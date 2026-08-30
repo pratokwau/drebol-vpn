@@ -8,7 +8,9 @@ from handlers.user import handle_buy, handle_about, handle_back_start, handle_my
 from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url, handle_documents_menu
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
-from handlers.tickets import handle_ticket_list, handle_ticket_view, handle_ticket_reply_start
+from handlers.tickets import (
+    handle_ticket_list, handle_ticket_view, handle_ticket_reply_start,
+)
 from handlers.xui_settings import (
     handle_xui_settings, handle_set_xui_url, handle_set_xui_token,
     handle_set_xui_sub_port, handle_set_xui_sub_path,
@@ -136,6 +138,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_referral(query, context)
     elif data == "copy_sub":
         await handle_copy_sub(query, context)
+    elif data == "support_open":
+        context.user_data["state"] = AWAITING_SUPPORT_MSG
+        await open_support(query, update.effective_user.id)
     elif data.startswith("support_page:"):
         page = int(data.split(":")[1])
         context.user_data["state"] = AWAITING_SUPPORT_MSG

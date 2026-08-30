@@ -21,7 +21,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
     if has_sub:
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
     rows.append([InlineKeyboardButton("👥 Пригласить друга", callback_data="referral")])
-    rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_page:1")])
+    rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_open")])
     rows.append([
         InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to"),
         InlineKeyboardButton("ℹ️ О сервисе", callback_data="about"),
@@ -33,16 +33,17 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
 
 # ── Админка ───────────────────────────────────────────────────────────────────
 
-def admin_keyboard() -> InlineKeyboardMarkup:
+def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
     cfg = load_config()
     channel_label = "📢 Изменить канал" if cfg.get("channel_url") else "📢 Установить канал"
     sub_enabled = cfg.get("force_subscribe", False)
     sub_label = "🔔 Подписка на канал: ВКЛ" if sub_enabled else "🔕 Подписка на канал: ВЫКЛ"
+    tickets_label = f"🎫 Тикеты 🔴{unread_tickets}" if unread_tickets else "🎫 Тикеты"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs")],
         [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
-        [InlineKeyboardButton("🎫 Тикеты", callback_data="ticket_list:1")],
+        [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
         [InlineKeyboardButton(sub_label, callback_data="toggle_force_sub")],
         [InlineKeyboardButton("🔧 Параметры 3x-UI", callback_data="xui_settings")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
@@ -75,17 +76,35 @@ def support_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
         if page < total_pages:
             nav.append(InlineKeyboardButton("▶️", callback_data=f"support_page:{page + 1}"))
         rows.append(nav)
+    rows.append([InlineKeyboardButton("🔄 Обновить", callback_data=f"support_page:{page}")])
     rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
     return InlineKeyboardMarkup(rows)
 
 
 # ── Тикеты (админ) ────────────────────────────────────────────────────────────
 
+def _ticket_badge(unread: int, last_from_admin: int) -> str:
+    if unread and unread > 0:
+        return f"🔴{unread}"
+    if last_from_admin:
+        return "✅"
+    return "💬"
+
+
 def ticket_list_keyboard(ticket_rows, page: int, total_pages: int) -> InlineKeyboardMarkup:
     keyboard = []
-    for user_id, first_name, username, cnt, _ in ticket_rows:
-        label = f"{first_name} (@{username}) · {cnt} сообщ." if username else f"{first_name} · {cnt} сообщ."
+    for row in ticket_rows:
+        user_id, first_name, username, total, unread, last_time, last_text, last_from_admin = row
+        badge = _ticket_badge(unread, last_from_admin)
+        name = first_name or str(user_id)
+        uname = f" @{username}" if username else ""
+        preview = (last_text or "").replace("\n", " ")
+        if len(preview) > 22:
+            preview = preview[:22] + "…"
+        who = "🛡" if last_from_admin else "👤"
+        label = f"{badge} {name}{uname} · {who}{preview}"
         keyboard.append([InlineKeyboardButton(label, callback_data=f"ticket_view:{user_id}:1")])
+
     if total_pages > 1:
         nav = []
         if page > 1:

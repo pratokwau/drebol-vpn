@@ -1,6 +1,9 @@
 from datetime import datetime
 from telegram.ext import ContextTypes
-from database import get_ticket_users, get_support_messages, get_user_info, add_support_message
+from database import (
+    get_ticket_users, get_support_messages, get_user_info, add_support_message,
+    mark_ticket_read, get_unread_tickets_count,
+)
 from keyboards import ticket_list_keyboard, ticket_view_keyboard, cancel_admin
 from states import AWAITING_ADMIN_REPLY
 
@@ -15,30 +18,44 @@ def _fmt_time(raw: str) -> str:
 
 async def handle_ticket_list(query, page: int = 1):
     rows, total_pages = await get_ticket_users(page)
+    unread_total = await get_unread_tickets_count()
+    title = "🎫 <b>Тикеты</b>"
     if not rows:
         await query.edit_message_text(
-            "🎫 <b>Тикеты</b>\n\nОбращений пока нет.",
+            f"{title}\n\nОбращений пока нет.",
             parse_mode="HTML",
             reply_markup=ticket_list_keyboard([], 1, 1),
         )
         return
+    header = (
+        f"{title} — стр. {page}/{total_pages}\n"
+        f"🔴 Непрочитанных: <b>{unread_total}</b>\n\n"
+        "🔴 — новые сообщения · ✅ — вы ответили последним\n"
+        "Выберите диалог:"
+    )
     await query.edit_message_text(
-        f"🎫 <b>Тикеты</b> — стр. {page}/{total_pages}\n\nВыберите пользователя:",
+        header,
         parse_mode="HTML",
         reply_markup=ticket_list_keyboard(rows, page, total_pages),
     )
 
 
 async def handle_ticket_view(query, user_id: int, page: int = 1):
+    # помечаем сообщения юзера прочитанными при открытии
+    await mark_ticket_read(user_id)
+
     user_info = await get_user_info(user_id)
     first_name = user_info[1] if user_info else str(user_id)
     username = f" (@{user_info[2]})" if user_info and user_info[2] else ""
 
     msgs, total_pages = await get_support_messages(user_id, page)
-    lines = [f"👤 <b>{first_name}{username}</b> — стр. {page}/{total_pages}\n"]
+    lines = [
+        f"👤 <b>{first_name}</b>{username}\n"
+        f"🆔 <code>{user_id}</code> · стр. {page}/{total_pages}\n"
+    ]
     for text, from_admin, created_at in msgs:
         who = "🛡 <b>Поддержка</b>" if from_admin else "👤 <b>Юзер</b>"
-        lines.append(f"{who}: {text}\n🕐 {_fmt_time(created_at)}")
+        lines.append(f"{who} · 🕐 {_fmt_time(created_at)}\n{text}")
 
     await query.edit_message_text(
         "\n\n".join(lines),

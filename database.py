@@ -23,9 +23,14 @@ async def init_db():
                 user_id INTEGER NOT NULL,
                 text TEXT NOT NULL,
                 from_admin INTEGER NOT NULL DEFAULT 0,
+                is_read INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            await db.execute("ALTER TABLE support_messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS admin_subs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,9 +153,10 @@ async def get_all_user_ids() -> list[int]:
 
 async def add_support_message(user_id: int, text: str, from_admin: bool = False):
     async with aiosqlite.connect(DB_PATH) as db:
+        # сообщения от админа сразу считаются прочитанными
         await db.execute(
-            "INSERT INTO support_messages (user_id, text, from_admin) VALUES (?, ?, ?)",
-            (user_id, text, 1 if from_admin else 0),
+            "INSERT INTO support_messages (user_id, text, from_admin, is_read) VALUES (?, ?, ?, ?)",
+            (user_id, text, 1 if from_admin else 0, 1 if from_admin else 0),
         )
         await db.commit()
 
@@ -173,20 +179,47 @@ async def get_support_messages(user_id: int, page: int = 1):
     return msgs, total_pages
 
 
+async def mark_ticket_read(user_id: int):
+    """Помечает все сообщения юзера как прочитанные админом."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE support_messages SET is_read = 1 WHERE user_id = ? AND from_admin = 0",
+            (user_id,),
+        )
+        await db.commit()
+
+
+async def get_unread_tickets_count() -> int:
+    """Число тикетов с непрочитанными сообщениями."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM support_messages WHERE from_admin = 0 AND is_read = 0"
+        ) as cur:
+            return (await cur.fetchone())[0]
+
+
 async def get_ticket_users(page: int = 1):
     offset = (page - 1) * TICKETS_PER_PAGE
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT COUNT(DISTINCT user_id) FROM support_messages WHERE from_admin = 0
+            SELECT COUNT(*) FROM (
+                SELECT user_id FROM support_messages WHERE from_admin = 0 GROUP BY user_id
+            )
         """) as cur:
             total = (await cur.fetchone())[0]
         async with db.execute("""
-            SELECT u.id, u.first_name, u.username, COUNT(sm.id), MAX(sm.created_at)
+            SELECT
+                u.id, u.first_name, u.username,
+                COUNT(sm.id) AS total,
+                SUM(CASE WHEN sm.from_admin = 0 AND sm.is_read = 0 THEN 1 ELSE 0 END) AS unread,
+                MAX(sm.created_at) AS last_time,
+                (SELECT text FROM support_messages s2 WHERE s2.user_id = u.id ORDER BY s2.id DESC LIMIT 1) AS last_text,
+                (SELECT from_admin FROM support_messages s3 WHERE s3.user_id = u.id ORDER BY s3.id DESC LIMIT 1) AS last_from_admin
             FROM support_messages sm
             JOIN users u ON u.id = sm.user_id
-            WHERE sm.from_admin = 0
             GROUP BY sm.user_id
-            ORDER BY MAX(sm.created_at) DESC
+            HAVING SUM(CASE WHEN sm.from_admin = 0 THEN 1 ELSE 0 END) > 0
+            ORDER BY unread DESC, last_time DESC
             LIMIT ? OFFSET ?
         """, (TICKETS_PER_PAGE, offset)) as cur:
             rows = await cur.fetchall()

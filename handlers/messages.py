@@ -50,6 +50,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Юзер пишет в поддержку ───────────────────────────────────────────────
     if state == AWAITING_SUPPORT_MSG and not is_admin:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from database import get_unread_tickets_count
         await add_support_message(user.id, text, from_admin=False)
         _, total_pages = await get_support_messages(user.id)
         await update.message.reply_text(
@@ -57,9 +59,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=support_keyboard(total_pages, total_pages),
         )
         uname = f"@{user.username}" if user.username else f"id{user.id}"
+        unread = await get_unread_tickets_count()
+        preview = text if len(text) <= 500 else text[:500] + "…"
         await context.bot.send_message(
             chat_id=ADMIN_ID,
-            text=f"📩 Новое обращение от {user.first_name} ({uname}):\n\n{text}",
+            text=(
+                f"📩 <b>Новое обращение в поддержку</b>\n\n"
+                f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
+                f"🆔 <code>{user.id}</code>\n"
+                f"🔴 Всего непрочитанных тикетов: <b>{unread}</b>\n\n"
+                f"💬 {preview}"
+            ),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
+                [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
+            ]),
         )
         return
 
@@ -110,12 +125,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if state == AWAITING_ADMIN_REPLY:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         reply_to = context.user_data.pop("reply_to", None)
         context.user_data.pop("state", None)
         if not reply_to:
             await update.message.reply_text("❌ Пользователь не найден.", reply_markup=back_admin())
             return
         await add_support_message(reply_to, text, from_admin=True)
+        delivered = True
         try:
             await context.bot.send_message(
                 chat_id=reply_to,
@@ -123,8 +140,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML",
             )
         except Exception:
-            pass
-        await update.message.reply_text("✅ Ответ отправлен.", reply_markup=back_admin())
+            delivered = False
+        status_line = "✅ Ответ отправлен." if delivered else "⚠️ Ответ сохранён, но не доставлен (юзер заблокировал бота)."
+        await update.message.reply_text(
+            status_line,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Ещё ответить", callback_data=f"ticket_reply:{reply_to}")],
+                [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{reply_to}:1")],
+                [InlineKeyboardButton("◀️ К тикетам", callback_data="ticket_list:1")],
+            ]),
+        )
         return
 
     # ── 3x-UI ─────────────────────────────────────────────────────────────────
