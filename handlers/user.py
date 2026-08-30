@@ -72,6 +72,7 @@ async def handle_my_paid_sub(query):
         return
     _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at, status, times_renewed = row[:13]
 
+    from paidsub.time_parser import fmt_duration
     from xui_api import get_client_info, get_client_traffic
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
@@ -90,6 +91,18 @@ async def handle_my_paid_sub(query):
         up_str = "0 КБ"
         down_str = "0 КБ"
 
+    def _parse_dt(s):
+        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+            try:
+                return datetime.strptime(s, fmt)
+            except ValueError:
+                continue
+        return datetime.now()
+
+    expire_dt = _parse_dt(expire)
+    cfg_tmp = load_config()
+    renew_sec = cfg_tmp.get("paid_renew_time", 86400)
+
     # --- Статус ---
     if status == "expired":
         status_emoji = "🔴"
@@ -98,17 +111,7 @@ async def handle_my_paid_sub(query):
     elif status == "renewal":
         status_emoji = "🟡"
         status_text = "ожидает оплаты"
-        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-            try:
-                expire_dt = datetime.strptime(expire, fmt)
-                break
-            except ValueError:
-                continue
-        else:
-            expire_dt = datetime.now()
-        remaining = expire_dt - datetime.now()
-        remaining_sec = max(0, int(remaining.total_seconds()))
-        from paidsub.time_parser import fmt_duration
+        remaining_sec = max(0, int((expire_dt - datetime.now()).total_seconds()))
         status_detail = f"Осталось {fmt_duration(remaining_sec)} на продление"
     elif not enabled:
         status_emoji = "❄️"
@@ -117,24 +120,8 @@ async def handle_my_paid_sub(query):
     else:
         status_emoji = "🟢"
         status_text = "активна"
-        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-            try:
-                expire_dt = datetime.strptime(expire, fmt)
-                break
-            except ValueError:
-                continue
-        else:
-            expire_dt = datetime.now()
-        days_left = (expire_dt - datetime.now()).days
-        cfg_tmp = load_config()
-        renew_sec = cfg_tmp.get("paid_renew_time", 86400)
-        real_days = max(0, days_left - int(renew_sec / 86400))
-        if real_days > 0:
-            status_detail = f"Осталось {real_days} дн."
-        else:
-            from paidsub.time_parser import fmt_duration
-            real_sec = max(0, int((expire_dt - datetime.now()).total_seconds()) - renew_sec)
-            status_detail = f"Осталось {fmt_duration(real_sec)}" if real_sec > 0 else "Скоро закончится"
+        real_sec = max(0, int((expire_dt - datetime.now()).total_seconds()) - renew_sec)
+        status_detail = f"Осталось {fmt_duration(real_sec)}" if real_sec > 0 else "Скоро закончится"
 
     # --- Трафик ---
     if total_gb > 0:
@@ -142,27 +129,22 @@ async def handle_my_paid_sub(query):
         used_gb = total_used / (1024 ** 3)
         bar = _progress_bar(used_gb, total_gb)
         traffic_block = (
-            f"📊 <b>Трафик:</b> {used_str} / {traffic_limit}\n"
-            f"<code>{bar}</code>\n"
-            f"     ⬆ {up_str}  ⬇ {down_str}"
+            f"📊 <b>Трафик</b>\n"
+            f"     {used_str} из {traffic_limit}\n"
+            f"     <code>{bar}</code>\n"
+            f"     ⬆️ {up_str}   ⬇️ {down_str}"
         )
     else:
         traffic_block = (
-            f"📊 <b>Трафик:</b> безлимит\n"
-            f"     ⬆ {up_str}  ⬇ {down_str}  ∑ {used_str}"
+            f"📊 <b>Трафик</b>\n"
+            f"     ♾ Безлимит  —  использовано {used_str}\n"
+            f"     ⬆️ {up_str}   ⬇️ {down_str}"
         )
 
-    # --- Дата ---
+    # --- Дата подключения ---
     try:
-        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-            try:
-                created_dt = datetime.strptime(created_at, fmt)
-                break
-            except ValueError:
-                continue
-        else:
-            created_dt = None
-        created_str = created_dt.strftime("%d.%m.%Y") if created_dt else created_at[:10]
+        created_dt = _parse_dt(created_at)
+        created_str = created_dt.strftime("%d.%m.%Y")
     except Exception:
         created_str = str(created_at)[:10]
 
@@ -174,38 +156,62 @@ async def handle_my_paid_sub(query):
     elif not enabled:
         sub_type = "❄️ Заморожена"
     elif times_renewed > 0:
-        sub_type = "⭐ Премиум"
+        sub_type = "⭐️ Премиум"
     else:
         sub_type = "🆓 Пробный период"
 
+    # --- Дата окончания без времени, если полночь ---
+    expire_display = expire_dt.strftime("%d.%m.%Y в %H:%M")
+
+    # --- Реферальный блок ---
+    referral_block = ""
+    from paidsub.storage import get_referral_stats
+    ref_stats = await get_referral_stats(user_id)
+    bonus_cfg = cfg_tmp.get("referral_bonus")
+    if ref_stats["total"] > 0:
+        earned = f" · +{fmt_duration(ref_stats['total_bonus'])}" if ref_stats["total_bonus"] > 0 else ""
+        referral_block = (
+            f"\n👥 <b>Приглашено друзей:</b> {ref_stats['total']}{earned}\n"
+        )
+    elif bonus_cfg:
+        referral_block = (
+            f"\n🎁 <b>Приглашай друзей</b> — получай +{fmt_duration(bonus_cfg)} за каждого!\n"
+        )
+
     text = (
         f"🔐 <b>Drebol VPN — Моя подписка</b>\n"
-        f"{'━' * 28}\n\n"
+        f"{'━' * 24}\n\n"
 
         f"📋 Тип: <b>{sub_type}</b>\n"
         f"{status_emoji} Статус: <b>{status_text}</b>\n"
         f"     <i>{status_detail}</i>\n\n"
 
-        f"📅 Активна до: <b>{expire}</b>\n"
+        f"📅 Активна до: <b>{expire_display}</b>\n"
         f"📆 Подключён с: {created_str}\n\n"
 
-        f"{traffic_block}\n\n"
+        f"{traffic_block}\n"
+        f"{referral_block}\n"
 
-        f"{'━' * 28}\n"
-        f"🔗 <b>Ссылка подписки:</b>\n"
+        f"{'━' * 24}\n"
+        f"🔗 <b>Ваша ссылка подписки:</b>\n"
         f"<code>{sub_url}</code>\n\n"
-        f"<i>Нажми на ссылку чтобы скопировать → вставь в Happ или INCY</i>"
+        f"<i>Нажмите на ссылку, чтобы скопировать, и вставьте её в приложение Happ или INCY.</i>"
     )
 
     kb_rows = []
     if status in ("renewal", "expired"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
+    kb_rows.append([
+        InlineKeyboardButton("👥 Пригласить друга", callback_data="referral"),
+        InlineKeyboardButton("❓ Как подключиться", callback_data="how_to"),
+    ])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
         text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb_rows),
+        disable_web_page_preview=True,
     )
 
 
