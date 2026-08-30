@@ -174,6 +174,73 @@ async def get_all_user_ids() -> list[int]:
             return [r[0] for r in await cur.fetchall()]
 
 
+async def get_dashboard_stats() -> dict:
+    async def _one(db, q, params=()):
+        async with db.execute(q, params) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        users_total = await _one(db, "SELECT COUNT(*) FROM users")
+        users_today = await _one(db, "SELECT COUNT(*) FROM users WHERE date(created_at) = date('now')")
+        users_week = await _one(db, "SELECT COUNT(*) FROM users WHERE created_at >= datetime('now','-7 days')")
+
+        paid_total = await _one(db, "SELECT COUNT(*) FROM paid_subs")
+        paid_active = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE status IN ('active','renewal')")
+        paid_expired = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE status = 'expired'")
+        trial_active = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed = 0 AND status IN ('active','renewal')")
+        paying = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed > 0")
+        payment_pending = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE payment_pending = 1")
+
+        requests_pending = await _one(db, "SELECT COUNT(*) FROM paid_sub_requests WHERE status = 'pending'")
+        admin_subs = await _one(db, "SELECT COUNT(*) FROM admin_subs")
+
+        ref_total = await _one(db, "SELECT COUNT(*) FROM referrals")
+        ref_rewarded = await _one(db, "SELECT COUNT(*) FROM referrals WHERE rewarded = 1")
+
+        promos_active = await _one(db, "SELECT COUNT(*) FROM promo_codes WHERE active = 1")
+        promo_uses = await _one(db, "SELECT COUNT(*) FROM promo_uses")
+
+        payments_confirmed = await _one(db, "SELECT COUNT(*) FROM paid_sub_history WHERE action = 'payment_confirmed'")
+        payments_today = await _one(db, "SELECT COUNT(*) FROM paid_sub_history WHERE action = 'payment_confirmed' AND date(created_at) = date('now')")
+        trials_approved = await _one(db, "SELECT COUNT(*) FROM paid_sub_history WHERE action = 'trial_approved'")
+        open_tickets_unread = await _one(db, "SELECT COUNT(DISTINCT user_id) FROM support_messages WHERE from_admin = 0 AND is_read = 0")
+
+    return {
+        "users_total": users_total, "users_today": users_today, "users_week": users_week,
+        "paid_total": paid_total, "paid_active": paid_active, "paid_expired": paid_expired,
+        "trial_active": trial_active, "paying": paying, "payment_pending": payment_pending,
+        "requests_pending": requests_pending, "admin_subs": admin_subs,
+        "ref_total": ref_total, "ref_rewarded": ref_rewarded,
+        "promos_active": promos_active, "promo_uses": promo_uses,
+        "payments_confirmed": payments_confirmed, "payments_today": payments_today,
+        "trials_approved": trials_approved, "unread_tickets": open_tickets_unread,
+    }
+
+
+async def get_users_by_segment(segment: str) -> list[int]:
+    """Возвращает tg_id пользователей по сегменту для рассылки."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        if segment == "all":
+            q = "SELECT id FROM users"
+        elif segment == "active":
+            q = "SELECT DISTINCT tg_id FROM paid_subs WHERE tg_id IS NOT NULL AND status IN ('active','renewal')"
+        elif segment == "expired":
+            q = "SELECT DISTINCT tg_id FROM paid_subs WHERE tg_id IS NOT NULL AND status = 'expired'"
+        elif segment == "trial":
+            q = "SELECT DISTINCT tg_id FROM paid_subs WHERE tg_id IS NOT NULL AND times_renewed = 0 AND status IN ('active','renewal')"
+        elif segment == "paying":
+            q = "SELECT DISTINCT tg_id FROM paid_subs WHERE tg_id IS NOT NULL AND times_renewed > 0"
+        elif segment == "no_sub":
+            q = "SELECT id FROM users WHERE id NOT IN (SELECT tg_id FROM paid_subs WHERE tg_id IS NOT NULL)"
+        elif segment == "pending_pay":
+            q = "SELECT DISTINCT tg_id FROM paid_subs WHERE tg_id IS NOT NULL AND payment_pending = 1"
+        else:
+            q = "SELECT id FROM users"
+        async with db.execute(q) as cur:
+            return [r[0] for r in await cur.fetchall()]
+
+
 async def add_support_message(user_id: int, text: str, from_admin: bool = False):
     async with aiosqlite.connect(DB_PATH) as db:
         # сообщения от админа сразу считаются прочитанными

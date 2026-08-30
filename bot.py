@@ -34,6 +34,39 @@ async def post_init(app: Application):
         from paidsub.handlers import check_expired_subs, paid_sync_usernames
         app.job_queue.run_repeating(check_expired_subs, interval=10, first=10)
 
+        async def _healthcheck_job(ctx):
+            from config import ADMIN_ID, load_config, save_config
+            from xui_api import test_connection
+            cfg = load_config()
+            if not cfg.get("xui_url") or not cfg.get("xui_token"):
+                return
+            result = await test_connection()
+            healthy = bool(result.get("success"))
+            prev = cfg.get("xui_healthy", True)
+            if healthy != prev:
+                cfg["xui_healthy"] = healthy
+                save_config(cfg)
+                try:
+                    if healthy:
+                        await ctx.bot.send_message(
+                            chat_id=ADMIN_ID,
+                            text="🟢 <b>Панель 3x-UI снова доступна.</b>",
+                            parse_mode="HTML",
+                        )
+                    else:
+                        await ctx.bot.send_message(
+                            chat_id=ADMIN_ID,
+                            text=(
+                                "🔴 <b>Панель 3x-UI недоступна!</b>\n\n"
+                                f"<code>{result.get('error', '?')}</code>"
+                            ),
+                            parse_mode="HTML",
+                        )
+                except Exception:
+                    pass
+
+        app.job_queue.run_repeating(_healthcheck_job, interval=300, first=60)
+
         async def _paid_sync_job(ctx):
             from datetime import datetime
             cfg = load_config()

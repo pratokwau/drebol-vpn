@@ -36,11 +36,15 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
 def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
     tickets_label = f"🎫 Тикеты 🔴{unread_tickets}" if unread_tickets else "🎫 Тикеты"
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Статистика", callback_data="dashboard")],
         [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs")],
         [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
-        [InlineKeyboardButton("🔧 Параметры 3x-UI", callback_data="xui_settings")],
+        [
+            InlineKeyboardButton("🔧 Параметры 3x-UI", callback_data="xui_settings"),
+            InlineKeyboardButton("🩺 Серверы", callback_data="healthcheck"),
+        ],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
         [InlineKeyboardButton("📢 Управление каналом", callback_data="channel_menu")],
         [InlineKeyboardButton("📄 Документы", callback_data="documents_menu")],

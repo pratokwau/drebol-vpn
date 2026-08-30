@@ -5,9 +5,9 @@ from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard
 from keyboards import main_keyboard
 from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral, handle_copy_sub, handle_enter_promo, handle_remove_promo
-from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url, handle_documents_menu, handle_channel_menu
+from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url, handle_documents_menu, handle_channel_menu, handle_dashboard, handle_healthcheck
 from handlers.support import open_support
-from handlers.broadcast import handle_broadcast_start
+from handlers.broadcast import handle_broadcast_start, handle_broadcast_segment
 from handlers.tickets import (
     handle_ticket_list, handle_ticket_view, handle_ticket_reply_start,
 )
@@ -176,8 +176,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_terms_url(query, context)
     elif data == "git_update":
         await handle_git_update(query)
+    elif data == "dashboard":
+        await handle_dashboard(query)
+    elif data == "healthcheck":
+        await handle_healthcheck(query)
     elif data == "broadcast":
         await handle_broadcast_start(query, context)
+    elif data.startswith("bcast_seg:"):
+        await handle_broadcast_segment(query, context, data.split(":")[1])
 
     # Тикеты
     elif data.startswith("ticket_list:"):

@@ -136,12 +136,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == AWAITING_BROADCAST:
         context.user_data.pop("state", None)
-        from database import get_all_user_ids
-        user_ids = await get_all_user_ids()
-        msg = await update.message.reply_text(f"⏳ Отправляю рассылку {len(user_ids)} пользователям...")
-        ok, fail = await do_broadcast(context.bot, text)
+        from database import get_users_by_segment
+        from handlers.broadcast import SEGMENTS
+        segment = context.user_data.pop("bcast_segment", "all")
+        user_ids = await get_users_by_segment(segment)
+        seg_label = SEGMENTS.get(segment, "Все")
+        msg = await update.message.reply_text(f"⏳ Отправляю рассылку ({seg_label}) — {len(user_ids)} получателям...")
+        ok, fail = await do_broadcast(context.bot, text, segment)
         await msg.edit_text(
-            f"✅ Рассылка завершена.\n\n👥 В базе: {len(user_ids)}\n📨 Доставлено: {ok}\n❌ Ошибок: {fail}",
+            f"✅ Рассылка завершена.\n\n"
+            f"🎯 Сегмент: {seg_label}\n"
+            f"👥 Получателей: {len(user_ids)}\n"
+            f"📨 Доставлено: {ok}\n❌ Ошибок: {fail}",
             reply_markup=back_admin(),
         )
         return
