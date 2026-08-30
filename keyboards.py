@@ -38,8 +38,6 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     channel_label = "📢 Изменить канал" if cfg.get("channel_url") else "📢 Установить канал"
     sub_enabled = cfg.get("force_subscribe", False)
     sub_label = "🔔 Подписка на канал: ВКЛ" if sub_enabled else "🔕 Подписка на канал: ВЫКЛ"
-    privacy_label = "📋 Изменить политику конф." if cfg.get("privacy_url") else "📋 Политика конфиденциальности"
-    terms_label = "📄 Изменить польз. соглашение" if cfg.get("terms_url") else "📄 Пользовательское соглашение"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs")],
         [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
@@ -49,9 +47,19 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔧 Параметры 3x-UI", callback_data="xui_settings")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
         [InlineKeyboardButton(channel_label, callback_data="set_channel")],
+        [InlineKeyboardButton("📄 Документы", callback_data="documents_menu")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
+    ])
+
+
+def documents_keyboard() -> InlineKeyboardMarkup:
+    cfg = load_config()
+    privacy_label = "📋 Изменить политику конф." if cfg.get("privacy_url") else "📋 Политика конфиденциальности"
+    terms_label = "📄 Изменить польз. соглашение" if cfg.get("terms_url") else "📄 Пользовательское соглашение"
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton(privacy_label, callback_data="set_privacy_url")],
         [InlineKeyboardButton(terms_label, callback_data="set_terms_url")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
+        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
 
 

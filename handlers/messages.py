@@ -30,6 +30,8 @@ from states import (
     AWAITING_PAID_SUB_EDIT_PAY_URL, AWAITING_PAID_MUTE_USER,
     AWAITING_PAID_AUTO_UPDATE_DAYS,
     AWAITING_REFERRAL_BONUS,
+    AWAITING_PAID_SUB_REDUCE,
+    AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
 )
 from handlers.broadcast import do_broadcast
 
@@ -461,6 +463,70 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         pass
                 return
         await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+
+    # ── Платные подписки: убавить срок ───────────────────────────────────────────
+    if state == AWAITING_PAID_SUB_REDUCE:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>5 часов</code>, <code>7 дней</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import get_paid_sub, update_paid_sub_field
+            row = await get_paid_sub(sub_id)
+            if row:
+                expire_str = row[6]
+                for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                    try:
+                        expire_dt = datetime.strptime(expire_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    expire_dt = datetime.now()
+                new_expire = expire_dt - timedelta(seconds=seconds)
+                new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
+                await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
+                from xui_api import update_client_expire
+                await update_client_expire(row[2], new_expire_str)
+                from paidsub.time_parser import fmt_duration as fmt_dur
+                await update.message.reply_text(
+                    f"✅ Срок убавлен на <b>{fmt_dur(seconds)}</b>\n"
+                    f"📅 Новая дата: <b>{new_expire_str}</b>",
+                    parse_mode="HTML", reply_markup=back_admin(),
+                )
+                return
+        await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+
+    # ── Платные подписки: массовое добавление/убавление срока ─────────────────────
+    if state in (AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE):
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>5 часов</code>, <code>7 дней</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        direction = 1 if state == AWAITING_PAID_BULK_EXTEND else -1
+        context.user_data.pop("state", None)
+        sent = await update.message.reply_text("⏳ Применяю ко всем подпискам...")
+        from paidsub.handlers import bulk_shift_expire
+        from paidsub.time_parser import fmt_duration as fmt_dur
+        result = await bulk_shift_expire(seconds, direction, context)
+        action = "добавлен" if direction > 0 else "убавлен"
+        await sent.edit_text(
+            f"✅ <b>Массовое действие завершено</b>\n\n"
+            f"Срок {action} на <b>{fmt_dur(seconds)}</b>\n"
+            f"📊 Обработано: <b>{result['updated']}/{result['total']}</b>\n"
+            + (f"❌ Ошибок: <b>{result['errors']}</b>" if result['errors'] else ""),
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
         return
 
     # ── Платные подписки: индивидуальные настройки ──────────────────────────────

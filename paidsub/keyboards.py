@@ -27,6 +27,7 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
         InlineKeyboardButton("📜 История", callback_data="paid_history"),
         InlineKeyboardButton("🔇 Заглушённые", callback_data="paid_muted_list"),
     ])
+    kb.append([InlineKeyboardButton("⚡ Массовые действия", callback_data="paid_bulk_menu")])
     kb.append([InlineKeyboardButton("👥 Рефералы", callback_data="referral_settings")])
     kb.append([InlineKeyboardButton("⚙️ Настройки", callback_data="paid_sub_presets")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
@@ -72,9 +73,10 @@ def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardM
     toggle_label = "⏸ Отключить" if enabled else "▶️ Включить"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(toggle_label, callback_data=f"paid_sub_toggle:{sub_id}")],
+        [InlineKeyboardButton("🧊 Заморозить", callback_data=f"paid_sub_freeze:{sub_id}")],
         [
-            InlineKeyboardButton("🧊 Заморозить", callback_data=f"paid_sub_freeze:{sub_id}"),
             InlineKeyboardButton("➕ Добавить срок", callback_data=f"paid_sub_extend:{sub_id}"),
+            InlineKeyboardButton("➖ Убавить срок", callback_data=f"paid_sub_reduce:{sub_id}"),
         ],
         [InlineKeyboardButton("⚙️ Настройки", callback_data=f"paid_sub_settings:{sub_id}")],
         [InlineKeyboardButton("🗑 Удалить", callback_data=f"paid_sub_delete:{sub_id}")],

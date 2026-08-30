@@ -5,7 +5,7 @@ from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard
 from keyboards import main_keyboard
 from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral
-from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url
+from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url, handle_documents_menu
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
 from handlers.tickets import handle_ticket_list, handle_ticket_view, handle_ticket_reply_start
@@ -33,7 +33,8 @@ from paidsub.handlers import (
     handle_paid_inbounds_menu, handle_paid_toggle_inbound,
     handle_paid_inbounds_expire_menu, handle_paid_toggle_inbound_expire,
     handle_approve, handle_reject, handle_request_sub,
-    handle_paid_sub_freeze, handle_paid_sub_extend,
+    handle_paid_sub_freeze, handle_paid_sub_extend, handle_paid_sub_reduce,
+    handle_paid_bulk_menu, handle_paid_bulk_extend, handle_paid_bulk_reduce,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_ip, handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
     handle_paid_sub_edit_trial, handle_paid_sub_edit_pay_period,
@@ -152,6 +153,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_admin_panel(query)
     elif data == "set_channel":
         await handle_set_channel(query, context)
+    elif data == "documents_menu":
+        await handle_documents_menu(query)
     elif data == "set_privacy_url":
         await handle_set_privacy_url(query, context)
     elif data == "set_terms_url":
@@ -273,6 +276,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_freeze(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_extend:"):
         await handle_paid_sub_extend(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_reduce:"):
+        await handle_paid_sub_reduce(query, int(data.split(":")[1]), context)
+    elif data == "paid_bulk_menu":
+        await handle_paid_bulk_menu(query)
+    elif data == "paid_bulk_extend":
+        await handle_paid_bulk_extend(query, context)
+    elif data == "paid_bulk_reduce":
+        await handle_paid_bulk_reduce(query, context)
     elif data.startswith("paid_sub_settings:"):
         await handle_paid_sub_settings(query, int(data.split(":")[1]))
     elif data.startswith("paid_sub_edit_expire:"):

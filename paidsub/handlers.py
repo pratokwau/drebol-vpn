@@ -875,6 +875,121 @@ async def handle_paid_sub_extend(query, sub_id: int, context):
     )
 
 
+async def handle_paid_sub_reduce(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_REDUCE
+    context.user_data["state"] = AWAITING_PAID_SUB_REDUCE
+    context.user_data["edit_sub_id"] = sub_id
+    await query.edit_message_text(
+        f"➖ <b>Убавить срок у подписки #{sub_id}</b>\n\n"
+        "Введи время в свободной форме:\n"
+        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+# ── Массовые действия ─────────────────────────────────────────────────────────
+
+async def handle_paid_bulk_menu(query):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    import aiosqlite
+    from database import DB_PATH
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM paid_subs") as cur:
+            total = (await cur.fetchone())[0]
+    await query.edit_message_text(
+        "⚡ <b>Массовые действия</b>\n\n"
+        f"Всего платных подписок: <b>{total}</b>\n\n"
+        "Выбери действие — оно применится ко <b>всем</b> платным подпискам сразу:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Добавить срок всем", callback_data="paid_bulk_extend")],
+            [InlineKeyboardButton("➖ Убавить срок всем", callback_data="paid_bulk_reduce")],
+            [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
+        ]),
+    )
+
+
+async def handle_paid_bulk_extend(query, context):
+    from states import AWAITING_PAID_BULK_EXTEND
+    context.user_data["state"] = AWAITING_PAID_BULK_EXTEND
+    await query.edit_message_text(
+        "➕ <b>Добавить срок всем подпискам</b>\n\n"
+        "Введи время в свободной форме:\n"
+        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_bulk_reduce(query, context):
+    from states import AWAITING_PAID_BULK_REDUCE
+    context.user_data["state"] = AWAITING_PAID_BULK_REDUCE
+    await query.edit_message_text(
+        "➖ <b>Убавить срок всем подпискам</b>\n\n"
+        "Введи время в свободной форме:\n"
+        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
+    """Сдвигает дату окончания у всех платных подписок.
+    direction = +1 (добавить) или -1 (убавить). Возвращает отчёт."""
+    from xui_api import update_client_expire, get_client_info, toggle_client, move_client_inbound
+    import aiosqlite
+    from database import DB_PATH
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT id FROM paid_subs") as cur:
+            all_ids = [r[0] for r in await cur.fetchall()]
+
+    cfg = load_config()
+    create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
+    updated = 0
+    errors = 0
+
+    for sid in all_ids:
+        row = await get_paid_sub(sid)
+        if not row:
+            continue
+        email = row[2]
+        tg_id = row[1]
+        expire_str = row[6]
+        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+            try:
+                expire_dt = datetime.strptime(expire_str, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            expire_dt = datetime.now()
+
+        if direction > 0:
+            base = expire_dt if expire_dt > datetime.now() else datetime.now()
+            new_expire = base + timedelta(seconds=seconds)
+        else:
+            new_expire = expire_dt - timedelta(seconds=seconds)
+
+        new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
+        try:
+            await update_paid_sub_field(sid, "expire_date", new_expire_str)
+            await update_client_expire(email, new_expire_str)
+            if direction > 0:
+                # при добавлении — активируем и возвращаем инбаунды
+                await update_paid_sub_field(sid, "status", "active")
+                info = await get_client_info(email)
+                if info.get("success") and not info.get("enabled", True):
+                    await toggle_client(email, True)
+                if create_inbound_ids:
+                    await move_client_inbound(email, create_inbound_ids)
+            updated += 1
+        except Exception:
+            errors += 1
+
+    return {"updated": updated, "errors": errors, "total": len(all_ids)}
+
+
 # ── Индивидуальные настройки платной подписки ─────────────────────────────────
 
 async def handle_paid_sub_settings(query, sub_id: int):

@@ -1,7 +1,7 @@
 import subprocess
 from telegram.ext import ContextTypes
 from config import INSTALL_DIR, load_config
-from keyboards import admin_keyboard, back_admin
+from keyboards import admin_keyboard, back_admin, documents_keyboard
 from states import AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL
 
 
@@ -20,6 +20,15 @@ async def handle_set_channel(query, context: ContextTypes.DEFAULT_TYPE):
         "Отправь ссылку на Telegram-канал (например: <code>https://t.me/mychannel</code>):",
         parse_mode="HTML",
         reply_markup=back_admin(),
+    )
+
+
+async def handle_documents_menu(query):
+    await query.edit_message_text(
+        "📄 <b>Документы</b>\n\n"
+        "Здесь можно задать ссылки на юридические документы:",
+        parse_mode="HTML",
+        reply_markup=documents_keyboard(),
     )
 
 

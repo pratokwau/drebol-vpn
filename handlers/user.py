@@ -201,10 +201,6 @@ async def handle_my_paid_sub(query):
     kb_rows = []
     if status in ("renewal", "expired"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
-    kb_rows.append([
-        InlineKeyboardButton("👥 Пригласить друга", callback_data="referral"),
-        InlineKeyboardButton("❓ Как подключиться", callback_data="how_to"),
-    ])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
