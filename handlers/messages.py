@@ -32,6 +32,8 @@ from states import (
     AWAITING_REFERRAL_BONUS,
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
+    AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE,
+    AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
 )
 from handlers.broadcast import do_broadcast
 
@@ -74,6 +76,42 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
                 [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
+            ]),
+        )
+        return
+
+    # ── Юзер вводит промокод ─────────────────────────────────────────────────
+    if state == AWAITING_PROMO_CODE:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from paidsub.handlers import validate_promo
+        from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field
+        context.user_data.pop("state", None)
+        code = text.strip().upper()
+        row = await get_paid_sub_by_tg_id(user.id)
+        if not row:
+            await update.message.reply_text(
+                "❌ У вас нет активной подписки для применения промокода.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
+                ]),
+            )
+            return
+        promo, err = await validate_promo(code, user.id)
+        if err:
+            await update.message.reply_text(
+                err,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎟 Ещё раз", callback_data="enter_promo")],
+                    [InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")],
+                ]),
+            )
+            return
+        await update_paid_sub_field(row[0], "pending_promo", promo[1])
+        await update.message.reply_text(
+            f"✅ Промокод <b>{promo[1]}</b> применён — скидка <b>−{promo[2]}%</b>!",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")]
             ]),
         )
         return
@@ -762,6 +800,77 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"✅ Бонус за реферала: <b>{fmt_duration(seconds)}</b>",
             parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+
+    # ── Создание промокода ───────────────────────────────────────────────────────
+    if state == AWAITING_PROMO_NEW_CODE:
+        from paidsub.storage import get_promo
+        code = text.strip().upper()
+        if not code or len(code) > 32 or " " in code:
+            await update.message.reply_text(
+                "❌ Код без пробелов, до 32 символов. Попробуй ещё раз:",
+                reply_markup=back_admin(),
+            )
+            return
+        if await get_promo(code):
+            await update.message.reply_text("❌ Такой промокод уже существует.", reply_markup=back_admin())
+            return
+        context.user_data["new_promo"] = {"code": code}
+        context.user_data["state"] = AWAITING_PROMO_NEW_PERCENT
+        await update.message.reply_text(
+            f"🎟 Код: <b>{code}</b>\n\nТеперь введи размер скидки в % (число от 1 до 100):",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+
+    if state == AWAITING_PROMO_NEW_PERCENT:
+        if not text.isdigit() or not (1 <= int(text) <= 100):
+            await update.message.reply_text("❌ Введи число от 1 до 100:", reply_markup=back_admin())
+            return
+        context.user_data.setdefault("new_promo", {})["percent"] = int(text)
+        context.user_data["state"] = AWAITING_PROMO_NEW_EXPIRE
+        await update.message.reply_text(
+            f"💯 Скидка: <b>{text}%</b>\n\n"
+            "Введи дату окончания действия промокода в формате <code>дд.мм.гггг</code>\n"
+            "или отправь <code>-</code> — без срока действия:",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+
+    if state == AWAITING_PROMO_NEW_EXPIRE:
+        from paidsub.storage import create_promo
+        expires_at = None
+        if text.strip() != "-":
+            try:
+                datetime.strptime(text.strip(), "%d.%m.%Y")
+                expires_at = text.strip()
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Формат: <code>дд.мм.гггг</code> или <code>-</code>",
+                    parse_mode="HTML", reply_markup=back_admin(),
+                )
+                return
+        data = context.user_data.pop("new_promo", {})
+        context.user_data.pop("state", None)
+        code = data.get("code")
+        percent = data.get("percent")
+        if not code or not percent:
+            await update.message.reply_text("❌ Данные потеряны, начни заново.", reply_markup=back_admin())
+            return
+        ok = await create_promo(code, percent, expires_at)
+        if not ok:
+            await update.message.reply_text("❌ Не удалось создать промокод.", reply_markup=back_admin())
+            return
+        exp_line = f"📅 Действует до: <b>{expires_at}</b>" if expires_at else "📅 Без срока действия"
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        await update.message.reply_text(
+            f"✅ <b>Промокод создан!</b>\n\n"
+            f"🎟 <b>{code}</b> · скидка <b>−{percent}%</b>\n{exp_line}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎟 К промокодам", callback_data="promo_menu")],
+            ]),
         )
         return
 

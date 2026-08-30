@@ -14,6 +14,8 @@ from paidsub.storage import (
     get_muted_until, set_mute, clear_mute, list_muted,
     list_pending_requests, list_pending_payments,
     get_referrer, mark_referral_rewarded, get_all_referral_stats,
+    create_promo, get_promo, get_promo_by_id, list_promos, toggle_promo,
+    delete_promo, promo_used_by, record_promo_use, promo_use_count, get_pending_promo,
 )
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
@@ -1318,10 +1320,22 @@ async def handle_confirm_payment(query, tg_id: int, context):
         from xui_api import move_client_inbound
         await move_client_inbound(email, create_inbound_ids)
 
+    # Промокод: списываем использование и снимаем pending
+    promo_line = ""
+    pending_promo = await get_pending_promo(tg_id)
+    if pending_promo:
+        promo = await get_promo(pending_promo)
+        if promo and not await promo_used_by(pending_promo, tg_id):
+            await record_promo_use(pending_promo, tg_id)
+            await add_history(tg_id, "promo_used", f"Промокод {pending_promo} (−{promo[2]}%)")
+            promo_line = f"🎟 Промокод: <b>{pending_promo}</b> (−{promo[2]}%)\n"
+        await update_paid_sub_field(sub_id, "pending_promo", None)
+
     await add_history(tg_id, "payment_confirmed")
 
     await query.edit_message_text(
         f"✅ Оплата подтверждена для <code>{tg_id}</code>!\n\n"
+        f"{promo_line}"
         f"📅 Новая дата: <b>{new_expire_str}</b>",
         parse_mode="HTML",
     )
@@ -1425,6 +1439,7 @@ _ACTION_LABELS = {
     "bulk_reduced": "⚡➖ Массово: срок убавлен",
     "settings_changed": "⚙️ Изменены настройки",
     "referral_bonus": "🎁 Реферальный бонус",
+    "promo_used": "🎟 Промокод применён",
     "user_muted": "🔇 Заглушён",
     "user_unmuted": "🔊 Разглушён",
 }
@@ -1709,6 +1724,112 @@ async def handle_set_referral_bonus(query, context):
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
+
+
+# ── Промокоды ────────────────────────────────────────────────────────────────
+
+def apply_discount(price: int, percent: int) -> int:
+    return max(0, round(price * (100 - percent) / 100))
+
+
+def _parse_date(s: str):
+    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+async def validate_promo(code: str, tg_id: int):
+    """Возвращает (promo_row, None) или (None, текст_ошибки)."""
+    promo = await get_promo(code)
+    if not promo:
+        return None, "❌ Промокод не найден."
+    _id, code_u, percent, expires_at, active, _ = promo
+    if not active:
+        return None, "❌ Промокод неактивен."
+    if expires_at:
+        exp = _parse_date(expires_at)
+        if exp and datetime.now() > exp:
+            return None, "❌ Срок действия промокода истёк."
+    if await promo_used_by(code_u, tg_id):
+        return None, "❌ Вы уже использовали этот промокод."
+    return promo, None
+
+
+async def handle_promos_menu(query):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    promos = await list_promos()
+    kb = []
+    if promos:
+        for pid, code, percent, expires_at, active in promos:
+            mark = "🟢" if active else "🔴"
+            exp = f" · до {expires_at}" if expires_at else ""
+            kb.append([InlineKeyboardButton(
+                f"{mark} {code} · −{percent}%{exp}",
+                callback_data=f"promo_view:{pid}",
+            )])
+    kb.append([InlineKeyboardButton("➕ Создать промокод", callback_data="promo_create")])
+    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
+    body = "Список промокодов:" if promos else "Промокодов пока нет."
+    await query.edit_message_text(
+        "🎟 <b>Промокоды</b>\n\n"
+        "Скидка в % на стоимость продления.\n\n"
+        f"{body}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb),
+    )
+
+
+async def handle_promo_view(query, promo_id: int):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    promo = await get_promo_by_id(promo_id)
+    if not promo:
+        await query.answer("Промокод не найден", show_alert=True)
+        return
+    pid, code, percent, expires_at, active, created_at = promo
+    used = await promo_use_count(code)
+    status = "🟢 активен" if active else "🔴 выключен"
+    exp_line = f"📅 Действует до: <b>{expires_at}</b>\n" if expires_at else "📅 Без срока действия\n"
+    toggle_label = "🔴 Выключить" if active else "🟢 Включить"
+    await query.edit_message_text(
+        f"🎟 <b>Промокод {code}</b>\n\n"
+        f"💯 Скидка: <b>−{percent}%</b>\n"
+        f"📌 Статус: <b>{status}</b>\n"
+        f"{exp_line}"
+        f"👥 Использован: <b>{used}</b> раз\n"
+        f"🕐 Создан: {created_at[:16] if created_at else '?'}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(toggle_label, callback_data=f"promo_toggle:{pid}")],
+            [InlineKeyboardButton("🗑 Удалить", callback_data=f"promo_delete:{pid}")],
+            [InlineKeyboardButton("◀️ К промокодам", callback_data="promo_menu")],
+        ]),
+    )
+
+
+async def handle_promo_create(query, context):
+    from states import AWAITING_PROMO_NEW_CODE
+    context.user_data["state"] = AWAITING_PROMO_NEW_CODE
+    context.user_data.pop("new_promo", None)
+    await query.edit_message_text(
+        "🎟 <b>Новый промокод</b>\n\n"
+        "Введи текст промокода (латиница/цифры, напр. <code>SUMMER20</code>):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_promo_toggle(query, promo_id: int):
+    await toggle_promo(promo_id)
+    await handle_promo_view(query, promo_id)
+
+
+async def handle_promo_delete(query, promo_id: int):
+    await delete_promo(promo_id)
+    await query.answer("Промокод удалён 🗑")
+    await handle_promos_menu(query)
 
 
 def save_paid_preset(key: str, value):

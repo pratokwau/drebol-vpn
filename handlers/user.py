@@ -242,15 +242,37 @@ async def handle_renew_sub(query):
     uname = f"@{user.username}" if user.username else f"id{user.id}"
     hint_text = f"{user.id} - {uname}"
 
+    # Применённый промокод (если валиден)
+    from paidsub.storage import get_pending_promo, update_paid_sub_field
+    from paidsub.handlers import validate_promo, apply_discount
+    promo_line = ""
+    price_line = f"💵 Сумма: <b>{price} ₽</b>\n"
+    promo_btn_row = [InlineKeyboardButton("🎟 Ввести промокод", callback_data="enter_promo")]
+    pending = await get_pending_promo(user.id)
+    if pending:
+        promo, err = await validate_promo(pending, user.id)
+        if promo:
+            percent = promo[2]
+            final_price = apply_discount(price, percent)
+            price_line = f"💵 Сумма: <s>{price} ₽</s> → <b>{final_price} ₽</b>\n"
+            promo_line = f"🎟 Промокод <b>{promo[1]}</b>: скидка <b>−{percent}%</b>\n"
+            promo_btn_row = [InlineKeyboardButton("❌ Убрать промокод", callback_data="remove_promo")]
+        else:
+            # промокод стал невалидным — снимаем
+            if row:
+                await update_paid_sub_field(row[0], "pending_promo", None)
+
     kb = []
     if pay_url:
         kb.append([InlineKeyboardButton("💳 Оплатить", url=pay_url)])
+    kb.append(promo_btn_row)
     kb.append([InlineKeyboardButton("✅ Я оплатил", callback_data="i_paid")])
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
 
     await query.edit_message_text(
         "💳 <b>Продление подписки</b>\n\n"
-        f"💵 Сумма: <b>{price} ₽</b>\n"
+        f"{price_line}"
+        f"{promo_line}"
         f"⏱ Срок: <b>{period_str}</b>\n\n"
         "При оплате в поле <b>обратная связь</b> введите:\n"
         f"<code>{hint_text}</code>\n\n"
@@ -261,12 +283,34 @@ async def handle_renew_sub(query):
     )
 
 
+async def handle_enter_promo(query, context):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from states import AWAITING_PROMO_CODE
+    context.user_data["state"] = AWAITING_PROMO_CODE
+    await query.edit_message_text(
+        "🎟 <b>Промокод</b>\n\nВведите промокод одним сообщением:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")]
+        ]),
+    )
+
+
+async def handle_remove_promo(query, context):
+    context.user_data.pop("state", None)
+    from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field
+    row = await get_paid_sub_by_tg_id(query.from_user.id)
+    if row:
+        await update_paid_sub_field(row[0], "pending_promo", None)
+    await handle_renew_sub(query)
+
+
 async def handle_i_paid(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from datetime import datetime
     user = query.from_user
 
-    from paidsub.storage import is_payment_pending, get_paid_sub_by_tg_id, update_paid_sub_field, get_muted_until
+    from paidsub.storage import is_payment_pending, get_paid_sub_by_tg_id, update_paid_sub_field, get_muted_until, get_paid_sub
     muted = await get_muted_until(user.id)
     if muted:
         muted_dt = None
@@ -322,7 +366,26 @@ async def handle_i_paid(query, context):
         sub_info = f"\n📧 Email: <code>{row[2]}</code>\n📅 До: <b>{row[6]}</b>"
 
     cfg = load_config()
-    price = cfg.get("paid_price", 0)
+    # цена с учётом индивидуальной и промокода
+    full = await get_paid_sub(row[0]) if row else None
+    ind_price = full[16] if full and len(full) > 16 and full[16] else None
+    price = ind_price if ind_price else cfg.get("paid_price", 0)
+
+    from paidsub.storage import get_pending_promo
+    from paidsub.handlers import validate_promo, apply_discount
+    promo_admin_line = ""
+    pending = await get_pending_promo(user.id)
+    if pending:
+        promo, err = await validate_promo(pending, user.id)
+        if promo:
+            percent = promo[2]
+            final_price = apply_discount(price, percent)
+            promo_admin_line = (
+                f"🎟 Промокод: <b>{promo[1]}</b> (−{percent}%)\n"
+                f"💵 К оплате: <s>{price} ₽</s> → <b>{final_price} ₽</b>\n"
+            )
+    if not promo_admin_line:
+        promo_admin_line = f"💵 Сумма: <b>{price} ₽</b>\n"
 
     if user.username:
         link_line = f'⛓‍💥 <a href="https://t.me/{user.username}">Написать</a>'
@@ -339,7 +402,7 @@ async def handle_i_paid(query, context):
             f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
             f"🆔 TG ID: <code>{user.id}</code>"
             f"{sub_info}\n"
-            f"💵 Сумма: <b>{price} ₽</b>\n\n"
+            f"{promo_admin_line}\n"
             f"{link_line}"
         ),
         parse_mode="HTML",

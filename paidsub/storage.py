@@ -86,7 +86,7 @@ async def get_all_paid_subs_with_tg() -> list:
 async def update_paid_sub_field(sub_id: int, field: str, value):
     allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending",
                 "ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url",
-                "times_renewed"}
+                "times_renewed", "pending_promo"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:
@@ -309,3 +309,94 @@ async def get_all_referral_stats() -> dict:
         """) as cur:
             top_referrers = await cur.fetchall()
     return {"total": total, "rewarded": rewarded, "total_bonus": total_bonus, "top_referrers": top_referrers}
+
+
+# ── Промокоды ────────────────────────────────────────────────────────────────
+
+async def create_promo(code: str, percent: int, expires_at: str | None) -> bool:
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO promo_codes (code, percent, expires_at) VALUES (?, ?, ?)",
+                (code.upper(), percent, expires_at),
+            )
+            await db.commit()
+        return True
+    except Exception:
+        return False
+
+
+async def get_promo(code: str) -> tuple | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, code, percent, expires_at, active, created_at FROM promo_codes WHERE code = ?",
+            (code.upper(),),
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def get_promo_by_id(promo_id: int) -> tuple | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, code, percent, expires_at, active, created_at FROM promo_codes WHERE id = ?",
+            (promo_id,),
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def list_promos() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, code, percent, expires_at, active FROM promo_codes ORDER BY created_at DESC"
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def toggle_promo(promo_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE promo_codes SET active = 1 - active WHERE id = ?", (promo_id,)
+        )
+        await db.commit()
+
+
+async def delete_promo(promo_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM promo_codes WHERE id = ?", (promo_id,))
+        await db.commit()
+
+
+async def promo_used_by(code: str, tg_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM promo_uses WHERE code = ? AND tg_id = ?",
+            (code.upper(), tg_id),
+        ) as cur:
+            return (await cur.fetchone()) is not None
+
+
+async def record_promo_use(code: str, tg_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO promo_uses (code, tg_id) VALUES (?, ?)",
+            (code.upper(), tg_id),
+        )
+        await db.commit()
+
+
+async def promo_use_count(code: str) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM promo_uses WHERE code = ?", (code.upper(),)
+        ) as cur:
+            return (await cur.fetchone())[0]
+
+
+async def get_pending_promo(tg_id: int) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT pending_promo FROM paid_subs WHERE tg_id = ? ORDER BY created_at DESC LIMIT 1",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row and row[0] else None

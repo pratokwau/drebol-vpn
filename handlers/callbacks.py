@@ -4,7 +4,7 @@ from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard
 from keyboards import main_keyboard
-from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral, handle_copy_sub
+from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral, handle_copy_sub, handle_enter_promo, handle_remove_promo
 from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url, handle_documents_menu, handle_channel_menu
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start
@@ -47,6 +47,8 @@ from paidsub.handlers import (
     handle_paid_auto_update_settings, handle_paid_toggle_auto_update,
     handle_paid_set_auto_update_days, handle_paid_run_sync_now,
     handle_referral_settings, handle_set_referral_bonus,
+    handle_promos_menu, handle_promo_view, handle_promo_create,
+    handle_promo_toggle, handle_promo_delete,
 )
 
 
@@ -120,6 +122,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_request_sub(query, context)
     elif data == "renew_sub":
         await handle_renew_sub(query)
+    elif data == "enter_promo":
+        await handle_enter_promo(query, context)
+    elif data == "remove_promo":
+        await handle_remove_promo(query, context)
     elif data == "i_paid":
         await handle_i_paid(query, context)
     elif data == "my_sub":
@@ -323,6 +329,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_referral_settings(query)
     elif data == "set_referral_bonus":
         await handle_set_referral_bonus(query, context)
+    elif data == "promo_menu":
+        await handle_promos_menu(query)
+    elif data == "promo_create":
+        await handle_promo_create(query, context)
+    elif data.startswith("promo_view:"):
+        await handle_promo_view(query, int(data.split(":")[1]))
+    elif data.startswith("promo_toggle:"):
+        await handle_promo_toggle(query, int(data.split(":")[1]))
+    elif data.startswith("promo_delete:"):
+        await handle_promo_delete(query, int(data.split(":")[1]))
     elif data == "paid_auto_update_settings":
         await handle_paid_auto_update_settings(query)
     elif data == "paid_toggle_auto_update":

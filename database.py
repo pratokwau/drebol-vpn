@@ -123,6 +123,29 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # промокоды (скидка %)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS promo_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                percent INTEGER NOT NULL,
+                expires_at TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS promo_uses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL,
+                tg_id INTEGER NOT NULL,
+                used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        try:
+            await db.execute("ALTER TABLE paid_subs ADD COLUMN pending_promo TEXT")
+        except Exception:
+            pass
         # убираем :443/:80 из существующих sub_url
         from xui_api import strip_default_port
         async with db.execute("SELECT id, sub_url FROM admin_subs") as cur:

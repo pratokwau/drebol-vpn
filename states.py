@@ -55,3 +55,9 @@ AWAITING_REFERRAL_BONUS = "awaiting_referral_bonus"
 AWAITING_PAID_SUB_REDUCE = "awaiting_paid_sub_reduce"
 AWAITING_PAID_BULK_EXTEND = "awaiting_paid_bulk_extend"
 AWAITING_PAID_BULK_REDUCE = "awaiting_paid_bulk_reduce"
+
+# Промокоды
+AWAITING_PROMO_CODE = "awaiting_promo_code"
+AWAITING_PROMO_NEW_CODE = "awaiting_promo_new_code"
+AWAITING_PROMO_NEW_PERCENT = "awaiting_promo_new_percent"
+AWAITING_PROMO_NEW_EXPIRE = "awaiting_promo_new_expire"
