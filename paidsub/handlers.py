@@ -20,7 +20,7 @@ from paidsub.keyboards import (
     paid_inbounds_keyboard, approve_keyboard, paid_sub_settings_keyboard,
     paid_history_keyboard, payment_approve_keyboard, muted_list_keyboard,
 )
-from paidsub.time_parser import fmt_duration
+from paidsub.time_parser import fmt_duration, fmt_duration_precise
 
 
 async def _notify_user(bot: Bot, tg_id, text: str):
@@ -752,7 +752,7 @@ async def handle_paid_sub_view(query, sub_id: int):
     if expire_dt:
         delta = expire_dt - datetime.now()
         if delta.total_seconds() > 0:
-            time_left_line = f"⏱ Осталось: <b>{fmt_duration(int(delta.total_seconds()))}</b>\n"
+            time_left_line = f"⏱ Осталось: <b>{fmt_duration_precise(int(delta.total_seconds()))}</b>\n"
         else:
             time_left_line = "⏱ Осталось: <b>истекла</b>\n"
 
