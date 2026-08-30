@@ -28,6 +28,41 @@ def parse_duration(text: str) -> int:
     return None
 
 
+def _plural(n: int, forms: tuple) -> str:
+    """forms = (одна, две, пять): '1 день', '2 дня', '5 дней'."""
+    n = abs(n)
+    if n % 10 == 1 and n % 100 != 11:
+        word = forms[0]
+    elif 2 <= n % 10 <= 4 and not (12 <= n % 100 <= 14):
+        word = forms[1]
+    else:
+        word = forms[2]
+    return f"{n} {word}"
+
+
+def fmt_duration_precise(seconds: int) -> str:
+    """Каскадный формат из двух старших ненулевых единиц:
+    '5 дней 7 часов', '7 часов 8 минут', '8 минут 5 секунд', '5 секунд'."""
+    seconds = max(0, int(seconds))
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+
+    d = _plural(days, ("день", "дня", "дней"))
+    h = _plural(hours, ("час", "часа", "часов"))
+    m = _plural(minutes, ("минута", "минуты", "минут"))
+    s = _plural(secs, ("секунда", "секунды", "секунд"))
+
+    if days > 0:
+        return f"{d} {h}" if hours > 0 else d
+    if hours > 0:
+        return f"{h} {m}" if minutes > 0 else h
+    if minutes > 0:
+        return f"{m} {s}" if secs > 0 else m
+    return s
+
+
 def fmt_duration(seconds: int) -> str:
     """Форматирует секунды в читаемую строку."""
     if seconds >= 2592000 and seconds % 2592000 == 0:

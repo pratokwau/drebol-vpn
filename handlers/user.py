@@ -72,7 +72,7 @@ async def handle_my_paid_sub(query):
         return
     _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at, status, times_renewed = row[:13]
 
-    from paidsub.time_parser import fmt_duration
+    from paidsub.time_parser import fmt_duration, fmt_duration_precise
     from xui_api import get_client_info, get_client_traffic
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
@@ -112,7 +112,7 @@ async def handle_my_paid_sub(query):
         status_emoji = "🟡"
         status_text = "ожидает оплаты"
         remaining_sec = max(0, int((expire_dt - datetime.now()).total_seconds()))
-        status_detail = f"Осталось {fmt_duration(remaining_sec)} на продление"
+        status_detail = f"Осталось {fmt_duration_precise(remaining_sec)} на продление"
     elif not enabled:
         status_emoji = "❄️"
         status_text = "заморожена"
@@ -121,7 +121,7 @@ async def handle_my_paid_sub(query):
         status_emoji = "🟢"
         status_text = "активна"
         real_sec = max(0, int((expire_dt - datetime.now()).total_seconds()) - renew_sec)
-        status_detail = f"Осталось {fmt_duration(real_sec)}" if real_sec > 0 else "Скоро закончится"
+        status_detail = f"Осталось {fmt_duration_precise(real_sec)}" if real_sec > 0 else "Скоро закончится"
 
     # --- Трафик ---
     if total_gb > 0:
