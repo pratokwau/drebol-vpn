@@ -86,12 +86,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ══════════════════════════════════════════════════════════════════════════
 
     if state == AWAITING_CHANNEL:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        _channel_back = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Управление каналом", callback_data="channel_menu")]])
         if not text.startswith("http"):
-            await update.message.reply_text("❌ Некорректная ссылка.", reply_markup=back_admin())
+            await update.message.reply_text("❌ Некорректная ссылка.", reply_markup=_channel_back)
             return
         _save("channel_url", text)
         context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Канал сохранён: <code>{text}</code>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Канал сохранён: <code>{text}</code>", parse_mode="HTML", reply_markup=_channel_back)
         return
 
     if state == AWAITING_BROADCAST:

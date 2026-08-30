@@ -34,22 +34,29 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
 # ── Админка ───────────────────────────────────────────────────────────────────
 
 def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
-    cfg = load_config()
-    channel_label = "📢 Изменить канал" if cfg.get("channel_url") else "📢 Установить канал"
-    sub_enabled = cfg.get("force_subscribe", False)
-    sub_label = "🔔 Подписка на канал: ВКЛ" if sub_enabled else "🔕 Подписка на канал: ВЫКЛ"
     tickets_label = f"🎫 Тикеты 🔴{unread_tickets}" if unread_tickets else "🎫 Тикеты"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs")],
         [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
-        [InlineKeyboardButton(sub_label, callback_data="toggle_force_sub")],
         [InlineKeyboardButton("🔧 Параметры 3x-UI", callback_data="xui_settings")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
-        [InlineKeyboardButton(channel_label, callback_data="set_channel")],
+        [InlineKeyboardButton("📢 Управление каналом", callback_data="channel_menu")],
         [InlineKeyboardButton("📄 Документы", callback_data="documents_menu")],
         [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
+    ])
+
+
+def channel_keyboard() -> InlineKeyboardMarkup:
+    cfg = load_config()
+    channel_label = "📢 Изменить канал" if cfg.get("channel_url") else "📢 Установить канал"
+    sub_enabled = cfg.get("force_subscribe", False)
+    sub_label = "🔔 Обязательная подписка: ВКЛ" if sub_enabled else "🔕 Обязательная подписка: ВЫКЛ"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(channel_label, callback_data="set_channel")],
+        [InlineKeyboardButton(sub_label, callback_data="toggle_force_sub")],
+        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
 
 
