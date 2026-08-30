@@ -569,7 +569,18 @@ async def handle_paid_sub_view(query, sub_id: int):
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
+    # row: id(0),tg_id(1),email(2),uuid(3),sub_id(4),sub_url(5),expire(6),
+    #      ip(7),hwid(8),traffic(9),created(10),status(11),payment_pending(12),
+    #      ind_trial(13),ind_pay(14),ind_renew(15),ind_price(16),ind_pay_url(17)
     _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row[:11]
+    status = row[11] if len(row) > 11 else "active"
+    payment_pending = row[12] if len(row) > 12 else 0
+    ind_trial = row[13] if len(row) > 13 else None
+    ind_pay = row[14] if len(row) > 14 else None
+    ind_renew = row[15] if len(row) > 15 else None
+    ind_price = row[16] if len(row) > 16 else None
+    ind_pay_url = row[17] if len(row) > 17 else None
+
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
     from xui_api import get_client_traffic, get_client_info
@@ -577,7 +588,8 @@ async def handle_paid_sub_view(query, sub_id: int):
     if t["success"]:
         up = t.get("up", 0)
         down = t.get("down", 0)
-        traffic_line = f"📶 Трафик: <b>{traffic_limit}</b> — ⬆ {_fmt_bytes(up)} ⬇ {_fmt_bytes(down)}"
+        total_used = up + down
+        traffic_line = f"📶 Трафик: <b>{traffic_limit}</b> — ⬆ {_fmt_bytes(up)} ⬇ {_fmt_bytes(down)} (всего {_fmt_bytes(total_used)})"
     else:
         traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>"
 
@@ -585,17 +597,41 @@ async def handle_paid_sub_view(query, sub_id: int):
     enabled = info.get("enabled", True) if info.get("success") else True
     status_icon = "🟢" if enabled else "🔴"
 
-    tg_line = f'👤 TG: <a href="tg://user?id={tg_id}">{tg_id}</a>\n' if tg_id else ""
+    # Статус подписки
+    status_labels = {"active": "активна", "renewal": "ожидает продления", "expired": "истекла"}
+    status_label = status_labels.get(status, status)
+
+    # Оплата ожидает
+    payment_line = ""
+    if payment_pending:
+        payment_line = "💳 Оплата: <b>ожидает проверки</b>\n"
+
+    # Количество продлений
+    from paidsub.storage import get_paid_sub_by_tg_id
+    tg_row = await get_paid_sub_by_tg_id(tg_id) if tg_id else None
+    times_renewed = tg_row[12] if tg_row and len(tg_row) > 12 else 0
+    sub_type = "оплаченная" if times_renewed > 0 else "пробная"
+
+    # Юзер инфо
     from database import get_user_info
     user_info = await get_user_info(tg_id) if tg_id else None
     uname = user_info[2] if user_info and user_info[2] else None
+    first_name = user_info[1] if user_info and user_info[1] else None
+
     if tg_id and uname:
+        tg_line = f'👤 <a href="tg://user?id={tg_id}">{first_name or tg_id}</a> (@{uname})\n'
         link_line = f'⛓‍💥 <a href="https://t.me/{uname}">Написать</a>'
     elif tg_id:
+        tg_line = f'👤 <a href="tg://user?id={tg_id}">{first_name or tg_id}</a>\n'
         link_line = f'⛓‍💥 <a href="tg://user?id={tg_id}">Написать</a>'
     else:
+        tg_line = ""
         link_line = ""
 
+    if tg_id:
+        tg_line += f"🆔 TG ID: <code>{tg_id}</code>\n"
+
+    # Мьют
     mute_line = ""
     if tg_id:
         muted_until = await get_muted_until(tg_id)
@@ -608,21 +644,61 @@ async def handle_paid_sub_view(query, sub_id: int):
                 except ValueError:
                     continue
             if muted_dt and datetime.now() < muted_dt:
-                mute_line = f"\n🔇 Заглушен до: <b>{muted_until}</b>\n"
+                mute_line = f"🔇 Заглушен до: <b>{muted_until}</b>\n"
+
+    # Индивидуальные настройки
+    cfg = load_config()
+    ind_lines = []
+    if ind_trial:
+        ind_lines.append(f"🆓 Пробный: <b>{fmt_duration(ind_trial)}</b>")
+    if ind_pay:
+        ind_lines.append(f"💰 Период оплаты: <b>{fmt_duration(ind_pay)}</b>")
+    if ind_renew:
+        ind_lines.append(f"⏳ На продление: <b>{fmt_duration(ind_renew)}</b>")
+    if ind_price is not None:
+        ind_lines.append(f"💵 Сумма: <b>{ind_price} ₽</b>")
+    if ind_pay_url:
+        ind_lines.append(f"🔗 Ссылка оплаты: <b>{ind_pay_url}</b>")
+    ind_block = ""
+    if ind_lines:
+        ind_block = "\n<b>Инд. настройки:</b>\n" + "\n".join(ind_lines) + "\n"
+
+    # Оставшееся время
+    time_left_line = ""
+    for fmt_e in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+        try:
+            expire_dt = datetime.strptime(expire, fmt_e)
+            break
+        except ValueError:
+            continue
+    else:
+        expire_dt = None
+    if expire_dt:
+        delta = expire_dt - datetime.now()
+        if delta.total_seconds() > 0:
+            time_left_line = f"⏱ Осталось: <b>{fmt_duration(int(delta.total_seconds()))}</b>\n"
+        else:
+            time_left_line = "⏱ Осталось: <b>истекла</b>\n"
 
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b> {status_icon}\n\n"
-        + tg_line +
-        f"📧 Email: <code>{email}</code>\n"
+        + tg_line
+        + f"📧 Email: <code>{email}</code>\n"
         f"🆔 UUID: <code>{uuid_val}</code>\n"
-        f"📅 До: <b>{expire}</b>\n"
-        f"🌐 Лимит IP: <b>{limit_ip}</b>\n"
+        f"📋 Sub ID: <code>{sub_id_str}</code>\n\n"
+        f"📌 Статус: <b>{status_label}</b>\n"
+        f"🏷 Тип: <b>{sub_type}</b> (продлений: {times_renewed})\n"
+        + payment_line
+        + f"📅 До: <b>{expire}</b>\n"
+        + time_left_line
+        + f"🌐 Лимит IP: <b>{limit_ip}</b>\n"
         f"🖥 Лимит HWID: <b>{limit_hwid}</b>\n"
         f"{traffic_line}\n"
         f"🕐 Создано: {created_at}\n"
         + mute_line
-        + (f"\n{link_line}\n" if link_line else "") +
-        f"\n🔗 Ссылка:\n<code>{sub_url}</code>",
+        + ind_block
+        + (f"\n{link_line}\n" if link_line else "")
+        + f"\n🔗 Ссылка:\n<code>{sub_url}</code>",
         parse_mode="HTML",
         reply_markup=paid_sub_view_keyboard(sub_id, enabled),
         disable_web_page_preview=True,
