@@ -199,6 +199,13 @@ async def handle_my_paid_sub(query):
     )
 
     kb_rows = []
+    # Кнопка "Скопировать подписку": CopyTextButton если поддерживается, иначе callback
+    try:
+        from telegram import CopyTextButton
+        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", copy_text=CopyTextButton(text=sub_url))
+    except (ImportError, TypeError):
+        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", callback_data="copy_sub")
+    kb_rows.append([copy_btn])
     if status in ("renewal", "expired"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
@@ -411,6 +418,24 @@ async def handle_about(query):
         reply_markup=back_main(),
         disable_web_page_preview=True,
     )
+
+
+async def handle_copy_sub(query, context):
+    """Фолбэк для старых версий Telegram: присылает ссылку отдельным сообщением."""
+    user_id = query.from_user.id
+    from paidsub.storage import get_paid_sub_by_tg_id
+    row = await get_paid_sub_by_tg_id(user_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    sub_url = row[5]
+    await context.bot.send_message(
+        chat_id=user_id,
+        text=f"<code>{sub_url}</code>",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
+    await query.answer("Ссылка отправлена — нажми на неё, чтобы скопировать")
 
 
 async def handle_referral(query, context):

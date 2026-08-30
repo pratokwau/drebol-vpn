@@ -448,6 +448,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="HTML", reply_markup=back_admin(),
                 )
                 tg_id = row[1]
+                from paidsub.storage import add_history
+                await add_history(
+                    tg_id, "sub_extended",
+                    f"Подписка #{sub_id} ({row[2]})\n"
+                    f"Добавлено: {fmt_dur(seconds)}\nНовая дата: {new_expire_str}",
+                )
                 if tg_id:
                     try:
                         await context.bot.send_message(
@@ -500,6 +506,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📅 Новая дата: <b>{new_expire_str}</b>",
                     parse_mode="HTML", reply_markup=back_admin(),
                 )
+                tg_id = row[1]
+                from paidsub.storage import add_history
+                await add_history(
+                    tg_id, "sub_reduced",
+                    f"Подписка #{sub_id} ({row[2]})\n"
+                    f"Убавлено: {fmt_dur(seconds)}\nНовая дата: {new_expire_str}",
+                )
+                if tg_id:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=tg_id,
+                            text=(
+                                f"ℹ️ <b>Срок вашей подписки изменён.</b>\n\n"
+                                f"➖ Убавлено: <b>{fmt_dur(seconds)}</b>\n"
+                                f"📅 Действует до: <b>{new_expire_str}</b>"
+                            ),
+                            parse_mode="HTML",
+                        )
+                    except Exception:
+                        pass
                 return
         await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
@@ -553,6 +579,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if r:
                 from xui_api import update_client_expire
                 await update_client_expire(r[2], text)
+                from paidsub.storage import add_history
+                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: дата окончания → {text}")
         await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -563,8 +591,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
         if sub_id:
-            from paidsub.storage import update_paid_sub_field
+            from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
             await update_paid_sub_field(sub_id, "limit_ip", int(text))
+            r = await get_paid_sub(sub_id)
+            if r:
+                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: лимит IP → {text}")
         await update.message.reply_text(f"✅ Лимит IP обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -575,8 +606,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
         if sub_id:
-            from paidsub.storage import update_paid_sub_field
+            from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
             await update_paid_sub_field(sub_id, "limit_hwid", int(text))
+            r = await get_paid_sub(sub_id)
+            if r:
+                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: лимит HWID → {text}")
         await update.message.reply_text(f"✅ Лимит HWID обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -593,8 +627,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
         if sub_id:
-            from paidsub.storage import update_paid_sub_field
+            from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
             await update_paid_sub_field(sub_id, "total_gb", val)
+            r = await get_paid_sub(sub_id)
+            if r:
+                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: трафик → {label}")
         await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -713,9 +750,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mute_tg_id = context.user_data.pop("mute_tg_id", None)
         context.user_data.pop("state", None)
         if mute_tg_id:
-            from paidsub.storage import set_mute
+            from paidsub.storage import set_mute, add_history
             muted_until = (datetime.now() + timedelta(seconds=seconds)).strftime("%d.%m.%Y %H:%M:%S")
             await set_mute(mute_tg_id, muted_until)
+            await add_history(
+                mute_tg_id, "user_muted",
+                f"Заглушён до {muted_until}\nСрок: {fmt_duration(seconds)}",
+            )
             await update.message.reply_text(
                 f"🔇 Пользователь <code>{mute_tg_id}</code> заглушён до <b>{muted_until}</b>\n"
                 f"({fmt_duration(seconds)})",

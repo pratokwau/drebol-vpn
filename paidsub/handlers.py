@@ -10,7 +10,7 @@ from paidsub.storage import (
     list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
     add_request, get_pending_request, resolve_request,
     update_paid_sub_field, get_expired_paid_subs,
-    add_history, list_history,
+    add_history, list_history, get_history_entry,
     get_muted_until, set_mute, clear_mute, list_muted,
     list_pending_requests, list_pending_payments,
     get_referrer, mark_referral_rewarded, get_all_referral_stats,
@@ -415,6 +415,11 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
     traffic_str = f"{cfg.get('paid_preset_traffic', 0)} ГБ" if int(cfg.get("paid_preset_traffic", 0)) > 0 else "безлимит"
     period_label = "пробный период" if trial else "оплаченный период"
 
+    await add_history(
+        tg_id, "sub_created",
+        f"Подписка #{new_sub_id} ({period_label})\nEmail: {result['email']}\nДо: {result['expire']}",
+    )
+
     await reply_func(
         f"✅ <b>Подписка создана ({period_label})!</b>\n\n"
         f"👤 TG ID: <code>{tg_id}</code>\n"
@@ -563,6 +568,12 @@ async def _process_referral_bonus(invited_tg_id: int, context):
     await update_client_expire(ref_email, new_expire_str)
 
     await mark_referral_rewarded(invited_tg_id, bonus_seconds)
+
+    await add_history(
+        referrer_id, "referral_bonus",
+        f"За приглашение <code>{invited_tg_id}</code>\n"
+        f"Начислено: {fmt_duration(bonus_seconds)}\nДо: {new_expire_str}",
+    )
 
     bot = context.bot if hasattr(context, 'bot') else None
     if bot:
@@ -799,6 +810,11 @@ async def handle_paid_sub_toggle(query, sub_id: int, context=None):
         status_text = "✅ включена" if new_state else "⏸ приостановлена"
         await _notify_user(context.bot, tg_id, f"ℹ️ Ваша подписка <b>{status_text}</b>.")
 
+    await add_history(
+        tg_id, "sub_enabled" if new_state else "sub_disabled",
+        f"Подписка #{sub_id} ({email})",
+    )
+
     await handle_paid_sub_view(query, sub_id)
 
 
@@ -818,6 +834,9 @@ async def handle_paid_sub_delete(query, sub_id: int, context=None):
         panel_status = "⚠️ email не найден, из панели не удалено"
 
     await delete_paid_sub(sub_id)
+
+    if tg_id:
+        await add_history(tg_id, "sub_deleted", f"Подписка #{sub_id} ({email}) · {panel_status}")
 
     if context and tg_id:
         await _notify_user(context.bot, tg_id, "🗑 Ваша подписка была <b>удалена</b>.")
@@ -856,6 +875,8 @@ async def handle_paid_sub_freeze(query, sub_id: int, context=None):
         await _notify_user(context.bot, tg_id,
             "🧊 Ваша подписка <b>заморожена</b>. Время действия приостановлено."
         )
+
+    await add_history(tg_id, "sub_frozen", f"Подписка #{sub_id} ({email})")
 
     await handle_paid_sub_view(query, sub_id)
 
@@ -984,6 +1005,30 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
                 if create_inbound_ids:
                     await move_client_inbound(email, create_inbound_ids)
             updated += 1
+
+            # уведомление пользователю
+            if tg_id:
+                bot = context.bot if hasattr(context, 'bot') else None
+                if bot:
+                    if direction > 0:
+                        await _notify_user(bot, tg_id,
+                            f"🎉 <b>Ваша подписка продлена!</b>\n\n"
+                            f"➕ Добавлено: <b>{fmt_duration(seconds)}</b>\n"
+                            f"📅 Действует до: <b>{new_expire_str}</b>"
+                        )
+                    else:
+                        await _notify_user(bot, tg_id,
+                            f"ℹ️ <b>Срок вашей подписки изменён.</b>\n\n"
+                            f"➖ Убавлено: <b>{fmt_duration(seconds)}</b>\n"
+                            f"📅 Действует до: <b>{new_expire_str}</b>"
+                        )
+                # запись в историю
+                await add_history(
+                    tg_id, "bulk_extended" if direction > 0 else "bulk_reduced",
+                    f"Подписка #{sid} ({email})\n"
+                    f"{'Добавлено' if direction > 0 else 'Убавлено'}: {fmt_duration(seconds)}\n"
+                    f"Новая дата: {new_expire_str}",
+                )
         except Exception:
             errors += 1
 
@@ -1369,10 +1414,24 @@ _ACTION_LABELS = {
     "trial_rejected": "❌ Пробный отклонён",
     "payment_confirmed": "✅ Оплата подтверждена",
     "payment_rejected": "❌ Оплата отклонена",
+    "sub_created": "🆕 Подписка создана",
+    "sub_extended": "➕ Срок добавлен",
+    "sub_reduced": "➖ Срок убавлен",
+    "sub_frozen": "🧊 Заморожена",
+    "sub_enabled": "▶️ Включена",
+    "sub_disabled": "⏸ Отключена",
+    "sub_deleted": "🗑 Удалена",
+    "bulk_extended": "⚡➕ Массово: срок добавлен",
+    "bulk_reduced": "⚡➖ Массово: срок убавлен",
+    "settings_changed": "⚙️ Изменены настройки",
+    "referral_bonus": "🎁 Реферальный бонус",
+    "user_muted": "🔇 Заглушён",
+    "user_unmuted": "🔊 Разглушён",
 }
 
 
 async def handle_paid_history(query, page: int = 1):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     rows, total_pages = await list_history(page)
     if not rows:
         await query.edit_message_text(
@@ -1381,16 +1440,62 @@ async def handle_paid_history(query, page: int = 1):
             reply_markup=paid_history_keyboard(1, 1),
         )
         return
-    lines = []
-    for _, tg_id, action, created_at in rows:
+    kb = []
+    for entry_id, tg_id, action, details, created_at in rows:
         label = _ACTION_LABELS.get(action, action)
-        ts = created_at[:16] if created_at else "?"
-        lines.append(f"<code>{ts}</code> · <code>{tg_id}</code> · {label}")
+        ts = created_at[5:16] if created_at else "?"  # MM-DD HH:MM
+        kb.append([InlineKeyboardButton(
+            f"{label} · {tg_id} · {ts}",
+            callback_data=f"paid_history_view:{entry_id}",
+        )])
+    # навигация
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"paid_history_page:{page - 1}"))
+    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"paid_history_page:{page + 1}"))
+    if total_pages > 1:
+        kb.append(nav)
+    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
+
     await query.edit_message_text(
-        f"📜 <b>История действий</b>\n\n" + "\n".join(lines),
+        f"📜 <b>История действий</b>\n\n"
+        f"Всего показано: стр. {page}/{total_pages}\n"
+        "Нажми на запись, чтобы посмотреть детали 👇",
         parse_mode="HTML",
-        reply_markup=paid_history_keyboard(page, total_pages),
+        reply_markup=InlineKeyboardMarkup(kb),
     )
+
+
+async def handle_paid_history_view(query, entry_id: int):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from database import get_user_info
+    entry = await get_history_entry(entry_id)
+    if not entry:
+        await query.answer("Запись не найдена", show_alert=True)
+        return
+    _, tg_id, action, details, created_at = entry
+    label = _ACTION_LABELS.get(action, action)
+
+    user_info = await get_user_info(tg_id) if tg_id else None
+    name = user_info[1] if user_info else str(tg_id)
+    uname = f"@{user_info[2]}" if user_info and user_info[2] else f"id{tg_id}"
+
+    text = (
+        f"📋 <b>Детали действия</b>\n\n"
+        f"🎬 Действие: <b>{label}</b>\n"
+        f"👤 Пользователь: <b>{name}</b> ({uname})\n"
+        f"🆔 TG ID: <code>{tg_id}</code>\n"
+        f"🕐 Время: <b>{created_at}</b>\n"
+    )
+    if details:
+        text += f"\n📝 Подробности:\n{details}"
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ К истории", callback_data="paid_history")],
+    ])
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
 
 
 # ── Мьют / Размьют ──────────────────────────────────────────────────────────
@@ -1410,6 +1515,7 @@ async def handle_mute_user(query, tg_id: int, context):
 
 async def handle_unmute_user(query, tg_id: int):
     await clear_mute(tg_id)
+    await add_history(tg_id, "user_unmuted", "Снята блокировка запросов")
     await query.answer(f"🔊 Пользователь {tg_id} разглушён", show_alert=True)
     await handle_muted_list(query)
 

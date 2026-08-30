@@ -94,9 +94,14 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tg_id INTEGER NOT NULL,
                 action TEXT NOT NULL,
+                details TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            await db.execute("ALTER TABLE paid_sub_history ADD COLUMN details TEXT")
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS paid_mutes (
                 tg_id INTEGER PRIMARY KEY,

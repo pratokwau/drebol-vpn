@@ -162,14 +162,14 @@ async def resolve_request(tg_id: int, status: str):
 
 # ── История действий ─────────────────────────────────────────────────────────
 
-HISTORY_PER_PAGE = 10
+HISTORY_PER_PAGE = 8
 
 
-async def add_history(tg_id: int, action: str):
+async def add_history(tg_id: int, action: str, details: str | None = None):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO paid_sub_history (tg_id, action) VALUES (?, ?)",
-            (tg_id, action),
+            "INSERT INTO paid_sub_history (tg_id, action, details) VALUES (?, ?, ?)",
+            (tg_id, action, details),
         )
         await db.commit()
 
@@ -180,7 +180,7 @@ async def list_history(page: int = 1) -> tuple[list, int]:
         async with db.execute("SELECT COUNT(*) FROM paid_sub_history") as cur:
             total = (await cur.fetchone())[0]
         async with db.execute("""
-            SELECT h.id, h.tg_id, h.action, h.created_at
+            SELECT h.id, h.tg_id, h.action, h.details, h.created_at
             FROM paid_sub_history h
             ORDER BY h.created_at DESC
             LIMIT ? OFFSET ?
@@ -188,6 +188,15 @@ async def list_history(page: int = 1) -> tuple[list, int]:
             rows = await cur.fetchall()
     total_pages = max(1, (total + HISTORY_PER_PAGE - 1) // HISTORY_PER_PAGE)
     return rows, total_pages
+
+
+async def get_history_entry(entry_id: int) -> tuple | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, tg_id, action, details, created_at FROM paid_sub_history WHERE id = ?",
+            (entry_id,),
+        ) as cur:
+            return await cur.fetchone()
 
 
 # ── Мьют ─────────────────────────────────────────────────────────────────────
