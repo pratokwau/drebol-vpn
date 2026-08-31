@@ -293,6 +293,8 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         kb_rows.append([InlineKeyboardButton("💳 К подписке", callback_data=f"paid_sub_view:{sub[0]}")])
     if ticket_count > 0:
         kb_rows.append([InlineKeyboardButton("🎫 Переписка", callback_data=f"ticket_view:{tg_id}:1")])
+    if history_count > 0:
+        kb_rows.append([InlineKeyboardButton("🕐 История", callback_data=f"user_history:{tg_id}:1")])
     if banned:
         kb_rows.append([InlineKeyboardButton("🔓 Разбанить", callback_data=f"unban_user:{tg_id}")])
     else:
@@ -306,6 +308,64 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         await query_or_msg.edit_message_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
     else:
         await query_or_msg.reply_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+
+
+_ACTION_LABELS_ADMIN = {
+    "sub_created": "📦 Создана",
+    "trial_approved": "🆓 Триал",
+    "trial_rejected": "❌ Триал отклонён",
+    "payment_confirmed": "💰 Оплата",
+    "payment_rejected": "❌ Оплата отклонена",
+    "promo_used": "🎟 Промокод",
+    "referral_bonus": "🎁 Реф. бонус",
+    "sub_enabled": "▶️ Включена",
+    "sub_disabled": "⏸ Приостановлена",
+    "sub_deleted": "🗑 Удалена",
+    "sub_frozen": "❄️ Заморожена",
+    "user_unmuted": "🔊 Разблокирован",
+}
+
+
+async def handle_user_history(query, tg_id: int, page: int = 1):
+    from database import get_user_info
+    from paidsub.storage import get_user_history
+    rows, total_pages = await get_user_history(tg_id, page)
+    u = await get_user_info(tg_id)
+    name = u[1] if u else str(tg_id)
+
+    if not rows:
+        await query.edit_message_text(
+            f"🕐 <b>История — {name}</b>\n\nЗаписей нет.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ Профиль", callback_data=f"user_profile:{tg_id}")],
+            ]),
+        )
+        return
+
+    lines = [f"🕐 <b>История — {name}</b> (<code>{tg_id}</code>)\n"]
+    for entry_id, _, action, details, created_at in rows:
+        label = _ACTION_LABELS_ADMIN.get(action, action)
+        ts = created_at[:16] if created_at else ""
+        detail_line = f"\n     <i>{details[:100]}</i>" if details else ""
+        lines.append(f"{label} · {ts}{detail_line}")
+
+    kb = []
+    if total_pages > 1:
+        nav = []
+        if page > 1:
+            nav.append(InlineKeyboardButton("◀️", callback_data=f"user_history:{tg_id}:{page - 1}"))
+        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+        if page < total_pages:
+            nav.append(InlineKeyboardButton("▶️", callback_data=f"user_history:{tg_id}:{page + 1}"))
+        kb.append(nav)
+    kb.append([InlineKeyboardButton("◀️ Профиль", callback_data=f"user_profile:{tg_id}")])
+
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb),
+    )
 
 
 async def handle_ban_user(query, tg_id: int):

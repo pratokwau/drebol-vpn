@@ -95,7 +95,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     # ── Юзер пишет отзыв ────────────────────────────────────────────────────
-    if state == AWAITING_USER_REVIEW and not is_admin:
+    if state == AWAITING_USER_REVIEW:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         from database import add_review
         from log_channel import send_log

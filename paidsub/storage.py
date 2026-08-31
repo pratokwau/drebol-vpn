@@ -190,6 +190,24 @@ async def list_history(page: int = 1) -> tuple[list, int]:
     return rows, total_pages
 
 
+async def get_user_history(tg_id: int, page: int = 1, per_page: int = 8) -> tuple[list, int]:
+    offset = (page - 1) * per_page
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM paid_sub_history WHERE tg_id = ?", (tg_id,)
+        ) as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute("""
+            SELECT id, tg_id, action, details, created_at
+            FROM paid_sub_history WHERE tg_id = ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """, (tg_id, per_page, offset)) as cur:
+            rows = await cur.fetchall()
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    return rows, total_pages
+
+
 async def get_history_entry(entry_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(

@@ -1358,7 +1358,19 @@ async def handle_confirm_payment(query, tg_id: int, context):
             promo_line = f"🎟 Промокод: <b>{pending_promo}</b> (−{promo[2]}%)\n"
         await update_paid_sub_field(sub_id, "pending_promo", None)
 
-    await add_history(tg_id, "payment_confirmed")
+    ind_price = full_row[16] if full_row and full_row[16] else None
+    price = ind_price if ind_price else cfg.get("paid_price", 0)
+    if pending_promo and promo_line:
+        promo_obj = await get_promo(pending_promo)
+        if promo_obj:
+            final_price = apply_discount(price, promo_obj[2])
+        else:
+            final_price = price
+        pay_details = f"Сумма: {final_price} ₽ (промокод {pending_promo} −{promo_obj[2] if promo_obj else 0}%)\nДо: {new_expire_str}"
+    else:
+        final_price = price
+        pay_details = f"Сумма: {price} ₽\nДо: {new_expire_str}"
+    await add_history(tg_id, "payment_confirmed", pay_details)
 
     from log_channel import send_log
     from database import get_user_info

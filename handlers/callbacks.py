@@ -9,6 +9,7 @@ from handlers.user import (
     handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_rate_service, handle_rate, handle_rate_skip,
+    handle_my_history,
 )
 from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
@@ -18,6 +19,7 @@ from handlers.admin import (
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
     handle_winback_settings, handle_toggle_winback, handle_set_winback_days, handle_set_winback_percent,
     handle_reviews_menu, handle_review_view, handle_set_review_days,
+    handle_user_history,
 )
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start, handle_broadcast_segment
@@ -171,6 +173,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_rate(query, context, int(data.split(":")[1]))
     elif data == "rate_skip":
         await handle_rate_skip(query, context)
+    elif data == "my_history":
+        await handle_my_history(query)
+    elif data.startswith("my_history_page:"):
+        await handle_my_history(query, int(data.split(":")[1]))
     elif data == "support_open":
         context.user_data["state"] = AWAITING_SUPPORT_MSG
         await open_support(query, update.effective_user.id)
@@ -215,6 +221,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_ban_user(query, int(data.split(":")[1]))
     elif data.startswith("unban_user:"):
         await handle_unban_user(query, int(data.split(":")[1]))
+    elif data.startswith("user_history:"):
+        parts = data.split(":")
+        await handle_user_history(query, int(parts[1]), int(parts[2]))
     elif data == "log_channel_settings":
         await handle_log_channel_settings(query)
     elif data == "set_log_channel":

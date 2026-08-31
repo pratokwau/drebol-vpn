@@ -208,6 +208,7 @@ async def handle_my_paid_sub(query):
     kb_rows.append([copy_btn])
     if status in ("renewal", "expired"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
+    kb_rows.append([InlineKeyboardButton("🕐 История", callback_data="my_history")])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
@@ -629,6 +630,63 @@ async def handle_rate_skip(query, context):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
         ]),
+    )
+
+
+_ACTION_LABELS = {
+    "sub_created": "📦 Подписка создана",
+    "trial_approved": "🆓 Триал одобрен",
+    "trial_rejected": "❌ Триал отклонён",
+    "payment_confirmed": "💰 Оплата подтверждена",
+    "payment_rejected": "❌ Оплата отклонена",
+    "promo_used": "🎟 Промокод применён",
+    "referral_bonus": "🎁 Реферальный бонус",
+    "sub_enabled": "▶️ Подписка включена",
+    "sub_disabled": "⏸ Подписка приостановлена",
+    "sub_deleted": "🗑 Подписка удалена",
+    "sub_frozen": "❄️ Подписка заморожена",
+    "user_unmuted": "🔊 Разблокирован",
+}
+
+
+async def handle_my_history(query, page: int = 1):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_user_history
+    user_id = query.from_user.id
+    rows, total_pages = await get_user_history(user_id, page)
+
+    if not rows:
+        await query.edit_message_text(
+            "🕐 <b>История</b>\n\nЗаписей пока нет.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+            ]),
+        )
+        return
+
+    lines = ["🕐 <b>История операций</b>\n"]
+    for entry_id, tg_id, action, details, created_at in rows:
+        label = _ACTION_LABELS.get(action, action)
+        ts = created_at[:16] if created_at else ""
+        detail_line = f"\n     <i>{details[:80]}</i>" if details else ""
+        lines.append(f"{label} · {ts}{detail_line}")
+
+    kb = []
+    if total_pages > 1:
+        nav = []
+        if page > 1:
+            nav.append(InlineKeyboardButton("◀️", callback_data=f"my_history_page:{page - 1}"))
+        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+        if page < total_pages:
+            nav.append(InlineKeyboardButton("▶️", callback_data=f"my_history_page:{page + 1}"))
+        kb.append(nav)
+    kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
+
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb),
     )
 
 
