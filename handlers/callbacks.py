@@ -9,7 +9,6 @@ from handlers.user import (
     handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_rate_service, handle_rate, handle_rate_skip,
-    handle_my_history,
 )
 from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
@@ -173,10 +172,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_rate(query, context, int(data.split(":")[1]))
     elif data == "rate_skip":
         await handle_rate_skip(query, context)
-    elif data == "my_history":
-        await handle_my_history(query)
-    elif data.startswith("my_history_page:"):
-        await handle_my_history(query, int(data.split(":")[1]))
     elif data == "support_open":
         context.user_data["state"] = AWAITING_SUPPORT_MSG
         await open_support(query, update.effective_user.id)
