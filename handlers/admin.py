@@ -1,8 +1,13 @@
 import subprocess
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from config import INSTALL_DIR, load_config
+from config import INSTALL_DIR, load_config, save_config
 from keyboards import admin_keyboard, back_admin, documents_keyboard, channel_keyboard
-from states import AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL
+from states import (
+    AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
+    AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
+    AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT, AWAITING_REVIEW_DAYS,
+)
 
 
 async def handle_admin_panel(query):
@@ -189,3 +194,344 @@ async def handle_git_update(query):
         await query.edit_message_text("❌ Таймаут при обновлении. Попробуй позже.", reply_markup=back_admin())
     except Exception as e:
         await query.edit_message_text(f"❌ Ошибка: {e}", reply_markup=back_admin())
+
+
+# ── Найти юзера ──────────────────────────────────────────────────────────────
+
+async def handle_find_user(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_FIND_USER
+    await query.edit_message_text(
+        "🔍 <b>Найти пользователя</b>\n\n"
+        "Введи Telegram ID пользователя:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
+    from database import get_user_info, is_banned, get_user_review
+    from paidsub.storage import (
+        get_paid_sub_by_tg_id, get_referral_stats, get_muted_until,
+    )
+    import aiosqlite
+    from database import DB_PATH
+
+    user_info = await get_user_info(tg_id)
+    if not user_info:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")]])
+        text = f"❌ Пользователь <code>{tg_id}</code> не найден в базе."
+        if edit:
+            await query_or_msg.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
+        else:
+            await query_or_msg.reply_text(text, parse_mode="HTML", reply_markup=kb)
+        return
+
+    _, first_name, username = user_info
+    uname = f"@{username}" if username else f"id{tg_id}"
+    banned = await is_banned(tg_id)
+
+    lines = [
+        f"👤 <b>Профиль пользователя</b>\n",
+        f'📛 <a href="tg://user?id={tg_id}">{first_name}</a> ({uname})',
+        f"🆔 TG ID: <code>{tg_id}</code>",
+    ]
+
+    if banned:
+        lines.append("🚫 <b>ЗАБАНЕН</b>")
+
+    # Подписка
+    sub = await get_paid_sub_by_tg_id(tg_id)
+    if sub:
+        status = sub[11] if len(sub) > 11 else "active"
+        status_labels = {"active": "🟢 активна", "renewal": "🟡 ожидает продления", "expired": "🔴 истекла"}
+        lines.append(f"\n💳 Подписка: <b>{status_labels.get(status, status)}</b>")
+        lines.append(f"📅 До: <b>{sub[6]}</b>")
+        times = sub[12] if len(sub) > 12 else 0
+        lines.append(f"🏷 Тип: {'оплаченная' if times > 0 else 'пробная'} (продлений: {times})")
+    else:
+        lines.append("\n💳 Подписка: <b>нет</b>")
+
+    # Мьют
+    muted = await get_muted_until(tg_id)
+    if muted:
+        lines.append(f"🔇 Заглушён до: <b>{muted}</b>")
+
+    # Рефералы
+    ref_stats = await get_referral_stats(tg_id)
+    if ref_stats["total"] > 0:
+        lines.append(f"\n👥 Приглашено: <b>{ref_stats['total']}</b> (с бонусом: {ref_stats['rewarded']})")
+
+    # Тикеты
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM support_messages WHERE user_id = ? AND from_admin = 0", (tg_id,)
+        ) as cur:
+            ticket_count = (await cur.fetchone())[0]
+    if ticket_count > 0:
+        lines.append(f"🎫 Сообщений в поддержку: <b>{ticket_count}</b>")
+
+    # Отзыв
+    review = await get_user_review(tg_id)
+    if review:
+        stars = "⭐️" * review[2]
+        lines.append(f"\n⭐️ Оценка: {stars}")
+        if review[3]:
+            lines.append(f"💬 {review[3][:100]}")
+
+    # История
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM paid_sub_history WHERE tg_id = ?", (tg_id,)
+        ) as cur:
+            history_count = (await cur.fetchone())[0]
+    if history_count:
+        lines.append(f"\n📜 Записей в истории: <b>{history_count}</b>")
+
+    # Кнопки
+    kb_rows = []
+    if sub:
+        kb_rows.append([InlineKeyboardButton("💳 К подписке", callback_data=f"paid_sub_view:{sub[0]}")])
+    if ticket_count > 0:
+        kb_rows.append([InlineKeyboardButton("🎫 Переписка", callback_data=f"ticket_view:{tg_id}:1")])
+    if banned:
+        kb_rows.append([InlineKeyboardButton("🔓 Разбанить", callback_data=f"unban_user:{tg_id}")])
+    else:
+        kb_rows.append([InlineKeyboardButton("🚫 Забанить", callback_data=f"ban_user:{tg_id}")])
+    kb_rows.append([InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}")])
+    kb_rows.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
+    kb = InlineKeyboardMarkup(kb_rows)
+
+    text = "\n".join(lines)
+    if edit:
+        await query_or_msg.edit_message_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+    else:
+        await query_or_msg.reply_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+
+
+async def handle_ban_user(query, tg_id: int):
+    from database import ban_user
+    from log_channel import send_log
+    await ban_user(tg_id)
+    await send_log(query._bot, f"🚫 Забанен: <code>{tg_id}</code>")
+    await query.answer(f"🚫 Пользователь {tg_id} забанен", show_alert=True)
+    await handle_user_profile(query, tg_id)
+
+
+async def handle_unban_user(query, tg_id: int):
+    from database import unban_user
+    from log_channel import send_log
+    await unban_user(tg_id)
+    await send_log(query._bot, f"🔓 Разбанен: <code>{tg_id}</code>")
+    await query.answer(f"🔓 Пользователь {tg_id} разбанен", show_alert=True)
+    await handle_user_profile(query, tg_id)
+
+
+# ── Лог-канал ────────────────────────────────────────────────────────────────
+
+async def handle_log_channel_settings(query):
+    cfg = load_config()
+    channel_id = cfg.get("log_channel_id")
+    if channel_id:
+        status_line = f"📢 Канал: <code>{channel_id}</code>"
+    else:
+        status_line = "📢 Канал: <i>не задан</i>"
+    await query.edit_message_text(
+        f"🧾 <b>Лог-канал</b>\n\n"
+        f"{status_line}\n\n"
+        "Бот будет дублировать ключевые события (оплаты, регистрации, алерты) в этот канал/чат.\n\n"
+        "Отправь ID канала или чата (число, напр. <code>-1001234567890</code>).\n"
+        "Бот должен быть админом в канале.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Изменить", callback_data="set_log_channel")],
+            *([
+                [InlineKeyboardButton("🗑 Отключить", callback_data="clear_log_channel")],
+            ] if channel_id else []),
+            [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+        ]),
+    )
+
+
+async def handle_set_log_channel(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_LOG_CHANNEL
+    await query.edit_message_text(
+        "🧾 <b>Лог-канал</b>\n\n"
+        "Отправь ID канала или чата (число, напр. <code>-1001234567890</code>):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_clear_log_channel(query):
+    cfg = load_config()
+    cfg.pop("log_channel_id", None)
+    save_config(cfg)
+    await query.answer("🗑 Лог-канал отключён", show_alert=True)
+    await handle_log_channel_settings(query)
+
+
+# ── Winback ──────────────────────────────────────────────────────────────────
+
+async def handle_winback_settings(query):
+    cfg = load_config()
+    enabled = cfg.get("winback_enabled", False)
+    days = cfg.get("winback_days", 3)
+    percent = cfg.get("winback_percent", 20)
+    status = "ВКЛ ✅" if enabled else "ВЫКЛ ❌"
+    await query.edit_message_text(
+        "🎯 <b>Winback — возврат ушедших</b>\n\n"
+        f"📌 Статус: <b>{status}</b>\n"
+        f"📅 Через дней после истечения: <b>{days}</b>\n"
+        f"💯 Скидка: <b>{percent}%</b>\n\n"
+        "Автоматически отправляет спец-предложение со скидкой "
+        "пользователям, чья подписка истекла.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "🔴 Выключить" if enabled else "🟢 Включить",
+                callback_data="toggle_winback",
+            )],
+            [InlineKeyboardButton("📅 Дней до отправки", callback_data="set_winback_days")],
+            [InlineKeyboardButton("💯 Размер скидки %", callback_data="set_winback_percent")],
+            [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+        ]),
+    )
+
+
+async def handle_toggle_winback(query):
+    cfg = load_config()
+    cfg["winback_enabled"] = not cfg.get("winback_enabled", False)
+    save_config(cfg)
+    await handle_winback_settings(query)
+
+
+async def handle_set_winback_days(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_WINBACK_DAYS
+    cfg = load_config()
+    current = cfg.get("winback_days", 3)
+    await query.edit_message_text(
+        f"📅 <b>Дней до отправки Winback</b>\n\n"
+        f"Сейчас: <b>{current}</b>\n\n"
+        "Введи число дней после истечения подписки:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_set_winback_percent(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_WINBACK_PERCENT
+    cfg = load_config()
+    current = cfg.get("winback_percent", 20)
+    await query.edit_message_text(
+        f"💯 <b>Скидка Winback</b>\n\n"
+        f"Сейчас: <b>{current}%</b>\n\n"
+        "Введи размер скидки в % (от 1 до 100):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+# ── Отзывы (админ) ──────────────────────────────────────────────────────────
+
+async def handle_reviews_menu(query, page: int = 1):
+    from database import get_reviews_stats, get_reviews_list, get_user_info
+    stats = await get_reviews_stats()
+    rows, total_pages = await get_reviews_list(page)
+
+    cfg = load_config()
+    review_days = cfg.get("review_request_days", 0)
+    review_status = f"ВКЛ (через {review_days} дн.)" if review_days > 0 else "ВЫКЛ"
+
+    stars_bar = ""
+    for rating, count in stats["breakdown"]:
+        stars_bar += f"{'⭐️' * rating} — <b>{count}</b>\n"
+
+    lines = [
+        "⭐️ <b>Отзывы пользователей</b>\n",
+        f"📊 Всего: <b>{stats['total']}</b> · Средняя: <b>{stats['avg']}/5</b>",
+        f"📩 Авто-запрос: <b>{review_status}</b>\n",
+    ]
+    if stars_bar:
+        lines.append(stars_bar)
+
+    kb = []
+    for r_id, tg_id, rating, text, created_at in rows:
+        u = await get_user_info(tg_id)
+        name = u[1] if u else str(tg_id)
+        stars = "⭐️" * rating
+        ts = created_at[5:16] if created_at else ""
+        preview = ""
+        if text:
+            preview = f" · {text[:20]}…" if len(text) > 20 else f" · {text}"
+        kb.append([InlineKeyboardButton(
+            f"{stars} {name} · {ts}{preview}",
+            callback_data=f"review_view:{r_id}",
+        )])
+
+    if total_pages > 1:
+        nav = []
+        if page > 1:
+            nav.append(InlineKeyboardButton("◀️", callback_data=f"reviews_page:{page - 1}"))
+        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
+        if page < total_pages:
+            nav.append(InlineKeyboardButton("▶️", callback_data=f"reviews_page:{page + 1}"))
+        kb.append(nav)
+
+    kb.append([InlineKeyboardButton("⏱ Настроить авто-запрос", callback_data="set_review_days")])
+    kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
+
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb),
+    )
+
+
+async def handle_review_view(query, review_id: int):
+    from database import get_user_info
+    import aiosqlite
+    from database import DB_PATH
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, tg_id, rating, text, created_at FROM reviews WHERE id = ?",
+            (review_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        await query.answer("Отзыв не найден", show_alert=True)
+        return
+    _, tg_id, rating, text, created_at = row
+    u = await get_user_info(tg_id)
+    name = u[1] if u else str(tg_id)
+    uname = f"@{u[2]}" if u and u[2] else f"id{tg_id}"
+    stars = "⭐️" * rating
+    review_text = text if text else "<i>без текста</i>"
+    await query.edit_message_text(
+        f"⭐️ <b>Отзыв</b>\n\n"
+        f'👤 <a href="tg://user?id={tg_id}">{name}</a> ({uname})\n'
+        f"🆔 <code>{tg_id}</code>\n"
+        f"📊 Оценка: {stars}\n"
+        f"🕐 {created_at}\n\n"
+        f"💬 {review_text}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔍 Профиль юзера", callback_data=f"user_profile:{tg_id}")],
+            [InlineKeyboardButton("◀️ К отзывам", callback_data="reviews_menu")],
+        ]),
+        disable_web_page_preview=True,
+    )
+
+
+async def handle_set_review_days(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_REVIEW_DAYS
+    cfg = load_config()
+    current = cfg.get("review_request_days", 0)
+    cur_str = f"{current} дн." if current > 0 else "выключено"
+    await query.edit_message_text(
+        f"⏱ <b>Авто-запрос отзыва</b>\n\n"
+        f"Сейчас: <b>{cur_str}</b>\n\n"
+        "Через сколько дней после активации подписки запрашивать отзыв?\n"
+        "Введи число дней (0 — выключить):",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )

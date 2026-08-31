@@ -146,6 +146,36 @@ async def init_db():
             await db.execute("ALTER TABLE paid_subs ADD COLUMN pending_promo TEXT")
         except Exception:
             pass
+        # Баны
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bans (
+                tg_id INTEGER PRIMARY KEY,
+                banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Отзывы
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER NOT NULL,
+                rating INTEGER NOT NULL,
+                text TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS review_requests (
+                tg_id INTEGER PRIMARY KEY,
+                requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Winback
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS winback_sent (
+                tg_id INTEGER PRIMARY KEY,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         # убираем :443/:80 из существующих sub_url
         from xui_api import strip_default_port
         async with db.execute("SELECT id, sub_url FROM admin_subs") as cur:
@@ -323,3 +353,97 @@ async def get_user_info(user_id: int) -> tuple | None:
             "SELECT id, first_name, username FROM users WHERE id = ?", (user_id,)
         ) as cur:
             return await cur.fetchone()
+
+
+# ── Баны ─────────────────────────────────────────────────────────────────────
+
+async def ban_user(tg_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR REPLACE INTO bans (tg_id) VALUES (?)", (tg_id,))
+        await db.commit()
+
+
+async def unban_user(tg_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM bans WHERE tg_id = ?", (tg_id,))
+        await db.commit()
+
+
+async def is_banned(tg_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT 1 FROM bans WHERE tg_id = ?", (tg_id,)) as cur:
+            return (await cur.fetchone()) is not None
+
+
+# ── Отзывы ───────────────────────────────────────────────────────────────────
+
+async def add_review(tg_id: int, rating: int, text: str | None = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO reviews (tg_id, rating, text) VALUES (?, ?, ?)",
+            (tg_id, rating, text),
+        )
+        await db.commit()
+
+
+async def get_user_review(tg_id: int) -> tuple | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, tg_id, rating, text, created_at FROM reviews WHERE tg_id = ? ORDER BY id DESC LIMIT 1",
+            (tg_id,),
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def get_reviews_stats() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM reviews") as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute("SELECT AVG(rating) FROM reviews") as cur:
+            avg = (await cur.fetchone())[0] or 0
+        async with db.execute(
+            "SELECT rating, COUNT(*) FROM reviews GROUP BY rating ORDER BY rating DESC"
+        ) as cur:
+            breakdown = await cur.fetchall()
+    return {"total": total, "avg": round(avg, 1), "breakdown": breakdown}
+
+
+async def get_reviews_list(page: int = 1, per_page: int = 8) -> tuple[list, int]:
+    offset = (page - 1) * per_page
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM reviews") as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute("""
+            SELECT r.id, r.tg_id, r.rating, r.text, r.created_at
+            FROM reviews r ORDER BY r.created_at DESC
+            LIMIT ? OFFSET ?
+        """, (per_page, offset)) as cur:
+            rows = await cur.fetchall()
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    return rows, total_pages
+
+
+async def is_review_requested(tg_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT 1 FROM review_requests WHERE tg_id = ?", (tg_id,)) as cur:
+            return (await cur.fetchone()) is not None
+
+
+async def mark_review_requested(tg_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR REPLACE INTO review_requests (tg_id) VALUES (?)", (tg_id,))
+        await db.commit()
+
+
+# ── Winback ──────────────────────────────────────────────────────────────────
+
+async def is_winback_sent(tg_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT 1 FROM winback_sent WHERE tg_id = ?", (tg_id,)) as cur:
+            return (await cur.fetchone()) is not None
+
+
+async def mark_winback_sent(tg_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR REPLACE INTO winback_sent (tg_id) VALUES (?)", (tg_id,))
+        await db.commit()

@@ -4,8 +4,21 @@ from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard
 from keyboards import main_keyboard
-from handlers.user import handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral, handle_copy_sub, handle_enter_promo, handle_remove_promo
-from handlers.admin import handle_admin_panel, handle_set_channel, handle_git_update, handle_set_privacy_url, handle_set_terms_url, handle_documents_menu, handle_channel_menu, handle_dashboard, handle_healthcheck
+from handlers.user import (
+    handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub,
+    handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
+    handle_copy_sub, handle_enter_promo, handle_remove_promo,
+    handle_rate_service, handle_rate, handle_rate_skip,
+)
+from handlers.admin import (
+    handle_admin_panel, handle_set_channel, handle_git_update,
+    handle_set_privacy_url, handle_set_terms_url, handle_documents_menu,
+    handle_channel_menu, handle_dashboard, handle_healthcheck,
+    handle_find_user, handle_user_profile, handle_ban_user, handle_unban_user,
+    handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
+    handle_winback_settings, handle_toggle_winback, handle_set_winback_days, handle_set_winback_percent,
+    handle_reviews_menu, handle_review_view, handle_set_review_days,
+)
 from handlers.support import open_support
 from handlers.broadcast import handle_broadcast_start, handle_broadcast_segment
 from handlers.tickets import (
@@ -49,6 +62,7 @@ from paidsub.handlers import (
     handle_referral_settings, handle_set_referral_bonus,
     handle_promos_menu, handle_promo_view, handle_promo_create,
     handle_promo_toggle, handle_promo_delete,
+    handle_toggle_auto_trial,
 )
 
 
@@ -64,6 +78,13 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "noop":
         return
+
+    # Проверка бана
+    if not adm and data != "check_sub":
+        from database import is_banned
+        if await is_banned(update.effective_user.id):
+            await query.edit_message_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
+            return
 
     # Проверка подписки для не-админов
     if data != "check_sub" and not adm:
@@ -144,6 +165,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_referral(query, context)
     elif data == "copy_sub":
         await handle_copy_sub(query, context)
+    elif data == "rate_service":
+        await handle_rate_service(query, context)
+    elif data.startswith("rate:"):
+        await handle_rate(query, context, int(data.split(":")[1]))
+    elif data == "rate_skip":
+        await handle_rate_skip(query, context)
     elif data == "support_open":
         context.user_data["state"] = AWAITING_SUPPORT_MSG
         await open_support(query, update.effective_user.id)
@@ -180,6 +207,38 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_dashboard(query)
     elif data == "healthcheck":
         await handle_healthcheck(query)
+    elif data == "find_user":
+        await handle_find_user(query, context)
+    elif data.startswith("user_profile:"):
+        await handle_user_profile(query, int(data.split(":")[1]))
+    elif data.startswith("ban_user:"):
+        await handle_ban_user(query, int(data.split(":")[1]))
+    elif data.startswith("unban_user:"):
+        await handle_unban_user(query, int(data.split(":")[1]))
+    elif data == "log_channel_settings":
+        await handle_log_channel_settings(query)
+    elif data == "set_log_channel":
+        await handle_set_log_channel(query, context)
+    elif data == "clear_log_channel":
+        await handle_clear_log_channel(query)
+    elif data == "winback_settings":
+        await handle_winback_settings(query)
+    elif data == "toggle_winback":
+        await handle_toggle_winback(query)
+    elif data == "set_winback_days":
+        await handle_set_winback_days(query, context)
+    elif data == "set_winback_percent":
+        await handle_set_winback_percent(query, context)
+    elif data == "reviews_menu":
+        await handle_reviews_menu(query)
+    elif data.startswith("reviews_page:"):
+        await handle_reviews_menu(query, int(data.split(":")[1]))
+    elif data.startswith("review_view:"):
+        await handle_review_view(query, int(data.split(":")[1]))
+    elif data == "set_review_days":
+        await handle_set_review_days(query, context)
+    elif data == "toggle_auto_trial":
+        await handle_toggle_auto_trial(query)
     elif data == "broadcast":
         await handle_broadcast_start(query, context)
     elif data.startswith("bcast_seg:"):

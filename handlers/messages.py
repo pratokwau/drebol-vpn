@@ -34,6 +34,9 @@ from states import (
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE,
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
+    AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
+    AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
+    AWAITING_REVIEW_DAYS, AWAITING_USER_REVIEW,
 )
 from handlers.broadcast import do_broadcast
 
@@ -60,6 +63,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Сообщение отправлено в поддержку! Мы ответим как можно скорее.",
             reply_markup=support_keyboard(total_pages, total_pages),
         )
+        from log_channel import send_log
+        await send_log(context.bot,
+            f"📩 Обращение в поддержку: {user.first_name} (<code>{user.id}</code>)"
+        )
         uname = f"@{user.username}" if user.username else f"id{user.id}"
         unread = await get_unread_tickets_count()
         preview = text if len(text) <= 500 else text[:500] + "…"
@@ -76,6 +83,36 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
                 [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
+            ]),
+        )
+        return
+
+    # ── Бан-чек ───────────────────────────────────────────────────────────────
+    if not is_admin:
+        from database import is_banned
+        if await is_banned(user.id):
+            await update.message.reply_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
+            return
+
+    # ── Юзер пишет отзыв ────────────────────────────────────────────────────
+    if state == AWAITING_USER_REVIEW and not is_admin:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from database import add_review
+        from log_channel import send_log
+        rating = context.user_data.pop("pending_rating", 5)
+        context.user_data.pop("state", None)
+        review_text = text[:500]
+        await add_review(user.id, rating, review_text)
+        stars = "⭐️" * rating
+        await send_log(context.bot,
+            f"⭐️ Новый отзыв: {stars} от {user.first_name} (<code>{user.id}</code>)\n"
+            f"💬 {review_text[:200]}"
+        )
+        await update.message.reply_text(
+            f"✅ Спасибо за отзыв!\n\n{stars}\n💬 {review_text}",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
             ]),
         )
         return
@@ -878,6 +915,68 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🎟 К промокодам", callback_data="promo_menu")],
             ]),
         )
+        return
+
+    # ── Найти юзера ───────────────────────────────────────────────────────────
+    if state == AWAITING_FIND_USER:
+        if not text.isdigit():
+            await update.message.reply_text("❌ TG ID — это число.", reply_markup=back_admin())
+            return
+        context.user_data.pop("state", None)
+        from handlers.admin import handle_user_profile
+        await handle_user_profile(update.message, int(text), edit=False)
+        return
+
+    # ── Лог-канал ────────────────────────────────────────────────────────────
+    if state == AWAITING_LOG_CHANNEL:
+        try:
+            channel_id = int(text)
+        except ValueError:
+            await update.message.reply_text("❌ Введи числовой ID (напр. -1001234567890).", reply_markup=back_admin())
+            return
+        _save("log_channel_id", channel_id)
+        context.user_data.pop("state", None)
+        try:
+            await context.bot.send_message(chat_id=channel_id, text="✅ Лог-канал подключён!", parse_mode="HTML")
+            await update.message.reply_text(f"✅ Лог-канал: <code>{channel_id}</code>", parse_mode="HTML", reply_markup=back_admin())
+        except Exception as e:
+            await update.message.reply_text(
+                f"⚠️ ID сохранён (<code>{channel_id}</code>), но тестовое сообщение не отправлено.\n"
+                f"Убедись, что бот — админ канала.\n\n<code>{e}</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+        return
+
+    # ── Winback: дни ─────────────────────────────────────────────────────────
+    if state == AWAITING_WINBACK_DAYS:
+        if not text.isdigit() or int(text) < 1:
+            await update.message.reply_text("❌ Введи целое число дней (минимум 1).", reply_markup=back_admin())
+            return
+        _save("winback_days", int(text))
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Winback через <b>{text} дн.</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Winback: процент ─────────────────────────────────────────────────────
+    if state == AWAITING_WINBACK_PERCENT:
+        if not text.isdigit() or not (1 <= int(text) <= 100):
+            await update.message.reply_text("❌ Введи число от 1 до 100.", reply_markup=back_admin())
+            return
+        _save("winback_percent", int(text))
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Скидка Winback: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Авто-запрос отзыва: дни ─────────────────────────────────────────────
+    if state == AWAITING_REVIEW_DAYS:
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число (0 = выключить).", reply_markup=back_admin())
+            return
+        _save("review_request_days", int(text))
+        context.user_data.pop("state", None)
+        val = int(text)
+        label = f"через {val} дн." if val > 0 else "выключено"
+        await update.message.reply_text(f"✅ Авто-запрос отзыва: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Мьют пользователя ───────────────────────────────────────────────────────

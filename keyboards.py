@@ -21,6 +21,8 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
     if has_sub:
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
     rows.append([InlineKeyboardButton("👥 Пригласить друга", callback_data="referral")])
+    if paid_sub_status in ("active",):
+        rows.append([InlineKeyboardButton("⭐️ Оценить сервис", callback_data="rate_service")])
     rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_open")])
     rows.append([
         InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to"),
@@ -39,15 +41,23 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📊 Статистика", callback_data="dashboard")],
         [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs")],
         [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
+        [InlineKeyboardButton("🔍 Найти юзера", callback_data="find_user")],
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
+        [
+            InlineKeyboardButton("⭐️ Отзывы", callback_data="reviews_menu"),
+            InlineKeyboardButton("🎯 Winback", callback_data="winback_settings"),
+        ],
         [
             InlineKeyboardButton("🔧 Параметры 3x-UI", callback_data="xui_settings"),
             InlineKeyboardButton("🩺 Серверы", callback_data="healthcheck"),
         ],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
         [InlineKeyboardButton("📢 Управление каналом", callback_data="channel_menu")],
-        [InlineKeyboardButton("📄 Документы", callback_data="documents_menu")],
+        [
+            InlineKeyboardButton("📄 Документы", callback_data="documents_menu"),
+            InlineKeyboardButton("🧾 Лог-канал", callback_data="log_channel_settings"),
+        ],
         [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
     ])
 

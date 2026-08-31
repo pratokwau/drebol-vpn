@@ -61,3 +61,17 @@ AWAITING_PROMO_CODE = "awaiting_promo_code"
 AWAITING_PROMO_NEW_CODE = "awaiting_promo_new_code"
 AWAITING_PROMO_NEW_PERCENT = "awaiting_promo_new_percent"
 AWAITING_PROMO_NEW_EXPIRE = "awaiting_promo_new_expire"
+
+# Управление юзером
+AWAITING_FIND_USER = "awaiting_find_user"
+
+# Лог-канал
+AWAITING_LOG_CHANNEL = "awaiting_log_channel"
+
+# Winback
+AWAITING_WINBACK_DAYS = "awaiting_winback_days"
+AWAITING_WINBACK_PERCENT = "awaiting_winback_percent"
+
+# Отзывы
+AWAITING_REVIEW_DAYS = "awaiting_review_days"
+AWAITING_USER_REVIEW = "awaiting_user_review"

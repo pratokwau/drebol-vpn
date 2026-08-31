@@ -38,7 +38,12 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
 
 
 def paid_presets_keyboard() -> InlineKeyboardMarkup:
+    from config import load_config
+    cfg = load_config()
+    auto_trial = cfg.get("auto_approve_trial", False)
+    auto_label = "⚡ Авто-триал: ВКЛ ✅" if auto_trial else "⚡ Авто-триал: ВЫКЛ ❌"
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton(auto_label, callback_data="toggle_auto_trial")],
         [InlineKeyboardButton("🆓 Пробный период", callback_data="paid_preset_trial")],
         [InlineKeyboardButton("💰 Период оплаты", callback_data="paid_preset_pay_period")],
         [InlineKeyboardButton("⏳ Время на продление", callback_data="paid_preset_renew")],

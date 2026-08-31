@@ -486,6 +486,27 @@ async def handle_request_sub(query, context):
         )
         return
 
+    # Мгновенный триал без одобрения
+    cfg_auto = load_config()
+    if cfg_auto.get("auto_approve_trial", False):
+        existing = await get_paid_sub_by_tg_id(user.id)
+        if not existing:
+            await add_request(user.id)
+            await resolve_request(user.id, "approved")
+            await add_history(user.id, "trial_approved", "Авто-одобрение")
+
+            async def _edit(txt, **kw):
+                await query.edit_message_text(txt, **kw)
+
+            await do_create_paid_sub(query, user.id, context, _edit, trial=True)
+            await _process_referral_bonus(user.id, context)
+            from log_channel import send_log
+            uname_a = f"@{user.username}" if user.username else f"id{user.id}"
+            await send_log(context.bot,
+                f"⚡ Авто-триал выдан: {user.first_name} ({uname_a}) · <code>{user.id}</code>"
+            )
+            return
+
     await add_request(user.id)
 
     uname = f"@{user.username}" if user.username else f"id{user.id}"
@@ -605,6 +626,12 @@ async def handle_approve(query, tg_id: int, context):
         await query.edit_message_text(txt, **kw)
 
     await do_create_paid_sub(query, tg_id, context, _edit, trial=True)
+
+    from log_channel import send_log
+    from database import get_user_info
+    u = await get_user_info(tg_id)
+    u_name = u[1] if u else str(tg_id)
+    await send_log(context.bot, f"✅ Триал одобрен: {u_name} (<code>{tg_id}</code>)")
 
     # Реферальный бонус
     await _process_referral_bonus(tg_id, context)
@@ -1333,6 +1360,15 @@ async def handle_confirm_payment(query, tg_id: int, context):
 
     await add_history(tg_id, "payment_confirmed")
 
+    from log_channel import send_log
+    from database import get_user_info
+    u = await get_user_info(tg_id)
+    u_name = u[1] if u else str(tg_id)
+    await send_log(context.bot,
+        f"💰 Оплата подтверждена: {u_name} (<code>{tg_id}</code>)\n"
+        f"{promo_line}📅 До: {new_expire_str}"
+    )
+
     await query.edit_message_text(
         f"✅ Оплата подтверждена для <code>{tg_id}</code>!\n\n"
         f"{promo_line}"
@@ -1830,6 +1866,13 @@ async def handle_promo_delete(query, promo_id: int):
     await delete_promo(promo_id)
     await query.answer("Промокод удалён 🗑")
     await handle_promos_menu(query)
+
+
+async def handle_toggle_auto_trial(query):
+    cfg = load_config()
+    cfg["auto_approve_trial"] = not cfg.get("auto_approve_trial", False)
+    save_config(cfg)
+    await handle_paid_presets_menu(query)
 
 
 def save_paid_preset(key: str, value):

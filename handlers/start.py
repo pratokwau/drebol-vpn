@@ -9,7 +9,16 @@ from subscription import is_subscribed, subscribe_keyboard
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("state", None)
     user = update.effective_user
+
+    from database import get_user_info
+    is_new = not await get_user_info(user.id)
     await upsert_user(user.id, user.first_name, user.username)
+    if is_new:
+        from log_channel import send_log
+        uname = f"@{user.username}" if user.username else f"id{user.id}"
+        await send_log(context.bot,
+            f"👤 Новый пользователь: {user.first_name} ({uname}) · <code>{user.id}</code>"
+        )
 
     # Реферальная ссылка: /start ref_123456
     if context.args and context.args[0].startswith("ref_"):
@@ -20,6 +29,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await save_referral(user.id, referrer_id)
         except (ValueError, IndexError):
             pass
+
+    from database import is_banned
+    if user.id != ADMIN_ID and await is_banned(user.id):
+        await update.message.reply_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
+        return
 
     if not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(

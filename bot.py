@@ -46,6 +46,7 @@ async def post_init(app: Application):
             if healthy != prev:
                 cfg["xui_healthy"] = healthy
                 save_config(cfg)
+                from log_channel import send_log
                 try:
                     if healthy:
                         await ctx.bot.send_message(
@@ -53,6 +54,7 @@ async def post_init(app: Application):
                             text="🟢 <b>Панель 3x-UI снова доступна.</b>",
                             parse_mode="HTML",
                         )
+                        await send_log(ctx.bot, "🟢 Панель 3x-UI снова доступна.")
                     else:
                         await ctx.bot.send_message(
                             chat_id=ADMIN_ID,
@@ -61,6 +63,9 @@ async def post_init(app: Application):
                                 f"<code>{result.get('error', '?')}</code>"
                             ),
                             parse_mode="HTML",
+                        )
+                        await send_log(ctx.bot,
+                            f"🔴 Панель 3x-UI недоступна!\n<code>{result.get('error', '?')}</code>"
                         )
                 except Exception:
                     pass
@@ -84,6 +89,128 @@ async def post_init(app: Application):
             await paid_sync_usernames(ctx)
 
         app.job_queue.run_repeating(_paid_sync_job, interval=24 * 3600, first=300)
+
+        async def _winback_job(ctx):
+            from config import load_config
+            from datetime import datetime, timedelta
+            cfg = load_config()
+            if not cfg.get("winback_enabled", False):
+                return
+            days = cfg.get("winback_days", 3)
+            percent = cfg.get("winback_percent", 20)
+            from database import is_winback_sent, mark_winback_sent
+            from paidsub.storage import get_expired_paid_subs
+            from log_channel import send_log
+            subs = await get_expired_paid_subs()
+            now = datetime.now()
+            for row in subs:
+                sub_id, tg_id, email, uuid_val, sub_id_str, sub_url, expire_str, status, times_renewed, ind_renew = row
+                if status != "expired" or not tg_id:
+                    continue
+                for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                    try:
+                        expire_dt = datetime.strptime(expire_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    continue
+                if (now - expire_dt).days < days:
+                    continue
+                if await is_winback_sent(tg_id):
+                    continue
+                # Создаём персональный промокод
+                code = f"BACK{tg_id}"
+                from paidsub.storage import get_promo, create_promo
+                if not await get_promo(code):
+                    await create_promo(code, percent, None)
+                await mark_winback_sent(tg_id)
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    await ctx.bot.send_message(
+                        chat_id=tg_id,
+                        text=(
+                            f"🎯 <b>Мы скучаем!</b>\n\n"
+                            f"Ваша подписка истекла. Вернитесь со скидкой <b>{percent}%</b>!\n\n"
+                            f"🎟 Ваш промокод: <b>{code}</b>\n\n"
+                            f"Используйте его при продлении подписки."
+                        ),
+                        parse_mode="HTML",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
+                        ]),
+                    )
+                    await send_log(ctx.bot,
+                        f"🎯 Winback отправлен: <code>{tg_id}</code> · промокод <b>{code}</b> (−{percent}%)"
+                    )
+                except Exception:
+                    pass
+
+        app.job_queue.run_repeating(_winback_job, interval=3600, first=600)
+
+        async def _review_request_job(ctx):
+            from config import load_config
+            from datetime import datetime
+            cfg = load_config()
+            review_days = cfg.get("review_request_days", 0)
+            if review_days <= 0:
+                return
+            from database import is_review_requested, mark_review_requested, get_user_review
+            from paidsub.storage import get_all_paid_subs_with_tg
+            subs = await get_all_paid_subs_with_tg()
+            now = datetime.now()
+            for row in subs:
+                sub_id, tg_id, email, uuid_val, sub_id_str, expire_date, *_ = row
+                if not tg_id:
+                    continue
+                if await is_review_requested(tg_id):
+                    continue
+                if await get_user_review(tg_id):
+                    continue
+                # Проверяем дату создания подписки
+                import aiosqlite
+                from database import DB_PATH
+                async with aiosqlite.connect(DB_PATH) as db:
+                    async with db.execute(
+                        "SELECT created_at FROM paid_subs WHERE id = ?", (sub_id,)
+                    ) as cur:
+                        r = await cur.fetchone()
+                if not r:
+                    continue
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                    try:
+                        created_dt = datetime.strptime(r[0][:19] if r[0] else "", fmt)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    continue
+                if (now - created_dt).days < review_days:
+                    continue
+                await mark_review_requested(tg_id)
+                try:
+                    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                    await ctx.bot.send_message(
+                        chat_id=tg_id,
+                        text=(
+                            "⭐️ <b>Как вам Drebol VPN?</b>\n\n"
+                            "Мы хотим стать лучше! Оцените наш сервис:"
+                        ),
+                        parse_mode="HTML",
+                        reply_markup=InlineKeyboardMarkup([
+                            [
+                                InlineKeyboardButton("1⭐", callback_data="rate:1"),
+                                InlineKeyboardButton("2⭐", callback_data="rate:2"),
+                                InlineKeyboardButton("3⭐", callback_data="rate:3"),
+                                InlineKeyboardButton("4⭐", callback_data="rate:4"),
+                                InlineKeyboardButton("5⭐", callback_data="rate:5"),
+                            ],
+                        ]),
+                    )
+                except Exception:
+                    pass
+
+        app.job_queue.run_repeating(_review_request_job, interval=3600, first=900)
 
 
 def main():
