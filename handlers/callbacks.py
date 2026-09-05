@@ -47,7 +47,8 @@ from paidsub.handlers import (
     handle_paid_preset_ip, handle_paid_preset_hwid, handle_paid_preset_traffic,
     handle_paid_preset_trial, handle_paid_preset_pay_period, handle_paid_preset_renew,
     handle_paid_preset_price, handle_paid_preset_pay_url,
-    handle_paid_create_sub, handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
+    handle_paid_create_sub, handle_paid_create_type,
+    handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
     handle_paid_inbounds_menu, handle_paid_toggle_inbound,
     handle_paid_inbounds_expire_menu, handle_paid_toggle_inbound_expire,
     handle_approve, handle_reject, handle_request_sub,
@@ -339,6 +340,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_subs_menu(query, int(data.split(":")[1]))
     elif data == "paid_create_sub":
         await handle_paid_create_sub(query, context)
+    elif data.startswith("paid_create_type:"):
+        await handle_paid_create_type(query, context, data.split(":")[1] == "trial")
     elif data == "paid_sub_presets":
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":

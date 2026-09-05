@@ -408,13 +408,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         tg_id = int(text)
         context.user_data.pop("state", None)
+        trial = context.user_data.pop("create_trial", False)
         from paidsub.handlers import do_create_paid_sub
         sent = await update.message.reply_text("⏳ Создаю подписку...")
 
         async def _edit_paid(txt, **kw):
             await sent.edit_text(txt, reply_markup=back_admin(), **kw)
 
-        await do_create_paid_sub(sent, tg_id, context, _edit_paid)
+        await do_create_paid_sub(sent, tg_id, context, _edit_paid, trial=trial)
         return
 
     # ── Платные подписки: время-пресеты ──────────────────────────────────────────

@@ -351,13 +351,52 @@ async def handle_paid_create_sub(query, context):
             reply_markup=back_admin(),
         )
         return
-    from states import AWAITING_PAID_SUB_TG_ID
-    context.user_data["state"] = AWAITING_PAID_SUB_TG_ID
+    context.user_data.pop("state", None)
+    context.user_data.pop("create_trial", None)
+
+    trial_period = cfg.get("paid_trial_period", 86400)
+    pay_period = cfg.get("paid_pay_period", 2592000)
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🆓 Триал доступ", callback_data="paid_create_type:trial")],
+        [InlineKeyboardButton("💳 Оплаченный доступ", callback_data="paid_create_type:paid")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="paid_subs")],
+    ])
     await query.edit_message_text(
-        "👤 <b>Введи Telegram ID пользователя</b>\n\n"
-        "Введи числовой ID:",
+        "➕ <b>Создание подписки</b>\n\n"
+        "Выбери тип доступа:\n\n"
+        f"🆓 <b>Триал</b> — <b>{fmt_duration(trial_period)}</b>\n"
+        f"<i>Дальше идёт обычный сценарий: запрос оплаты, продление.</i>\n\n"
+        f"💳 <b>Оплаченный</b> — <b>{fmt_duration(pay_period)}</b>\n"
+        f"<i>Сразу засчитывается как оплаченный период.</i>",
         parse_mode="HTML",
-        reply_markup=back_admin(),
+        reply_markup=kb,
+    )
+
+
+async def handle_paid_create_type(query, context, trial: bool):
+    """Админ выбрал тип создаваемой подписки — спрашиваем TG ID."""
+    from states import AWAITING_PAID_SUB_TG_ID
+    cfg = load_config()
+    context.user_data["state"] = AWAITING_PAID_SUB_TG_ID
+    context.user_data["create_trial"] = trial
+
+    if trial:
+        label = "🆓 <b>Триал доступ</b>"
+        period = fmt_duration(cfg.get("paid_trial_period", 86400))
+    else:
+        label = "💳 <b>Оплаченный доступ</b>"
+        period = fmt_duration(cfg.get("paid_pay_period", 2592000))
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    await query.edit_message_text(
+        f"{label} · <b>{period}</b>\n\n"
+        "👤 Введи Telegram ID пользователя (числом):",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ Назад", callback_data="paid_create_sub")],
+        ]),
     )
 
 
