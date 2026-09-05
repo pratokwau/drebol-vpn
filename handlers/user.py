@@ -532,43 +532,89 @@ async def handle_qr_code(query, context):
 
 async def handle_reissue_key(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field, add_history
-    from log_channel import send_log
+    from paidsub.storage import get_paid_sub_by_tg_id
     user_id = query.from_user.id
     row = await get_paid_sub_by_tg_id(user_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
+    sub_url = row[5]
+    await query.edit_message_text(
+        "🔁 <b>Перевыпуск ключа</b>\n\n"
+        "Ваш ключ будет перевыпущен через <b>10 секунд</b>.\n\n"
+        "⚠️ После перевыпуска удалите старую подписку из приложения "
+        "и добавьте заново по ссылке ниже:\n\n"
+        f"🔗 <code>{sub_url}</code>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Отмена", callback_data="my_paid_sub")],
+        ]),
+        disable_web_page_preview=True,
+    )
+    context.application.job_queue.run_once(
+        _do_reissue_job, 10,
+        data={"tg_id": user_id, "chat_id": query.message.chat_id, "message_id": query.message.message_id},
+        name=f"reissue_{user_id}",
+    )
+
+
+async def _do_reissue_job(ctx):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field, add_history
+    from log_channel import send_log
+    data = ctx.job.data
+    tg_id = data["tg_id"]
+    chat_id = data["chat_id"]
+    message_id = data["message_id"]
+    row = await get_paid_sub_by_tg_id(tg_id)
+    if not row:
+        return
     sub_id = row[0]
     email = row[2]
-    await query.edit_message_text("⏳ Перевыпуск ключа...")
+    sub_url = row[5]
     from xui_api import reissue_client_uuid
     result = await reissue_client_uuid(email)
     if not result["success"]:
-        await query.edit_message_text(
-            f"❌ Ошибка: <code>{result['error']}</code>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
-            ]),
-        )
+        try:
+            await ctx.bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id,
+                text=f"❌ Ошибка перевыпуска: <code>{result['error']}</code>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+                ]),
+            )
+        except Exception:
+            pass
         return
     new_uuid = result["new_uuid"]
     await update_paid_sub_field(sub_id, "uuid", new_uuid)
-    await add_history(user_id, "key_reissued", f"Новый UUID: {new_uuid[:8]}…")
-    await send_log(context.bot,
-        f"🔁 Перевыпуск ключа: <code>{user_id}</code>"
-    )
-    await query.edit_message_text(
-        "✅ <b>Ключ перевыпущен!</b>\n\n"
-        "Ваша ссылка подписки осталась прежней.\n"
-        "Обновите подписку в приложении (обычно достаточно нажать «обновить»).",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")],
-            [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
-        ]),
-    )
+    await add_history(tg_id, "key_reissued", f"Новый UUID: {new_uuid[:8]}…")
+    await send_log(ctx.bot, f"🔁 Перевыпуск ключа: <code>{tg_id}</code>")
+    try:
+        from telegram import CopyTextButton
+        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", copy_text=CopyTextButton(text=sub_url))
+    except (ImportError, TypeError):
+        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", callback_data="copy_sub")
+    try:
+        await ctx.bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text=(
+                "✅ <b>Ключ перевыпущен!</b>\n\n"
+                "Удалите старую подписку из приложения и добавьте заново:\n\n"
+                f"🔗 <code>{sub_url}</code>\n\n"
+                "<i>Скопируйте ссылку и вставьте в Happ или INCY.</i>"
+            ),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [copy_btn],
+                [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")],
+                [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
+            ]),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        pass
     await query.answer("Ссылка отправлена — нажми на неё, чтобы скопировать")
 
 

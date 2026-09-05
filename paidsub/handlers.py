@@ -1297,9 +1297,8 @@ async def check_expired_subs(context):
                     except Exception:
                         pass
 
-                if expire_inbound_ids:
-                    from xui_api import move_client_inbound
-                    await move_client_inbound(email, expire_inbound_ids)
+                # Не перемещаем в expire-инбаунд чтобы не сбрасывать трафик.
+                # Клиент уже отключён через toggle_client(email, False).
 
 
 async def handle_confirm_payment(query, tg_id: int, context):
