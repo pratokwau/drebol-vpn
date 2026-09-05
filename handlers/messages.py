@@ -29,7 +29,7 @@ from states import (
     AWAITING_PAID_SUB_EDIT_RENEW_TIME, AWAITING_PAID_SUB_EDIT_PRICE,
     AWAITING_PAID_SUB_EDIT_PAY_URL, AWAITING_PAID_MUTE_USER,
     AWAITING_PAID_AUTO_UPDATE_DAYS,
-    AWAITING_REFERRAL_BONUS,
+    AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE,
@@ -843,6 +843,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         await update.message.reply_text(
             f"✅ Бонус за реферала: <b>{fmt_duration(seconds)}</b>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+
+    if state == AWAITING_REFERRAL_INVITED_BONUS:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>1 день</code>, <code>12 часов</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        _save("referral_invited_bonus", seconds)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(
+            f"✅ Бонус приглашённому: <b>{fmt_duration(seconds)}</b>",
             parse_mode="HTML", reply_markup=back_admin(),
         )
         return

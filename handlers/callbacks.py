@@ -62,7 +62,7 @@ from paidsub.handlers import (
     handle_paid_requests,
     handle_paid_auto_update_settings, handle_paid_toggle_auto_update,
     handle_paid_set_auto_update_days, handle_paid_run_sync_now,
-    handle_referral_settings, handle_set_referral_bonus,
+    handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
     handle_promos_menu, handle_promo_view, handle_promo_create,
     handle_promo_toggle, handle_promo_delete,
     handle_toggle_auto_trial,
@@ -413,6 +413,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_referral_settings(query)
     elif data == "set_referral_bonus":
         await handle_set_referral_bonus(query, context)
+    elif data == "set_referral_invited_bonus":
+        await handle_set_referral_invited_bonus(query, context)
     elif data == "promo_menu":
         await handle_promos_menu(query)
     elif data == "promo_create":

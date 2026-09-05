@@ -323,6 +323,7 @@ _ACTION_LABELS_ADMIN = {
     "payment_rejected": "❌ Оплата отклонена",
     "promo_used": "🎟 Промокод",
     "referral_bonus": "🎁 Реф. бонус",
+    "referral_invited_bonus": "🎁 Бонус приглашённого",
     "sub_enabled": "▶️ Включена",
     "sub_disabled": "⏸ Приостановлена",
     "sub_deleted": "🗑 Удалена",

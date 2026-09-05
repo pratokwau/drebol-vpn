@@ -168,14 +168,20 @@ async def handle_my_paid_sub(query):
     from paidsub.storage import get_referral_stats
     ref_stats = await get_referral_stats(user_id)
     bonus_cfg = cfg_tmp.get("referral_bonus")
+    invited_bonus_cfg = cfg_tmp.get("referral_invited_bonus")
     if ref_stats["total"] > 0:
         earned = f" · +{fmt_duration(ref_stats['total_bonus'])}" if ref_stats["total_bonus"] > 0 else ""
         referral_block = (
             f"\n👥 <b>Приглашено друзей:</b> {ref_stats['total']}{earned}\n"
         )
-    elif bonus_cfg:
+    elif bonus_cfg or invited_bonus_cfg:
+        parts = []
+        if bonus_cfg:
+            parts.append(f"получай +{fmt_duration(bonus_cfg)}")
+        if invited_bonus_cfg:
+            parts.append(f"друг получит +{fmt_duration(invited_bonus_cfg)}")
         referral_block = (
-            f"\n🎁 <b>Приглашай друзей</b> — получай +{fmt_duration(bonus_cfg)} за каждого!\n"
+            f"\n🎁 <b>Приглашай друзей</b> — {', '.join(parts)}!\n"
         )
 
     text = (
@@ -637,8 +643,13 @@ async def handle_referral(query, context):
 
     cfg = load_config()
     bonus = cfg.get("referral_bonus")
+    invited_bonus = cfg.get("referral_invited_bonus")
     if bonus:
-        lines.append(f"🎁 Бонус за каждого друга: <b>{fmt_duration(bonus)}</b>\n")
+        lines.append(f"🎁 Вам за каждого друга: <b>+{fmt_duration(bonus)}</b>")
+    if invited_bonus:
+        lines.append(f"🎁 Другу за регистрацию: <b>+{fmt_duration(invited_bonus)}</b>")
+    if bonus or invited_bonus:
+        lines.append("")
 
     lines.append(f"👤 Приглашено: <b>{stats['total']}</b>")
     lines.append(f"✅ С бонусом: <b>{stats['rewarded']}</b>")

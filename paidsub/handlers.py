@@ -551,61 +551,103 @@ async def handle_request_sub(query, context):
 
 
 async def _process_referral_bonus(invited_tg_id: int, context):
-    """Начисляет бонус рефереру если у него активная подписка."""
+    """Начисляет бонус рефереру и приглашённому, если настроено."""
     cfg = load_config()
     bonus_seconds = cfg.get("referral_bonus")
-    if not bonus_seconds:
-        return
+    invited_bonus = cfg.get("referral_invited_bonus")
     referrer_id = await get_referrer(invited_tg_id)
+
     if not referrer_id:
         return
-    referrer_sub = await get_paid_sub_by_tg_id(referrer_id)
-    if not referrer_sub:
+    if not bonus_seconds and not invited_bonus:
         return
-    ref_status = referrer_sub[11] if len(referrer_sub) > 11 else "active"
-    if ref_status not in ("active", "renewal"):
-        return
-
-    ref_sub_id = referrer_sub[0]
-    ref_email = referrer_sub[2]
-    ref_expire = referrer_sub[6]
-
-    for fmt_e in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-        try:
-            expire_dt = datetime.strptime(ref_expire, fmt_e)
-            break
-        except ValueError:
-            continue
-    else:
-        expire_dt = datetime.now()
-    if expire_dt < datetime.now():
-        expire_dt = datetime.now()
-
-    new_expire = expire_dt + timedelta(seconds=bonus_seconds)
-    new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-
-    full_row = await get_paid_sub(ref_sub_id)
-    await update_paid_sub_field(ref_sub_id, "expire_date", new_expire_str)
 
     from xui_api import update_client_expire
-    await update_client_expire(ref_email, new_expire_str)
-
-    await mark_referral_rewarded(invited_tg_id, bonus_seconds)
-
-    await add_history(
-        referrer_id, "referral_bonus",
-        f"За приглашение <code>{invited_tg_id}</code>\n"
-        f"Начислено: {fmt_duration(bonus_seconds)}\nДо: {new_expire_str}",
-    )
-
     bot = context.bot if hasattr(context, 'bot') else None
-    if bot:
-        await _notify_user(bot, referrer_id,
-            f"🎉 <b>Реферальный бонус!</b>\n\n"
-            f"Ваш друг активировал подписку.\n"
-            f"➕ Вам начислено: <b>{fmt_duration(bonus_seconds)}</b>\n"
-            f"📅 Подписка до: <b>{new_expire_str}</b>"
-        )
+
+    # ── Бонус рефереру ──────────────────────────────────────────────────────
+    if bonus_seconds:
+        referrer_sub = await get_paid_sub_by_tg_id(referrer_id)
+        if referrer_sub:
+            ref_status = referrer_sub[11] if len(referrer_sub) > 11 else "active"
+            if ref_status in ("active", "renewal"):
+                ref_sub_id = referrer_sub[0]
+                ref_email = referrer_sub[2]
+                ref_expire = referrer_sub[6]
+
+                for fmt_e in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                    try:
+                        expire_dt = datetime.strptime(ref_expire, fmt_e)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    expire_dt = datetime.now()
+                if expire_dt < datetime.now():
+                    expire_dt = datetime.now()
+
+                new_expire = expire_dt + timedelta(seconds=bonus_seconds)
+                new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
+
+                await update_paid_sub_field(ref_sub_id, "expire_date", new_expire_str)
+                await update_client_expire(ref_email, new_expire_str)
+
+                await add_history(
+                    referrer_id, "referral_bonus",
+                    f"За приглашение <code>{invited_tg_id}</code>\n"
+                    f"Начислено: {fmt_duration(bonus_seconds)}\nДо: {new_expire_str}",
+                )
+
+                if bot:
+                    await _notify_user(bot, referrer_id,
+                        f"🎉 <b>Реферальный бонус!</b>\n\n"
+                        f"Ваш друг активировал подписку.\n"
+                        f"➕ Вам начислено: <b>{fmt_duration(bonus_seconds)}</b>\n"
+                        f"📅 Подписка до: <b>{new_expire_str}</b>"
+                    )
+
+    await mark_referral_rewarded(invited_tg_id, bonus_seconds or 0)
+
+    # ── Бонус приглашённому ─────────────────────────────────────────────────
+    if invited_bonus:
+        invited_sub = await get_paid_sub_by_tg_id(invited_tg_id)
+        if invited_sub:
+            inv_status = invited_sub[11] if len(invited_sub) > 11 else "active"
+            if inv_status in ("active", "renewal"):
+                inv_sub_id = invited_sub[0]
+                inv_email = invited_sub[2]
+                inv_expire = invited_sub[6]
+
+                for fmt_e in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                    try:
+                        expire_dt = datetime.strptime(inv_expire, fmt_e)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    expire_dt = datetime.now()
+                if expire_dt < datetime.now():
+                    expire_dt = datetime.now()
+
+                new_inv_expire = expire_dt + timedelta(seconds=invited_bonus)
+                new_inv_str = new_inv_expire.strftime("%d.%m.%Y %H:%M:%S")
+
+                await update_paid_sub_field(inv_sub_id, "expire_date", new_inv_str)
+                await update_client_expire(inv_email, new_inv_str)
+
+                await add_history(
+                    invited_tg_id, "referral_invited_bonus",
+                    f"Бонус за регистрацию по реферальной ссылке\n"
+                    f"Начислено: {fmt_duration(invited_bonus)}\nДо: {new_inv_str}",
+                )
+
+                if bot:
+                    await _notify_user(bot, invited_tg_id,
+                        f"🎉 <b>Приветственный бонус!</b>\n\n"
+                        f"Вы зарегистрировались по реферальной ссылке.\n"
+                        f"➕ Вам начислено: <b>{fmt_duration(invited_bonus)}</b>\n"
+                        f"📅 Подписка до: <b>{new_inv_str}</b>"
+                    )
 
 
 async def handle_approve(query, tg_id: int, context):
@@ -1486,6 +1528,7 @@ _ACTION_LABELS = {
     "bulk_reduced": "⚡➖ Массово: срок убавлен",
     "settings_changed": "⚙️ Изменены настройки",
     "referral_bonus": "🎁 Реферальный бонус",
+    "referral_invited_bonus": "🎁 Бонус приглашённого",
     "promo_used": "🎟 Промокод применён",
     "user_muted": "🔇 Заглушён",
     "user_unmuted": "🔊 Разглушён",
@@ -1722,6 +1765,8 @@ async def handle_referral_settings(query):
     cfg = load_config()
     bonus = cfg.get("referral_bonus")
     bonus_str = fmt_duration(bonus) if bonus else "не задан"
+    invited_bonus = cfg.get("referral_invited_bonus")
+    invited_str = fmt_duration(invited_bonus) if invited_bonus else "не задан"
     stats = await get_all_referral_stats()
 
     from database import get_user_info
@@ -1734,7 +1779,8 @@ async def handle_referral_settings(query):
 
     lines = [
         "👥 <b>Реферальная система</b>\n",
-        f"🎁 Бонус за реферала: <b>{bonus_str}</b>",
+        f"🎁 Бонус пригласившему: <b>{bonus_str}</b>",
+        f"🎁 Бонус приглашённому: <b>{invited_str}</b>",
         f"👤 Всего рефералов: <b>{stats['total']}</b>",
         f"✅ С бонусом: <b>{stats['rewarded']}</b>",
     ]
@@ -1746,7 +1792,8 @@ async def handle_referral_settings(query):
 
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎁 Изменить бонус", callback_data="set_referral_bonus")],
+        [InlineKeyboardButton("🎁 Бонус пригласившему", callback_data="set_referral_bonus")],
+        [InlineKeyboardButton("🎁 Бонус приглашённому", callback_data="set_referral_invited_bonus")],
         [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
     ])
 
@@ -1764,9 +1811,25 @@ async def handle_set_referral_bonus(query, context):
     bonus = cfg.get("referral_bonus")
     cur_str = fmt_duration(bonus) if bonus else "не задан"
     await query.edit_message_text(
-        f"🎁 <b>Бонус за реферала</b>\n\n"
+        f"🎁 <b>Бонус пригласившему</b>\n\n"
         f"Сейчас: <b>{cur_str}</b>\n\n"
         "Введи время бонуса:\n"
+        "<code>1 день</code>, <code>3 дня</code>, <code>12 часов</code>, <code>1 неделя</code>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_set_referral_invited_bonus(query, context):
+    from states import AWAITING_REFERRAL_INVITED_BONUS
+    context.user_data["state"] = AWAITING_REFERRAL_INVITED_BONUS
+    cfg = load_config()
+    bonus = cfg.get("referral_invited_bonus")
+    cur_str = fmt_duration(bonus) if bonus else "не задан"
+    await query.edit_message_text(
+        f"🎁 <b>Бонус приглашённому</b>\n\n"
+        f"Сейчас: <b>{cur_str}</b>\n\n"
+        "Введи время бонуса для приглашённого друга:\n"
         "<code>1 день</code>, <code>3 дня</code>, <code>12 часов</code>, <code>1 неделя</code>",
         parse_mode="HTML",
         reply_markup=back_admin(),
