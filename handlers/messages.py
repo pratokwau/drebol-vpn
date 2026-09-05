@@ -1006,7 +1006,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
         return
 
-    # ── Мьют пользователя ───────────────────────────────────────────────────────
+    # ── Мьют пользователя (ставь в конец админских) ──────────────────────────────
     if state == AWAITING_PAID_MUTE_USER:
         seconds = parse_duration(text)
         if not seconds:
@@ -1032,4 +1032,120 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         await update.message.reply_text("❌ Пользователь не найден.", reply_markup=back_admin())
+        return
+
+
+async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    state = context.user_data.get("state")
+    user = update.effective_user
+    is_admin = user.id == ADMIN_ID
+    msg = update.message
+
+    if msg.photo:
+        file_id = msg.photo[-1].file_id
+        file_type = "photo"
+        fallback_label = "🖼 Фото"
+    elif msg.document:
+        file_id = msg.document.file_id
+        file_type = "document"
+        fname = msg.document.file_name or "файл"
+        fallback_label = f"📎 {fname}"
+    else:
+        return
+
+    caption = msg.caption or ""
+
+    # ── Юзер отправляет файл в поддержку ────────────────────────────────────
+    if state == AWAITING_SUPPORT_MSG and not is_admin:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from database import get_unread_tickets_count, get_support_messages, count_support_files
+        text_to_save = caption if caption else fallback_label
+        await add_support_message(user.id, text_to_save, from_admin=False,
+                                  file_id=file_id, file_type=file_type)
+        _, total_pages = await get_support_messages(user.id)
+        has_files = (await count_support_files(user.id)) > 0
+        await msg.reply_text(
+            "✅ Файл отправлен в поддержку! Мы ответим как можно скорее.",
+            reply_markup=support_keyboard(total_pages, total_pages, has_files),
+        )
+        from log_channel import send_log
+        await send_log(context.bot,
+            f"📩 Файл в поддержку: {user.first_name} (<code>{user.id}</code>) — {fallback_label}"
+        )
+        uname = f"@{user.username}" if user.username else f"id{user.id}"
+        unread = await get_unread_tickets_count()
+        if file_type == "photo":
+            await context.bot.send_photo(
+                chat_id=ADMIN_ID,
+                photo=file_id,
+                caption=(
+                    f"📩 <b>Файл от пользователя</b>\n\n"
+                    f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
+                    f"🆔 <code>{user.id}</code>\n"
+                    f"🔴 Непрочитанных: <b>{unread}</b>"
+                    + (f"\n\n💬 {caption}" if caption else "")
+                ),
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
+                    [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
+                ]),
+            )
+        else:
+            await context.bot.send_document(
+                chat_id=ADMIN_ID,
+                document=file_id,
+                caption=(
+                    f"📩 <b>Файл от пользователя</b>\n\n"
+                    f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
+                    f"🆔 <code>{user.id}</code>\n"
+                    f"🔴 Непрочитанных: <b>{unread}</b>"
+                    + (f"\n\n💬 {caption}" if caption else "")
+                ),
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
+                    [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
+                ]),
+            )
+        return
+
+    # ── Админ отправляет файл как ответ ─────────────────────────────────────
+    if state == AWAITING_ADMIN_REPLY and is_admin:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        reply_to = context.user_data.pop("reply_to", None)
+        context.user_data.pop("state", None)
+        if not reply_to:
+            await msg.reply_text("❌ Пользователь не найден.", reply_markup=back_admin())
+            return
+        text_to_save = caption if caption else fallback_label
+        await add_support_message(reply_to, text_to_save, from_admin=True,
+                                  file_id=file_id, file_type=file_type)
+        delivered = True
+        try:
+            if file_type == "photo":
+                await context.bot.send_photo(
+                    chat_id=reply_to,
+                    photo=file_id,
+                    caption=f"🛡 <b>Ответ поддержки:</b>" + (f"\n\n{caption}" if caption else ""),
+                    parse_mode="HTML",
+                )
+            else:
+                await context.bot.send_document(
+                    chat_id=reply_to,
+                    document=file_id,
+                    caption=f"🛡 <b>Ответ поддержки:</b>" + (f"\n\n{caption}" if caption else ""),
+                    parse_mode="HTML",
+                )
+        except Exception:
+            delivered = False
+        status_line = "✅ Файл отправлен." if delivered else "⚠️ Файл сохранён, но не доставлен."
+        await msg.reply_text(
+            status_line,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Ещё ответить", callback_data=f"ticket_reply:{reply_to}")],
+                [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{reply_to}:1")],
+                [InlineKeyboardButton("◀️ К тикетам", callback_data="ticket_list:1")],
+            ]),
+        )
         return

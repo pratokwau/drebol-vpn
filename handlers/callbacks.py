@@ -21,10 +21,11 @@ from handlers.admin import (
     handle_reviews_menu, handle_review_view, handle_set_review_days,
     handle_user_history, handle_dm_user, handle_payment_stats,
 )
-from handlers.support import open_support
+from handlers.support import open_support, handle_support_files
 from handlers.broadcast import handle_broadcast_start, handle_broadcast_segment
 from handlers.tickets import (
     handle_ticket_list, handle_ticket_view, handle_ticket_reply_start,
+    handle_ticket_files,
 )
 from handlers.xui_settings import (
     handle_xui_settings, handle_set_xui_url, handle_set_xui_token,
@@ -180,6 +181,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "support_open":
         context.user_data["state"] = AWAITING_SUPPORT_MSG
         await open_support(query, update.effective_user.id)
+    elif data == "support_files":
+        context.user_data["state"] = AWAITING_SUPPORT_MSG
+        await handle_support_files(query, update.effective_user.id)
     elif data.startswith("support_page:"):
         page = int(data.split(":")[1])
         context.user_data["state"] = AWAITING_SUPPORT_MSG
@@ -263,6 +267,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("ticket_view:"):
         _, uid, page = data.split(":")
         await handle_ticket_view(query, int(uid), int(page))
+    elif data.startswith("ticket_files:"):
+        await handle_ticket_files(query, int(data.split(":")[1]))
     elif data.startswith("ticket_reply:"):
         await handle_ticket_reply_start(query, int(data.split(":")[1]), context)
 

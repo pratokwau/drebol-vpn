@@ -31,6 +31,11 @@ async def init_db():
             await db.execute("ALTER TABLE support_messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0")
         except Exception:
             pass
+        for col in ("file_id TEXT", "file_type TEXT"):
+            try:
+                await db.execute(f"ALTER TABLE support_messages ADD COLUMN {col}")
+            except Exception:
+                pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS admin_subs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -283,12 +288,12 @@ async def get_users_by_segment(segment: str) -> list[int]:
             return [r[0] for r in await cur.fetchall()]
 
 
-async def add_support_message(user_id: int, text: str, from_admin: bool = False):
+async def add_support_message(user_id: int, text: str, from_admin: bool = False,
+                              file_id: str | None = None, file_type: str | None = None):
     async with aiosqlite.connect(DB_PATH) as db:
-        # сообщения от админа сразу считаются прочитанными
         await db.execute(
-            "INSERT INTO support_messages (user_id, text, from_admin, is_read) VALUES (?, ?, ?, ?)",
-            (user_id, text, 1 if from_admin else 0, 1 if from_admin else 0),
+            "INSERT INTO support_messages (user_id, text, from_admin, is_read, file_id, file_type) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, text, 1 if from_admin else 0, 1 if from_admin else 0, file_id, file_type),
         )
         await db.commit()
 
@@ -301,7 +306,7 @@ async def get_support_messages(user_id: int, page: int = 1):
         ) as cur:
             total = (await cur.fetchone())[0]
         async with db.execute("""
-            SELECT text, from_admin, created_at FROM support_messages
+            SELECT text, from_admin, created_at, file_id, file_type FROM support_messages
             WHERE user_id = ?
             ORDER BY created_at ASC
             LIMIT ? OFFSET ?
@@ -309,6 +314,25 @@ async def get_support_messages(user_id: int, page: int = 1):
             msgs = await cur.fetchall()
     total_pages = max(1, (total + MSGS_PER_PAGE - 1) // MSGS_PER_PAGE)
     return msgs, total_pages
+
+
+async def count_support_files(user_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM support_messages WHERE user_id = ? AND file_id IS NOT NULL",
+            (user_id,),
+        ) as cur:
+            return (await cur.fetchone())[0]
+
+
+async def get_support_files(user_id: int) -> list[tuple]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT file_id, file_type, from_admin, created_at FROM support_messages
+            WHERE user_id = ? AND file_id IS NOT NULL
+            ORDER BY created_at ASC
+        """, (user_id,)) as cur:
+            return await cur.fetchall()
 
 
 async def mark_ticket_read(user_id: int):

@@ -4,7 +4,7 @@ from database import init_db
 from handlers.start import start
 from handlers.help import help_cmd
 from handlers.callbacks import callback_router
-from handlers.messages import handle_text
+from handlers.messages import handle_text, handle_media
 
 
 async def post_init(app: Application):
@@ -228,6 +228,7 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CallbackQueryHandler(callback_router))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
 
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)

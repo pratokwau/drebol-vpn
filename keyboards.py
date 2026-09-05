@@ -88,7 +88,7 @@ def documents_keyboard() -> InlineKeyboardMarkup:
 
 # ── Поддержка (юзер) ──────────────────────────────────────────────────────────
 
-def support_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
+def support_keyboard(page: int, total_pages: int, has_files: bool = False) -> InlineKeyboardMarkup:
     rows = []
     if total_pages > 1:
         nav = []
@@ -98,6 +98,8 @@ def support_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
         if page < total_pages:
             nav.append(InlineKeyboardButton("▶️", callback_data=f"support_page:{page + 1}"))
         rows.append(nav)
+    if has_files:
+        rows.append([InlineKeyboardButton("📎 Показать файлы", callback_data="support_files")])
     rows.append([InlineKeyboardButton("🔄 Обновить", callback_data=f"support_page:{page}")])
     rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
     return InlineKeyboardMarkup(rows)
@@ -139,7 +141,7 @@ def ticket_list_keyboard(ticket_rows, page: int, total_pages: int) -> InlineKeyb
     return InlineKeyboardMarkup(keyboard)
 
 
-def ticket_view_keyboard(user_id: int, page: int, total_pages: int) -> InlineKeyboardMarkup:
+def ticket_view_keyboard(user_id: int, page: int, total_pages: int, has_files: bool = False) -> InlineKeyboardMarkup:
     rows = []
     if total_pages > 1:
         nav = []
@@ -149,6 +151,8 @@ def ticket_view_keyboard(user_id: int, page: int, total_pages: int) -> InlineKey
         if page < total_pages:
             nav.append(InlineKeyboardButton("▶️", callback_data=f"ticket_view:{user_id}:{page + 1}"))
         rows.append(nav)
+    if has_files:
+        rows.append([InlineKeyboardButton("📎 Файлы", callback_data=f"ticket_files:{user_id}")])
     rows.append([InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user_id}")])
     rows.append([InlineKeyboardButton("◀️ К тикетам", callback_data="ticket_list:1")])
     return InlineKeyboardMarkup(rows)
