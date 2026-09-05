@@ -115,6 +115,36 @@ async def get_inbounds() -> dict:
         await s.close()
 
 
+async def count_panel_clients() -> dict:
+    """Считает уникальных клиентов в панели.
+
+    Клиент может лежать сразу в нескольких инбаундах (переносы при продлении
+    и истечении), поэтому считаем по уникальному email, иначе цифра задваивается.
+    """
+    result = await get_inbounds()
+    if not result.get("success"):
+        return {"success": False, "error": result.get("error", "?")}
+
+    import json
+    seen: set[str] = set()
+    paid = 0
+    for inb in result["inbounds"]:
+        try:
+            settings = json.loads(inb.get("settings") or "{}")
+            clients = settings.get("clients") or []
+        except Exception:
+            clients = []
+        for c in clients:
+            email = (c.get("email") or "").strip()
+            if not email or email in seen:
+                continue
+            seen.add(email)
+            if email.startswith("paid_"):
+                paid += 1
+    total = len(seen)
+    return {"success": True, "total": total, "paid": paid, "other": total - paid}
+
+
 async def test_connection() -> dict:
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")

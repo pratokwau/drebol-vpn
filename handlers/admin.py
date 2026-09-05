@@ -24,10 +24,47 @@ async def handle_admin_panel(query):
 
 async def handle_dashboard(query):
     from database import get_dashboard_stats
+    from xui_api import count_panel_clients
     s = await get_dashboard_stats()
     cfg = load_config()
     price = cfg.get("paid_price", 0) or 0
-    revenue_est = s["payments_confirmed"] * price
+
+    # Выручка: точная сумма из истории + оценка по оплатам без сохранённой суммы
+    unknown_pays = s["payments_confirmed"] - s["revenue_known"]
+    revenue = s["revenue_total"] + unknown_pays * price
+    if unknown_pays > 0:
+        revenue_note = f" <i>(точно по {s['revenue_known']} из {s['payments_confirmed']}, остальное ~{price}₽)</i>"
+    else:
+        revenue_note = ""
+
+    # Сверка базы с панелью 3x-UI
+    db_paid = s["paid_total"]
+    db_admin = s["admin_subs"]
+    db_all = db_paid + db_admin
+    panel = await count_panel_clients()
+    if panel.get("success"):
+        p_total, p_paid, p_other = panel["total"], panel["paid"], panel["other"]
+        if p_total == db_all and p_paid == db_paid:
+            sync_line = "✅ База и панель совпадают"
+        else:
+            sync_line = (
+                f"⚠️ Расхождение: платных {p_paid} vs {db_paid} · "
+                f"прочих {p_other} vs {db_admin}"
+            )
+        panel_block = (
+            "<b>🖥 Панель 3x-UI</b>\n"
+            f"Клиентов в панели: <b>{p_total}</b> (платных {p_paid} · прочих {p_other})\n"
+            f"Записей в базе: <b>{db_all}</b> (платных {db_paid} · админских {db_admin})\n"
+            f"{sync_line}\n\n"
+        )
+    else:
+        panel_block = (
+            "<b>🖥 Панель 3x-UI</b>\n"
+            f"🔴 Панель недоступна — сверка не выполнена\n"
+            f"Записей в базе: <b>{db_all}</b> (платных {db_paid} · админских {db_admin})\n\n"
+        )
+
+    other_line = f" · прочие: <b>{s['paid_other']}</b>" if s["paid_other"] else ""
 
     text = (
         "📊 <b>Статистика</b>\n\n"
@@ -35,17 +72,20 @@ async def handle_dashboard(query):
         f"Всего: <b>{s['users_total']}</b>\n"
         f"Сегодня: <b>+{s['users_today']}</b> · за неделю: <b>+{s['users_week']}</b>\n\n"
         "<b>💳 Платные подписки</b>\n"
-        f"Активные: <b>{s['paid_active']}</b> · истёкшие: <b>{s['paid_expired']}</b>\n"
-        f"На триале: <b>{s['trial_active']}</b> · платящих: <b>{s['paying']}</b>\n"
+        f"Активные: <b>{s['paid_active']}</b> · истёкшие: <b>{s['paid_expired']}</b>{other_line}\n"
+        f"Из активных: триал <b>{s['trial_active']}</b> · платящих <b>{s['paying_active']}</b>\n"
+        f"Оплачивали хоть раз: <b>{s['paying_total']}</b>\n"
         f"Всего записей: <b>{s['paid_total']}</b>\n\n"
+        f"{panel_block}"
         "<b>⏳ Ожидают действия</b>\n"
         f"Заявок на оплату: <b>{s['payment_pending']}</b>\n"
         f"Запросов на триал: <b>{s['requests_pending']}</b>\n"
         f"Непрочитанных тикетов: <b>{s['unread_tickets']}</b>\n\n"
         "<b>💰 Оплаты</b>\n"
         f"Подтверждено всего: <b>{s['payments_confirmed']}</b> · сегодня: <b>{s['payments_today']}</b>\n"
-        f"Выдано триалов: <b>{s['trials_approved']}</b>\n"
-        f"Оценка выручки: <b>~{revenue_est} ₽</b> <i>(по тек. цене {price}₽)</i>\n\n"
+        f"Выдано триалов: <b>{s['trials_issued']}</b>\n"
+        f"Выручка: <b>{revenue} ₽</b>{revenue_note}\n"
+        f"Сегодня: <b>{s['revenue_today']} ₽</b>\n\n"
         "<b>🎁 Прочее</b>\n"
         f"Рефералов: <b>{s['ref_total']}</b> (с бонусом: {s['ref_rewarded']})\n"
         f"Промокодов активно: <b>{s['promos_active']}</b> · активаций: <b>{s['promo_uses']}</b>\n"

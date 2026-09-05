@@ -215,17 +215,26 @@ async def get_dashboard_stats() -> dict:
             row = await cur.fetchone()
             return row[0] if row else 0
 
+    import re
+
     async with aiosqlite.connect(DB_PATH) as db:
+        # локальная дата сервера — чтобы «сегодня» совпадало с реальными сутками,
+        # а не с UTC-сутками, в которых SQLite пишет CURRENT_TIMESTAMP
+        today_local = await _one(db, "SELECT date('now','localtime')")
+
         users_total = await _one(db, "SELECT COUNT(*) FROM users")
-        users_today = await _one(db, "SELECT COUNT(*) FROM users WHERE date(created_at) = date('now')")
+        users_today = await _one(db, "SELECT COUNT(*) FROM users WHERE date(created_at,'localtime') = date('now','localtime')")
         users_week = await _one(db, "SELECT COUNT(*) FROM users WHERE created_at >= datetime('now','-7 days')")
 
         paid_total = await _one(db, "SELECT COUNT(*) FROM paid_subs")
         paid_active = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE status IN ('active','renewal')")
         paid_expired = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE status = 'expired'")
+        # обе метрики считаем по одному срезу — только активные, иначе сумма не сходится с paid_active
         trial_active = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed = 0 AND status IN ('active','renewal')")
-        paying = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed > 0")
+        paying_active = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed > 0 AND status IN ('active','renewal')")
+        paying_total = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed > 0")
         payment_pending = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE payment_pending = 1")
+        paid_other = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE status NOT IN ('active','renewal','expired')")
 
         requests_pending = await _one(db, "SELECT COUNT(*) FROM paid_sub_requests WHERE status = 'pending'")
         admin_subs = await _one(db, "SELECT COUNT(*) FROM admin_subs")
@@ -237,26 +246,52 @@ async def get_dashboard_stats() -> dict:
         promo_uses = await _one(db, "SELECT COUNT(*) FROM promo_uses")
 
         payments_confirmed = await _one(db, "SELECT COUNT(*) FROM paid_sub_history WHERE action = 'payment_confirmed'")
-        payments_today = await _one(db, "SELECT COUNT(*) FROM paid_sub_history WHERE action = 'payment_confirmed' AND date(created_at) = date('now')")
-        trials_approved = await _one(db, "SELECT COUNT(*) FROM paid_sub_history WHERE action = 'trial_approved'")
+        payments_today = await _one(db, "SELECT COUNT(*) FROM paid_sub_history WHERE action = 'payment_confirmed' AND date(created_at,'localtime') = date('now','localtime')")
+        # триалы считаем по факту создания подписки — покрывает и авто-выдачу,
+        # и одобрение админом, и ручное создание из админки
+        trials_issued = await _one(db, "SELECT COUNT(*) FROM paid_sub_history WHERE action = 'sub_created' AND details LIKE '%пробный период%'")
         open_tickets_unread = await _one(db, "SELECT COUNT(DISTINCT user_id) FROM support_messages WHERE from_admin = 0 AND is_read = 0")
+
+        # реальная выручка из истории: details содержит "Сумма: N ₽"
+        async with db.execute("""
+            SELECT details, date(created_at,'localtime') FROM paid_sub_history
+            WHERE action = 'payment_confirmed'
+        """) as cur:
+            pay_rows = await cur.fetchall()
+
+    revenue_total = 0
+    revenue_today = 0
+    revenue_known = 0
+    for details, day in pay_rows:
+        m = re.search(r"Сумма:\s*(\d+)", details or "")
+        if not m:
+            continue
+        amount = int(m.group(1))
+        revenue_known += 1
+        revenue_total += amount
+        if day == today_local:
+            revenue_today += amount
 
     return {
         "users_total": users_total, "users_today": users_today, "users_week": users_week,
         "paid_total": paid_total, "paid_active": paid_active, "paid_expired": paid_expired,
-        "trial_active": trial_active, "paying": paying, "payment_pending": payment_pending,
+        "paid_other": paid_other,
+        "trial_active": trial_active, "paying_active": paying_active, "paying_total": paying_total,
+        "payment_pending": payment_pending,
         "requests_pending": requests_pending, "admin_subs": admin_subs,
         "ref_total": ref_total, "ref_rewarded": ref_rewarded,
         "promos_active": promos_active, "promo_uses": promo_uses,
         "payments_confirmed": payments_confirmed, "payments_today": payments_today,
-        "trials_approved": trials_approved, "unread_tickets": open_tickets_unread,
+        "trials_issued": trials_issued, "unread_tickets": open_tickets_unread,
+        "revenue_total": revenue_total, "revenue_today": revenue_today,
+        "revenue_known": revenue_known,
     }
 
 
 async def get_payments_by_day(days: int = 30) -> list[tuple]:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT date(created_at) as d, COUNT(*) as cnt
+            SELECT date(created_at,'localtime') as d, COUNT(*) as cnt
             FROM paid_sub_history
             WHERE action = 'payment_confirmed'
               AND created_at >= datetime('now', ?)
