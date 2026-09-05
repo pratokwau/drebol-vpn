@@ -37,6 +37,7 @@ from states import (
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_REVIEW_DAYS, AWAITING_USER_REVIEW,
+    AWAITING_DM_USER,
 )
 from handlers.broadcast import do_broadcast
 
@@ -977,6 +978,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         val = int(text)
         label = f"через {val} дн." if val > 0 else "выключено"
         await update.message.reply_text(f"✅ Авто-запрос отзыва: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Сообщение юзеру из профиля ─────────────────────────────────────────────
+    if state == AWAITING_DM_USER:
+        dm_target = context.user_data.pop("dm_target", None)
+        context.user_data.pop("state", None)
+        if dm_target:
+            try:
+                await context.bot.send_message(
+                    chat_id=dm_target,
+                    text=f"📌 <b>Сообщение от администратора:</b>\n\n{text}",
+                    parse_mode="HTML",
+                )
+                from log_channel import send_log
+                await send_log(context.bot,
+                    f"📌 Админ → <code>{dm_target}</code>: {text[:100]}"
+                )
+                await update.message.reply_text(
+                    f"✅ Сообщение отправлено пользователю <code>{dm_target}</code>.",
+                    parse_mode="HTML", reply_markup=back_admin(),
+                )
+            except Exception as e:
+                await update.message.reply_text(
+                    f"❌ Не удалось отправить: <code>{e}</code>",
+                    parse_mode="HTML", reply_markup=back_admin(),
+                )
         return
 
     # ── Мьют пользователя ───────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ from states import (
     AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT, AWAITING_REVIEW_DAYS,
+    AWAITING_DM_USER,
 )
 
 
@@ -55,6 +56,7 @@ async def handle_dashboard(query):
         text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📊 Оплаты по дням", callback_data="payment_stats:30")],
             [InlineKeyboardButton("🔄 Обновить", callback_data="dashboard")],
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
@@ -299,7 +301,10 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         kb_rows.append([InlineKeyboardButton("🔓 Разбанить", callback_data=f"unban_user:{tg_id}")])
     else:
         kb_rows.append([InlineKeyboardButton("🚫 Забанить", callback_data=f"ban_user:{tg_id}")])
-    kb_rows.append([InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}")])
+    kb_rows.append([
+        InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}"),
+        InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}"),
+    ])
     kb_rows.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     kb = InlineKeyboardMarkup(kb_rows)
 
@@ -594,4 +599,70 @@ async def handle_set_review_days(query, context: ContextTypes.DEFAULT_TYPE):
         "Введи число дней (0 — выключить):",
         parse_mode="HTML",
         reply_markup=back_admin(),
+    )
+
+
+# ── Написать юзеру ─────────────────────────────────────────────────────────
+
+async def handle_dm_user(query, tg_id: int, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_DM_USER
+    context.user_data["dm_target"] = tg_id
+    from database import get_user_info
+    u = await get_user_info(tg_id)
+    name = u[1] if u else str(tg_id)
+    await query.edit_message_text(
+        f"📌 <b>Сообщение для {name}</b> (<code>{tg_id}</code>)\n\n"
+        "Напиши текст сообщения одним сообщением:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К профилю", callback_data=f"user_profile:{tg_id}")],
+        ]),
+    )
+
+
+# ── Статистика оплат по дням ────────────────────────────────────────────────
+
+async def handle_payment_stats(query, days: int = 30):
+    from database import get_payments_by_day
+    rows = await get_payments_by_day(days)
+    cfg = load_config()
+    price = cfg.get("paid_price", 0) or 0
+
+    if not rows:
+        await query.edit_message_text(
+            f"📊 <b>Оплаты за {days} дн.</b>\n\nНет данных.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ Назад", callback_data="dashboard")],
+            ]),
+        )
+        return
+
+    max_cnt = max(r[1] for r in rows)
+    total = sum(r[1] for r in rows)
+    bar_width = 12
+
+    lines = [f"📊 <b>Оплаты за {days} дн.</b>\n"]
+    for date_str, cnt in rows:
+        short_date = date_str[5:]  # MM-DD
+        filled = int(cnt / max_cnt * bar_width) if max_cnt > 0 else 0
+        bar = "▓" * filled + "░" * (bar_width - filled)
+        lines.append(f"<code>{short_date} {bar}</code> {cnt}")
+
+    revenue = total * price
+    lines.append(f"\n💰 Всего: <b>{total}</b> оплат")
+    if price > 0:
+        lines.append(f"💵 Оценка выручки: <b>~{revenue} ₽</b>")
+
+    toggle_days = 7 if days == 30 else 30
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                f"📅 За {toggle_days} дн.",
+                callback_data=f"payment_stats:{toggle_days}",
+            )],
+            [InlineKeyboardButton("◀️ Назад", callback_data="dashboard")],
+        ]),
     )

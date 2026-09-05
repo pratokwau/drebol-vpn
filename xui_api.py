@@ -316,6 +316,54 @@ async def update_client_email(old_email: str, new_email: str, client_uuid: str,
         await s.close()
 
 
+async def reissue_client_uuid(email: str) -> dict:
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "URL или токен не заданы"}
+    s = _session(token)
+    try:
+        data, err = await _get(s, f"{url}/panel/api/inbounds/list")
+        if not data or not data.get("success"):
+            return {"success": False, "error": f"Не удалось загрузить инбаунды: {err}"}
+        client_obj = None
+        old_uuid = None
+        for inb in (data.get("obj") or []):
+            settings_str = inb.get("settings") or "{}"
+            try:
+                settings = json.loads(settings_str) if isinstance(settings_str, str) else settings_str
+            except Exception:
+                continue
+            for c in settings.get("clients", []):
+                if c.get("email") == email:
+                    client_obj = dict(c)
+                    old_uuid = c.get("id", "")
+                    break
+            if client_obj:
+                break
+        if not client_obj:
+            return {"success": False, "error": "Клиент не найден в панели"}
+        new_uuid = str(uuid.uuid4())
+        client_obj["id"] = new_uuid
+        client_obj["flow"] = "xtls-rprx-vision"
+        safe_old = quote(old_uuid, safe="")
+        safe_email = quote(email, safe="")
+        for path in (
+            f"/panel/api/clients/update/{safe_old}",
+            f"/panel/api/clients/update/{safe_email}",
+            f"/panel/api/inbounds/updateClient/{safe_old}",
+        ):
+            result, err2 = await _post(s, f"{url}{path}", client_obj)
+            if result and result.get("success"):
+                return {"success": True, "new_uuid": new_uuid}
+        return {"success": False, "error": f"API не принял обновление: {err2}"}
+    except Exception as e:
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        await s.close()
+
+
 async def delete_client(email: str) -> dict:
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")

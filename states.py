@@ -75,3 +75,6 @@ AWAITING_WINBACK_PERCENT = "awaiting_winback_percent"
 # Отзывы
 AWAITING_REVIEW_DAYS = "awaiting_review_days"
 AWAITING_USER_REVIEW = "awaiting_user_review"
+
+# Сообщение юзеру из профиля
+AWAITING_DM_USER = "awaiting_dm_user"

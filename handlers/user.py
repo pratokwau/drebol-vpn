@@ -206,8 +206,11 @@ async def handle_my_paid_sub(query):
     except (ImportError, TypeError):
         copy_btn = InlineKeyboardButton("📋 Скопировать подписку", callback_data="copy_sub")
     kb_rows.append([copy_btn])
+    kb_rows.append([InlineKeyboardButton("📱 QR-код", callback_data="qr_code")])
     if status in ("renewal", "expired"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
+    if status == "active":
+        kb_rows.append([InlineKeyboardButton("🔁 Перевыпуск ключа", callback_data="reissue_key")])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
@@ -497,6 +500,74 @@ async def handle_copy_sub(query, context):
         text=f"<code>{sub_url}</code>",
         parse_mode="HTML",
         disable_web_page_preview=True,
+    )
+
+
+async def handle_qr_code(query, context):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_paid_sub_by_tg_id
+    user_id = query.from_user.id
+    row = await get_paid_sub_by_tg_id(user_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    sub_url = row[5]
+    try:
+        import qrcode
+        from io import BytesIO
+        qr = qrcode.make(sub_url)
+        buf = BytesIO()
+        qr.save(buf, format="PNG")
+        buf.seek(0)
+        await context.bot.send_photo(
+            chat_id=user_id,
+            photo=buf,
+            caption="📱 <b>QR-код подписки</b>\n\nОтсканируйте в приложении Happ или INCY.",
+            parse_mode="HTML",
+        )
+        await query.answer()
+    except ImportError:
+        await query.answer("QR-генератор недоступен на сервере", show_alert=True)
+
+
+async def handle_reissue_key(query, context):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field, add_history
+    from log_channel import send_log
+    user_id = query.from_user.id
+    row = await get_paid_sub_by_tg_id(user_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    sub_id = row[0]
+    email = row[2]
+    await query.edit_message_text("⏳ Перевыпуск ключа...")
+    from xui_api import reissue_client_uuid
+    result = await reissue_client_uuid(email)
+    if not result["success"]:
+        await query.edit_message_text(
+            f"❌ Ошибка: <code>{result['error']}</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+            ]),
+        )
+        return
+    new_uuid = result["new_uuid"]
+    await update_paid_sub_field(sub_id, "uuid", new_uuid)
+    await add_history(user_id, "key_reissued", f"Новый UUID: {new_uuid[:8]}…")
+    await send_log(context.bot,
+        f"🔁 Перевыпуск ключа: <code>{user_id}</code>"
+    )
+    await query.edit_message_text(
+        "✅ <b>Ключ перевыпущен!</b>\n\n"
+        "Ваша ссылка подписки осталась прежней.\n"
+        "Обновите подписку в приложении (обычно достаточно нажать «обновить»).",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")],
+            [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
+        ]),
     )
     await query.answer("Ссылка отправлена — нажми на неё, чтобы скопировать")
 

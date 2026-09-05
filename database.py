@@ -248,6 +248,18 @@ async def get_dashboard_stats() -> dict:
     }
 
 
+async def get_payments_by_day(days: int = 30) -> list[tuple]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT date(created_at) as d, COUNT(*) as cnt
+            FROM paid_sub_history
+            WHERE action = 'payment_confirmed'
+              AND created_at >= datetime('now', ?)
+            GROUP BY d ORDER BY d ASC
+        """, (f"-{days} days",)) as cur:
+            return await cur.fetchall()
+
+
 async def get_users_by_segment(segment: str) -> list[int]:
     """Возвращает tg_id пользователей по сегменту для рассылки."""
     async with aiosqlite.connect(DB_PATH) as db:
