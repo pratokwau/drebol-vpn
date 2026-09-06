@@ -1,6 +1,7 @@
 # Поддержка
 AWAITING_CHANNEL = "awaiting_channel"
 AWAITING_BROADCAST = "awaiting_broadcast"
+AWAITING_BROADCAST_BUTTONS = "awaiting_broadcast_buttons"
 AWAITING_SUPPORT_MSG = "awaiting_support_msg"
 AWAITING_ADMIN_REPLY = "awaiting_admin_reply"
 AWAITING_PRIVACY_URL = "awaiting_privacy_url"
@@ -72,10 +73,6 @@ AWAITING_LOG_CHANNEL = "awaiting_log_channel"
 # Winback
 AWAITING_WINBACK_DAYS = "awaiting_winback_days"
 AWAITING_WINBACK_PERCENT = "awaiting_winback_percent"
-
-# Отзывы
-AWAITING_REVIEW_DAYS = "awaiting_review_days"
-AWAITING_USER_REVIEW = "awaiting_user_review"
 
 # Сообщение юзеру из профиля
 AWAITING_DM_USER = "awaiting_dm_user"

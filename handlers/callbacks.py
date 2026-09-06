@@ -8,8 +8,7 @@ from handlers.user import (
     handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub,
     handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
-    handle_rate_service, handle_rate, handle_rate_skip,
-    handle_qr_code, handle_reissue_key, handle_prices,
+    handle_qr_code, handle_reissue_key, handle_prices, handle_info,
 )
 from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
@@ -18,11 +17,14 @@ from handlers.admin import (
     handle_find_user, handle_user_profile, handle_ban_user, handle_unban_user,
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
     handle_winback_settings, handle_toggle_winback, handle_set_winback_days, handle_set_winback_percent,
-    handle_reviews_menu, handle_review_view, handle_set_review_days,
     handle_user_history, handle_dm_user, handle_payment_stats,
 )
 from handlers.support import open_support, handle_support_files
-from handlers.broadcast import handle_broadcast_start, handle_broadcast_segment
+from handlers.broadcast import (
+    handle_broadcast_start, handle_broadcast_segment,
+    handle_bcast_buttons_add, handle_bcast_buttons_skip,
+    handle_bcast_edit_text, handle_bcast_cancel, handle_bcast_send,
+)
 from handlers.tickets import (
     handle_ticket_list, handle_ticket_view, handle_ticket_reply_start,
     handle_ticket_files,
@@ -171,12 +173,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_referral(query, context)
     elif data == "copy_sub":
         await handle_copy_sub(query, context)
-    elif data == "rate_service":
-        await handle_rate_service(query, context)
-    elif data.startswith("rate:"):
-        await handle_rate(query, context, int(data.split(":")[1]))
-    elif data == "rate_skip":
-        await handle_rate_skip(query, context)
+    elif data == "info":
+        await handle_info(query)
     elif data == "qr_code":
         await handle_qr_code(query, context)
     elif data == "reissue_key":
@@ -249,20 +247,22 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_winback_days(query, context)
     elif data == "set_winback_percent":
         await handle_set_winback_percent(query, context)
-    elif data == "reviews_menu":
-        await handle_reviews_menu(query)
-    elif data.startswith("reviews_page:"):
-        await handle_reviews_menu(query, int(data.split(":")[1]))
-    elif data.startswith("review_view:"):
-        await handle_review_view(query, int(data.split(":")[1]))
-    elif data == "set_review_days":
-        await handle_set_review_days(query, context)
     elif data == "toggle_auto_trial":
         await handle_toggle_auto_trial(query)
     elif data == "broadcast":
         await handle_broadcast_start(query, context)
     elif data.startswith("bcast_seg:"):
         await handle_broadcast_segment(query, context, data.split(":")[1])
+    elif data == "bcast_buttons_add":
+        await handle_bcast_buttons_add(query, context)
+    elif data == "bcast_buttons_skip":
+        await handle_bcast_buttons_skip(query, context)
+    elif data == "bcast_edit_text":
+        await handle_bcast_edit_text(query, context)
+    elif data == "bcast_send":
+        await handle_bcast_send(query, context)
+    elif data == "bcast_cancel":
+        await handle_bcast_cancel(query, context)
 
     # Тикеты
     elif data.startswith("ticket_list:"):

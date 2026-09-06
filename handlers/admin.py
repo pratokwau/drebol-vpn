@@ -6,7 +6,7 @@ from keyboards import admin_keyboard, back_admin, documents_keyboard, channel_ke
 from states import (
     AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
-    AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT, AWAITING_REVIEW_DAYS,
+    AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_DM_USER,
 )
 
@@ -251,7 +251,7 @@ async def handle_find_user(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
-    from database import get_user_info, is_banned, get_user_review
+    from database import get_user_info, is_banned
     from paidsub.storage import (
         get_paid_sub_by_tg_id, get_referral_stats, get_muted_until,
     )
@@ -311,14 +311,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
             ticket_count = (await cur.fetchone())[0]
     if ticket_count > 0:
         lines.append(f"🎫 Сообщений в поддержку: <b>{ticket_count}</b>")
-
-    # Отзыв
-    review = await get_user_review(tg_id)
-    if review:
-        stars = "⭐️" * review[2]
-        lines.append(f"\n⭐️ Оценка: {stars}")
-        if review[3]:
-            lines.append(f"💬 {review[3][:100]}")
 
     # История
     async with aiosqlite.connect(DB_PATH) as db:
@@ -532,112 +524,6 @@ async def handle_set_winback_percent(query, context: ContextTypes.DEFAULT_TYPE):
         f"💯 <b>Скидка Winback</b>\n\n"
         f"Сейчас: <b>{current}%</b>\n\n"
         "Введи размер скидки в % (от 1 до 100):",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
-
-
-# ── Отзывы (админ) ──────────────────────────────────────────────────────────
-
-async def handle_reviews_menu(query, page: int = 1):
-    from database import get_reviews_stats, get_reviews_list, get_user_info
-    stats = await get_reviews_stats()
-    rows, total_pages = await get_reviews_list(page)
-
-    cfg = load_config()
-    review_days = cfg.get("review_request_days", 0)
-    review_status = f"ВКЛ (через {review_days} дн.)" if review_days > 0 else "ВЫКЛ"
-
-    stars_bar = ""
-    for rating, count in stats["breakdown"]:
-        stars_bar += f"{'⭐️' * rating} — <b>{count}</b>\n"
-
-    lines = [
-        "⭐️ <b>Отзывы пользователей</b>\n",
-        f"📊 Всего: <b>{stats['total']}</b> · Средняя: <b>{stats['avg']}/5</b>",
-        f"📩 Авто-запрос: <b>{review_status}</b>\n",
-    ]
-    if stars_bar:
-        lines.append(stars_bar)
-
-    kb = []
-    for r_id, tg_id, rating, text, created_at in rows:
-        u = await get_user_info(tg_id)
-        name = u[1] if u else str(tg_id)
-        stars = "⭐️" * rating
-        ts = created_at[5:16] if created_at else ""
-        preview = ""
-        if text:
-            preview = f" · {text[:20]}…" if len(text) > 20 else f" · {text}"
-        kb.append([InlineKeyboardButton(
-            f"{stars} {name} · {ts}{preview}",
-            callback_data=f"review_view:{r_id}",
-        )])
-
-    if total_pages > 1:
-        nav = []
-        if page > 1:
-            nav.append(InlineKeyboardButton("◀️", callback_data=f"reviews_page:{page - 1}"))
-        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
-        if page < total_pages:
-            nav.append(InlineKeyboardButton("▶️", callback_data=f"reviews_page:{page + 1}"))
-        kb.append(nav)
-
-    kb.append([InlineKeyboardButton("⏱ Настроить авто-запрос", callback_data="set_review_days")])
-    kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
-
-    await query.edit_message_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(kb),
-    )
-
-
-async def handle_review_view(query, review_id: int):
-    from database import get_user_info
-    import aiosqlite
-    from database import DB_PATH
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT id, tg_id, rating, text, created_at FROM reviews WHERE id = ?",
-            (review_id,),
-        ) as cur:
-            row = await cur.fetchone()
-    if not row:
-        await query.answer("Отзыв не найден", show_alert=True)
-        return
-    _, tg_id, rating, text, created_at = row
-    u = await get_user_info(tg_id)
-    name = u[1] if u else str(tg_id)
-    uname = f"@{u[2]}" if u and u[2] else f"id{tg_id}"
-    stars = "⭐️" * rating
-    review_text = text if text else "<i>без текста</i>"
-    await query.edit_message_text(
-        f"⭐️ <b>Отзыв</b>\n\n"
-        f'👤 <a href="tg://user?id={tg_id}">{name}</a> ({uname})\n'
-        f"🆔 <code>{tg_id}</code>\n"
-        f"📊 Оценка: {stars}\n"
-        f"🕐 {created_at}\n\n"
-        f"💬 {review_text}",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔍 Профиль юзера", callback_data=f"user_profile:{tg_id}")],
-            [InlineKeyboardButton("◀️ К отзывам", callback_data="reviews_menu")],
-        ]),
-        disable_web_page_preview=True,
-    )
-
-
-async def handle_set_review_days(query, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["state"] = AWAITING_REVIEW_DAYS
-    cfg = load_config()
-    current = cfg.get("review_request_days", 0)
-    cur_str = f"{current} дн." if current > 0 else "выключено"
-    await query.edit_message_text(
-        f"⏱ <b>Авто-запрос отзыва</b>\n\n"
-        f"Сейчас: <b>{cur_str}</b>\n\n"
-        "Через сколько дней после активации подписки запрашивать отзыв?\n"
-        "Введи число дней (0 — выключить):",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )

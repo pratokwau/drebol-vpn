@@ -22,14 +22,8 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
     if paid_sub_status:
         rows.append([InlineKeyboardButton("👥 Пригласить друга", callback_data="referral")])
-    if paid_sub_status in ("active",):
-        rows.append([InlineKeyboardButton("⭐️ Оценить сервис", callback_data="rate_service")])
-    rows.append([InlineKeyboardButton("💰 Цены", callback_data="prices")])
     rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_open")])
-    rows.append([
-        InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to"),
-        InlineKeyboardButton("ℹ️ О сервисе", callback_data="about"),
-    ])
+    rows.append([InlineKeyboardButton("ℹ️ Инфо", callback_data="info")])
     if is_admin:
         rows.append([InlineKeyboardButton("⚙️ Админка", callback_data="admin_panel")])
     return InlineKeyboardMarkup(rows)
@@ -46,10 +40,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔍 Найти юзера", callback_data="find_user")],
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
-        [
-            InlineKeyboardButton("⭐️ Отзывы", callback_data="reviews_menu"),
-            InlineKeyboardButton("🎯 Winback", callback_data="winback_settings"),
-        ],
+        [InlineKeyboardButton("🎯 Winback", callback_data="winback_settings")],
         [
             InlineKeyboardButton("🔧 Параметры 3x-UI", callback_data="xui_settings"),
             InlineKeyboardButton("🩺 Серверы", callback_data="healthcheck"),
@@ -176,6 +167,10 @@ def xui_settings_keyboard() -> InlineKeyboardMarkup:
 
 def back_main() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="back_start")]])
+
+
+def back_info() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Назад", callback_data="info")]])
 
 
 def back_admin() -> InlineKeyboardMarkup:

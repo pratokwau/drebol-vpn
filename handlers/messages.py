@@ -7,7 +7,7 @@ from config import ADMIN_ID, load_config, save_config
 from database import add_support_message, get_support_messages
 from keyboards import back_admin, support_keyboard
 from states import (
-    AWAITING_CHANNEL, AWAITING_BROADCAST,
+    AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS,
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_XUI_URL, AWAITING_XUI_TOKEN,
@@ -36,10 +36,8 @@ from states import (
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
-    AWAITING_REVIEW_DAYS, AWAITING_USER_REVIEW,
     AWAITING_DM_USER,
 )
-from handlers.broadcast import do_broadcast
 
 
 def _save(key: str, value):
@@ -95,29 +93,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
             return
 
-    # ── Юзер пишет отзыв ────────────────────────────────────────────────────
-    if state == AWAITING_USER_REVIEW:
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from database import add_review
-        from log_channel import send_log
-        rating = context.user_data.pop("pending_rating", 5)
-        context.user_data.pop("state", None)
-        review_text = text[:500]
-        await add_review(user.id, rating, review_text)
-        stars = "⭐️" * rating
-        await send_log(context.bot,
-            f"⭐️ Новый отзыв: {stars} от {user.first_name} (<code>{user.id}</code>)\n"
-            f"💬 {review_text[:200]}"
-        )
-        await update.message.reply_text(
-            f"✅ Спасибо за отзыв!\n\n{stars}\n💬 {review_text}",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
-            ]),
-        )
-        return
-
     # ── Юзер вводит промокод ─────────────────────────────────────────────────
     if state == AWAITING_PROMO_CODE:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -172,22 +147,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Канал сохранён: <code>{text}</code>", parse_mode="HTML", reply_markup=_channel_back)
         return
 
+    # ── Рассылка: текст ─────────────────────────────────────────────────────
     if state == AWAITING_BROADCAST:
+        from handlers.broadcast import extract_html, ask_buttons
         context.user_data.pop("state", None)
-        from database import get_users_by_segment
-        from handlers.broadcast import SEGMENTS
-        segment = context.user_data.pop("bcast_segment", "all")
-        user_ids = await get_users_by_segment(segment)
-        seg_label = SEGMENTS.get(segment, "Все")
-        msg = await update.message.reply_text(f"⏳ Отправляю рассылку ({seg_label}) — {len(user_ids)} получателям...")
-        ok, fail = await do_broadcast(context.bot, text, segment)
-        await msg.edit_text(
-            f"✅ Рассылка завершена.\n\n"
-            f"🎯 Сегмент: {seg_label}\n"
-            f"👥 Получателей: {len(user_ids)}\n"
-            f"📨 Доставлено: {ok}\n❌ Ошибок: {fail}",
-            reply_markup=back_admin(),
-        )
+        context.user_data["bcast_text"] = extract_html(update.message)
+        await ask_buttons(update.message, context)
+        return
+
+    # ── Рассылка: инлайн-кнопки ─────────────────────────────────────────────
+    if state == AWAITING_BROADCAST_BUTTONS:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from handlers.broadcast import parse_buttons, show_preview, BUTTONS_HELP
+        spec, err = parse_buttons(text)
+        if err:
+            await update.message.reply_text(
+                f"❌ {err}\n\n{BUTTONS_HELP}",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⏭ Пропустить", callback_data="bcast_buttons_skip")],
+                    [InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
+                ]),
+            )
+            return
+        context.user_data.pop("state", None)
+        context.user_data["bcast_buttons"] = spec
+        await show_preview(update.message, context)
         return
 
     if state == AWAITING_PRIVACY_URL:
@@ -983,18 +968,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("winback_percent", int(text))
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Скидка Winback: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    # ── Авто-запрос отзыва: дни ─────────────────────────────────────────────
-    if state == AWAITING_REVIEW_DAYS:
-        if not text.isdigit():
-            await update.message.reply_text("❌ Введи число (0 = выключить).", reply_markup=back_admin())
-            return
-        _save("review_request_days", int(text))
-        context.user_data.pop("state", None)
-        val = int(text)
-        label = f"через {val} дн." if val > 0 else "выключено"
-        await update.message.reply_text(f"✅ Авто-запрос отзыва: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Сообщение юзеру из профиля ─────────────────────────────────────────────

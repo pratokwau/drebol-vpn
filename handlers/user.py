@@ -1,5 +1,5 @@
 from config import ADMIN_ID, load_config
-from keyboards import main_keyboard, back_main
+from keyboards import main_keyboard, back_main, back_info
 
 
 async def handle_my_sub(query):
@@ -450,7 +450,7 @@ async def handle_how_to(query):
         "3. Скопируй ссылку подписки и вставь её в приложение\n"
         "4. Выбери сервер и подключайся",
         parse_mode="HTML",
-        reply_markup=back_main(),
+        reply_markup=back_info(),
         disable_web_page_preview=True,
     )
 
@@ -487,7 +487,7 @@ async def handle_about(query):
         "<b>💳 Прозрачные платежи</b> — без скрытых списаний и автопродления\n\n"
         f"<b>📕 Документы</b> — {docs}",
         parse_mode="HTML",
-        reply_markup=back_main(),
+        reply_markup=back_info(),
         disable_web_page_preview=True,
     )
 
@@ -534,7 +534,7 @@ async def handle_prices(query):
     await query.edit_message_text(
         "\n".join(lines),
         parse_mode="HTML",
-        reply_markup=back_main(),
+        reply_markup=back_info(),
     )
 
 
@@ -728,79 +728,17 @@ async def handle_referral(query, context):
     )
 
 
-async def handle_rate_service(query, context):
+async def handle_info(query):
+    """Раздел «Инфо»: как подключиться, цены, документы."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from database import get_user_review
-    user_id = query.from_user.id
-    existing = await get_user_review(user_id)
-    if existing:
-        stars = "⭐️" * existing[2]
-        text_line = f"\n💬 {existing[3]}" if existing[3] else ""
-        await query.edit_message_text(
-            f"⭐️ <b>Ваш отзыв</b>\n\n{stars}{text_line}\n\n"
-            "Хотите оставить новый отзыв?",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("1⭐", callback_data="rate:1"),
-                    InlineKeyboardButton("2⭐", callback_data="rate:2"),
-                    InlineKeyboardButton("3⭐", callback_data="rate:3"),
-                    InlineKeyboardButton("4⭐", callback_data="rate:4"),
-                    InlineKeyboardButton("5⭐", callback_data="rate:5"),
-                ],
-                [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
-            ]),
-        )
-        return
     await query.edit_message_text(
-        "⭐️ <b>Оцените Drebol VPN</b>\n\n"
-        "Как вам наш сервис? Выберите оценку:",
+        "ℹ️ <b>Инфо</b>\n\n"
+        "Здесь всё о сервисе — как подключиться, сколько стоит и наши документы.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("1⭐", callback_data="rate:1"),
-                InlineKeyboardButton("2⭐", callback_data="rate:2"),
-                InlineKeyboardButton("3⭐", callback_data="rate:3"),
-                InlineKeyboardButton("4⭐", callback_data="rate:4"),
-                InlineKeyboardButton("5⭐", callback_data="rate:5"),
-            ],
-            [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
-        ]),
-    )
-
-
-async def handle_rate(query, context, rating: int):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from states import AWAITING_USER_REVIEW
-    context.user_data["pending_rating"] = rating
-    context.user_data["state"] = AWAITING_USER_REVIEW
-    stars = "⭐️" * rating
-    await query.edit_message_text(
-        f"⭐️ Оценка: {stars}\n\n"
-        "Хотите добавить комментарий? Напишите его одним сообщением.\n"
-        "Или нажмите «Пропустить», чтобы сохранить без комментария.",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏭ Пропустить", callback_data="rate_skip")],
-            [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
-        ]),
-    )
-
-
-async def handle_rate_skip(query, context):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from database import add_review
-    from log_channel import send_log
-    rating = context.user_data.pop("pending_rating", 5)
-    context.user_data.pop("state", None)
-    user = query.from_user
-    await add_review(user.id, rating)
-    stars = "⭐️" * rating
-    await send_log(query._bot, f"⭐️ Новый отзыв: {stars} от {user.first_name} (<code>{user.id}</code>)")
-    await query.edit_message_text(
-        f"✅ Спасибо за оценку!\n\n{stars}",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to")],
+            [InlineKeyboardButton("💰 Цены", callback_data="prices")],
+            [InlineKeyboardButton("📕 О сервисе и документы", callback_data="about")],
             [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
         ]),
     )
