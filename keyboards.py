@@ -24,6 +24,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
         rows.append([InlineKeyboardButton("👥 Пригласить друга", callback_data="referral")])
     if paid_sub_status in ("active",):
         rows.append([InlineKeyboardButton("⭐️ Оценить сервис", callback_data="rate_service")])
+    rows.append([InlineKeyboardButton("💰 Цены", callback_data="prices")])
     rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_open")])
     rows.append([
         InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to"),

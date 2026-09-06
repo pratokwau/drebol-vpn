@@ -492,6 +492,52 @@ async def handle_about(query):
     )
 
 
+async def handle_prices(query):
+    """Простая витрина цен — всё видно сразу, без переходов."""
+    from paidsub.time_parser import fmt_duration
+    cfg = load_config()
+
+    price = cfg.get("paid_price", 0) or 0
+    pay_period = cfg.get("paid_pay_period")
+    trial_period = cfg.get("paid_trial_period")
+    traffic = int(cfg.get("paid_preset_traffic", 0) or 0)
+    limit_ip = int(cfg.get("paid_preset_ip", 0) or 0)
+
+    lines = ["💰 <b>Цены</b>\n"]
+
+    if trial_period:
+        lines.append(f"🆓 <b>Пробный период</b> — бесплатно\n     {fmt_duration(trial_period)}\n")
+
+    if price and pay_period:
+        lines.append(f"💳 <b>Подписка</b> — <b>{price} ₽</b>\n     {fmt_duration(pay_period)}\n")
+    elif price:
+        lines.append(f"💳 <b>Подписка</b> — <b>{price} ₽</b>\n")
+    else:
+        lines.append("💳 <b>Подписка</b> — цена уточняется\n")
+
+    lines.append("<b>Что входит:</b>")
+    lines.append(f"📶 Трафик — {f'{traffic} ГБ' if traffic > 0 else 'безлимит'}")
+    lines.append(f"📱 Устройств — {limit_ip if limit_ip > 0 else 'без ограничений'}")
+    lines.append("🖥️ iOS, Android, Windows, macOS")
+    lines.append("🛡️ Без логов и скрытых списаний")
+
+    from database import DB_PATH
+    import aiosqlite
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM promo_codes WHERE active = 1"
+        ) as cur:
+            has_promo = (await cur.fetchone())[0] > 0
+    if has_promo:
+        lines.append("\n🎟 Действуют промокоды — скидка применится при оплате.")
+
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=back_main(),
+    )
+
+
 async def handle_copy_sub(query, context):
     """Фолбэк для старых версий Telegram: присылает ссылку отдельным сообщением."""
     user_id = query.from_user.id

@@ -9,7 +9,7 @@ from handlers.user import (
     handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_rate_service, handle_rate, handle_rate_skip,
-    handle_qr_code, handle_reissue_key,
+    handle_qr_code, handle_reissue_key, handle_prices,
 )
 from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
@@ -165,6 +165,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_buy(query)
     elif data == "about":
         await handle_about(query)
+    elif data == "prices":
+        await handle_prices(query)
     elif data == "referral":
         await handle_referral(query, context)
     elif data == "copy_sub":
