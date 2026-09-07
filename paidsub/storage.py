@@ -78,6 +78,34 @@ def sub_settings(row) -> dict:
     }
 
 
+def parse_sub_date(raw: str):
+    from datetime import datetime
+    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(raw, fmt)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+async def set_expire_date(sub_id: int, new_expire: str):
+    """Ставит дату окончания и синхронно двигает конец периода.
+
+    Инвариант: period_end = expire_date − время_на_оплату. Нарушает его
+    только смена самого времени на оплату — там наоборот, period_end
+    зафиксирован, а expire_date пересчитывается от него.
+    """
+    from datetime import timedelta
+    row = await get_paid_sub(sub_id)
+    await update_paid_sub_field(sub_id, "expire_date", new_expire)
+    parsed = parse_sub_date(new_expire)
+    if not parsed or not row:
+        return
+    renew = int(sub_settings(row)["renew_time"])
+    period_end = (parsed - timedelta(seconds=renew)).strftime("%d.%m.%Y %H:%M:%S")
+    await update_paid_sub_field(sub_id, "period_end", period_end)
+
+
 async def snapshot_sub_settings(sub_id: int):
     """Фиксирует действующие общие настройки в подписке при её создании."""
     from config import load_config
@@ -133,7 +161,7 @@ async def get_all_paid_subs_with_tg() -> list:
 async def update_paid_sub_field(sub_id: int, field: str, value):
     allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending",
                 "ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url",
-                "times_renewed", "pending_promo", "uuid"}
+                "times_renewed", "pending_promo", "uuid", "period_end"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:
@@ -144,7 +172,7 @@ async def update_paid_sub_field(sub_id: int, field: str, value):
 async def get_expired_paid_subs() -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, status, times_renewed, ind_renew_time
+            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, status, times_renewed, ind_renew_time, period_end
             FROM paid_subs
         """) as cur:
             return await cur.fetchall()

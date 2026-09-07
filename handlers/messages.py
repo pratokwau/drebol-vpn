@@ -31,7 +31,7 @@ from states import (
     AWAITING_PAID_AUTO_UPDATE_DAYS,
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
-    AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
+    AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE, AWAITING_PAID_FIX_RENEW,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE,
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
@@ -525,7 +525,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     expire_dt = datetime.now()
                 new_expire = expire_dt + timedelta(seconds=seconds)
                 new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-                await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
+                from paidsub.storage import set_expire_date
+                await set_expire_date(sub_id, new_expire_str)
                 await update_paid_sub_field(sub_id, "status", "active")
                 from xui_api import update_client_expire, toggle_client, get_client_info, move_client_inbound
                 await update_client_expire(row[2], new_expire_str)
@@ -592,7 +593,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     expire_dt = datetime.now()
                 new_expire = expire_dt - timedelta(seconds=seconds)
                 new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-                await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
+                from paidsub.storage import set_expire_date
+                await set_expire_date(sub_id, new_expire_str)
                 from xui_api import update_client_expire
                 await update_client_expire(row[2], new_expire_str)
                 from paidsub.time_parser import fmt_duration as fmt_dur
@@ -623,6 +625,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         pass
                 return
         await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+
+    # ── Починка окна оплаты ──────────────────────────────────────────────────
+    if state == AWAITING_PAID_FIX_RENEW:
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>1 день</code>, <code>12 часов</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        context.user_data.pop("state", None)
+        from paidsub.handlers import preview_fix_renew
+        await preview_fix_renew(update.message, context, seconds)
         return
 
     # ── Платные подписки: массовое добавление/убавление срока ─────────────────────
@@ -667,8 +683,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
         if sub_id:
-            from paidsub.storage import update_paid_sub_field, get_paid_sub
-            await update_paid_sub_field(sub_id, "expire_date", text)
+            from paidsub.storage import update_paid_sub_field, get_paid_sub, set_expire_date
+            await set_expire_date(sub_id, text)
             await update_paid_sub_field(sub_id, "status", "active")
             r = await get_paid_sub(sub_id)
             if r:

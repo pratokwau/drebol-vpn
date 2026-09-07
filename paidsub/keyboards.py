@@ -28,6 +28,7 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
         InlineKeyboardButton("🔇 Заглушённые", callback_data="paid_muted_list"),
     ])
     kb.append([InlineKeyboardButton("⚡ Массовые действия", callback_data="paid_bulk_menu")])
+    kb.append([InlineKeyboardButton("⏳ Окно оплаты", callback_data="paid_fix_renew")])
     kb.append([
         InlineKeyboardButton("🎟 Промокоды", callback_data="promo_menu"),
         InlineKeyboardButton("👥 Рефералы", callback_data="referral_settings"),

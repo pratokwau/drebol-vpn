@@ -9,7 +9,7 @@ from keyboards import back_admin, back_main
 from paidsub.storage import (
     list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
     add_request, get_pending_request, resolve_request,
-    update_paid_sub_field, get_expired_paid_subs,
+    update_paid_sub_field, get_expired_paid_subs, set_expire_date,
     add_history, list_history, get_history_entry,
     get_muted_until, set_mute, clear_mute, list_muted,
     list_pending_requests, list_pending_payments,
@@ -419,9 +419,10 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
     else:
         period_seconds = cfg.get("paid_pay_period", 2592000)
 
-    total_seconds = period_seconds + renew_seconds
-    expire_dt = datetime.now() + timedelta(seconds=total_seconds)
+    period_end_dt = datetime.now() + timedelta(seconds=period_seconds)
+    expire_dt = period_end_dt + timedelta(seconds=renew_seconds)
     expire_date = expire_dt.strftime("%d.%m.%Y %H:%M:%S")
+    period_end_str = period_end_dt.strftime("%d.%m.%Y %H:%M:%S")
 
     paid_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
     result = await create_client(
@@ -456,6 +457,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
     # настроек не должна менять условия уже выданной подписки
     from paidsub.storage import snapshot_sub_settings
     await snapshot_sub_settings(new_sub_id)
+    await update_paid_sub_field(new_sub_id, "period_end", period_end_str)
 
     if not trial:
         await update_paid_sub_field(new_sub_id, "times_renewed", 1)
@@ -635,7 +637,7 @@ async def _process_referral_bonus(invited_tg_id: int, context):
                 new_expire = expire_dt + timedelta(seconds=bonus_seconds)
                 new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
 
-                await update_paid_sub_field(ref_sub_id, "expire_date", new_expire_str)
+                await set_expire_date(ref_sub_id, new_expire_str)
                 await update_client_expire(ref_email, new_expire_str)
 
                 await add_history(
@@ -678,7 +680,7 @@ async def _process_referral_bonus(invited_tg_id: int, context):
                 new_inv_expire = expire_dt + timedelta(seconds=invited_bonus)
                 new_inv_str = new_inv_expire.strftime("%d.%m.%Y %H:%M:%S")
 
-                await update_paid_sub_field(inv_sub_id, "expire_date", new_inv_str)
+                await set_expire_date(inv_sub_id, new_inv_str)
                 await update_client_expire(inv_email, new_inv_str)
 
                 await add_history(
@@ -1111,7 +1113,7 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
 
         new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
         try:
-            await update_paid_sub_field(sid, "expire_date", new_expire_str)
+            await set_expire_date(sid, new_expire_str)
             await update_client_expire(email, new_expire_str)
             if direction > 0:
                 # при добавлении — активируем и возвращаем инбаунды
@@ -1295,6 +1297,133 @@ async def handle_paid_sub_edit_pay_url(query, sub_id: int, context):
     )
 
 
+# ── Починка окна оплаты ──────────────────────────────────────────────────────
+
+async def handle_paid_fix_renew(query, context):
+    """Пересчёт конца периода, если общее время на оплату меняли после выдачи подписок."""
+    from states import AWAITING_PAID_FIX_RENEW
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    context.user_data["state"] = AWAITING_PAID_FIX_RENEW
+    cfg = load_config()
+    cur = cfg.get("paid_renew_time", 86400)
+    await query.edit_message_text(
+        "⏳ <b>Окно оплаты</b>\n\n"
+        "Конец пробного и оплаченного периода раньше вычислялся от даты\n"
+        "окончания, поэтому смена общего времени на оплату сдвигала его\n"
+        "у всех выданных подписок задним числом.\n\n"
+        f"Сейчас общее время на оплату: <b>{fmt_duration(cur)}</b>\n\n"
+        "Если ты его менял <b>после</b> того, как подписки были выданы — укажи,\n"
+        "какое время на оплату действовало на момент их создания.\n"
+        "Пересчитаю конец периода и покажу, что изменится.\n\n"
+        "Например: <code>1 день</code>, <code>12 часов</code>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
+        ]),
+    )
+
+
+async def preview_fix_renew(message, context, old_renew: int):
+    """Считает, что изменится при пересчёте, и просит подтверждение."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import parse_sub_date
+
+    subs = await get_expired_paid_subs()
+    now = datetime.now()
+    cfg = load_config()
+    global_renew = cfg.get("paid_renew_time", 86400)
+
+    changed = 0
+    back_to_active = 0
+    for row in subs:
+        expire_s, status, ind_renew, pe = row[6], row[7], row[9], row[10]
+        expire_dt = parse_sub_date(expire_s)
+        if not expire_dt:
+            continue
+        cur_end = parse_sub_date(pe) if pe else expire_dt - timedelta(seconds=ind_renew or global_renew)
+        new_end = expire_dt - timedelta(seconds=old_renew)
+        if cur_end and abs((new_end - cur_end).total_seconds()) < 1:
+            continue
+        changed += 1
+        if now < new_end and status in ("renewal", "expired"):
+            back_to_active += 1
+
+    context.user_data["fix_renew_seconds"] = old_renew
+    if not changed:
+        await message.reply_text(
+            "✅ Пересчёт ничего не изменит — конец периода уже соответствует\n"
+            f"времени на оплату <b>{fmt_duration(old_renew)}</b>.",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+
+    await message.reply_text(
+        f"🔍 <b>Что изменится</b>\n\n"
+        f"⏳ Время на оплату при создании: <b>{fmt_duration(old_renew)}</b>\n"
+        f"📊 Подписок затронуто: <b>{changed}</b>\n"
+        f"🟢 Вернётся в активные: <b>{back_to_active}</b>\n\n"
+        f"Конец периода будет пересчитан как <i>дата окончания − {fmt_duration(old_renew)}</i>.\n"
+        f"Даты окончания и доступ в 3x-UI не меняются.\n\n"
+        f"Применить?",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Применить", callback_data="paid_fix_renew_apply")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="paid_subs")],
+        ]),
+    )
+
+
+async def handle_paid_fix_renew_apply(query, context):
+    from paidsub.storage import parse_sub_date
+    old_renew = context.user_data.pop("fix_renew_seconds", None)
+    if not old_renew:
+        await query.edit_message_text("❌ Данные потеряны, начни заново.", reply_markup=back_admin())
+        return
+
+    await query.edit_message_text("⏳ Пересчитываю...")
+    subs = await get_expired_paid_subs()
+    now = datetime.now()
+    updated = 0
+    reactivated = 0
+
+    for row in subs:
+        sub_id, expire_s, status = row[0], row[6], row[7]
+        expire_dt = parse_sub_date(expire_s)
+        if not expire_dt:
+            continue
+        new_end = expire_dt - timedelta(seconds=old_renew)
+        await update_paid_sub_field(
+            sub_id, "period_end", new_end.strftime("%d.%m.%Y %H:%M:%S")
+        )
+        # чтобы подписки не жили дальше на общем значении
+        await update_paid_sub_field(sub_id, "ind_renew_time", old_renew)
+        updated += 1
+        if now < new_end and status in ("renewal", "expired"):
+            await update_paid_sub_field(sub_id, "status", "active")
+            reactivated += 1
+
+    # состояние изменилось — снимаем блокировку предохранителя
+    cfg = load_config()
+    if cfg.get("mass_flip_alerted"):
+        cfg["mass_flip_alerted"] = False
+        save_config(cfg)
+
+    from log_channel import send_log
+    await send_log(context.bot,
+        f"⏳ Пересчёт окна оплаты: {updated} подписок, "
+        f"возвращено в активные {reactivated} (время на оплату {fmt_duration(old_renew)})"
+    )
+    await query.edit_message_text(
+        f"✅ <b>Готово</b>\n\n"
+        f"📊 Обновлено подписок: <b>{updated}</b>\n"
+        f"🟢 Возвращено в активные: <b>{reactivated}</b>\n"
+        f"⏳ Время на оплату: <b>{fmt_duration(old_renew)}</b>\n\n"
+        f"Отключённые клиенты в 3x-UI при необходимости включи вручную\n"
+        f"через карточку подписки.",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
 # ── Job: проверка истечения подписок ──────────────────────────────────────────
 
 async def check_expired_subs(context):
@@ -1307,25 +1436,65 @@ async def check_expired_subs(context):
     subs = await get_expired_paid_subs()
     now = datetime.now()
 
+    from paidsub.storage import parse_sub_date
+
+    # Предохранитель: одномоментный переход большого числа активных подписок
+    # в «продлите» — почти всегда следствие правки настроек, а не реального
+    # истечения. Уведомления в таком случае не шлём, а зовём админа разбираться.
+    flip_limit = int(cfg.get("mass_flip_limit", 5) or 5)
+    would_flip = 0
+    for _r in subs:
+        _status, _expire_s, _renew, _pe = _r[7], _r[6], _r[9], _r[10]
+        if _status != "active":
+            continue
+        _exp = parse_sub_date(_expire_s)
+        if not _exp:
+            continue
+        _end = parse_sub_date(_pe) if _pe else _exp - timedelta(seconds=_renew or global_renew_seconds)
+        if _end and now >= _end:
+            would_flip += 1
+
+    if would_flip > flip_limit:
+        # джоб крутится каждые 10 секунд — предупреждаем один раз, до разбора
+        if not cfg.get("mass_flip_alerted"):
+            from config import ADMIN_ID, save_config
+            from log_channel import send_log
+            warn = (
+                f"🛑 <b>Массовый переход подписок</b>\n\n"
+                f"Сразу <b>{would_flip}</b> активных подписок оказались в конце периода.\n"
+                f"Похоже на последствие правки настроек, а не на реальное истечение.\n\n"
+                f"Уведомления пользователям <b>не отправлены</b>, статусы не тронуты.\n"
+                f"Проверь «⏳ Окно оплаты» в меню платных подписок."
+            )
+            cfg["mass_flip_alerted"] = True
+            save_config(cfg)
+            try:
+                await context.bot.send_message(chat_id=ADMIN_ID, text=warn, parse_mode="HTML")
+                await send_log(context.bot, warn)
+            except Exception:
+                pass
+        return
+
+    if cfg.get("mass_flip_alerted"):
+        from config import save_config
+        cfg["mass_flip_alerted"] = False
+        save_config(cfg)
+
     for row in subs:
-        sub_id, tg_id, email, uuid_val, sub_id_str, sub_url, expire_str, status, times_renewed, ind_renew_time = row
+        (sub_id, tg_id, email, uuid_val, sub_id_str, sub_url,
+         expire_str, status, times_renewed, ind_renew_time, period_end_str) = row
         renew_seconds = ind_renew_time if ind_renew_time else global_renew_seconds
-        try:
-            for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-                try:
-                    expire_dt = datetime.strptime(expire_str, fmt)
-                    break
-                except ValueError:
-                    continue
-            else:
-                continue
-        except Exception:
+
+        expire_dt = parse_sub_date(expire_str)
+        if not expire_dt:
             continue
 
-        # expire_date = creation + period + renew_time
-        # main_period_end = expire_date - renew_time (конец пробного/оплаченного)
-        # expire_date = конец времени на оплату
-        main_period_end = expire_dt - timedelta(seconds=renew_seconds)
+        # Конец периода берём сохранённый. Вычислять его как expire − время_на_оплату
+        # нельзя: правка времени на оплату тогда сдвигает конец периода задним числом
+        # и разом выкидывает всех активных в «продлите подписку».
+        main_period_end = parse_sub_date(period_end_str) if period_end_str else None
+        if not main_period_end:
+            main_period_end = expire_dt - timedelta(seconds=renew_seconds)
 
         if now < main_period_end:
             # Основной период ещё идёт — статус active
@@ -1414,12 +1583,14 @@ async def handle_confirm_payment(query, tg_id: int, context):
     settings = sub_settings(full_row)
     pay_seconds = settings["pay_period"]
     renew_seconds = settings["renew_time"]
-    total_seconds = pay_seconds + renew_seconds
-
-    new_expire = datetime.now() + timedelta(seconds=total_seconds)
+    new_period_end = datetime.now() + timedelta(seconds=pay_seconds)
+    new_expire = new_period_end + timedelta(seconds=renew_seconds)
     new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
 
     await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
+    await update_paid_sub_field(
+        sub_id, "period_end", new_period_end.strftime("%d.%m.%Y %H:%M:%S")
+    )
     await update_paid_sub_field(sub_id, "status", "active")
     await update_paid_sub_field(sub_id, "payment_pending", 0)
     cur_renewed = row[12] if len(row) > 12 else 0

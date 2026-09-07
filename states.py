@@ -55,6 +55,7 @@ AWAITING_PAID_AUTO_UPDATE_DAYS = "awaiting_paid_auto_update_days"
 AWAITING_REFERRAL_BONUS = "awaiting_referral_bonus"
 AWAITING_REFERRAL_INVITED_BONUS = "awaiting_referral_invited_bonus"
 AWAITING_PAID_SUB_REDUCE = "awaiting_paid_sub_reduce"
+AWAITING_PAID_FIX_RENEW = "awaiting_paid_fix_renew"
 AWAITING_PAID_BULK_EXTEND = "awaiting_paid_bulk_extend"
 AWAITING_PAID_BULK_REDUCE = "awaiting_paid_bulk_reduce"
 

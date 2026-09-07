@@ -99,23 +99,63 @@ async def init_db():
                     await db.execute(f"ALTER TABLE paid_subs ADD COLUMN {col} INTEGER")
             except Exception:
                 pass
+        # period_end — конец пробного/оплаченного периода. Хранится явно.
+        # Раньше он вычислялся как expire_date − время_на_оплату, поэтому правка
+        # времени на оплату двигала конец периода задним числом у всех подписок.
+        try:
+            await db.execute("ALTER TABLE paid_subs ADD COLUMN period_end TEXT")
+        except Exception:
+            pass
+
+        from config import load_config as _load_cfg
+        try:
+            _cfg = _load_cfg()
+        except Exception:
+            _cfg = {}
+
         # Фиксируем текущие общие настройки в подписках, созданных до этого механизма.
         # Дальше правка общих настроек не должна менять условия уже выданных подписок.
-        try:
-            from config import load_config as _load_cfg
-            _cfg = _load_cfg()
-            for _col, _key in (
-                ("ind_trial_period", "paid_trial_period"),
-                ("ind_pay_period", "paid_pay_period"),
-                ("ind_renew_time", "paid_renew_time"),
-                ("ind_price", "paid_price"),
-                ("ind_pay_url", "paid_pay_url"),
-            ):
-                _val = _cfg.get(_key)
-                if _val:
+        for _col, _key in (
+            ("ind_trial_period", "paid_trial_period"),
+            ("ind_pay_period", "paid_pay_period"),
+            ("ind_renew_time", "paid_renew_time"),
+            ("ind_price", "paid_price"),
+            ("ind_pay_url", "paid_pay_url"),
+        ):
+            _val = _cfg.get(_key)
+            if _val:
+                try:
                     await db.execute(
                         f"UPDATE paid_subs SET {_col} = ? WHERE {_col} IS NULL", (_val,)
                     )
+                except Exception:
+                    pass
+
+        # Проставляем period_end там, где его ещё нет.
+        # Значение выводится из текущего времени на оплату — если оно менялось
+        # после выдачи подписок, конец периода правится инструментом в админке.
+        try:
+            from datetime import datetime as _dt, timedelta as _td
+            _fallback_renew = int(_cfg.get("paid_renew_time", 86400) or 86400)
+            async with db.execute(
+                "SELECT id, expire_date, ind_renew_time FROM paid_subs WHERE period_end IS NULL"
+            ) as _cur:
+                _rows = await _cur.fetchall()
+            for _id, _exp, _renew in _rows:
+                _parsed = None
+                for _f in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                    try:
+                        _parsed = _dt.strptime(_exp, _f)
+                        break
+                    except (ValueError, TypeError):
+                        continue
+                if not _parsed:
+                    continue
+                _sec = int(_renew or _fallback_renew)
+                _pe = (_parsed - _td(seconds=_sec)).strftime("%d.%m.%Y %H:%M:%S")
+                await db.execute(
+                    "UPDATE paid_subs SET period_end = ? WHERE id = ?", (_pe, _id)
+                )
         except Exception:
             pass
         await db.execute("""

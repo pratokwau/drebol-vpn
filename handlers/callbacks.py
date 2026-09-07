@@ -56,6 +56,7 @@ from paidsub.handlers import (
     handle_approve, handle_reject, handle_request_sub,
     handle_paid_sub_freeze, handle_paid_sub_extend, handle_paid_sub_reduce,
     handle_paid_bulk_menu, handle_paid_bulk_extend, handle_paid_bulk_reduce,
+    handle_paid_fix_renew, handle_paid_fix_renew_apply,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_ip, handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
     handle_paid_sub_edit_trial, handle_paid_sub_edit_pay_period,
@@ -388,6 +389,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_bulk_extend(query, context)
     elif data == "paid_bulk_reduce":
         await handle_paid_bulk_reduce(query, context)
+    elif data == "paid_fix_renew":
+        await handle_paid_fix_renew(query, context)
+    elif data == "paid_fix_renew_apply":
+        await handle_paid_fix_renew_apply(query, context)
     elif data.startswith("paid_sub_settings:"):
         await handle_paid_sub_settings(query, int(data.split(":")[1]))
     elif data.startswith("paid_sub_edit_expire:"):
