@@ -35,7 +35,8 @@ async def get_paid_sub(sub_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
             SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at,
-                   status, payment_pending, ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url
+                   status, payment_pending, ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url,
+                   period_end
             FROM paid_subs WHERE id = ?
         """, (sub_id,)) as cur:
             return await cur.fetchone()

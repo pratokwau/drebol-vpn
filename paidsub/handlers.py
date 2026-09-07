@@ -859,21 +859,40 @@ async def handle_paid_sub_view(query, sub_id: int):
             referral_line = f"👥 Приглашён: <b>{ref_name}</b> (<code>{referrer_id}</code>)\n"
 
     # Оставшееся время
+    # Конец периода и окно оплаты — это разные даты. Показываем обе:
+    # «Осталось» по дате окончания включало бы окно оплаты и выглядело бы так,
+    # будто пробный период длится на всё окно дольше, чем на самом деле.
+    from paidsub.storage import parse_sub_date, sub_settings
+    eff = sub_settings(row)
+    renew_sec = int(eff["renew_time"])
+    now_dt = datetime.now()
+
+    expire_dt = parse_sub_date(expire)
+    period_end_raw = row[18] if len(row) > 18 else None
+    period_end_dt = parse_sub_date(period_end_raw) if period_end_raw else None
+    if not period_end_dt and expire_dt:
+        period_end_dt = expire_dt - timedelta(seconds=renew_sec)
+
+    period_label = "пробный период" if times_renewed == 0 else "оплаченный период"
     time_left_line = ""
-    for fmt_e in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-        try:
-            expire_dt = datetime.strptime(expire, fmt_e)
-            break
-        except ValueError:
-            continue
+
+    if period_end_dt and now_dt < period_end_dt:
+        left = int((period_end_dt - now_dt).total_seconds())
+        time_left_line = (
+            f"📅 {period_label.capitalize()} до: <b>{period_end_dt.strftime('%d.%m.%Y %H:%M:%S')}</b>\n"
+            f"⏱ Осталось: <b>{fmt_duration_precise(left)}</b>\n"
+            f"⏳ Затем на оплату: <b>{fmt_duration(renew_sec)}</b> — до {expire}\n"
+        )
+    elif expire_dt and now_dt < expire_dt:
+        left = int((expire_dt - now_dt).total_seconds())
+        ended = period_end_dt.strftime('%d.%m.%Y %H:%M:%S') if period_end_dt else "—"
+        time_left_line = (
+            f"📅 {period_label.capitalize()} закончился: <b>{ended}</b>\n"
+            f"⏳ Оплатить до: <b>{expire}</b>\n"
+            f"⏱ На оплату осталось: <b>{fmt_duration_precise(left)}</b>\n"
+        )
     else:
-        expire_dt = None
-    if expire_dt:
-        delta = expire_dt - datetime.now()
-        if delta.total_seconds() > 0:
-            time_left_line = f"⏱ Осталось: <b>{fmt_duration_precise(int(delta.total_seconds()))}</b>\n"
-        else:
-            time_left_line = "⏱ Осталось: <b>истекла</b>\n"
+        time_left_line = f"📅 До: <b>{expire}</b>\n⏱ <b>Истекла</b>\n"
 
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b> {status_icon}\n\n"
@@ -884,7 +903,6 @@ async def handle_paid_sub_view(query, sub_id: int):
         f"📌 Статус: <b>{status_label}</b>\n"
         f"🏷 Тип: <b>{sub_type}</b> (продлений: {times_renewed})\n"
         + payment_line
-        + f"📅 До: <b>{expire}</b>\n"
         + time_left_line
         + f"🌐 Лимит IP: <b>{limit_ip}</b>\n"
         f"🖥 Лимит HWID: <b>{limit_hwid}</b>\n"
@@ -1179,8 +1197,15 @@ async def handle_paid_sub_settings(query, sub_id: int):
 
     # показываем действующие условия подписки, а не «общие»:
     # с ними она реально живёт, по ним считаются сроки и уведомления
-    from paidsub.storage import sub_settings
+    from paidsub.storage import sub_settings, parse_sub_date
     eff = sub_settings(row)
+    period_end_line = row[18] if len(row) > 18 and row[18] else None
+    if not period_end_line:
+        _e = parse_sub_date(expire)
+        period_end_line = (
+            (_e - timedelta(seconds=int(eff["renew_time"]))).strftime("%d.%m.%Y %H:%M:%S")
+            if _e else "—"
+        )
     trial_str = fmt_duration(eff["trial_period"])
     pay_str = fmt_duration(eff["pay_period"])
     renew_str = fmt_duration(eff["renew_time"])
@@ -1189,7 +1214,8 @@ async def handle_paid_sub_settings(query, sub_id: int):
 
     await query.edit_message_text(
         f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
-        f"📅 Дата окончания: <b>{expire}</b>\n"
+        f"📅 Период до: <b>{period_end_line}</b>\n"
+        f"⏳ Оплатить до: <b>{expire}</b>\n"
         f"🌐 Лимит IP: <b>{ip_str}</b>\n"
         f"🖥 Лимит HWID: <b>{hwid_str}</b>\n"
         f"📶 Трафик: <b>{traffic}</b>\n"
