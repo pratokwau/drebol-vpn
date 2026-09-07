@@ -101,7 +101,11 @@ async def handle_my_paid_sub(query):
 
     expire_dt = _parse_dt(expire)
     cfg_tmp = load_config()
-    renew_sec = cfg_tmp.get("paid_renew_time", 86400)
+    # условия берём из самой подписки, а не из общих настроек —
+    # иначе экран показывает не то, по чему реально живёт подписка
+    from paidsub.storage import sub_settings
+    settings = sub_settings(row)
+    renew_sec = settings["renew_time"]
 
     # --- Статус ---
     if status == "expired":
@@ -232,19 +236,12 @@ async def handle_renew_sub(query):
     user = query.from_user
     cfg = load_config()
 
-    from paidsub.storage import get_paid_sub_by_tg_id, get_paid_sub
+    from paidsub.storage import get_paid_sub_by_tg_id, sub_settings
     row = await get_paid_sub_by_tg_id(user.id)
-    if row:
-        full = await get_paid_sub(row[0])
-        ind_price = full[16] if full and full[16] else None
-        ind_pay_url = full[17] if full and full[17] else None
-    else:
-        ind_price = None
-        ind_pay_url = None
-    price = ind_price if ind_price else cfg.get("paid_price", 0)
-    pay_url = ind_pay_url if ind_pay_url else cfg.get("paid_pay_url", "")
-    ind_pay_period = full[14] if full and full[14] else None
-    pay_seconds = ind_pay_period if ind_pay_period else cfg.get("paid_pay_period", 2592000)
+    settings = sub_settings(row)
+    price = settings["price"]
+    pay_url = settings["pay_url"]
+    pay_seconds = settings["pay_period"]
     from paidsub.time_parser import fmt_duration
     period_str = fmt_duration(pay_seconds)
 
@@ -375,10 +372,9 @@ async def handle_i_paid(query, context):
         sub_info = f"\n📧 Email: <code>{row[2]}</code>\n📅 До: <b>{row[6]}</b>"
 
     cfg = load_config()
-    # цена с учётом индивидуальной и промокода
-    full = await get_paid_sub(row[0]) if row else None
-    ind_price = full[16] if full and len(full) > 16 and full[16] else None
-    price = ind_price if ind_price else cfg.get("paid_price", 0)
+    # цена по условиям самой подписки, дальше применится промокод
+    from paidsub.storage import sub_settings
+    price = sub_settings(row)["price"]
 
     from paidsub.storage import get_pending_promo
     from paidsub.handlers import validate_promo, apply_discount

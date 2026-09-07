@@ -132,6 +132,8 @@ async def handle_paid_presets_menu(query):
                 inbound_names[inb.get("id")] = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
     await query.edit_message_text(
         "⚙️ <b>Настройки платной подписки</b>\n\n"
+        "<i>Применяются только к новым подпискам. У выданных условия\n"
+        "зафиксированы при создании — меняются в самой подписке.</i>\n\n"
         + _fmt_presets(cfg, inbound_names)
         + "\n\nВыбери параметр для изменения:",
         parse_mode="HTML",
@@ -449,6 +451,11 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
         limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
         total_gb=int(cfg.get("paid_preset_traffic", 0)),
     )
+
+    # Фиксируем действующие условия за подпиской: последующая правка общих
+    # настроек не должна менять условия уже выданной подписки
+    from paidsub.storage import snapshot_sub_settings
+    await snapshot_sub_settings(new_sub_id)
 
     if not trial:
         await update_paid_sub_field(new_sub_id, "times_renewed", 1)
@@ -838,7 +845,7 @@ async def handle_paid_sub_view(query, sub_id: int):
         ind_lines.append(f"🔗 Ссылка оплаты: <b>{ind_pay_url}</b>")
     ind_block = ""
     if ind_lines:
-        ind_block = "\n<b>Инд. настройки:</b>\n" + "\n".join(ind_lines) + "\n"
+        ind_block = "\n<b>Условия подписки:</b>\n" + "\n".join(ind_lines) + "\n"
 
     # Реферал
     referral_line = ""
@@ -1168,11 +1175,15 @@ async def handle_paid_sub_settings(query, sub_id: int):
     ip_str = str(limit_ip) if limit_ip > 0 else "безлимит"
     hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
 
-    trial_str = fmt_duration(ind_trial) if ind_trial else "общие"
-    pay_str = fmt_duration(ind_pay) if ind_pay else "общие"
-    renew_str = fmt_duration(ind_renew) if ind_renew else "общие"
-    price_str = f"{ind_price} ₽" if ind_price is not None else "общие"
-    pay_url_str = ind_pay_url if ind_pay_url else "общие"
+    # показываем действующие условия подписки, а не «общие»:
+    # с ними она реально живёт, по ним считаются сроки и уведомления
+    from paidsub.storage import sub_settings
+    eff = sub_settings(row)
+    trial_str = fmt_duration(eff["trial_period"])
+    pay_str = fmt_duration(eff["pay_period"])
+    renew_str = fmt_duration(eff["renew_time"])
+    price_str = f"{eff['price']} ₽"
+    pay_url_str = eff["pay_url"] or "не задана"
 
     await query.edit_message_text(
         f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
@@ -1398,10 +1409,11 @@ async def handle_confirm_payment(query, tg_id: int, context):
 
     full_row = await get_paid_sub(sub_id)
     cfg = load_config()
-    ind_pay = full_row[14] if full_row and full_row[14] else None
-    ind_renew = full_row[15] if full_row and full_row[15] else None
-    pay_seconds = ind_pay if ind_pay else cfg.get("paid_pay_period", 2592000)
-    renew_seconds = ind_renew if ind_renew else cfg.get("paid_renew_time", 86400)
+    # условия подписки — с неё самой; правки применяются со следующего периода
+    from paidsub.storage import sub_settings
+    settings = sub_settings(full_row)
+    pay_seconds = settings["pay_period"]
+    renew_seconds = settings["renew_time"]
     total_seconds = pay_seconds + renew_seconds
 
     new_expire = datetime.now() + timedelta(seconds=total_seconds)
@@ -1438,8 +1450,7 @@ async def handle_confirm_payment(query, tg_id: int, context):
             promo_line = f"🎟 Промокод: <b>{pending_promo}</b> (−{promo[2]}%)\n"
         await update_paid_sub_field(sub_id, "pending_promo", None)
 
-    ind_price = full_row[16] if full_row and full_row[16] else None
-    price = ind_price if ind_price else cfg.get("paid_price", 0)
+    price = settings["price"]
     if pending_promo and promo_line:
         promo_obj = await get_promo(pending_promo)
         if promo_obj:

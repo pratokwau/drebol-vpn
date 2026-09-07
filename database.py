@@ -99,6 +99,25 @@ async def init_db():
                     await db.execute(f"ALTER TABLE paid_subs ADD COLUMN {col} INTEGER")
             except Exception:
                 pass
+        # Фиксируем текущие общие настройки в подписках, созданных до этого механизма.
+        # Дальше правка общих настроек не должна менять условия уже выданных подписок.
+        try:
+            from config import load_config as _load_cfg
+            _cfg = _load_cfg()
+            for _col, _key in (
+                ("ind_trial_period", "paid_trial_period"),
+                ("ind_pay_period", "paid_pay_period"),
+                ("ind_renew_time", "paid_renew_time"),
+                ("ind_price", "paid_price"),
+                ("ind_pay_url", "paid_pay_url"),
+            ):
+                _val = _cfg.get(_key)
+                if _val:
+                    await db.execute(
+                        f"UPDATE paid_subs SET {_col} = ? WHERE {_col} IS NULL", (_val,)
+                    )
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS paid_sub_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

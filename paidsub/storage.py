@@ -44,11 +44,58 @@ async def get_paid_sub(sub_id: int) -> tuple | None:
 async def get_paid_sub_by_tg_id(tg_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at, status, times_renewed
+            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at, status, times_renewed,
+                   ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url
             FROM paid_subs WHERE tg_id = ?
             ORDER BY created_at DESC LIMIT 1
         """, (tg_id,)) as cur:
             return await cur.fetchone()
+
+
+def sub_settings(row) -> dict:
+    """Условия конкретной подписки.
+
+    Значения фиксируются при её создании, поэтому правка общих настроек
+    не меняет условия уже выданных подписок. Общий конфиг — только запасной
+    вариант для старых записей, где снимок ещё не проставлен.
+
+    Работает и с get_paid_sub, и с get_paid_sub_by_tg_id: в обеих выборках
+    ind_*-поля идут с 13-го индекса.
+    """
+    from config import load_config
+    cfg = load_config()
+
+    def pick(idx: int, key: str, default):
+        val = row[idx] if row is not None and len(row) > idx else None
+        return val if val else cfg.get(key, default)
+
+    return {
+        "trial_period": pick(13, "paid_trial_period", 86400),
+        "pay_period": pick(14, "paid_pay_period", 2592000),
+        "renew_time": pick(15, "paid_renew_time", 86400),
+        "price": pick(16, "paid_price", 0),
+        "pay_url": pick(17, "paid_pay_url", ""),
+    }
+
+
+async def snapshot_sub_settings(sub_id: int):
+    """Фиксирует действующие общие настройки в подписке при её создании."""
+    from config import load_config
+    cfg = load_config()
+    async with aiosqlite.connect(DB_PATH) as db:
+        for col, key in (
+            ("ind_trial_period", "paid_trial_period"),
+            ("ind_pay_period", "paid_pay_period"),
+            ("ind_renew_time", "paid_renew_time"),
+            ("ind_price", "paid_price"),
+            ("ind_pay_url", "paid_pay_url"),
+        ):
+            val = cfg.get(key)
+            if val:
+                await db.execute(
+                    f"UPDATE paid_subs SET {col} = ? WHERE id = ?", (val, sub_id)
+                )
+        await db.commit()
 
 
 async def get_paid_sub_status(tg_id: int) -> str:

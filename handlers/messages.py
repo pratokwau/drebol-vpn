@@ -775,11 +775,45 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
-        if sub_id:
-            from paidsub.storage import update_paid_sub_field
-            await update_paid_sub_field(sub_id, "ind_renew_time", seconds)
         from paidsub.time_parser import fmt_duration as fmt_dur
-        await update.message.reply_text(f"✅ Время на продление: <b>{fmt_dur(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
+        note = ""
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field, get_paid_sub, sub_settings, add_history
+            row = await get_paid_sub(sub_id)
+            if row:
+                old_renew = sub_settings(row)["renew_time"]
+                await update_paid_sub_field(sub_id, "ind_renew_time", seconds)
+                # expire_date = конец периода + время на оплату. Сам пробный/оплаченный
+                # период трогать нельзя, поэтому сдвигаем только окно оплаты.
+                expire_dt = None
+                for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+                    try:
+                        expire_dt = datetime.strptime(row[6], fmt)
+                        break
+                    except ValueError:
+                        continue
+                if expire_dt:
+                    period_end = expire_dt - timedelta(seconds=old_renew)
+                    new_expire = period_end + timedelta(seconds=seconds)
+                    new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
+                    await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
+                    from xui_api import update_client_expire
+                    await update_client_expire(row[2], new_expire_str)
+                    note = (
+                        f"\n📅 Период заканчивается: <b>{period_end.strftime('%d.%m.%Y %H:%M:%S')}</b>\n"
+                        f"⏳ Оплатить до: <b>{new_expire_str}</b>"
+                    )
+                    await add_history(
+                        row[1], "settings_changed",
+                        f"Подписка #{sub_id}: время на оплату → {fmt_dur(seconds)}\n"
+                        f"Оплатить до: {new_expire_str}",
+                    )
+            else:
+                await update_paid_sub_field(sub_id, "ind_renew_time", seconds)
+        await update.message.reply_text(
+            f"✅ Время на продление: <b>{fmt_dur(seconds)}</b>{note}",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
         return
 
     if state == AWAITING_PAID_SUB_EDIT_PRICE:
