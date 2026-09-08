@@ -46,7 +46,10 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🩺 Серверы", callback_data="healthcheck"),
         ],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
-        [InlineKeyboardButton("📢 Управление каналом", callback_data="channel_menu")],
+        [
+            InlineKeyboardButton("🌐 Сайт", callback_data="site_menu"),
+            InlineKeyboardButton("📢 Канал", callback_data="channel_menu"),
+        ],
         [
             InlineKeyboardButton("📄 Документы", callback_data="documents_menu"),
             InlineKeyboardButton("🧾 Лог-канал", callback_data="log_channel_settings"),
