@@ -6,7 +6,38 @@ from telegram.ext import ContextTypes
 from config import load_config, save_config
 from keyboards import back_admin
 from states import AWAITING_SITE_DOMAIN
-import site_manager as sm
+
+try:
+    import site_manager as sm
+except ImportError:
+    # При частичном обновлении файла может не быть. Раздел сайта тогда
+    # недоступен, но бот должен запускаться — иначе падает всё остальное.
+    sm = None
+
+
+_NO_MODULE_TEXT = (
+    "❌ <b>Модуль сайта не найден</b>\n\n"
+    "На сервере отсутствует <code>site_manager.py</code> в корне проекта "
+    "(<code>/root/drebol-vpn/</code>).\n\n"
+    "Обнови код полностью — файл лежит рядом с <code>bot.py</code>, "
+    "а не в папке <code>handlers/</code>."
+)
+
+
+def _back_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+    ])
+
+
+async def _no_module(query) -> bool:
+    """True — модуль недоступен, обработчику дальше делать нечего."""
+    if sm is not None:
+        return False
+    await query.edit_message_text(
+        _NO_MODULE_TEXT, parse_mode="HTML", reply_markup=_back_kb()
+    )
+    return True
 
 
 def _menu_kb(st: dict) -> InlineKeyboardMarkup:
@@ -86,6 +117,8 @@ def _status_text(st: dict) -> str:
 
 
 async def handle_site_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
+    if await _no_module(query):
+        return
     if context:
         context.user_data.pop("state", None)
     st = await sm.status()
@@ -96,6 +129,8 @@ async def handle_site_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
 
 
 async def handle_site_set_domain(query, context: ContextTypes.DEFAULT_TYPE):
+    if await _no_module(query):
+        return
     context.user_data["state"] = AWAITING_SITE_DOMAIN
     cfg = load_config()
     cur = cfg.get("site_domain")
@@ -114,6 +149,9 @@ async def handle_site_set_domain(query, context: ContextTypes.DEFAULT_TYPE):
 
 async def apply_domain(message, context: ContextTypes.DEFAULT_TYPE, raw: str):
     """Вызывается из обработчика текста."""
+    if sm is None:
+        await message.reply_text(_NO_MODULE_TEXT, parse_mode="HTML", reply_markup=_back_kb())
+        return
     domain = sm.normalize_domain(raw)
     if not sm.valid_domain(domain):
         await message.reply_text(
@@ -148,6 +186,8 @@ async def apply_domain(message, context: ContextTypes.DEFAULT_TYPE, raw: str):
 
 
 async def handle_site_activate(query, context: ContextTypes.DEFAULT_TYPE):
+    if await _no_module(query):
+        return
     cfg = load_config()
     domain = cfg.get("site_domain")
     if not domain:
@@ -217,6 +257,8 @@ async def handle_site_activate(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_site_toggle(query, context: ContextTypes.DEFAULT_TYPE, enable: bool):
+    if await _no_module(query):
+        return
     await query.edit_message_text("⏳ Применяю...")
     res = await sm.set_enabled(enable)
     if not res["ok"]:
@@ -234,6 +276,8 @@ async def handle_site_toggle(query, context: ContextTypes.DEFAULT_TYPE, enable: 
 
 
 async def handle_site_sync(query, context: ContextTypes.DEFAULT_TYPE):
+    if await _no_module(query):
+        return
     cfg = load_config()
     domain = cfg.get("site_domain")
     if not domain:
@@ -254,6 +298,8 @@ async def handle_site_sync(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_site_cert(query, context: ContextTypes.DEFAULT_TYPE):
+    if await _no_module(query):
+        return
     cfg = load_config()
     domain = cfg.get("site_domain")
     if not domain:
@@ -283,6 +329,8 @@ async def handle_site_cert(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_site_check(query, context: ContextTypes.DEFAULT_TYPE):
+    if await _no_module(query):
+        return
     await query.edit_message_text("🩺 Проверяю сервер...")
     env = await sm.check_env()
 
