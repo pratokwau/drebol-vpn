@@ -690,38 +690,42 @@ async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
         safe_email = quote(email, safe="")
         safe_uuid = quote(client_obj.get("id", ""), safe="")
 
-        # Добавляем во ВСЕ недостающие инбаунды.
-        # Массовый эндпоинт есть не во всех сборках 3x-UI, поэтому при неудаче
-        # проходим по каждому отдельно — иначе клиент попадёт только в первый.
-        added = set()
-        if to_add:
+        async def _add_to(targets: set) -> set:
+            """Кладёт клиента в указанные инбаунды, возвращает удавшиеся."""
+            if not targets:
+                return set()
+            ok = set()
             bulk, _ = await _post(
                 s, f"{url}/panel/api/clients/add",
-                {"inboundIds": sorted(to_add), "client": client_obj},
+                {"inboundIds": sorted(targets), "client": client_obj},
             )
             if bulk and bulk.get("success"):
-                added = set(to_add)
-            else:
-                for target_id in sorted(to_add):
+                return set(targets)
+            # массовый эндпоинт есть не везде — тогда по одному
+            for tid in sorted(targets):
+                for path in (
+                    f"/panel/api/inbounds/{tid}/addClient",
+                    "/panel/api/inbounds/addClient",
+                ):
                     res, _e = await _post(
-                        s, f"{url}/panel/api/inbounds/{target_id}/addClient",
-                        {"id": target_id,
-                         "settings": json.dumps({"clients": [client_obj]})},
+                        s, f"{url}{path}",
+                        {"id": tid, "settings": json.dumps({"clients": [client_obj]})},
                     )
                     if res and res.get("success"):
-                        added.add(target_id)
+                        ok.add(tid)
+                        break
+            return ok
 
-            if not added:
-                return {"success": False,
-                        "error": "не удалось добавить ни в один целевой инбаунд"}
-
-        # Убираем из лишних — только после того, как добавление удалось,
-        # чтобы при сбое клиент не остался вообще без инбаунда.
-        # Форма пути у delClient в разных сборках 3x-UI отличается, поэтому
-        # перебираем известные варианты и оба идентификатора.
         del_errors = []
+        added = set()
+
+        # Точечное удаление из одного инбаунда поддерживают не все сборки 3x-UI:
+        # часть отвечает 404. Тогда единственный доступный путь — снести клиента
+        # целиком по email и создать заново уже в нужных инбаундах.
+        selective_failed = False
         for old_id in sorted(to_remove):
             done = False
+            attempts = []
             for ident in (safe_uuid, safe_email):
                 if not ident or done:
                     continue
@@ -733,23 +737,66 @@ async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
                     if res and res.get("success"):
                         done = True
                         break
-                    del_errors.append(f"{path}: {res_err or str(res)[:60]}")
+                    reason = res_err or (res or {}).get("msg") or str(res)
+                    attempts.append(f"{path.rsplit('/api', 1)[-1]} → {reason}")
             if not done:
-                del_errors.append(f"инбаунд {old_id}: удалить не удалось")
+                selective_failed = True
+                del_errors.append(f"инбаунд {old_id}: " + " | ".join(attempts[:2]))
+
+        if to_remove and selective_failed:
+            # Полное пересоздание. UUID, subId и email берутся из существующей
+            # записи, поэтому ссылка подписки у клиента не меняется.
+            del_errors = []
+            wiped = False
+            res, res_err = await _post(s, f"{url}/panel/api/clients/del/{safe_email}", {})
+            if res and res.get("success"):
+                wiped = True
+            else:
+                del_errors.append(
+                    f"clients/del: {res_err or (res or {}).get('msg') or str(res)}"
+                )
+                for ib_id in sorted(current_ids):
+                    r2, e2 = await _post(
+                        s, f"{url}/panel/api/inbounds/delClient/{ib_id}/{safe_email}", {}
+                    )
+                    if r2 and r2.get("success"):
+                        wiped = True
+            if wiped:
+                del_errors = []
+                added = await _add_to(valid_targets)
+            else:
+                added = await _add_to(to_add)
+        else:
+            added = await _add_to(to_add)
+
+        if to_add and not added:
+            return {"success": False,
+                    "error": "не удалось добавить ни в один целевой инбаунд"}
 
         # Сверяемся с панелью, а не верим ответам: бывает, что запрос
-        # отвечает успехом, а клиент остаётся на месте
-        verify_data, _ = await _get(s, f"{url}/panel/api/inbounds/list")
-        actual = set()
-        if verify_data and verify_data.get("success"):
-            for inb in (verify_data.get("obj") or []):
-                try:
-                    st = inb.get("settings") or "{}"
-                    st = json.loads(st) if isinstance(st, str) else st
-                except Exception:
-                    continue
-                if any(c.get("email") == email for c in st.get("clients", [])):
-                    actual.add(inb.get("id"))
+        # отвечает успехом, а клиент остаётся на месте.
+        # Инбаунды на узлах обновляются не мгновенно, поэтому при расхождении
+        # даём панели время и перечитываем — иначе задержка выглядит как сбой.
+        async def _placement() -> set:
+            vdata, _ = await _get(s, f"{url}/panel/api/inbounds/list")
+            found = set()
+            if vdata and vdata.get("success"):
+                for inb in (vdata.get("obj") or []):
+                    try:
+                        st = inb.get("settings") or "{}"
+                        st = json.loads(st) if isinstance(st, str) else st
+                    except Exception:
+                        continue
+                    if any(c.get("email") == email for c in st.get("clients", [])):
+                        found.add(inb.get("id"))
+            return found
+
+        actual = await _placement()
+        for _attempt in range(3):
+            if not (valid_targets - actual) and not (actual & to_remove):
+                break
+            await asyncio.sleep(5)
+            actual = await _placement()
 
         problems = []
         still_missing = valid_targets - actual
@@ -759,7 +806,7 @@ async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
         if still_extra:
             problems.append(f"не удалён из {sorted(still_extra)}")
             if del_errors:
-                problems.append("; ".join(del_errors[:2]))
+                problems.append("\n".join(del_errors[:3]))
 
         return {
             "success": not problems,
