@@ -75,8 +75,5 @@ AWAITING_LOG_CHANNEL = "awaiting_log_channel"
 AWAITING_WINBACK_DAYS = "awaiting_winback_days"
 AWAITING_WINBACK_PERCENT = "awaiting_winback_percent"
 
-# Сайт-визитка
-AWAITING_SITE_DOMAIN = "awaiting_site_domain"
-
 # Сообщение юзеру из профиля
 AWAITING_DM_USER = "awaiting_dm_user"

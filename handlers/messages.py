@@ -36,7 +36,7 @@ from states import (
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
-    AWAITING_DM_USER, AWAITING_SITE_DOMAIN,
+    AWAITING_DM_USER,
 )
 
 
@@ -1018,13 +1018,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("winback_percent", int(text))
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Скидка Winback: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    # ── Домен сайта ──────────────────────────────────────────────────────────
-    if state == AWAITING_SITE_DOMAIN:
-        context.user_data.pop("state", None)
-        from handlers.site import apply_domain
-        await apply_domain(update.message, context, text)
         return
 
     # ── Сообщение юзеру из профиля ─────────────────────────────────────────────

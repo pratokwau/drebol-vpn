@@ -20,10 +20,6 @@ from handlers.admin import (
     handle_user_history, handle_dm_user, handle_payment_stats,
 )
 from handlers.support import open_support, handle_support_files
-from handlers.site import (
-    handle_site_menu, handle_site_set_domain, handle_site_activate,
-    handle_site_toggle, handle_site_sync, handle_site_cert, handle_site_check,
-)
 from handlers.broadcast import (
     handle_broadcast_start, handle_broadcast_segment,
     handle_bcast_buttons_add, handle_bcast_buttons_skip,
@@ -205,23 +201,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "channel_menu":
         await handle_channel_menu(query)
 
-    # Сайт-визитка
-    elif data == "site_menu":
-        await handle_site_menu(query, context)
-    elif data == "site_set_domain":
-        await handle_site_set_domain(query, context)
-    elif data == "site_activate":
-        await handle_site_activate(query, context)
-    elif data == "site_enable":
-        await handle_site_toggle(query, context, True)
-    elif data == "site_disable":
-        await handle_site_toggle(query, context, False)
-    elif data == "site_sync":
-        await handle_site_sync(query, context)
-    elif data == "site_cert":
-        await handle_site_cert(query, context)
-    elif data == "site_check":
-        await handle_site_check(query, context)
     elif data == "toggle_force_sub":
         cfg = load_config()
         cfg["force_subscribe"] = not cfg.get("force_subscribe", False)
