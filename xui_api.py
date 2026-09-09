@@ -231,6 +231,34 @@ async def check_sub_service(timeout: float = 6.0) -> dict:
         return {"ok": False, "error": str(e)[:60], "url": base, "port": port_int}
 
 
+def node_prefix(tag: str) -> str:
+    """Префикс из имени инбаунда: у «n3-in-14034-tcp» это «n3».
+
+    Инбаунды одного узла принято называть с общим префиксом, поэтому
+    привязка идёт по нему — новый инбаунд на том же узле подхватится сам.
+    """
+    tag = (tag or "").strip()
+    return tag.split("-")[0] if "-" in tag else tag
+
+
+def resolve_inbound_host(inb: dict, panel_host: str | None) -> tuple[str | None, bool]:
+    """Куда стучаться, чтобы проверить инбаунд.
+
+    Возвращает (хост, привязан_явно). Порядок: поле listen самого инбаунда →
+    адрес узла по префиксу имени → адрес панели.
+    """
+    listen = (inb.get("listen") or "").strip()
+    if listen and listen not in ("0.0.0.0", "::"):
+        return listen, True
+
+    nodes = load_config().get("node_hosts") or {}
+    prefix = node_prefix(inb.get("tag") or inb.get("remark") or "")
+    if prefix and nodes.get(prefix):
+        return nodes[prefix], True
+
+    return panel_host, False
+
+
 def _inbound_clients(inb: dict) -> int:
     cs = inb.get("clientStats")
     if isinstance(cs, list):
@@ -261,17 +289,21 @@ async def probe_servers() -> dict:
     inbounds = []
     if panel["ok"]:
         raw = inb_result.get("inbounds") or []
+        hosts = [resolve_inbound_host(inb, host) for inb in raw]
         # порты проверяем параллельно, иначе на десятке инбаундов экран висит
         checks = await asyncio.gather(*[
-            check_tcp(inb.get("listen") or host, inb.get("port"))
-            for inb in raw
+            check_tcp(h, inb.get("port")) for inb, (h, _m) in zip(raw, hosts)
         ], return_exceptions=True)
 
-        for inb, chk in zip(raw, checks):
+        for inb, (inb_host, mapped), chk in zip(raw, hosts, checks):
             if isinstance(chk, Exception):
                 chk = {"ok": False, "error": str(chk)[:50]}
+            tag = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
             inbounds.append({
-                "tag": inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}",
+                "tag": tag,
+                "prefix": node_prefix(tag),
+                "host": inb_host,
+                "mapped": mapped,
                 "protocol": inb.get("protocol", "?"),
                 "port": inb.get("port"),
                 "enabled": inb.get("enable", True),

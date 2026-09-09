@@ -140,16 +140,22 @@ async def handle_healthcheck(query):
         if not inbounds:
             lines.append("\n⚪️ Инбаундов нет.")
         else:
-            up = sum(1 for i in inbounds if i["enabled"] and i["reachable"])
-            active = sum(1 for i in inbounds if i["enabled"])
-            lines.append(f"\n<b>Инбаунды</b> — доступно {up}/{active}")
+            checkable = [i for i in inbounds if i["enabled"] and
+                         (i.get("mapped") or i["reachable"])]
+            up = sum(1 for i in checkable if i["reachable"])
+            lines.append(f"\n<b>Инбаунды</b> — доступно {up}/{len(checkable)}")
             for i in inbounds:
                 if not i["enabled"]:
                     icon, tail = "⚪️", " · выключен"
                 elif i["reachable"]:
-                    icon, tail = "🟢", f" · {i['ms']} мс"
+                    where = "" if not i.get("mapped") else f" · {i['host']}"
+                    icon, tail = "🟢", f"{where} · {i['ms']} мс"
+                elif not i.get("mapped"):
+                    # проверяли по адресу панели, а инбаунд может жить на узле —
+                    # это не авария, а незаданная привязка
+                    icon, tail = "⚪️", " · узел не привязан"
                 else:
-                    icon, tail = "🔴", f" · {i['error']}"
+                    icon, tail = "🔴", f" · {i['host']} · {i['error']}"
                 lines.append(
                     f"{icon} <b>{i['tag']}</b> ({i['protocol']}:{i['port']}) "
                     f"· 👤 {i['clients']}{tail}"
@@ -160,9 +166,18 @@ async def handle_healthcheck(query):
         problems.append("панель не отвечает — бот не сможет выдавать и продлевать ключи")
     if not sub["ok"]:
         problems.append("сервис подписок лежит — выданные ключи не обновятся у клиентов")
-    dead = [i["tag"] for i in inbounds if i["enabled"] and not i["reachable"]]
+    dead = [i["tag"] for i in inbounds
+            if i["enabled"] and not i["reachable"] and i.get("mapped")]
     if dead:
         problems.append("порт не принимает соединения: " + ", ".join(dead[:5]))
+
+    unmapped = sorted({i["prefix"] for i in inbounds
+                       if i["enabled"] and not i["reachable"] and not i.get("mapped")})
+    if unmapped:
+        problems.append(
+            "не проверены — не задан адрес узла: " + ", ".join(unmapped[:5])
+            + ". Укажи в «🖧 Узлы»"
+        )
     if problems:
         lines.append("\n⚠️ <b>Проблемы:</b>")
         lines += [f"• {p}" for p in problems]

@@ -43,7 +43,7 @@ from handlers.tickets import (
 from handlers.xui_settings import (
     handle_xui_settings, handle_set_xui_url, handle_set_xui_token,
     handle_set_xui_sub_port, handle_set_xui_sub_path,
-    handle_test_xui,
+    handle_test_xui, handle_nodes_menu, handle_node_set,
 )
 from adminsub.handlers import (
     handle_admin_subs_menu, handle_presets_menu,
@@ -305,6 +305,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_xui_sub_path(query, context)
     elif data == "test_xui":
         await handle_test_xui(query)
+    elif data == "nodes_menu":
+        await handle_nodes_menu(query, context)
+    elif data.startswith("node_set:"):
+        await handle_node_set(query, context, data.split(":", 1)[1])
 
     # Админские подписки
     elif data == "admin_subs":

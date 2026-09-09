@@ -40,6 +40,7 @@ from states import (
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
+    AWAITING_NODE_HOST,
 )
 
 
@@ -1021,6 +1022,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("winback_percent", int(text))
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Скидка Winback: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Адрес узла ───────────────────────────────────────────────────────────
+    if state == AWAITING_NODE_HOST:
+        from handlers.xui_settings import apply_node_host
+        await apply_node_host(update.message, context, text)
         return
 
     # ── Тарифы ───────────────────────────────────────────────────────────────

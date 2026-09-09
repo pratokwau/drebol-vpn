@@ -156,6 +156,7 @@ def xui_settings_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔌 Порт подписки", callback_data="set_xui_sub_port")],
         [InlineKeyboardButton("📂 Путь подписки", callback_data="set_xui_sub_path")],
         [InlineKeyboardButton("🩺 Здоровье серверов", callback_data="healthcheck")],
+        [InlineKeyboardButton("🖧 Узлы", callback_data="nodes_menu")],
         [InlineKeyboardButton("🔌 Тест соединения", callback_data="test_xui")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
