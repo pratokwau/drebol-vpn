@@ -809,31 +809,40 @@ async def create_client(
             "reset": 0,
         }
 
-        # Пробуем новый API
+        # Пробуем массовый эндпоинт — он кладёт сразу во все инбаунды
         payload = {"inboundIds": inbound_ids, "client": client}
         data, err = await _post(s, f"{url}/panel/api/clients/add", payload)
 
+        added = set()
         if data and data.get("success"):
-            pass  # OK
+            added = set(inbound_ids)
         else:
+            # Запасной путь: по одному инбаунду. Раньше здесь добавлялся
+            # только первый — клиент оставался в одном инбаунде из нескольких.
             err1 = err or str(data)
-            # Фолбэк 1: /panel/api/inbounds/{id}/addClient
-            old_payload = {
-                "id": int(inbound_id),
-                "settings": json.dumps({"clients": [client]}),
-            }
-            data2, err2 = await _post(s, f"{url}/panel/api/inbounds/{inbound_id}/addClient", old_payload)
-            if data2 and data2.get("success"):
-                data = data2
-            else:
-                err2 = err2 or str(data2)
-                # Фолбэк 2: /panel/api/inbounds/addClient
-                data3, err3 = await _post(s, f"{url}/panel/api/inbounds/addClient", old_payload)
-                if data3 and data3.get("success"):
-                    data = data3
-                else:
-                    err3 = err3 or str(data3)
-                    return {"success": False, "error": f"1) clients/add: {err1}\n2) inbounds/{inbound_id}/addClient: {err2}\n3) inbounds/addClient: {err3}"}
+            errors = [f"clients/add: {err1}"]
+            for ib in inbound_ids:
+                one_payload = {
+                    "id": int(ib),
+                    "settings": json.dumps({"clients": [client]}),
+                }
+                ok = False
+                for path in (
+                    f"/panel/api/inbounds/{ib}/addClient",
+                    "/panel/api/inbounds/addClient",
+                ):
+                    res, res_err = await _post(s, f"{url}{path}", one_payload)
+                    if res and res.get("success"):
+                        ok = True
+                        break
+                    errors.append(f"inbound {ib} via {path}: {res_err or str(res)}")
+                if ok:
+                    added.add(ib)
+
+            if not added:
+                return {"success": False, "error": "\n".join(errors[:4])}
+
+        missed = sorted(set(inbound_ids) - added)
 
         parsed = urlparse(url)
         sub_url = _build_sub_url(parsed.scheme, parsed.hostname, sub_port, sub_path, sub_id)
@@ -845,6 +854,8 @@ async def create_client(
             "sub_id": sub_id,
             "expire": expire_date,
             "inbound_id": inbound_id,
+            "inbound_ids": sorted(added),
+            "missed_inbounds": missed,
         }
 
     except Exception as e:

@@ -451,6 +451,16 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
         total_gb=int(cfg.get("paid_preset_traffic", 0)),
     )
 
+    # Клиент должен попасть во все выбранные инбаунды. Если часть не приняла —
+    # человек получит рабочую ссылку, но без части серверов, и молчать нельзя.
+    missed = result.get("missed_inbounds") or []
+    if missed:
+        from log_channel import send_log
+        await send_log(context.bot,
+            f"⚠️ Клиент <code>{result['email']}</code> добавлен не во все инбаунды.\n"
+            f"Не приняли: <code>{missed}</code>"
+        )
+
     # Фиксируем действующие условия за подпиской: последующая правка общих
     # настроек не должна менять условия уже выданной подписки
     from paidsub.storage import snapshot_sub_settings
