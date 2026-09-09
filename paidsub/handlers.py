@@ -400,7 +400,8 @@ async def handle_paid_create_type(query, context, trial: bool):
     )
 
 
-async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, trial: bool = False):
+async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
+                             trial: bool = False, for_user: bool = False):
     """Создаёт платную подписку. trial=True — пробный период."""
     cfg = load_config()
     await reply_func("⏳ Создаю подписку в 3x-UI...")
@@ -478,6 +479,20 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
         f"Подписка #{new_sub_id} ({period_label})\nEmail: {result['email']}\nДо: {result['expire']}",
     )
 
+    user_text = (
+        f"🎉 <b>Вам выдана VPN подписка ({period_label})!</b>\n\n"
+        f"📅 Действует до: <b>{result['expire']}</b>\n"
+        f"📶 Трафик: <b>{traffic_str}</b>\n\n"
+        f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
+        "Скопируйте ссылку и вставьте в приложение (Happ или INCY)"
+    )
+
+    if for_user:
+        # экран открыт у самого клиента (авто-триал): служебные поля вроде
+        # TG ID и email ему не нужны, и второе уведомление было бы дублем
+        await reply_func(user_text, parse_mode="HTML")
+        return
+
     await reply_func(
         f"✅ <b>Подписка создана ({period_label})!</b>\n\n"
         f"👤 TG ID: <code>{tg_id}</code>\n"
@@ -490,13 +505,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func, tria
 
     bot = context.bot if hasattr(context, 'bot') else None
     if bot:
-        await _notify_user(bot, tg_id,
-            f"🎉 <b>Вам выдана VPN подписка ({period_label})!</b>\n\n"
-            f"📅 Действует до: <b>{result['expire']}</b>\n"
-            f"📶 Трафик: <b>{traffic_str}</b>\n\n"
-            f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
-            "Скопируй ссылку и вставь в приложение (Happ или INCY)"
-        )
+        await _notify_user(bot, tg_id, user_text)
 
 
 # ── Запрос на одобрение подписки (от юзера) ──────────────────────────────────
@@ -554,7 +563,7 @@ async def handle_request_sub(query, context):
             async def _edit(txt, **kw):
                 await query.edit_message_text(txt, **kw)
 
-            await do_create_paid_sub(query, user.id, context, _edit, trial=True)
+            await do_create_paid_sub(query, user.id, context, _edit, trial=True, for_user=True)
             await _process_referral_bonus(user.id, context)
             from log_channel import send_log
             uname_a = f"@{user.username}" if user.username else f"id{user.id}"
@@ -1660,7 +1669,13 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
     if create_inbound_ids:
         from xui_api import move_client_inbound
-        await move_client_inbound(email, create_inbound_ids)
+        mv = await move_client_inbound(email, create_inbound_ids)
+        if not mv.get("success"):
+            from log_channel import send_log
+            await send_log(context.bot,
+                f"⚠️ Возврат на инбаунды подписки не удался: <code>{email}</code>\n"
+                f"<code>{mv.get('error', '?')}</code>"
+            )
 
     promo_line = ""
     pending_promo = promo_code or await get_pending_promo(tg_id)
@@ -1758,7 +1773,13 @@ async def handle_confirm_payment(query, tg_id: int, context):
     create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
     if create_inbound_ids:
         from xui_api import move_client_inbound
-        await move_client_inbound(email, create_inbound_ids)
+        mv = await move_client_inbound(email, create_inbound_ids)
+        if not mv.get("success"):
+            from log_channel import send_log
+            await send_log(context.bot,
+                f"⚠️ Возврат на инбаунды подписки не удался: <code>{email}</code>\n"
+                f"<code>{mv.get('error', '?')}</code>"
+            )
 
     # Промокод: списываем использование и снимаем pending
     promo_line = ""

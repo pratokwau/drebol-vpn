@@ -716,24 +716,58 @@ async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
                         "error": "не удалось добавить ни в один целевой инбаунд"}
 
         # Убираем из лишних — только после того, как добавление удалось,
-        # чтобы при сбое клиент не остался вообще без инбаунда
+        # чтобы при сбое клиент не остался вообще без инбаунда.
+        # Форма пути у delClient в разных сборках 3x-UI отличается, поэтому
+        # перебираем известные варианты и оба идентификатора.
+        del_errors = []
         for old_id in sorted(to_remove):
+            done = False
             for ident in (safe_uuid, safe_email):
-                if not ident:
+                if not ident or done:
                     continue
-                res, _e = await _post(
-                    s, f"{url}/panel/api/inbounds/{old_id}/delClient/{ident}", {}
-                )
-                if res and res.get("success"):
-                    break
+                for path in (
+                    f"/panel/api/inbounds/{old_id}/delClient/{ident}",
+                    f"/panel/api/inbounds/delClient/{old_id}/{ident}",
+                ):
+                    res, res_err = await _post(s, f"{url}{path}", {})
+                    if res and res.get("success"):
+                        done = True
+                        break
+                    del_errors.append(f"{path}: {res_err or str(res)[:60]}")
+            if not done:
+                del_errors.append(f"инбаунд {old_id}: удалить не удалось")
 
-        missed = to_add - added
+        # Сверяемся с панелью, а не верим ответам: бывает, что запрос
+        # отвечает успехом, а клиент остаётся на месте
+        verify_data, _ = await _get(s, f"{url}/panel/api/inbounds/list")
+        actual = set()
+        if verify_data and verify_data.get("success"):
+            for inb in (verify_data.get("obj") or []):
+                try:
+                    st = inb.get("settings") or "{}"
+                    st = json.loads(st) if isinstance(st, str) else st
+                except Exception:
+                    continue
+                if any(c.get("email") == email for c in st.get("clients", [])):
+                    actual.add(inb.get("id"))
+
+        problems = []
+        still_missing = valid_targets - actual
+        still_extra = actual & to_remove
+        if still_missing:
+            problems.append(f"не добавлен в {sorted(still_missing)}")
+        if still_extra:
+            problems.append(f"не удалён из {sorted(still_extra)}")
+            if del_errors:
+                problems.append("; ".join(del_errors[:2]))
+
         return {
-            "success": True,
+            "success": not problems,
             "moved": True,
             "added": sorted(added),
-            "removed": sorted(to_remove),
-            "error": (f"не добавлен в инбаунды {sorted(missed)}" if missed else ""),
+            "removed": sorted(to_remove - still_extra),
+            "actual": sorted(actual),
+            "error": " · ".join(problems),
         }
     except Exception as e:
         return {"success": False, "error": f"{type(e).__name__}: {e}"}
