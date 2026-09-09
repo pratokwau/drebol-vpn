@@ -42,7 +42,6 @@ def _paid_presets_ready(cfg: dict) -> bool:
         cfg.get("paid_preset_ip") is not None,
         cfg.get("paid_preset_hwid") is not None,
         cfg.get("paid_preset_traffic") is not None,
-        cfg.get("paid_price") is not None,
     ])
 
 
@@ -91,7 +90,6 @@ def _fmt_presets(cfg: dict, inbound_names=None) -> str:
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
         f"💰 Период оплаты: <b>{pay_str}</b>\n"
         f"⏳ Время на продление: <b>{renew_str}</b>\n"
-        f"💵 Сумма: <b>{price_str}</b>\n"
         f"🔗 Ссылка на оплату: <b>{pay_url}</b>\n"
         f"🌐 Лимит IP: <b>{ip}</b>\n"
         f"🖥 Лимит HWID: <b>{hwid}</b>\n"
@@ -1222,7 +1220,6 @@ async def handle_paid_sub_settings(query, sub_id: int):
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
         f"💰 Период оплаты: <b>{pay_str}</b>\n"
         f"⏳ На продление: <b>{renew_str}</b>\n"
-        f"💵 Сумма: <b>{price_str}</b>\n"
         f"🔗 Ссылка на оплату: <b>{pay_url_str}</b>\n\n"
         "Выбери параметр для изменения:",
         parse_mode="HTML",

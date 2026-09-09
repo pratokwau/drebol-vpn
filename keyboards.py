@@ -41,10 +41,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
         [InlineKeyboardButton("🎯 Winback", callback_data="winback_settings")],
-        [
-            InlineKeyboardButton("🔧 Параметры 3x-UI", callback_data="xui_settings"),
-            InlineKeyboardButton("🩺 Серверы", callback_data="healthcheck"),
-        ],
+        [InlineKeyboardButton("🖥 Серверы и 3x-UI", callback_data="xui_settings")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
         [InlineKeyboardButton("📢 Управление каналом", callback_data="channel_menu")],
         [
@@ -158,6 +155,7 @@ def xui_settings_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔑 API Токен", callback_data="set_xui_token")],
         [InlineKeyboardButton("🔌 Порт подписки", callback_data="set_xui_sub_port")],
         [InlineKeyboardButton("📂 Путь подписки", callback_data="set_xui_sub_path")],
+        [InlineKeyboardButton("🩺 Здоровье серверов", callback_data="healthcheck")],
         [InlineKeyboardButton("🔌 Тест соединения", callback_data="test_xui")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])

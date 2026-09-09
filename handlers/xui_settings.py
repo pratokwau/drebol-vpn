@@ -11,7 +11,7 @@ async def handle_xui_settings(query):
     sub_path = cfg.get("xui_sub_path") or "/sub/"
 
     await query.edit_message_text(
-        "<b>⚙️ Параметры 3x-UI</b>\n\n"
+        "<b>🖥 Серверы и 3x-UI</b>\n\n"
         f"🌐 URL панели: <code>{url}</code>\n"
         f"🔑 API Токен: {token_set}\n"
         f"🔌 Порт подписки: <code>{sub_port}</code>\n"

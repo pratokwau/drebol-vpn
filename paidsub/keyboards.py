@@ -47,7 +47,6 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🆓 Пробный период", callback_data="paid_preset_trial")],
         [InlineKeyboardButton("💰 Период оплаты", callback_data="paid_preset_pay_period")],
         [InlineKeyboardButton("⏳ Время на продление", callback_data="paid_preset_renew")],
-        [InlineKeyboardButton("💵 Сумма подписки", callback_data="paid_preset_price")],
         [InlineKeyboardButton("💰 Тарифы", callback_data="tariffs_menu")],
         [InlineKeyboardButton("💳 Платёжная система", callback_data="pay_provider_menu")],
         [InlineKeyboardButton("🌐 Лимит IP", callback_data="paid_preset_ip")],

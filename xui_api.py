@@ -622,8 +622,10 @@ async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
         if not data or not data.get("success"):
             return {"success": False, "error": f"Не удалось загрузить инбаунды: {err}"}
 
+        # Клиент может лежать сразу в нескольких инбаундах — собираем все,
+        # иначе чистка затронет только первый найденный и останутся хвосты
         client_obj = None
-        old_inbound_id = None
+        current_ids = set()
         for inb in (data.get("obj") or []):
             settings_str = inb.get("settings") or "{}"
             try:
@@ -632,51 +634,75 @@ async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
                 continue
             for c in settings.get("clients", []):
                 if c.get("email") == email:
-                    client_obj = dict(c)
-                    old_inbound_id = inb.get("id")
+                    if client_obj is None:
+                        client_obj = dict(c)
+                    current_ids.add(inb.get("id"))
                     break
-            if client_obj:
-                break
 
         if not client_obj:
             return {"success": False, "error": "Клиент не найден в панели"}
 
         client_obj["flow"] = "xtls-rprx-vision"
         real_ids = {inb.get("id") for inb in (data.get("obj") or [])}
-        valid_targets = [int(i) for i in target_inbound_ids if int(i) in real_ids]
+        valid_targets = {int(i) for i in target_inbound_ids if int(i) in real_ids}
         if not valid_targets:
             return {"success": False, "error": "Целевые инбаунды не найдены"}
 
-        if old_inbound_id in valid_targets:
+        to_add = valid_targets - current_ids
+        to_remove = current_ids - valid_targets
+
+        # уже ровно там, где нужно — не трогаем, чтобы зря не сбрасывать трафик
+        if not to_add and not to_remove:
             return {"success": True, "moved": False}
 
         safe_email = quote(email, safe="")
         safe_uuid = quote(client_obj.get("id", ""), safe="")
 
-        # Удаляем из старого инбаунда
-        for path in (
-            f"/panel/api/clients/del/{safe_email}",
-            f"/panel/api/inbounds/{old_inbound_id}/delClient/{safe_email}",
-        ):
-            await _post(s, f"{url}{path}", {})
+        # Добавляем во ВСЕ недостающие инбаунды.
+        # Массовый эндпоинт есть не во всех сборках 3x-UI, поэтому при неудаче
+        # проходим по каждому отдельно — иначе клиент попадёт только в первый.
+        added = set()
+        if to_add:
+            bulk, _ = await _post(
+                s, f"{url}/panel/api/clients/add",
+                {"inboundIds": sorted(to_add), "client": client_obj},
+            )
+            if bulk and bulk.get("success"):
+                added = set(to_add)
+            else:
+                for target_id in sorted(to_add):
+                    res, _e = await _post(
+                        s, f"{url}/panel/api/inbounds/{target_id}/addClient",
+                        {"id": target_id,
+                         "settings": json.dumps({"clients": [client_obj]})},
+                    )
+                    if res and res.get("success"):
+                        added.add(target_id)
 
-        # Добавляем в новые инбаунды
-        payload_new = {"inboundIds": valid_targets, "client": client_obj}
-        result, err2 = await _post(s, f"{url}/panel/api/clients/add", payload_new)
-        if result and result.get("success"):
-            return {"success": True, "moved": True}
+            if not added:
+                return {"success": False,
+                        "error": "не удалось добавить ни в один целевой инбаунд"}
 
-        # Фолбэк: добавляем в первый целевой
-        target_id = valid_targets[0]
-        old_payload = {
-            "id": target_id,
-            "settings": json.dumps({"clients": [client_obj]}),
+        # Убираем из лишних — только после того, как добавление удалось,
+        # чтобы при сбое клиент не остался вообще без инбаунда
+        for old_id in sorted(to_remove):
+            for ident in (safe_uuid, safe_email):
+                if not ident:
+                    continue
+                res, _e = await _post(
+                    s, f"{url}/panel/api/inbounds/{old_id}/delClient/{ident}", {}
+                )
+                if res and res.get("success"):
+                    break
+
+        missed = to_add - added
+        return {
+            "success": True,
+            "moved": True,
+            "added": sorted(added),
+            "removed": sorted(to_remove),
+            "error": (f"не добавлен в инбаунды {sorted(missed)}" if missed else ""),
         }
-        result2, err3 = await _post(s, f"{url}/panel/api/inbounds/{target_id}/addClient", old_payload)
-        if result2 and result2.get("success"):
-            return {"success": True, "moved": True}
-
-        return {"success": False, "error": f"Не удалось добавить в новый инбаунд: {err3}"}
     except Exception as e:
         return {"success": False, "error": f"{type(e).__name__}: {e}"}
     finally:
