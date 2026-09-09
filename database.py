@@ -500,6 +500,23 @@ async def add_payment(tg_id: int, provider: str, external_id: str, amount: int,
         return cur.lastrowid
 
 
+async def record_paid_payment(tg_id: int, provider: str, amount: int,
+                              period_seconds: int | None,
+                              promo_code: str | None = None,
+                              external_id: str | None = None) -> int:
+    """Сразу оплаченный счёт — для подтверждений, минующих платёжную систему."""
+    from datetime import datetime
+    ext = external_id or f"{provider}-{tg_id}-{int(datetime.now().timestamp())}"
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            INSERT INTO payments (tg_id, provider, external_id, amount,
+                                  period_seconds, promo_code, status, pay_url, paid_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'paid', '', CURRENT_TIMESTAMP)
+        """, (tg_id, provider, ext, amount, period_seconds, promo_code))
+        await db.commit()
+        return cur.lastrowid
+
+
 async def get_pending_payments(provider: str | None = None, limit: int = 50) -> list[tuple]:
     """Счета, ожидающие оплаты — их опрашивает фоновая задача."""
     q = """SELECT id, tg_id, provider, external_id, amount, period_seconds,
@@ -564,6 +581,110 @@ async def expire_stale_payments(hours: int = 24) -> int:
         """, (f"-{hours} hours",))
         await db.commit()
         return cur.rowcount or 0
+
+
+async def payments_summary() -> dict:
+    """Сводка по деньгам. Считаем только фактически оплаченные счета."""
+    async def _row(db, q, params=()):
+        async with db.execute(q, params) as cur:
+            return await cur.fetchone()
+
+    paid = "status = 'paid'"
+    async with aiosqlite.connect(DB_PATH) as db:
+        def period(expr):
+            return (f"SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
+                    f"WHERE {paid} AND {expr}")
+
+        today = await _row(db, period(
+            "date(COALESCE(paid_at, created_at), 'localtime') = date('now', 'localtime')"))
+        week = await _row(db, period(
+            "COALESCE(paid_at, created_at) >= datetime('now', '-7 days')"))
+        month = await _row(db, period(
+            "COALESCE(paid_at, created_at) >= datetime('now', '-30 days')"))
+        total = await _row(db, f"SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments WHERE {paid}")
+        pending = await _row(db, "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments WHERE status = 'pending'")
+        failed = await _row(db, "SELECT COUNT(*) FROM payments WHERE status IN ('canceled','expired','error','chargebacked')")
+
+        async with db.execute(
+            f"SELECT provider, COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
+            f"WHERE {paid} GROUP BY provider ORDER BY 3 DESC"
+        ) as cur:
+            by_provider = await cur.fetchall()
+
+        async with db.execute(
+            f"SELECT COUNT(DISTINCT tg_id) FROM payments WHERE {paid}"
+        ) as cur:
+            payers = (await cur.fetchone())[0]
+
+    cnt_total, sum_total = total
+    return {
+        "today": today, "week": week, "month": month,
+        "total_count": cnt_total, "total_sum": sum_total,
+        "pending_count": pending[0], "pending_sum": pending[1],
+        "failed_count": failed[0],
+        "by_provider": by_provider,
+        "payers": payers,
+        "avg": round(sum_total / cnt_total) if cnt_total else 0,
+    }
+
+
+async def list_payments(page: int = 1, status: str = "paid",
+                        per_page: int = 8) -> tuple[list, int]:
+    """Платежи с пагинацией. status='all' — все подряд."""
+    offset = (page - 1) * per_page
+    where, params = "", []
+    if status == "paid":
+        where = "WHERE p.status = 'paid'"
+    elif status == "pending":
+        where = "WHERE p.status = 'pending'"
+    elif status == "failed":
+        where = "WHERE p.status IN ('canceled','expired','error','chargebacked')"
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"SELECT COUNT(*) FROM payments p {where}", params) as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute(f"""
+            SELECT p.id, p.tg_id, p.provider, p.amount, p.status,
+                   COALESCE(p.paid_at, p.created_at) AS ts,
+                   u.first_name, u.username, p.promo_code, p.period_seconds
+            FROM payments p
+            LEFT JOIN users u ON u.id = p.tg_id
+            {where}
+            ORDER BY p.id DESC LIMIT ? OFFSET ?
+        """, params + [per_page, offset]) as cur:
+            rows = await cur.fetchall()
+    return rows, max(1, (total + per_page - 1) // per_page)
+
+
+async def get_payment_full(payment_id: int) -> tuple | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT p.id, p.tg_id, p.provider, p.external_id, p.amount,
+                   p.period_seconds, p.promo_code, p.status, p.pay_url,
+                   p.error, p.created_at, p.paid_at, u.first_name, u.username
+            FROM payments p
+            LEFT JOIN users u ON u.id = p.tg_id
+            WHERE p.id = ?
+        """, (payment_id,)) as cur:
+            return await cur.fetchone()
+
+
+async def user_payments(tg_id: int, limit: int = 10) -> tuple[list, int, int]:
+    """Оплаты конкретного юзера: строки, всего оплат, сумма."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
+            "WHERE tg_id = ? AND status = 'paid'", (tg_id,)
+        ) as cur:
+            cnt, total = await cur.fetchone()
+        async with db.execute("""
+            SELECT id, provider, amount, status,
+                   COALESCE(paid_at, created_at), promo_code
+            FROM payments WHERE tg_id = ?
+            ORDER BY id DESC LIMIT ?
+        """, (tg_id, limit)) as cur:
+            rows = await cur.fetchall()
+    return rows, cnt, total
 
 
 async def count_support_files(user_id: int) -> int:

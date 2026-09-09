@@ -344,6 +344,12 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     if ticket_count > 0:
         lines.append(f"🎫 Сообщений в поддержку: <b>{ticket_count}</b>")
 
+    # Оплаты
+    from handlers.payments import user_payments_block
+    pay_block = await user_payments_block(tg_id)
+    if pay_block:
+        lines.append(pay_block)
+
     # История
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(

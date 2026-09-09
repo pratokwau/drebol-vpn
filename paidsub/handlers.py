@@ -1805,6 +1805,18 @@ async def handle_confirm_payment(query, tg_id: int, context):
         pay_details = f"Сумма: {price} ₽\nДо: {new_expire_str}"
     await add_history(tg_id, "payment_confirmed", pay_details)
 
+    # Ручное подтверждение тоже пишем в платежи, иначе раздел «Оплаты»
+    # показывал бы только то, что прошло через платёжную систему
+    try:
+        from database import record_paid_payment
+        await record_paid_payment(
+            tg_id=tg_id, provider="manual", amount=int(final_price),
+            period_seconds=pay_seconds,
+            promo_code=pending_promo if promo_line else None,
+        )
+    except Exception:
+        pass
+
     from log_channel import send_log
     from database import get_user_info
     u = await get_user_info(tg_id)

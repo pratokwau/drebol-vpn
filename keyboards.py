@@ -35,6 +35,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
     tickets_label = f"🎫 Тикеты 🔴{unread_tickets}" if unread_tickets else "🎫 Тикеты"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Статистика", callback_data="dashboard")],
+        [InlineKeyboardButton("💰 Оплаты", callback_data="payments:paid:1")],
         [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs")],
         [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
         [InlineKeyboardButton("🔍 Найти юзера", callback_data="find_user")],
