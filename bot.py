@@ -112,16 +112,27 @@ async def post_init(app: Application):
             if not pg.is_configured():
                 return
 
-            await expire_stale_payments(24)
+            # счёт Platega живёт 30 минут — дальше опрашивать нечего
+            ttl = int(load_config().get("invoice_ttl_minutes", 60) or 60)
+            await expire_stale_payments(ttl)
             pending = await get_pending_payments("platega", limit=40)
             if not pending:
                 return
 
+            # статусы читаем параллельно: последовательно 40 счетов могли бы
+            # растянуться дольше, чем интервал самой задачи
+            import asyncio
+            statuses = await asyncio.gather(
+                *[pg.get_status(p[3]) for p in pending if p[3]],
+                return_exceptions=True,
+            )
+
             from paidsub.handlers import apply_paid_payment
-            for pay_id, tg_id, _prov, ext_id, amount, period, promo, _created in pending:
-                if not ext_id:
+            for (pay_id, tg_id, _prov, ext_id, amount, period, promo, _created), r in zip(
+                [p for p in pending if p[3]], statuses
+            ):
+                if isinstance(r, Exception):
                     continue
-                r = await pg.get_status(ext_id)
                 if not r.get("ok"):
                     if r.get("not_found"):
                         await set_payment_status(pay_id, "error", "транзакция не найдена")
@@ -155,7 +166,8 @@ async def post_init(app: Application):
                 elif status in (pg.STATUS_CANCELED, pg.STATUS_CHARGEBACKED):
                     await set_payment_status(pay_id, status.lower())
 
-        app.job_queue.run_repeating(_platega_poll_job, interval=20, first=30)
+        poll_every = int(load_config().get("invoice_poll_seconds", 60) or 60)
+        app.job_queue.run_repeating(_platega_poll_job, interval=poll_every, first=30)
 
         async def _paid_sync_job(ctx):
             from datetime import datetime

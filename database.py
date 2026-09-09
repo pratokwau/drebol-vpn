@@ -571,14 +571,19 @@ async def set_payment_status(payment_id: int, status: str, error: str | None = N
         await db.commit()
 
 
-async def expire_stale_payments(hours: int = 24) -> int:
-    """Гасит счета, по которым так и не заплатили."""
+async def expire_stale_payments(minutes: int = 60) -> int:
+    """Гасит счета, по которым так и не заплатили.
+
+    Счёт в платёжной системе живёт ограниченное время (у Platega — 30 минут),
+    после чего опрашивать его бессмысленно. Берём запас вдвое, чтобы не
+    потерять оплату, подтверждённую у самого края срока.
+    """
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
             UPDATE payments SET status = 'expired'
             WHERE status = 'pending'
               AND created_at < datetime('now', ?)
-        """, (f"-{hours} hours",))
+        """, (f"-{minutes} minutes",))
         await db.commit()
         return cur.rowcount or 0
 
