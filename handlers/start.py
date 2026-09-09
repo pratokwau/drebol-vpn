@@ -38,7 +38,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(
             f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
-            "🔒 Быстрый и безопасный VPN\n"
             "⚡️ Стабильное подключение\n"
             "🌍 Доступ к популярным сервисам\n\n"
             "🔒 Чтобы пользоваться ботом, необходимо подписаться на наш канал.\n\n"
@@ -55,7 +54,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     paid_status = await get_paid_sub_status(user.id)
     await update.message.reply_text(
         f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
-        "🔒 Быстрый и безопасный VPN\n"
         "⚡️ Стабильное подключение\n"
         "🌍 Доступ к популярным сервисам\n\n"
         "Выберите нужный раздел ниже 👇",
