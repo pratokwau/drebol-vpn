@@ -28,7 +28,6 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
         InlineKeyboardButton("🔇 Заглушённые", callback_data="paid_muted_list"),
     ])
     kb.append([InlineKeyboardButton("⚡ Массовые действия", callback_data="paid_bulk_menu")])
-    kb.append([InlineKeyboardButton("⏳ Окно оплаты", callback_data="paid_fix_renew")])
     kb.append([
         InlineKeyboardButton("🎟 Промокоды", callback_data="promo_menu"),
         InlineKeyboardButton("👥 Рефералы", callback_data="referral_settings"),
@@ -49,7 +48,6 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💰 Период оплаты", callback_data="paid_preset_pay_period")],
         [InlineKeyboardButton("⏳ Время на продление", callback_data="paid_preset_renew")],
         [InlineKeyboardButton("💵 Сумма подписки", callback_data="paid_preset_price")],
-        [InlineKeyboardButton("🔗 Ссылка на оплату", callback_data="paid_preset_pay_url")],
         [InlineKeyboardButton("💰 Тарифы", callback_data="tariffs_menu")],
         [InlineKeyboardButton("💳 Платёжная система", callback_data="pay_provider_menu")],
         [InlineKeyboardButton("🌐 Лимит IP", callback_data="paid_preset_ip")],

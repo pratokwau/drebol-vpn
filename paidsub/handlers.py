@@ -1584,8 +1584,25 @@ async def check_expired_subs(context):
                     except Exception:
                         pass
 
-                # Не перемещаем в expire-инбаунд чтобы не сбрасывать трафик.
-                # Клиент уже отключён через toggle_client(email, False).
+                # Переносим в инбаунд окончания.
+                # В 3x-UI нет операции «перенести»: клиент удаляется и создаётся
+                # заново, поэтому счётчик трафика в панели обнуляется. Это
+                # осознанный размен — перенос важнее сохранности статистики.
+                if expire_inbound_ids:
+                    from xui_api import move_client_inbound
+                    move = await move_client_inbound(email, expire_inbound_ids)
+                    if move.get("success"):
+                        if move.get("moved") and tg_id:
+                            await add_history(
+                                tg_id, "sub_expired",
+                                f"Перенесён в инбаунд окончания {expire_inbound_ids}",
+                            )
+                    else:
+                        from log_channel import send_log
+                        await send_log(context.bot,
+                            f"⚠️ Не удалось перенести в инбаунд окончания: "
+                            f"<code>{email}</code> — {move.get('error', '?')}"
+                        )
 
 
 async def apply_paid_payment(tg_id: int, amount: int, context,

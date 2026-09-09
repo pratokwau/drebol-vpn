@@ -219,7 +219,9 @@ async def handle_my_paid_sub(query):
     kb_rows.append([InlineKeyboardButton("📱 QR-код", callback_data="qr_code")])
     if status in ("renewal", "expired"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
-    if status == "active":
+    # во время окна оплаты доступ ещё работает — перевыпуск должен быть доступен,
+    # иначе при утечке ключа человеку нечего сделать до продления
+    if status in ("active", "renewal") and enabled:
         kb_rows.append([InlineKeyboardButton("🔁 Перевыпуск ключа", callback_data="reissue_key")])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
