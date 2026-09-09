@@ -118,7 +118,7 @@ async def post_init(app: Application):
                 return
 
             from paidsub.handlers import apply_paid_payment
-            for pay_id, tg_id, _prov, ext_id, amount, _period, promo, _created in pending:
+            for pay_id, tg_id, _prov, ext_id, amount, period, promo, _created in pending:
                 if not ext_id:
                     continue
                 r = await pg.get_status(ext_id)
@@ -134,7 +134,8 @@ async def post_init(app: Application):
                     await set_payment_status(pay_id, "paid")
                     try:
                         res = await apply_paid_payment(
-                            tg_id, amount, ctx, promo_code=promo, source="Platega"
+                            tg_id, amount, ctx, promo_code=promo,
+                            source="Platega", period_seconds=period,
                         )
                         if not res.get("ok"):
                             await set_payment_status(pay_id, "paid", res.get("error"))

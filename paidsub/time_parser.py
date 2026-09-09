@@ -1,30 +1,61 @@
 import re
 
 
+_MONTH = 2592000
+_YEAR = 31536000
+
 _UNITS = {
     "минут": 60, "мин": 60, "minute": 60, "min": 60,
     "час": 3600, "hour": 3600, "hr": 3600,
     "день": 86400, "дн": 86400, "day": 86400,
     "недел": 604800, "week": 604800,
-    "месяц": 2592000, "month": 2592000,
+    "месяц": _MONTH, "мес": _MONTH, "month": _MONTH,
+    "год": _YEAR, "года": _YEAR, "лет": _YEAR, "year": _YEAR,
+}
+
+# Формы без числа: «месяц», «год», «полгода» — для тарифов пишут именно так
+_WORDS = {
+    "полгода": 6 * _MONTH,
+    "полугодие": 6 * _MONTH,
+    "год": _YEAR,
+    "года": _YEAR,
+    "годик": _YEAR,
+    "месяц": _MONTH,
+    "неделя": 604800,
+    "неделю": 604800,
+    "день": 86400,
+    "сутки": 86400,
+    "year": _YEAR,
+    "month": _MONTH,
+    "week": 604800,
+    "day": 86400,
 }
 
 _PATTERN = re.compile(r"(\d+)\s*([a-zа-яё]+)", re.IGNORECASE)
 
 
 def parse_duration(text: str) -> int:
-    """Парсит строку вроде '5 часов', '7 дней', '2 недели', '44 минуты', '3 месяца'.
+    """Парсит '5 часов', '7 дней', '2 недели', '3 месяца', '1 год', 'полгода'.
     Возвращает количество секунд или None если не удалось распознать."""
-    m = _PATTERN.match(text.strip())
+    raw = (text or "").strip().lower()
+    if not raw:
+        return None
+
+    # сначала формы без числа
+    if raw in _WORDS:
+        return _WORDS[raw]
+
+    m = _PATTERN.match(raw)
     if not m:
         return None
     num = int(m.group(1))
     if num <= 0:
         return None
-    unit_text = m.group(2).lower()
-    for prefix, seconds in _UNITS.items():
+    unit_text = m.group(2)
+    # длинные префиксы вперёд, иначе «мес» перехватит «месяц»
+    for prefix in sorted(_UNITS, key=len, reverse=True):
         if unit_text.startswith(prefix):
-            return num * seconds
+            return num * _UNITS[prefix]
     return None
 
 
@@ -65,6 +96,9 @@ def fmt_duration_precise(seconds: int) -> str:
 
 def fmt_duration(seconds: int) -> str:
     """Форматирует секунды в читаемую строку."""
+    if seconds >= _YEAR and seconds % _YEAR == 0:
+        n = seconds // _YEAR
+        return _plural(n, ("год", "года", "лет"))
     if seconds >= 2592000 and seconds % 2592000 == 0:
         n = seconds // 2592000
         return f"{n} мес."

@@ -1590,11 +1590,15 @@ async def check_expired_subs(context):
 
 async def apply_paid_payment(tg_id: int, amount: int, context,
                              promo_code: str | None = None,
-                             source: str = "Platega") -> dict:
+                             source: str = "Platega",
+                             period_seconds: int | None = None) -> dict:
     """Засчитывает оплату, пришедшую из платёжной системы.
 
     Делает то же, что ручное подтверждение админом, но без его участия:
     продлевает период, включает клиента, списывает промокод и уведомляет.
+
+    period_seconds — срок из оплаченного тарифа. Он зафиксирован в счёте,
+    поэтому правка тарифа после оплаты не меняет уже купленный срок.
     """
     row = await get_paid_sub_by_tg_id(tg_id)
     if not row:
@@ -1607,7 +1611,7 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     cfg = load_config()
     from paidsub.storage import sub_settings
     settings = sub_settings(full_row)
-    pay_seconds = settings["pay_period"]
+    pay_seconds = period_seconds or settings["pay_period"]
     renew_seconds = settings["renew_time"]
 
     new_period_end = datetime.now() + timedelta(seconds=pay_seconds)

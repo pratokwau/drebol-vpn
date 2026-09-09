@@ -75,6 +75,14 @@ AWAITING_LOG_CHANNEL = "awaiting_log_channel"
 AWAITING_WINBACK_DAYS = "awaiting_winback_days"
 AWAITING_WINBACK_PERCENT = "awaiting_winback_percent"
 
+# Тарифы
+AWAITING_TARIFF_NAME = "awaiting_tariff_name"
+AWAITING_TARIFF_PERIOD = "awaiting_tariff_period"
+AWAITING_TARIFF_PRICE = "awaiting_tariff_price"
+AWAITING_TARIFF_EDIT_NAME = "awaiting_tariff_edit_name"
+AWAITING_TARIFF_EDIT_PERIOD = "awaiting_tariff_edit_period"
+AWAITING_TARIFF_EDIT_PRICE = "awaiting_tariff_edit_price"
+
 # Платёжная система
 AWAITING_PLATEGA_MERCHANT = "awaiting_platega_merchant"
 AWAITING_PLATEGA_SECRET = "awaiting_platega_secret"

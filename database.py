@@ -210,6 +210,18 @@ async def init_db():
             await db.execute("ALTER TABLE paid_subs ADD COLUMN pending_promo TEXT")
         except Exception:
             pass
+        # Тарифы: варианты продления, которые видит клиент.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tariffs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                period_seconds INTEGER NOT NULL,
+                price INTEGER NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         # Платежи через платёжную систему.
         # Сумма и период кладутся снимком: правка тарифа не должна задним
         # числом менять уже созданный счёт.
@@ -418,6 +430,59 @@ async def get_support_messages(user_id: int, page: int = 1):
             msgs = await cur.fetchall()
     total_pages = max(1, (total + MSGS_PER_PAGE - 1) // MSGS_PER_PAGE)
     return msgs, total_pages
+
+
+# ── Тарифы ───────────────────────────────────────────────────────────────────
+
+async def add_tariff(name: str, period_seconds: int, price: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tariffs") as cur:
+            order = (await cur.fetchone())[0]
+        cur = await db.execute(
+            "INSERT INTO tariffs (name, period_seconds, price, sort_order) VALUES (?, ?, ?, ?)",
+            (name, period_seconds, price, order),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def list_tariffs(only_active: bool = False) -> list[tuple]:
+    q = "SELECT id, name, period_seconds, price, active, sort_order FROM tariffs"
+    if only_active:
+        q += " WHERE active = 1"
+    q += " ORDER BY sort_order ASC, id ASC"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(q) as cur:
+            return await cur.fetchall()
+
+
+async def get_tariff(tariff_id: int) -> tuple | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, name, period_seconds, price, active, sort_order "
+            "FROM tariffs WHERE id = ?", (tariff_id,)
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def update_tariff_field(tariff_id: int, field: str, value):
+    if field not in {"name", "period_seconds", "price", "active", "sort_order"}:
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"UPDATE tariffs SET {field} = ? WHERE id = ?", (value, tariff_id))
+        await db.commit()
+
+
+async def delete_tariff(tariff_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM tariffs WHERE id = ?", (tariff_id,))
+        await db.commit()
+
+
+async def count_active_tariffs() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM tariffs WHERE active = 1") as cur:
+            return (await cur.fetchone())[0]
 
 
 # ── Платежи ──────────────────────────────────────────────────────────────────

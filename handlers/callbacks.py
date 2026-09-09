@@ -21,6 +21,11 @@ from handlers.admin import (
     handle_user_history, handle_dm_user, handle_payment_stats,
 )
 from handlers.support import open_support, handle_support_files
+from handlers.tariffs import (
+    handle_tariffs_menu, handle_tariff_view, handle_tariff_toggle,
+    handle_tariff_delete, handle_tariff_delete_confirm, handle_tariff_add,
+    handle_tariff_edit,
+)
 from handlers.payprovider import (
     handle_pay_provider_menu, handle_pay_provider_set,
     handle_platega_set_merchant, handle_platega_set_secret,
@@ -162,6 +167,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_remove_promo(query, context)
     elif data == "pay_invoice":
         await handle_pay_invoice(query, context)
+    elif data.startswith("pay_invoice:"):
+        await handle_pay_invoice(query, context, int(data.split(":")[1]))
     elif data == "i_paid":
         await handle_i_paid(query, context)
     elif data == "my_sub":
@@ -354,6 +361,24 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_create_sub(query, context)
     elif data.startswith("paid_create_type:"):
         await handle_paid_create_type(query, context, data.split(":")[1] == "trial")
+    elif data == "tariffs_menu":
+        await handle_tariffs_menu(query, context)
+    elif data == "tariff_add":
+        await handle_tariff_add(query, context)
+    elif data.startswith("tariff_view:"):
+        await handle_tariff_view(query, int(data.split(":")[1]))
+    elif data.startswith("tariff_toggle:"):
+        await handle_tariff_toggle(query, context, int(data.split(":")[1]))
+    elif data.startswith("tariff_del_ok:"):
+        await handle_tariff_delete_confirm(query, context, int(data.split(":")[1]))
+    elif data.startswith("tariff_del:"):
+        await handle_tariff_delete(query, int(data.split(":")[1]))
+    elif data.startswith("tariff_price:"):
+        await handle_tariff_edit(query, context, int(data.split(":")[1]), "price")
+    elif data.startswith("tariff_period:"):
+        await handle_tariff_edit(query, context, int(data.split(":")[1]), "period")
+    elif data.startswith("tariff_name:"):
+        await handle_tariff_edit(query, context, int(data.split(":")[1]), "name")
     elif data == "pay_provider_menu":
         await handle_pay_provider_menu(query, context)
     elif data.startswith("pay_provider_set:"):

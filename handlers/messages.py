@@ -38,6 +38,8 @@ from states import (
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
+    AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
+    AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
 )
 
 
@@ -1019,6 +1021,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("winback_percent", int(text))
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Скидка Winback: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Тарифы ───────────────────────────────────────────────────────────────
+    if state in (AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE):
+        from handlers.tariffs import apply_new_step
+        context.user_data.pop("state", None)
+        await apply_new_step(update.message, context, state, text)
+        return
+
+    if state in (AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD,
+                 AWAITING_TARIFF_EDIT_PRICE):
+        from handlers.tariffs import apply_edit
+        await apply_edit(update.message, context, state, text)
         return
 
     # ── Ключи платёжной системы ──────────────────────────────────────────────
