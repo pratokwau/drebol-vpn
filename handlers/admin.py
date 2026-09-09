@@ -105,56 +105,73 @@ async def handle_dashboard(query):
 
 async def handle_healthcheck(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from xui_api import get_inbounds
-    import json
+    from xui_api import probe_servers
+
     await query.edit_message_text("🩺 Проверяю серверы...")
-    result = await get_inbounds()
+    r = await probe_servers()
+    panel, sub, inbounds = r["panel"], r["sub"], r["inbounds"]
+
     back = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Проверить снова", callback_data="healthcheck")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
-    if not result["success"]:
-        await query.edit_message_text(
-            "🩺 <b>Здоровье серверов</b>\n\n"
-            "🔴 <b>Панель недоступна!</b>\n"
-            f"<code>{result['error']}</code>",
-            parse_mode="HTML", reply_markup=back,
+
+    lines = ["🩺 <b>Здоровье серверов</b>\n"]
+
+    # Панель
+    if panel["ok"]:
+        lines.append(f"🟢 <b>Панель</b> — отвечает, {panel['ms']} мс")
+    else:
+        lines.append(f"🔴 <b>Панель недоступна</b>\n     <code>{panel['error']}</code>")
+
+    # Подписки — отдельный сервис на своём порту, падает независимо от панели
+    if sub["ok"]:
+        note = "" if sub["status"] < 400 else f" (HTTP {sub['status']})"
+        lines.append(f"🟢 <b>Подписки</b> — отвечают, {sub['ms']} мс{note}")
+    else:
+        lines.append(
+            f"🔴 <b>Подписки не работают</b> — порт {sub.get('port', '?')}\n"
+            f"     <code>{sub['error']}</code>\n"
+            f"     <i>Клиенты не смогут обновить ключ.</i>"
         )
-        return
-    inbounds = result["inbounds"]
-    if not inbounds:
-        await query.edit_message_text(
-            "🩺 <b>Здоровье серверов</b>\n\n"
-            "🟢 Панель доступна, но инбаундов нет.",
-            parse_mode="HTML", reply_markup=back,
-        )
-        return
-    lines = ["🩺 <b>Здоровье серверов</b>\n", "🟢 Панель доступна\n"]
-    up_count = 0
-    for inb in inbounds:
-        enable = inb.get("enable", True)
-        tag = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
-        protocol = inb.get("protocol", "?")
-        port = inb.get("port", "")
-        # число клиентов
-        clients = 0
-        cs = inb.get("clientStats")
-        if isinstance(cs, list):
-            clients = len(cs)
+
+    # Инбаунды
+    if panel["ok"]:
+        if not inbounds:
+            lines.append("\n⚪️ Инбаундов нет.")
         else:
-            try:
-                settings = json.loads(inb.get("settings") or "{}")
-                clients = len(settings.get("clients") or [])
-            except Exception:
-                clients = 0
-        icon = "🟢" if enable else "🔴"
-        if enable:
-            up_count += 1
-        lines.append(f"{icon} <b>{tag}</b> ({protocol}:{port}) · 👤 {clients}")
-    lines.append(f"\nАктивных инбаундов: <b>{up_count}/{len(inbounds)}</b>")
+            up = sum(1 for i in inbounds if i["enabled"] and i["reachable"])
+            active = sum(1 for i in inbounds if i["enabled"])
+            lines.append(f"\n<b>Инбаунды</b> — доступно {up}/{active}")
+            for i in inbounds:
+                if not i["enabled"]:
+                    icon, tail = "⚪️", " · выключен"
+                elif i["reachable"]:
+                    icon, tail = "🟢", f" · {i['ms']} мс"
+                else:
+                    icon, tail = "🔴", f" · {i['error']}"
+                lines.append(
+                    f"{icon} <b>{i['tag']}</b> ({i['protocol']}:{i['port']}) "
+                    f"· 👤 {i['clients']}{tail}"
+                )
+
+    problems = []
+    if not panel["ok"]:
+        problems.append("панель не отвечает — бот не сможет выдавать и продлевать ключи")
+    if not sub["ok"]:
+        problems.append("сервис подписок лежит — выданные ключи не обновятся у клиентов")
+    dead = [i["tag"] for i in inbounds if i["enabled"] and not i["reachable"]]
+    if dead:
+        problems.append("порт не принимает соединения: " + ", ".join(dead[:5]))
+    if problems:
+        lines.append("\n⚠️ <b>Проблемы:</b>")
+        lines += [f"• {p}" for p in problems]
+    elif panel["ok"]:
+        lines.append("\n✅ Всё работает.")
+
     await query.edit_message_text(
-        "\n".join(lines),
-        parse_mode="HTML", reply_markup=back,
+        "\n".join(lines), parse_mode="HTML", reply_markup=back,
+        disable_web_page_preview=True,
     )
 
 

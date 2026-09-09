@@ -1,3 +1,5 @@
+import asyncio
+import time
 import uuid
 import json
 import random
@@ -143,6 +145,143 @@ async def count_panel_clients() -> dict:
                 paid += 1
     total = len(seen)
     return {"success": True, "total": total, "paid": paid, "other": total - paid}
+
+
+async def check_tcp(host: str, port, timeout: float = 4.0) -> dict:
+    """Реально ли порт принимает соединения (а не что о нём написано в конфиге)."""
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "некорректный порт"}
+    if not host or not (0 < port < 65536):
+        return {"ok": False, "error": "нет адреса"}
+
+    start = time.monotonic()
+    writer = None
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
+        return {"ok": True, "ms": int((time.monotonic() - start) * 1000)}
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": "таймаут"}
+    except ConnectionRefusedError:
+        return {"ok": False, "error": "порт закрыт"}
+    except OSError as e:
+        return {"ok": False, "error": (e.strerror or str(e))[:50]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:50]}
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+
+async def check_sub_service(timeout: float = 6.0) -> dict:
+    """Проверяет сервис подписок — тот самый адрес, по которому ходят клиенты.
+
+    Панель и подписки в 3x-UI слушают разные порты и падают независимо:
+    панель может отвечать, пока выдача подписок лежит. Именно этот случай
+    прежняя проверка не видела.
+    """
+    cfg = load_config()
+    url = (cfg.get("xui_url") or "").rstrip("/")
+    if not url:
+        return {"ok": False, "error": "URL панели не задан", "url": ""}
+
+    parsed = urlparse(url)
+    host = parsed.hostname
+    scheme = parsed.scheme or "https"
+    sub_port = cfg.get("xui_sub_port") or (443 if scheme == "https" else 80)
+    sub_path = cfg.get("xui_sub_path", "/sub/")
+
+    try:
+        port_int = int(sub_port)
+    except (TypeError, ValueError):
+        port_int = 443 if scheme == "https" else 80
+
+    skip_port = (scheme == "https" and port_int == 443) or (scheme == "http" and port_int == 80)
+    base = f"{scheme}://{host}{'' if skip_port else f':{port_int}'}{sub_path}"
+
+    tcp = await check_tcp(host, port_int, timeout=4.0)
+    if not tcp["ok"]:
+        return {"ok": False, "error": tcp["error"], "url": base, "port": port_int}
+
+    start = time.monotonic()
+    conn = aiohttp.TCPConnector(ssl=False)
+    try:
+        async with aiohttp.ClientSession(
+            connector=conn, timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as s:
+            async with s.get(base, allow_redirects=False) as r:
+                # даже 404 означает, что сервис жив и отвечает —
+                # важно отличать «нет ответа» от «ответил кодом»
+                return {
+                    "ok": True,
+                    "status": r.status,
+                    "ms": int((time.monotonic() - start) * 1000),
+                    "url": base,
+                    "port": port_int,
+                }
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": "таймаут HTTP", "url": base, "port": port_int}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:60], "url": base, "port": port_int}
+
+
+def _inbound_clients(inb: dict) -> int:
+    cs = inb.get("clientStats")
+    if isinstance(cs, list):
+        return len(cs)
+    try:
+        return len(json.loads(inb.get("settings") or "{}").get("clients") or [])
+    except Exception:
+        return 0
+
+
+async def probe_servers() -> dict:
+    """Полная проверка: панель, сервис подписок и реальная доступность портов."""
+    cfg = load_config()
+    url = (cfg.get("xui_url") or "").rstrip("/")
+    host = urlparse(url).hostname if url else None
+
+    start = time.monotonic()
+    inb_result = await get_inbounds()
+    panel = {
+        "ok": bool(inb_result.get("success")),
+        "ms": int((time.monotonic() - start) * 1000),
+        "error": inb_result.get("error"),
+        "host": host,
+    }
+
+    sub = await check_sub_service()
+
+    inbounds = []
+    if panel["ok"]:
+        raw = inb_result.get("inbounds") or []
+        # порты проверяем параллельно, иначе на десятке инбаундов экран висит
+        checks = await asyncio.gather(*[
+            check_tcp(inb.get("listen") or host, inb.get("port"))
+            for inb in raw
+        ], return_exceptions=True)
+
+        for inb, chk in zip(raw, checks):
+            if isinstance(chk, Exception):
+                chk = {"ok": False, "error": str(chk)[:50]}
+            inbounds.append({
+                "tag": inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}",
+                "protocol": inb.get("protocol", "?"),
+                "port": inb.get("port"),
+                "enabled": inb.get("enable", True),
+                "clients": _inbound_clients(inb),
+                "reachable": chk.get("ok", False),
+                "ms": chk.get("ms"),
+                "error": chk.get("error"),
+            })
+
+    return {"panel": panel, "sub": sub, "inbounds": inbounds}
 
 
 async def test_connection() -> dict:

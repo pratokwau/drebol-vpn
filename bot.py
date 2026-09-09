@@ -35,38 +35,65 @@ async def post_init(app: Application):
         app.job_queue.run_repeating(check_expired_subs, interval=10, first=10)
 
         async def _healthcheck_job(ctx):
+            """Следит за панелью, сервисом подписок и портами инбаундов.
+
+            Уведомляет только при смене состояния, чтобы не спамить каждые 5 минут.
+            """
             from config import ADMIN_ID, load_config, save_config
-            from xui_api import test_connection
+            from xui_api import probe_servers
+            from log_channel import send_log
+
             cfg = load_config()
             if not cfg.get("xui_url") or not cfg.get("xui_token"):
                 return
-            result = await test_connection()
-            healthy = bool(result.get("success"))
-            prev = cfg.get("xui_healthy", True)
-            if healthy != prev:
-                cfg["xui_healthy"] = healthy
+
+            r = await probe_servers()
+            panel_ok = r["panel"]["ok"]
+            sub_ok = r["sub"]["ok"]
+            dead = sorted(
+                i["tag"] for i in r["inbounds"] if i["enabled"] and not i["reachable"]
+            )
+
+            alerts = []
+            changed = False
+
+            if panel_ok != cfg.get("xui_healthy", True):
+                cfg["xui_healthy"] = panel_ok
+                changed = True
+                alerts.append(
+                    "🟢 <b>Панель 3x-UI снова доступна.</b>" if panel_ok else
+                    f"🔴 <b>Панель 3x-UI недоступна!</b>\n<code>{r['panel'].get('error', '?')}</code>"
+                )
+
+            # панель может отвечать, пока выдача подписок лежит — следим отдельно
+            if panel_ok and sub_ok != cfg.get("sub_healthy", True):
+                cfg["sub_healthy"] = sub_ok
+                changed = True
+                alerts.append(
+                    "🟢 <b>Сервис подписок снова работает.</b>" if sub_ok else
+                    f"🔴 <b>Сервис подписок не отвечает!</b>\n"
+                    f"Порт {r['sub'].get('port', '?')} — <code>{r['sub'].get('error', '?')}</code>\n"
+                    f"Клиенты не смогут обновить ключ."
+                )
+
+            if panel_ok and dead != (cfg.get("dead_inbounds") or []):
+                prev = cfg.get("dead_inbounds") or []
+                cfg["dead_inbounds"] = dead
+                changed = True
+                if dead:
+                    alerts.append(
+                        "🔴 <b>Инбаунд не принимает соединения:</b>\n" +
+                        "\n".join(f"• {t}" for t in dead)
+                    )
+                elif prev:
+                    alerts.append("🟢 <b>Все инбаунды снова доступны.</b>")
+
+            if changed:
                 save_config(cfg)
-                from log_channel import send_log
+            for text in alerts:
                 try:
-                    if healthy:
-                        await ctx.bot.send_message(
-                            chat_id=ADMIN_ID,
-                            text="🟢 <b>Панель 3x-UI снова доступна.</b>",
-                            parse_mode="HTML",
-                        )
-                        await send_log(ctx.bot, "🟢 Панель 3x-UI снова доступна.")
-                    else:
-                        await ctx.bot.send_message(
-                            chat_id=ADMIN_ID,
-                            text=(
-                                "🔴 <b>Панель 3x-UI недоступна!</b>\n\n"
-                                f"<code>{result.get('error', '?')}</code>"
-                            ),
-                            parse_mode="HTML",
-                        )
-                        await send_log(ctx.bot,
-                            f"🔴 Панель 3x-UI недоступна!\n<code>{result.get('error', '?')}</code>"
-                        )
+                    await ctx.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="HTML")
+                    await send_log(ctx.bot, text)
                 except Exception:
                     pass
 
