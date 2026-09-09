@@ -37,6 +37,7 @@ from states import (
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_DM_USER,
+    AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
 )
 
 
@@ -1018,6 +1019,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("winback_percent", int(text))
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Скидка Winback: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    # ── Ключи платёжной системы ──────────────────────────────────────────────
+    if state in (AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET):
+        context.user_data.pop("state", None)
+        from handlers.payprovider import apply_credential
+        field = ("platega_merchant_id" if state == AWAITING_PLATEGA_MERCHANT
+                 else "platega_secret")
+        await apply_credential(update.message, context, field, text)
         return
 
     # ── Сообщение юзеру из профиля ─────────────────────────────────────────────

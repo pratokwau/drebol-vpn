@@ -50,6 +50,7 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⏳ Время на продление", callback_data="paid_preset_renew")],
         [InlineKeyboardButton("💵 Сумма подписки", callback_data="paid_preset_price")],
         [InlineKeyboardButton("🔗 Ссылка на оплату", callback_data="paid_preset_pay_url")],
+        [InlineKeyboardButton("💳 Платёжная система", callback_data="pay_provider_menu")],
         [InlineKeyboardButton("🌐 Лимит IP", callback_data="paid_preset_ip")],
         [InlineKeyboardButton("🖥 Лимит HWID", callback_data="paid_preset_hwid")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="paid_preset_traffic")],

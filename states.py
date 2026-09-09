@@ -75,5 +75,9 @@ AWAITING_LOG_CHANNEL = "awaiting_log_channel"
 AWAITING_WINBACK_DAYS = "awaiting_winback_days"
 AWAITING_WINBACK_PERCENT = "awaiting_winback_percent"
 
+# Платёжная система
+AWAITING_PLATEGA_MERCHANT = "awaiting_platega_merchant"
+AWAITING_PLATEGA_SECRET = "awaiting_platega_secret"
+
 # Сообщение юзеру из профиля
 AWAITING_DM_USER = "awaiting_dm_user"

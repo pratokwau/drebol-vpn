@@ -210,6 +210,32 @@ async def init_db():
             await db.execute("ALTER TABLE paid_subs ADD COLUMN pending_promo TEXT")
         except Exception:
             pass
+        # Платежи через платёжную систему.
+        # Сумма и период кладутся снимком: правка тарифа не должна задним
+        # числом менять уже созданный счёт.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                external_id TEXT,
+                amount INTEGER NOT NULL,
+                period_seconds INTEGER,
+                promo_code TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                pay_url TEXT,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                paid_at TIMESTAMP
+            )
+        """)
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external "
+            "ON payments(provider, external_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)"
+        )
         # Баны
         await db.execute("""
             CREATE TABLE IF NOT EXISTS bans (
@@ -392,6 +418,87 @@ async def get_support_messages(user_id: int, page: int = 1):
             msgs = await cur.fetchall()
     total_pages = max(1, (total + MSGS_PER_PAGE - 1) // MSGS_PER_PAGE)
     return msgs, total_pages
+
+
+# ── Платежи ──────────────────────────────────────────────────────────────────
+
+async def add_payment(tg_id: int, provider: str, external_id: str, amount: int,
+                      period_seconds: int | None, pay_url: str,
+                      promo_code: str | None = None) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            INSERT INTO payments (tg_id, provider, external_id, amount,
+                                  period_seconds, promo_code, status, pay_url)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (tg_id, provider, external_id, amount, period_seconds, promo_code, pay_url))
+        await db.commit()
+        return cur.lastrowid
+
+
+async def get_pending_payments(provider: str | None = None, limit: int = 50) -> list[tuple]:
+    """Счета, ожидающие оплаты — их опрашивает фоновая задача."""
+    q = """SELECT id, tg_id, provider, external_id, amount, period_seconds,
+                  promo_code, created_at
+           FROM payments WHERE status = 'pending'"""
+    params: list = []
+    if provider:
+        q += " AND provider = ?"
+        params.append(provider)
+    q += " ORDER BY id ASC LIMIT ?"
+    params.append(limit)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(q, params) as cur:
+            return await cur.fetchall()
+
+
+async def get_payment(payment_id: int) -> tuple | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, provider, external_id, amount, period_seconds,
+                   promo_code, status, pay_url, created_at, paid_at
+            FROM payments WHERE id = ?
+        """, (payment_id,)) as cur:
+            return await cur.fetchone()
+
+
+async def get_active_payment(tg_id: int, provider: str) -> tuple | None:
+    """Последний неоплаченный счёт юзера — чтобы не плодить дубли."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, provider, external_id, amount, period_seconds,
+                   promo_code, status, pay_url, created_at
+            FROM payments
+            WHERE tg_id = ? AND provider = ? AND status = 'pending'
+            ORDER BY id DESC LIMIT 1
+        """, (tg_id, provider)) as cur:
+            return await cur.fetchone()
+
+
+async def set_payment_status(payment_id: int, status: str, error: str | None = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        if status == "paid":
+            await db.execute(
+                "UPDATE payments SET status = ?, paid_at = CURRENT_TIMESTAMP, error = ? "
+                "WHERE id = ?", (status, error, payment_id)
+            )
+        else:
+            await db.execute(
+                "UPDATE payments SET status = ?, error = ? WHERE id = ?",
+                (status, error, payment_id)
+            )
+        await db.commit()
+
+
+async def expire_stale_payments(hours: int = 24) -> int:
+    """Гасит счета, по которым так и не заплатили."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            UPDATE payments SET status = 'expired'
+            WHERE status = 'pending'
+              AND created_at < datetime('now', ?)
+        """, (f"-{hours} hours",))
+        await db.commit()
+        return cur.rowcount or 0
 
 
 async def count_support_files(user_id: int) -> int:

@@ -99,6 +99,63 @@ async def post_init(app: Application):
 
         app.job_queue.run_repeating(_healthcheck_job, interval=300, first=60)
 
+        async def _platega_poll_job(ctx):
+            """Опрашивает выставленные счета и засчитывает оплату.
+
+            Колбэки Platega требуют публичный HTTPS с валидным сертификатом,
+            поэтому статус выясняем опросом — не зависит от занятости 443.
+            """
+            import platega_api as pg
+            from database import (
+                get_pending_payments, set_payment_status, expire_stale_payments,
+            )
+            if not pg.is_configured():
+                return
+
+            await expire_stale_payments(24)
+            pending = await get_pending_payments("platega", limit=40)
+            if not pending:
+                return
+
+            from paidsub.handlers import apply_paid_payment
+            for pay_id, tg_id, _prov, ext_id, amount, _period, promo, _created in pending:
+                if not ext_id:
+                    continue
+                r = await pg.get_status(ext_id)
+                if not r.get("ok"):
+                    if r.get("not_found"):
+                        await set_payment_status(pay_id, "error", "транзакция не найдена")
+                    continue
+
+                status = r.get("status")
+                if status == pg.STATUS_CONFIRMED:
+                    # статус ставим до начисления: если начисление упадёт,
+                    # повторный проход не выдаст второй период за один платёж
+                    await set_payment_status(pay_id, "paid")
+                    try:
+                        res = await apply_paid_payment(
+                            tg_id, amount, ctx, promo_code=promo, source="Platega"
+                        )
+                        if not res.get("ok"):
+                            await set_payment_status(pay_id, "paid", res.get("error"))
+                            from config import ADMIN_ID
+                            await ctx.bot.send_message(
+                                chat_id=ADMIN_ID,
+                                text=(
+                                    "⚠️ <b>Оплата получена, но не засчитана</b>\n\n"
+                                    f"👤 <code>{tg_id}</code> · {amount} ₽\n"
+                                    f"<code>{res.get('error')}</code>\n\n"
+                                    "Продли подписку вручную."
+                                ),
+                                parse_mode="HTML",
+                            )
+                    except Exception as e:
+                        await set_payment_status(pay_id, "paid", str(e)[:120])
+                elif status in (pg.STATUS_CANCELED, pg.STATUS_CHARGEBACKED):
+                    await set_payment_status(pay_id, status.lower())
+
+        app.job_queue.run_repeating(_platega_poll_job, interval=20, first=30)
+
         async def _paid_sync_job(ctx):
             from datetime import datetime
             cfg = load_config()

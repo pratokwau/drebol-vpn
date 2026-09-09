@@ -268,6 +268,32 @@ async def handle_renew_sub(query):
             if row:
                 await update_paid_sub_field(row[0], "pending_promo", None)
 
+    from handlers.payprovider import current_provider
+    provider = current_provider()
+
+    # Platega: счёт выставляет бот, оплата засчитывается автоматически
+    if provider == "platega":
+        import platega_api as pg
+        if pg.is_configured():
+            kb = [
+                [InlineKeyboardButton("💳 Оплатить", callback_data="pay_invoice")],
+                promo_btn_row,
+                [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+            ]
+            await query.edit_message_text(
+                "💳 <b>Продление подписки</b>\n\n"
+                f"{price_line}"
+                f"{promo_line}"
+                f"⏱ Срок: <b>{period_str}</b>\n\n"
+                "Нажмите <b>Оплатить</b> — я пришлю ссылку.\n"
+                "Подписка продлится автоматически сразу после оплаты.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(kb),
+            )
+            return
+        # ключи не заданы — не оставляем человека без вариантов
+        pay_url = pay_url or ""
+
     kb = []
     if pay_url:
         kb.append([InlineKeyboardButton("💳 Оплатить", url=pay_url)])
@@ -286,6 +312,97 @@ async def handle_renew_sub(query):
         "администратор проверит и активирует вашу подписку.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
+    )
+
+
+async def handle_pay_invoice(query, context):
+    """Создаёт счёт в Platega и отдаёт ссылку на оплату."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    import platega_api as pg
+    from database import add_payment, get_active_payment
+    from paidsub.storage import get_paid_sub_by_tg_id, sub_settings, get_pending_promo
+    from paidsub.handlers import validate_promo, apply_discount
+
+    user = query.from_user
+    if not pg.is_configured():
+        await query.answer("Оплата временно недоступна", show_alert=True)
+        return
+
+    row = await get_paid_sub_by_tg_id(user.id)
+    settings = sub_settings(row)
+    price = int(settings["price"])
+    pay_seconds = settings["pay_period"]
+
+    promo_code = None
+    pending = await get_pending_promo(user.id)
+    if pending:
+        promo, err = await validate_promo(pending, user.id)
+        if promo:
+            promo_code = promo[1]
+            price = apply_discount(price, promo[2])
+
+    # уже есть неоплаченный счёт на ту же сумму — переиспользуем ссылку,
+    # чтобы не плодить счета при повторных нажатиях
+    existing = await get_active_payment(user.id, "platega")
+    if existing and existing[4] == price and existing[8]:
+        await _send_invoice(query, existing[8], price)
+        return
+
+    await query.edit_message_text("⏳ Создаю счёт...")
+    result = await pg.create_payment(
+        amount=price,
+        description=f"Подписка Drebol VPN · {user.id}",
+        tg_id=user.id,
+        username=user.username,
+    )
+    if not result["ok"]:
+        await query.edit_message_text(
+            "❌ <b>Не удалось создать счёт</b>\n\n"
+            "Попробуйте ещё раз или напишите в поддержку.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔁 Ещё раз", callback_data="pay_invoice")],
+                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
+                [InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")],
+            ]),
+        )
+        from config import ADMIN_ID
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "⚠️ <b>Ошибка создания счёта Platega</b>\n\n"
+                    f"👤 <code>{user.id}</code>\n"
+                    f"<code>{result['error']}</code>"
+                ),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+        return
+
+    await add_payment(
+        tg_id=user.id, provider="platega",
+        external_id=result["transaction_id"], amount=price,
+        period_seconds=pay_seconds, pay_url=result["url"],
+        promo_code=promo_code,
+    )
+    await _send_invoice(query, result["url"], price)
+
+
+async def _send_invoice(query, url: str, price: int):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    await query.edit_message_text(
+        f"💳 <b>Счёт на {price} ₽</b>\n\n"
+        "Нажмите кнопку ниже и оплатите.\n"
+        "Подписка продлится автоматически — обычно в течение минуты после оплаты.\n\n"
+        "<i>Если оплатили, а подписка не продлилась — напишите в поддержку.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Перейти к оплате", url=url)],
+            [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+        ]),
+        disable_web_page_preview=True,
     )
 
 

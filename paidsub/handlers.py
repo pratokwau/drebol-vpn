@@ -1588,6 +1588,102 @@ async def check_expired_subs(context):
                 # Клиент уже отключён через toggle_client(email, False).
 
 
+async def apply_paid_payment(tg_id: int, amount: int, context,
+                             promo_code: str | None = None,
+                             source: str = "Platega") -> dict:
+    """Засчитывает оплату, пришедшую из платёжной системы.
+
+    Делает то же, что ручное подтверждение админом, но без его участия:
+    продлевает период, включает клиента, списывает промокод и уведомляет.
+    """
+    row = await get_paid_sub_by_tg_id(tg_id)
+    if not row:
+        return {"ok": False, "error": "подписка не найдена"}
+
+    sub_id = row[0]
+    email = row[2]
+
+    full_row = await get_paid_sub(sub_id)
+    cfg = load_config()
+    from paidsub.storage import sub_settings
+    settings = sub_settings(full_row)
+    pay_seconds = settings["pay_period"]
+    renew_seconds = settings["renew_time"]
+
+    new_period_end = datetime.now() + timedelta(seconds=pay_seconds)
+    new_expire = new_period_end + timedelta(seconds=renew_seconds)
+    new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
+
+    await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
+    await update_paid_sub_field(
+        sub_id, "period_end", new_period_end.strftime("%d.%m.%Y %H:%M:%S")
+    )
+    await update_paid_sub_field(sub_id, "status", "active")
+    await update_paid_sub_field(sub_id, "payment_pending", 0)
+    cur_renewed = row[12] if len(row) > 12 else 0
+    await update_paid_sub_field(sub_id, "times_renewed", cur_renewed + 1)
+
+    from xui_api import get_client_info, toggle_client, update_client_expire
+    info = await get_client_info(email)
+    if info.get("success") and not info.get("enabled", True):
+        await toggle_client(email, True)
+    await update_client_expire(email, new_expire_str)
+
+    create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
+    if create_inbound_ids:
+        from xui_api import move_client_inbound
+        await move_client_inbound(email, create_inbound_ids)
+
+    promo_line = ""
+    pending_promo = promo_code or await get_pending_promo(tg_id)
+    if pending_promo:
+        promo = await get_promo(pending_promo)
+        if promo and not await promo_used_by(pending_promo, tg_id):
+            await record_promo_use(pending_promo, tg_id)
+            await add_history(tg_id, "promo_used", f"Промокод {pending_promo} (−{promo[2]}%)")
+            promo_line = f"🎟 Промокод: <b>{pending_promo}</b> (−{promo[2]}%)\n"
+        await update_paid_sub_field(sub_id, "pending_promo", None)
+
+    promo_note = f" (промокод {pending_promo})" if promo_line else ""
+    await add_history(
+        tg_id, "payment_confirmed",
+        f"Сумма: {amount} ₽{promo_note}\nЧерез: {source}\nДо: {new_expire_str}",
+    )
+
+    from log_channel import send_log
+    from database import get_user_info
+    u = await get_user_info(tg_id)
+    u_name = u[1] if u else str(tg_id)
+    await send_log(context.bot,
+        f"💰 Оплата через {source}: {u_name} (<code>{tg_id}</code>) — {amount} ₽\n"
+        f"{promo_line}📅 До: {new_expire_str}"
+    )
+
+    await _notify_user(context.bot, tg_id,
+        f"🎉 <b>Оплата получена!</b>\n\n"
+        f"Ваша подписка продлена до <b>{new_expire_str}</b>.\n"
+        "Спасибо за использование Drebol VPN!"
+    )
+
+    from config import ADMIN_ID
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=(
+                f"💰 <b>Оплата через {source}</b>\n\n"
+                f"👤 {u_name} (<code>{tg_id}</code>)\n"
+                f"💵 {amount} ₽\n"
+                f"{promo_line}"
+                f"📅 До: <b>{new_expire_str}</b>"
+            ),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    return {"ok": True, "expire": new_expire_str}
+
+
 async def handle_confirm_payment(query, tg_id: int, context):
     """Админ подтвердил оплату — продлеваем подписку на оплаченный период."""
     row = await get_paid_sub_by_tg_id(tg_id)

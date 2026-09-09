@@ -9,6 +9,7 @@ from handlers.user import (
     handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_qr_code, handle_reissue_key, handle_prices, handle_info,
+    handle_pay_invoice,
 )
 from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
@@ -20,6 +21,11 @@ from handlers.admin import (
     handle_user_history, handle_dm_user, handle_payment_stats,
 )
 from handlers.support import open_support, handle_support_files
+from handlers.payprovider import (
+    handle_pay_provider_menu, handle_pay_provider_set,
+    handle_platega_set_merchant, handle_platega_set_secret,
+    handle_platega_methods, handle_platega_method_set, handle_platega_test,
+)
 from handlers.broadcast import (
     handle_broadcast_start, handle_broadcast_segment,
     handle_bcast_buttons_add, handle_bcast_buttons_skip,
@@ -154,6 +160,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_enter_promo(query, context)
     elif data == "remove_promo":
         await handle_remove_promo(query, context)
+    elif data == "pay_invoice":
+        await handle_pay_invoice(query, context)
     elif data == "i_paid":
         await handle_i_paid(query, context)
     elif data == "my_sub":
@@ -346,6 +354,20 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_create_sub(query, context)
     elif data.startswith("paid_create_type:"):
         await handle_paid_create_type(query, context, data.split(":")[1] == "trial")
+    elif data == "pay_provider_menu":
+        await handle_pay_provider_menu(query, context)
+    elif data.startswith("pay_provider_set:"):
+        await handle_pay_provider_set(query, context, data.split(":")[1])
+    elif data == "platega_set_merchant":
+        await handle_platega_set_merchant(query, context)
+    elif data == "platega_set_secret":
+        await handle_platega_set_secret(query, context)
+    elif data == "platega_methods":
+        await handle_platega_methods(query, context)
+    elif data.startswith("platega_method:"):
+        await handle_platega_method_set(query, context, int(data.split(":")[1]))
+    elif data == "platega_test":
+        await handle_platega_test(query, context)
     elif data == "paid_sub_presets":
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":
