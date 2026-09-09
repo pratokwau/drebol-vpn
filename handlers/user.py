@@ -678,7 +678,25 @@ async def handle_prices(query):
     if trial_period:
         lines.append(f"🆓 <b>Пробный период</b> — бесплатно\n     {fmt_duration(trial_period)}\n")
 
-    if price and pay_period:
+    # Тарифы — то же, что человек увидит при продлении.
+    # Пока их нет, показываем одну цену из общих настроек.
+    from database import list_tariffs
+    tariffs = await list_tariffs(only_active=True)
+
+    if tariffs:
+        lines.append("💳 <b>Тарифы</b>")
+        base = None
+        for _id, name, t_period, t_price, _a, _s in tariffs:
+            per_month = t_price / (t_period / 2592000) if t_period else None
+            note = ""
+            # показываем выгоду длинных тарифов относительно самого короткого
+            if base and per_month and per_month < base * 0.97:
+                note = f"  <i>−{round((1 - per_month / base) * 100)}%</i>"
+            if base is None and per_month:
+                base = per_month
+            lines.append(f"     <b>{name}</b> — {t_price} ₽ · {fmt_duration(t_period)}{note}")
+        lines.append("")
+    elif price and pay_period:
         lines.append(f"💳 <b>Подписка</b> — <b>{price} ₽</b>\n     {fmt_duration(pay_period)}\n")
     elif price:
         lines.append(f"💳 <b>Подписка</b> — <b>{price} ₽</b>\n")
