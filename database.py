@@ -248,6 +248,12 @@ async def init_db():
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)"
         )
+        # поля возврата: отзывать ли срок и когда возврат завершился
+        for _col in ("refund_revoke INTEGER", "refunded_at TIMESTAMP"):
+            try:
+                await db.execute(f"ALTER TABLE payments ADD COLUMN {_col}")
+            except Exception:
+                pass
         # Баны
         await db.execute("""
             CREATE TABLE IF NOT EXISTS bans (
@@ -608,7 +614,8 @@ async def payments_summary() -> dict:
             "COALESCE(paid_at, created_at) >= datetime('now', '-30 days')"))
         total = await _row(db, f"SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments WHERE {paid}")
         pending = await _row(db, "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments WHERE status = 'pending'")
-        failed = await _row(db, "SELECT COUNT(*) FROM payments WHERE status IN ('canceled','expired','error','chargebacked')")
+        failed = await _row(db, "SELECT COUNT(*) FROM payments WHERE status IN ('canceled','expired','error')")
+        refunds = await _row(db, "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments WHERE status IN ('refunded','refund_pending','chargebacked')")
 
         async with db.execute(
             f"SELECT provider, COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
@@ -627,6 +634,7 @@ async def payments_summary() -> dict:
         "total_count": cnt_total, "total_sum": sum_total,
         "pending_count": pending[0], "pending_sum": pending[1],
         "failed_count": failed[0],
+        "refund_count": refunds[0], "refund_sum": refunds[1],
         "by_provider": by_provider,
         "payers": payers,
         "avg": round(sum_total / cnt_total) if cnt_total else 0,
@@ -643,7 +651,9 @@ async def list_payments(page: int = 1, status: str = "paid",
     elif status == "pending":
         where = "WHERE p.status = 'pending'"
     elif status == "failed":
-        where = "WHERE p.status IN ('canceled','expired','error','chargebacked')"
+        where = "WHERE p.status IN ('canceled','expired','error')"
+    elif status == "refunds":
+        where = "WHERE p.status IN ('refunded','refund_pending','chargebacked')"
 
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(f"SELECT COUNT(*) FROM payments p {where}", params) as cur:
@@ -690,6 +700,60 @@ async def user_payments(tg_id: int, limit: int = 10) -> tuple[list, int, int]:
         """, (tg_id, limit)) as cur:
             rows = await cur.fetchall()
     return rows, cnt, total
+
+
+async def mark_refund_pending(payment_id: int, revoke: bool):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE payments SET status = 'refund_pending', refund_revoke = ? WHERE id = ?",
+            (1 if revoke else 0, payment_id),
+        )
+        await db.commit()
+
+
+async def claim_refund(payment_id: int) -> bool:
+    """Переводит платёж в «возвращён». True — если перевёл именно этот вызов.
+
+    Довести возврат могут одновременно и кнопка, и фоновая сверка: атомарный
+    переход не даёт отозвать срок дважды за один возврат.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "UPDATE payments SET status = 'refunded', refunded_at = CURRENT_TIMESTAMP "
+            "WHERE id = ? AND status != 'refunded'", (payment_id,),
+        )
+        await db.commit()
+        return (cur.rowcount or 0) > 0
+
+
+async def get_refund_revoke(payment_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT refund_revoke FROM payments WHERE id = ?", (payment_id,)
+        ) as cur:
+            r = await cur.fetchone()
+    return r[0] if r else None
+
+
+async def get_refund_watchlist(days: int = 30, limit: int = 100) -> list[tuple]:
+    """Платежи, у которых может появиться возврат.
+
+    О возврате из личного кабинета Platega бот узнаёт, только перечитав статус
+    оплаченной транзакции. Сначала — возвраты в обработке, затем свежие оплаты.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, external_id, amount, period_seconds, status
+            FROM payments
+            WHERE provider = 'platega'
+              AND external_id IS NOT NULL
+              AND (status = 'refund_pending'
+                   OR (status = 'paid'
+                       AND COALESCE(paid_at, created_at) >= datetime('now', ?)))
+            ORDER BY CASE status WHEN 'refund_pending' THEN 0 ELSE 1 END, id DESC
+            LIMIT ?
+        """, (f"-{days} days", limit)) as cur:
+            return await cur.fetchall()
 
 
 async def count_support_files(user_id: int) -> int:

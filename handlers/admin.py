@@ -394,6 +394,7 @@ _ACTION_LABELS_ADMIN = {
     "promo_used": "🎟 Промокод",
     "referral_bonus": "🎁 Реф. бонус",
     "referral_invited_bonus": "🎁 Бонус приглашённого",
+    "payment_refunded": "↩️ Возврат",
     "sub_enabled": "▶️ Включена",
     "sub_disabled": "⏸ Приостановлена",
     "sub_deleted": "🗑 Удалена",

@@ -21,7 +21,9 @@ from handlers.admin import (
     handle_user_history, handle_dm_user, handle_payment_stats,
 )
 from handlers.support import open_support, handle_support_files
-from handlers.payments import handle_payments_menu, handle_payment_view
+from handlers.payments import (
+    handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
+)
 from handlers.tariffs import (
     handle_tariffs_menu, handle_tariff_view, handle_tariff_toggle,
     handle_tariff_delete, handle_tariff_delete_confirm, handle_tariff_add,
@@ -239,6 +241,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_payments_menu(query, context, st, int(pg))
     elif data.startswith("payment_view:"):
         await handle_payment_view(query, int(data.split(":")[1]))
+    elif data.startswith("refund_start:"):
+        await handle_refund_start(query, int(data.split(":")[1]))
+    elif data.startswith("refund_do:"):
+        _, pid, rv = data.split(":")
+        await handle_refund_do(query, context, int(pid), rv == "1")
     elif data == "healthcheck":
         await handle_healthcheck(query)
     elif data == "find_user":

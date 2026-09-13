@@ -163,11 +163,52 @@ async def post_init(app: Application):
                             )
                     except Exception as e:
                         await set_payment_status(pay_id, "paid", str(e)[:120])
-                elif status in (pg.STATUS_CANCELED, pg.STATUS_CHARGEBACKED):
-                    await set_payment_status(pay_id, status.lower())
+                elif status == pg.STATUS_CANCELED:
+                    await set_payment_status(pay_id, "canceled")
+                elif status == pg.STATUS_CHARGEBACKED:
+                    # вернули раньше, чем бот увидел оплату — срок не начислялся
+                    await set_payment_status(pay_id, "refunded")
 
         poll_every = int(load_config().get("invoice_poll_seconds", 60) or 60)
         app.job_queue.run_repeating(_platega_poll_job, interval=poll_every, first=30)
+
+        async def _refund_sync_job(ctx):
+            """Замечает возвраты, сделанные в личном кабинете Platega.
+
+            Сам бот о них не узнаёт — только перечитав статус оплаченной
+            транзакции: при возврате Platega переводит её в CHARGEBACKED.
+            Здесь же доводятся возвраты из бота, которые Platega проводила вручную.
+            """
+            import asyncio
+            import platega_api as pg
+            from database import get_refund_watchlist
+            if not pg.is_configured():
+                return
+            days = int(load_config().get("refund_watch_days", 30) or 30)
+            watch = await get_refund_watchlist(days=days, limit=100)
+            if not watch:
+                return
+
+            # пачками по 10, чтобы не бить в API сотней запросов разом
+            results = []
+            for i in range(0, len(watch), 10):
+                chunk = watch[i:i + 10]
+                results += await asyncio.gather(
+                    *[pg.get_status(w[2]) for w in chunk], return_exceptions=True
+                )
+
+            from handlers.payments import finalize_refund
+            for w, r in zip(watch, results):
+                if isinstance(r, Exception) or not r.get("ok"):
+                    continue
+                if r.get("status") == pg.STATUS_CHARGEBACKED:
+                    try:
+                        await finalize_refund(ctx, w[0])
+                    except Exception:
+                        pass
+
+        refund_every = int(load_config().get("refund_sync_minutes", 30) or 30) * 60
+        app.job_queue.run_repeating(_refund_sync_job, interval=refund_every, first=120)
 
         async def _paid_sync_job(ctx):
             from datetime import datetime

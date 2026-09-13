@@ -164,6 +164,54 @@ async def get_status(transaction_id: str) -> dict:
     }
 
 
+async def refund_supported(transaction_id: str) -> dict:
+    """Можно ли вернуть платёж и во что это обойдётся.
+
+    Возврат оплачивается с баланса мерчанта: если на нём не хватает средств,
+    Platega отвечает supported=false.
+    """
+    if not is_configured():
+        return {"ok": False, "error": "Platega не настроена"}
+    status, body, err = await _request(
+        "GET", f"/transaction/{transaction_id}/cancel-supported", timeout=20
+    )
+    if err:
+        return {"ok": False, "error": err}
+    if status != 200 or not isinstance(body, dict):
+        return {"ok": False, "error": _err_text(status, body)}
+    return {
+        "ok": True,
+        "supported": bool(body.get("supported")),
+        "deduct_usdt": body.get("totalDeductUsdt"),
+        "penalty_usdt": body.get("penaltyUsdt"),
+        "block_reason": body.get("blockReason"),
+    }
+
+
+async def refund(transaction_id: str) -> dict:
+    """Запускает возврат.
+
+    Возврат может пройти не сразу: пока Platega его обрабатывает, она отвечает
+    accepted=false и manualControlRequired=true. Окончательный итог виден по
+    статусу транзакции — CHARGEBACKED.
+    """
+    if not is_configured():
+        return {"ok": False, "error": "Platega не настроена"}
+    status, body, err = await _request(
+        "POST", f"/transaction/{transaction_id}/cancel", timeout=30
+    )
+    if err:
+        return {"ok": False, "error": err}
+    if status != 200 or not isinstance(body, dict):
+        return {"ok": False, "error": _err_text(status, body)}
+    return {
+        "ok": True,
+        "accepted": bool(body.get("accepted")),
+        "manual": bool(body.get("manualControlRequired")),
+        "message": body.get("message") or "",
+    }
+
+
 async def test_connection() -> dict:
     """Проверяет учётные данные.
 

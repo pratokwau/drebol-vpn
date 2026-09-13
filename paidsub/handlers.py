@@ -1621,6 +1621,40 @@ async def check_expired_subs(context):
                         )
 
 
+async def revoke_paid_period(tg_id: int, period_seconds: int | None, context,
+                             reason: str = "Возврат платежа") -> dict:
+    """Отзывает оплаченный срок — обратная операция к начислению при оплате.
+
+    Двигает дату окончания назад на оплаченный период, конец периода сдвигается
+    вместе с ней. Если срок уходит в прошлое, дальше подписку переведёт в окно
+    оплаты или в истёкшие обычная проверка сроков.
+    """
+    if not period_seconds:
+        return {"ok": False, "error": "у платежа нет сохранённого периода"}
+    row = await get_paid_sub_by_tg_id(tg_id)
+    if not row:
+        return {"ok": False, "error": "подписка не найдена"}
+
+    from paidsub.storage import parse_sub_date
+    sub_id, email, expire_str = row[0], row[2], row[6]
+    expire_dt = parse_sub_date(expire_str)
+    if not expire_dt:
+        return {"ok": False, "error": f"не разобрал дату окончания: {expire_str}"}
+
+    new_expire = expire_dt - timedelta(seconds=int(period_seconds))
+    new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
+    await set_expire_date(sub_id, new_expire_str)
+
+    from xui_api import update_client_expire
+    await update_client_expire(email, new_expire_str)
+
+    await add_history(
+        tg_id, "payment_refunded",
+        f"{reason}\nОтозвано: {fmt_duration(int(period_seconds))}\nНовая дата: {new_expire_str}",
+    )
+    return {"ok": True, "expire": new_expire_str}
+
+
 async def apply_paid_payment(tg_id: int, amount: int, context,
                              promo_code: str | None = None,
                              source: str = "Platega",
@@ -1933,6 +1967,7 @@ _ACTION_LABELS = {
     "settings_changed": "⚙️ Изменены настройки",
     "referral_bonus": "🎁 Реферальный бонус",
     "referral_invited_bonus": "🎁 Бонус приглашённого",
+    "payment_refunded": "↩️ Возврат платежа",
     "promo_used": "🎟 Промокод применён",
     "user_muted": "🔇 Заглушён",
     "user_unmuted": "🔊 Разглушён",

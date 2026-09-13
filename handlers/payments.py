@@ -23,12 +23,15 @@ STATUS_LABELS = {
     "expired": "⌛️ просрочен",
     "error": "⚠️ ошибка",
     "chargebacked": "↩️ возврат",
+    "refunded": "↩️ возвращён",
+    "refund_pending": "⏳ возврат в обработке",
 }
 
 FILTERS = {
     "paid": "✅ Оплаченные",
     "pending": "⏳ Ожидают",
     "failed": "❌ Неуспешные",
+    "refunds": "↩️ Возвраты",
     "all": "📋 Все",
 }
 
@@ -76,6 +79,8 @@ async def handle_payments_menu(query, context: ContextTypes.DEFAULT_TYPE = None,
         )
     if s["failed_count"]:
         lines.append(f"❌ Неуспешных: <b>{s['failed_count']}</b>")
+    if s.get("refund_count"):
+        lines.append(f"↩️ Возвратов: <b>{s['refund_count']}</b> на <b>{s['refund_sum']} ₽</b>")
 
     lines.append(f"\n<b>{FILTERS.get(status, '')}</b> — стр. {page}/{total_pages}")
     if not rows:
@@ -148,6 +153,8 @@ async def handle_payment_view(query, payment_id: int):
     kb = [[InlineKeyboardButton("🔍 Профиль юзера", callback_data=f"user_profile:{tg_id}")]]
     if status == "pending" and pay_url:
         kb.append([InlineKeyboardButton("🔗 Ссылка на оплату", url=pay_url)])
+    if provider == "platega" and status == "paid" and ext_id:
+        kb.append([InlineKeyboardButton("💸 Вернуть деньги", callback_data=f"refund_start:{p_id}")])
     kb.append([InlineKeyboardButton("◀️ К оплатам", callback_data="payments:paid:1")])
 
     await query.edit_message_text(
@@ -171,3 +178,164 @@ async def user_payments_block(tg_id: int) -> str:
             f"· {_fmt_ts(ts)}{promo_mark}"
         )
     return "\n".join(lines)
+
+
+# ── Возвраты ─────────────────────────────────────────────────────────────────
+
+async def handle_refund_start(query, payment_id: int):
+    """Проверяет, можно ли вернуть платёж, и спрашивает, что делать со сроком."""
+    import platega_api as pg
+    p = await get_payment_full(payment_id)
+    if not p:
+        await query.answer("Платёж не найден", show_alert=True)
+        return
+    (p_id, tg_id, provider, ext_id, amount, period, promo,
+     status, _url, _err, _created, _paid, first_name, username) = p
+    if provider != "platega" or status != "paid" or not ext_id:
+        await query.answer("Возврат доступен только для оплаченных через Platega",
+                           show_alert=True)
+        return
+
+    back = InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ К платежу", callback_data=f"payment_view:{p_id}")],
+    ])
+    await query.edit_message_text("🔎 Проверяю возможность возврата...")
+    chk = await pg.refund_supported(ext_id)
+    if not chk["ok"]:
+        await query.edit_message_text(
+            f"❌ Не удалось проверить возврат:\n<code>{chk['error']}</code>",
+            parse_mode="HTML", reply_markup=back)
+        return
+    if not chk["supported"]:
+        reason = chk.get("block_reason") or "Platega не сообщила причину"
+        await query.edit_message_text(
+            f"⛔ <b>Возврат недоступен</b>\n\nПричина: <code>{reason}</code>\n\n"
+            "Частая причина — на балансе мерчанта не хватает средств: "
+            "возврат оплачивается с баланса Platega.",
+            parse_mode="HTML", reply_markup=back)
+        return
+
+    lines = [
+        f"💸 <b>Возврат платежа #{p_id}</b>\n",
+        f"👤 {_who(first_name, username, tg_id)}",
+        f"💵 Вернётся клиенту: <b>{amount} ₽</b>",
+    ]
+    if chk.get("deduct_usdt") is not None:
+        lines.append(f"🏦 Спишется с баланса: <b>{chk['deduct_usdt']} USDT</b>")
+    if chk.get("penalty_usdt"):
+        lines.append(f"⚠️ Штраф: <b>{chk['penalty_usdt']} USDT</b>")
+    if period:
+        lines.append(f"\nОплаченный период: <b>{fmt_duration(period)}</b>")
+    lines.append("\nЧто сделать с подпиской?")
+
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💸 Вернуть и отозвать срок",
+                                  callback_data=f"refund_do:{p_id}:1")],
+            [InlineKeyboardButton("💸 Вернуть, срок оставить",
+                                  callback_data=f"refund_do:{p_id}:0")],
+            [InlineKeyboardButton("◀️ Отмена", callback_data=f"payment_view:{p_id}")],
+        ]),
+    )
+
+
+async def handle_refund_do(query, context: ContextTypes.DEFAULT_TYPE,
+                           payment_id: int, revoke: bool):
+    import platega_api as pg
+    from database import mark_refund_pending
+
+    p = await get_payment_full(payment_id)
+    if not p or p[7] != "paid":
+        await query.answer("Платёж уже не в статусе «оплачен»", show_alert=True)
+        return
+
+    back = InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ К платежу", callback_data=f"payment_view:{payment_id}")],
+    ])
+    await query.edit_message_text("⏳ Отправляю возврат в Platega...")
+    res = await pg.refund(p[3])
+    if not res["ok"]:
+        await query.edit_message_text(
+            f"❌ Возврат не прошёл:\n<code>{res['error']}</code>",
+            parse_mode="HTML", reply_markup=back)
+        return
+
+    # выбор фиксируем сразу: итог может прийти позже статусом CHARGEBACKED,
+    # и довести возврат должна фоновая сверка — даже после перезапуска бота
+    await mark_refund_pending(payment_id, revoke)
+
+    if res["accepted"]:
+        await finalize_refund(context, payment_id, revoke)
+        await query.edit_message_text(
+            "✅ <b>Возврат выполнен</b>\n" +
+            ("Оплаченный срок отозван." if revoke else "Срок подписки оставлен."),
+            parse_mode="HTML", reply_markup=back)
+        return
+
+    msg = res.get("message") or "Возврат в обработке"
+    await query.edit_message_text(
+        f"⏳ <b>Возврат принят в обработку</b>\n\n{msg}\n\n"
+        "Как только Platega его проведёт, бот сам обновит платёж"
+        + (" и отзовёт срок." if revoke else "."),
+        parse_mode="HTML", reply_markup=back)
+
+
+async def finalize_refund(context, payment_id: int, revoke: bool | None = None) -> None:
+    """Доводит возврат до конца: статус, срок, уведомления.
+
+    revoke=None — берётся выбор, сохранённый при запуске возврата из бота. Если
+    его нет (возврат сделали в личном кабинете), решает настройка
+    refund_revokes_period.
+    """
+    from config import load_config, ADMIN_ID
+    from database import claim_refund, get_refund_revoke
+    from log_channel import send_log
+
+    p = await get_payment_full(payment_id)
+    if not p:
+        return
+    (p_id, tg_id, _prov, _ext, amount, period, _promo,
+     _status, _url, _err, _created, _paid, first_name, username) = p
+
+    if revoke is None:
+        stored = await get_refund_revoke(p_id)
+        revoke = bool(stored) if stored is not None else bool(
+            load_config().get("refund_revokes_period", True))
+
+    # атомарный переход: если возврат уже довели, второй раз ничего не делаем
+    if not await claim_refund(p_id):
+        return
+
+    period_line = ""
+    if revoke and period:
+        from paidsub.handlers import revoke_paid_period
+        rv = await revoke_paid_period(tg_id, period, context,
+                                      reason=f"Возврат платежа #{p_id}")
+        period_line = (f"\n📅 Срок отозван, новая дата: <b>{rv['expire']}</b>"
+                       if rv.get("ok") else
+                       f"\n⚠️ Срок отозвать не удалось: {rv.get('error')}")
+    elif period:
+        period_line = "\n📅 Срок подписки оставлен без изменений"
+
+    admin_text = (
+        f"↩️ <b>Возврат по платежу #{p_id}</b>\n\n"
+        f"👤 {_who(first_name, username, tg_id)} (<code>{tg_id}</code>)\n"
+        f"💵 {amount} ₽{period_line}"
+    )
+    try:
+        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="HTML")
+    except Exception:
+        pass
+    await send_log(context.bot, admin_text)
+
+    user_text = (
+        f"↩️ <b>Возврат {amount} ₽ оформлен.</b>\n\n"
+        "Деньги вернутся плательщику — срок зачисления зависит от банка."
+    )
+    if revoke and period:
+        user_text += "\nОплаченный срок подписки отменён."
+    try:
+        await context.bot.send_message(chat_id=tg_id, text=user_text, parse_mode="HTML")
+    except Exception:
+        pass
