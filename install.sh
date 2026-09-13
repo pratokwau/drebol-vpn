@@ -92,6 +92,16 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
+# --- Сторож: уведомление в Telegram, если бот упадёт ---
+# ExecStopPost срабатывает после каждой остановки, в том числе в крэш-цикле.
+# Префикс «-»: если скрипта нет, это не считается ошибкой сервиса.
+chmod +x "${INSTALL_DIR}/scripts/notify_failure.sh" 2>/dev/null || true
+mkdir -p /etc/systemd/system/${SERVICE_NAME}.service.d
+cat > /etc/systemd/system/${SERVICE_NAME}.service.d/watchdog.conf <<EOF
+[Service]
+ExecStopPost=-${INSTALL_DIR}/scripts/notify_failure.sh %n
+EOF
+
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"

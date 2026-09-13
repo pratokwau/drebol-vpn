@@ -78,6 +78,9 @@ AWAITING_WINBACK_PERCENT = "awaiting_winback_percent"
 # Узлы
 AWAITING_NODE_HOST = "awaiting_node_host"
 
+# Техработы
+AWAITING_MAINTENANCE_TEXT = "awaiting_maintenance_text"
+
 # Тарифы
 AWAITING_TARIFF_NAME = "awaiting_tariff_name"
 AWAITING_TARIFF_PERIOD = "awaiting_tariff_period"

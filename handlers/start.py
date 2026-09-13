@@ -30,6 +30,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except (ValueError, IndexError):
             pass
 
+    # Техработы: пользователь видит сообщение, админ работает как обычно.
+    # Регистрацию и реферала выше сохраняем, иначе пришедшие во время работ потеряются.
+    if user.id != ADMIN_ID:
+        import maintenance as mnt
+        if mnt.is_maintenance():
+            await mnt.show_maintenance(message=update.message)
+            return
+
     from database import is_banned
     if user.id != ADMIN_ID and await is_banned(user.id):
         await update.message.reply_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")

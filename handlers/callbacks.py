@@ -21,6 +21,10 @@ from handlers.admin import (
     handle_user_history, handle_dm_user, handle_payment_stats,
 )
 from handlers.support import open_support, handle_support_files
+from maintenance import (
+    handle_maintenance_menu, handle_maintenance_toggle,
+    handle_maintenance_text, handle_feature_toggle,
+)
 from handlers.payments import (
     handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
 )
@@ -99,6 +103,23 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "noop":
         return
+
+    # Техработы и выключенные функции. На админа не действуют.
+    if not adm:
+        import maintenance as mnt
+        if mnt.is_maintenance():
+            context.user_data.pop("state", None)
+            await mnt.show_maintenance(query=query)
+            return
+        feat = mnt.feature_for_callback(data)
+        if data == "my_paid_sub":
+            from paidsub.storage import get_paid_sub_by_tg_id
+            has_sub = await get_paid_sub_by_tg_id(update.effective_user.id)
+            # без подписки эта кнопка ведёт к выдаче триала
+            feat = "subscription" if has_sub else "trial"
+        if feat and not mnt.feature_enabled(feat):
+            await mnt.show_feature_off(feat, query=query)
+            return
 
     # Проверка бана
     if not adm and data != "check_sub":
@@ -236,6 +257,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_git_update(query)
     elif data == "dashboard":
         await handle_dashboard(query)
+    elif data == "mnt_menu":
+        await handle_maintenance_menu(query, context)
+    elif data == "mnt_toggle":
+        await handle_maintenance_toggle(query, context)
+    elif data == "mnt_text":
+        await handle_maintenance_text(query, context)
+    elif data.startswith("mnt_feature:"):
+        await handle_feature_toggle(query, context, data.split(":", 1)[1])
     elif data.startswith("payments:"):
         _, st, pg = data.split(":")
         await handle_payments_menu(query, context, st, int(pg))

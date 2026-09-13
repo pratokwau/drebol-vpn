@@ -210,6 +210,34 @@ async def post_init(app: Application):
         refund_every = int(load_config().get("refund_sync_minutes", 30) or 30) * 60
         app.job_queue.run_repeating(_refund_sync_job, interval=refund_every, first=120)
 
+        async def _recovered_job(ctx):
+            """После сбоя сообщает, что бот снова в строю.
+
+            Метку оставляет сторож (scripts/notify_failure.sh). Проверяем через
+            минуту после старта: в крэш-цикле бот упадёт раньше и не отчитается
+            ложным «всё хорошо».
+            """
+            import os
+            from config import ADMIN_ID
+            marker = "/var/lib/drebol-vpn/crashed"
+            if not os.path.exists(marker):
+                return
+            for path in (marker, "/var/lib/drebol-vpn/last_alert"):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            try:
+                await ctx.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text="🟢 <b>Бот снова работает</b> после сбоя.",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        app.job_queue.run_once(_recovered_job, when=60)
+
         async def _paid_sync_job(ctx):
             from datetime import datetime
             cfg = load_config()

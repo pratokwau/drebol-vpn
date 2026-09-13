@@ -40,7 +40,7 @@ from states import (
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
-    AWAITING_NODE_HOST,
+    AWAITING_NODE_HOST, AWAITING_MAINTENANCE_TEXT,
 )
 
 
@@ -55,6 +55,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text.strip()
     is_admin = user.id == ADMIN_ID
+
+    # ── Техработы и выключенные функции ─────────────────────────────────────
+    if not is_admin:
+        import maintenance as mnt
+        if mnt.is_maintenance():
+            context.user_data.pop("state", None)
+            await mnt.show_maintenance(message=update.message)
+            return
+        blocked = {AWAITING_SUPPORT_MSG: "support", AWAITING_PROMO_CODE: "payments"}.get(state)
+        if blocked and not mnt.feature_enabled(blocked):
+            context.user_data.pop("state", None)
+            await mnt.show_feature_off(blocked, message=update.message)
+            return
 
     # ── Юзер пишет в поддержку ───────────────────────────────────────────────
     if state == AWAITING_SUPPORT_MSG and not is_admin:
@@ -1025,6 +1038,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Адрес узла ───────────────────────────────────────────────────────────
+    if state == AWAITING_MAINTENANCE_TEXT:
+        from maintenance import apply_maintenance_text
+        await apply_maintenance_text(update.message, context)
+        return
+
     if state == AWAITING_NODE_HOST:
         from handlers.xui_settings import apply_node_host
         await apply_node_host(update.message, context, text)
@@ -1112,6 +1130,17 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     is_admin = user.id == ADMIN_ID
     msg = update.message
+
+    if not is_admin:
+        import maintenance as mnt
+        if mnt.is_maintenance():
+            context.user_data.pop("state", None)
+            await mnt.show_maintenance(message=msg)
+            return
+        if state == AWAITING_SUPPORT_MSG and not mnt.feature_enabled("support"):
+            context.user_data.pop("state", None)
+            await mnt.show_feature_off("support", message=msg)
+            return
 
     if msg.photo:
         file_id = msg.photo[-1].file_id

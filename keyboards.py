@@ -14,15 +14,24 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
         else InlineKeyboardButton("📰 Новости", callback_data="news_no_channel")
     )
 
+    # выключенные в техработах функции прячем от пользователей; админ видит всё
+    import maintenance as mnt
+
+    def on(key: str) -> bool:
+        return is_admin or mnt.feature_enabled(key)
+
     rows = []
     rows.append([InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")])
-    if paid_sub_status in ("renewal", "expired"):
+    if paid_sub_status in ("renewal", "expired") and on("payments"):
         rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
     if has_sub:
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
-    if paid_sub_status:
+    if paid_sub_status and on("referral"):
         rows.append([InlineKeyboardButton("👥 Пригласить друга", callback_data="referral")])
-    rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_open")])
+    if on("support"):
+        rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_open")])
+    else:
+        rows.append([news_btn])
     rows.append([InlineKeyboardButton("ℹ️ Инфо", callback_data="info")])
     if is_admin:
         rows.append([InlineKeyboardButton("⚙️ Админка", callback_data="admin_panel")])
@@ -33,6 +42,9 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
 
 def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
     tickets_label = f"🎫 Тикеты 🔴{unread_tickets}" if unread_tickets else "🎫 Тикеты"
+    # включённые техработы должны бросаться в глаза, чтобы про них не забыли
+    import maintenance as mnt
+    mnt_label = "🛠 Техработы: ВКЛЮЧЕНЫ 🔴" if mnt.is_maintenance() else "🛠 Техработы и функции"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Статистика", callback_data="dashboard")],
         [InlineKeyboardButton("💰 Оплаты", callback_data="payments:paid:1")],
@@ -43,6 +55,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
         [InlineKeyboardButton("🎯 Winback", callback_data="winback_settings")],
         [InlineKeyboardButton("🖥 Серверы и 3x-UI", callback_data="xui_settings")],
+        [InlineKeyboardButton(mnt_label, callback_data="mnt_menu")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
         [InlineKeyboardButton("📢 Управление каналом", callback_data="channel_menu")],
         [

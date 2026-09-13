@@ -208,6 +208,13 @@ async def handle_my_paid_sub(query):
         f"<i>Нажмите на ссылку, чтобы скопировать, и вставьте её в приложение Happ или INCY.</i>"
     )
 
+    # выключенные функции прячем от пользователей, админ видит всё
+    import maintenance as mnt
+    _is_adm = user_id == ADMIN_ID
+
+    def _on(key: str) -> bool:
+        return _is_adm or mnt.feature_enabled(key)
+
     kb_rows = []
     # Кнопка "Скопировать подписку": CopyTextButton если поддерживается, иначе callback
     try:
@@ -217,11 +224,11 @@ async def handle_my_paid_sub(query):
         copy_btn = InlineKeyboardButton("📋 Скопировать подписку", callback_data="copy_sub")
     kb_rows.append([copy_btn])
     kb_rows.append([InlineKeyboardButton("📱 QR-код", callback_data="qr_code")])
-    if status in ("renewal", "expired"):
+    if status in ("renewal", "expired") and _on("payments"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
     # во время окна оплаты доступ ещё работает — перевыпуск должен быть доступен,
     # иначе при утечке ключа человеку нечего сделать до продления
-    if status in ("active", "renewal") and enabled:
+    if status in ("active", "renewal") and enabled and _on("reissue"):
         kb_rows.append([InlineKeyboardButton("🔁 Перевыпуск ключа", callback_data="reissue_key")])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
