@@ -1550,6 +1550,10 @@ async def check_expired_subs(context):
                 # Переход active → renewal: одноразовое уведомление
                 await update_paid_sub_field(sub_id, "status", "renewal")
                 if tg_id:
+                    from database import log_activity
+                    await log_activity(tg_id, "ev:period_ended",
+                                       "триал" if times_renewed == 0 else "оплаченный")
+                if tg_id:
                     kb = InlineKeyboardMarkup([
                         [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
                     ])
@@ -1575,6 +1579,9 @@ async def check_expired_subs(context):
             if status != "expired":
                 # Переход → expired: одноразовое уведомление + отключение + смена инбаунда
                 await update_paid_sub_field(sub_id, "status", "expired")
+                if tg_id:
+                    from database import log_activity
+                    await log_activity(tg_id, "ev:expired")
 
                 from xui_api import get_client_info, toggle_client
                 info = await get_client_info(email)

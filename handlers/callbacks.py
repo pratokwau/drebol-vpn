@@ -25,6 +25,11 @@ from maintenance import (
     handle_maintenance_menu, handle_maintenance_toggle,
     handle_maintenance_text, handle_feature_toggle,
 )
+from handlers.control import (
+    handle_control_menu, handle_activity_feed, handle_user_activity,
+    handle_online, handle_traffic, handle_digest_toggle,
+    handle_digest_hour_menu, handle_digest_set_hour, handle_digest_now,
+)
 from handlers.payments import (
     handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
 )
@@ -265,6 +270,26 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_maintenance_text(query, context)
     elif data.startswith("mnt_feature:"):
         await handle_feature_toggle(query, context, data.split(":", 1)[1])
+    elif data == "ctl_menu":
+        await handle_control_menu(query, context)
+    elif data.startswith("act_feed:"):
+        _, scope, pg = data.split(":")
+        await handle_activity_feed(query, scope, int(pg))
+    elif data.startswith("user_activity:"):
+        _, uid, pg = data.split(":")
+        await handle_user_activity(query, int(uid), int(pg))
+    elif data == "ctl_online":
+        await handle_online(query)
+    elif data == "ctl_traffic":
+        await handle_traffic(query)
+    elif data == "ctl_digest_toggle":
+        await handle_digest_toggle(query, context)
+    elif data == "ctl_digest_hour":
+        await handle_digest_hour_menu(query)
+    elif data.startswith("ctl_digest_set:"):
+        await handle_digest_set_hour(query, context, int(data.split(":")[1]))
+    elif data == "ctl_digest_now":
+        await handle_digest_now(query, context)
     elif data.startswith("payments:"):
         _, st, pg = data.split(":")
         await handle_payments_menu(query, context, st, int(pg))

@@ -316,6 +316,42 @@ async def probe_servers() -> dict:
     return {"panel": panel, "sub": sub, "inbounds": inbounds}
 
 
+async def get_online_emails() -> dict:
+    """Кто сейчас подключён к VPN — живые данные панели, без сохранения."""
+    cfg = load_config()
+    url = (cfg.get("xui_url") or "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"ok": False, "error": "панель не настроена", "emails": []}
+    s = _session(token)
+    try:
+        data, err = await _post(s, f"{url}/panel/api/inbounds/onlines", {})
+        if not data or not data.get("success"):
+            return {"ok": False, "error": err or str(data)[:120], "emails": []}
+        return {"ok": True, "emails": sorted({e for e in (data.get("obj") or []) if e})}
+    finally:
+        await s.close()
+
+
+async def get_traffic_snapshot() -> dict:
+    """Счётчики трафика всех клиентов за один запрос к панели."""
+    r = await get_inbounds()
+    if not r.get("success"):
+        return {"ok": False, "error": r.get("error"), "clients": {}}
+    clients = {}
+    for inb in r["inbounds"]:
+        for cs in inb.get("clientStats") or []:
+            email = (cs.get("email") or "").strip()
+            if not email:
+                continue
+            up, down = int(cs.get("up") or 0), int(cs.get("down") or 0)
+            prev = clients.get(email)
+            # клиент может числиться в нескольких инбаундах — дубли не складываем
+            if prev is None or up + down > prev[0] + prev[1]:
+                clients[email] = (up, down)
+    return {"ok": True, "clients": clients}
+
+
 async def test_connection() -> dict:
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")

@@ -363,6 +363,7 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     kb_rows = []
     if sub:
         kb_rows.append([InlineKeyboardButton("💳 К подписке", callback_data=f"paid_sub_view:{sub[0]}")])
+    kb_rows.append([InlineKeyboardButton("📜 Действия в боте", callback_data=f"user_activity:{tg_id}:1")])
     if ticket_count > 0:
         kb_rows.append([InlineKeyboardButton("🎫 Переписка", callback_data=f"ticket_view:{tg_id}:1")])
     if history_count > 0:

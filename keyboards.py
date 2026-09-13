@@ -48,6 +48,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Статистика", callback_data="dashboard")],
         [InlineKeyboardButton("💰 Оплаты", callback_data="payments:paid:1")],
+        [InlineKeyboardButton("🛰 Контроль", callback_data="ctl_menu")],
         [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs")],
         [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
         [InlineKeyboardButton("🔍 Найти юзера", callback_data="find_user")],

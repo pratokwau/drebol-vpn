@@ -210,6 +210,19 @@ async def init_db():
             await db.execute("ALTER TABLE paid_subs ADD COLUMN pending_promo TEXT")
         except Exception:
             pass
+        # Журнал действий в боте: тип действия без содержимого сообщений.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS activity_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER NOT NULL,
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                action TEXT NOT NULL,
+                details TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(tg_id, created_at)")
         # Тарифы: варианты продления, которые видит клиент.
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tariffs (
@@ -511,8 +524,12 @@ async def record_paid_payment(tg_id: int, provider: str, amount: int,
                               promo_code: str | None = None,
                               external_id: str | None = None) -> int:
     """Сразу оплаченный счёт — для подтверждений, минующих платёжную систему."""
+    import secrets
     from datetime import datetime
-    ext = external_id or f"{provider}-{tg_id}-{int(datetime.now().timestamp())}"
+    # Случайный хвост: два подтверждения за одну секунду иначе упрутся
+    # в UNIQUE(provider, external_id), и второе молча не запишется
+    ext = external_id or (f"{provider}-{tg_id}-{int(datetime.now().timestamp())}"
+                          f"-{secrets.token_hex(3)}")
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
             INSERT INTO payments (tg_id, provider, external_id, amount,
@@ -660,7 +677,7 @@ async def list_payments(page: int = 1, status: str = "paid",
             total = (await cur.fetchone())[0]
         async with db.execute(f"""
             SELECT p.id, p.tg_id, p.provider, p.amount, p.status,
-                   COALESCE(p.paid_at, p.created_at) AS ts,
+                   datetime(COALESCE(p.paid_at, p.created_at), 'localtime') AS ts,
                    u.first_name, u.username, p.promo_code, p.period_seconds
             FROM payments p
             LEFT JOIN users u ON u.id = p.tg_id
@@ -676,7 +693,8 @@ async def get_payment_full(payment_id: int) -> tuple | None:
         async with db.execute("""
             SELECT p.id, p.tg_id, p.provider, p.external_id, p.amount,
                    p.period_seconds, p.promo_code, p.status, p.pay_url,
-                   p.error, p.created_at, p.paid_at, u.first_name, u.username
+                   p.error, datetime(p.created_at, 'localtime'), datetime(p.paid_at, 'localtime'),
+                   u.first_name, u.username
             FROM payments p
             LEFT JOIN users u ON u.id = p.tg_id
             WHERE p.id = ?
@@ -694,7 +712,7 @@ async def user_payments(tg_id: int, limit: int = 10) -> tuple[list, int, int]:
             cnt, total = await cur.fetchone()
         async with db.execute("""
             SELECT id, provider, amount, status,
-                   COALESCE(paid_at, created_at), promo_code
+                   datetime(COALESCE(paid_at, created_at), 'localtime'), promo_code
             FROM payments WHERE tg_id = ?
             ORDER BY id DESC LIMIT ?
         """, (tg_id, limit)) as cur:
@@ -754,6 +772,157 @@ async def get_refund_watchlist(days: int = 30, limit: int = 100) -> list[tuple]:
             LIMIT ?
         """, (f"-{days} days", limit)) as cur:
             return await cur.fetchall()
+
+
+# ── Журнал действий ──────────────────────────────────────────────────────────
+
+async def log_activity(tg_id: int, action: str, details: str | None = None,
+                       is_admin: bool = False):
+    """Одна запись журнала. Ошибки глотаем: журнал не должен ломать бота."""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO activity_log (tg_id, is_admin, action, details) VALUES (?, ?, ?, ?)",
+                (tg_id, 1 if is_admin else 0, str(action)[:120],
+                 str(details)[:200] if details else None),
+            )
+            await db.commit()
+    except Exception:
+        pass
+
+
+def _activity_where(scope: str):
+    if scope == "important":
+        return "a.action LIKE 'ev:%'", []
+    if scope == "admin":
+        return "a.is_admin = 1", []
+    if scope.startswith("user:"):
+        return "a.tg_id = ?", [int(scope.split(":", 1)[1])]
+    return "a.is_admin = 0", []
+
+
+async def list_activity(scope: str = "all", page: int = 1, per_page: int = 15):
+    """Журнал с пагинацией. Время отдаём в местном поясе."""
+    where, params = _activity_where(scope)
+    offset = (page - 1) * per_page
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"SELECT COUNT(*) FROM activity_log a WHERE {where}", params) as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute(f"""
+            SELECT a.tg_id, a.action, a.details, datetime(a.created_at, 'localtime'),
+                   u.first_name, u.username
+            FROM activity_log a LEFT JOIN users u ON u.id = a.tg_id
+            WHERE {where}
+            ORDER BY a.id DESC LIMIT ? OFFSET ?
+        """, params + [per_page, offset]) as cur:
+            rows = await cur.fetchall()
+    return rows, max(1, (total + per_page - 1) // per_page)
+
+
+async def activity_summary() -> dict:
+    today = "date(created_at, 'localtime') = date('now', 'localtime')"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"SELECT COUNT(DISTINCT tg_id), COUNT(*) FROM activity_log WHERE is_admin = 0 AND {today}"
+        ) as cur:
+            active_today, events_today = await cur.fetchone()
+        async with db.execute(
+            "SELECT COUNT(DISTINCT tg_id) FROM activity_log "
+            "WHERE is_admin = 0 AND created_at >= datetime('now', '-7 days')"
+        ) as cur:
+            active_week = (await cur.fetchone())[0]
+        async with db.execute(
+            f"SELECT action FROM activity_log WHERE is_admin = 0 AND {today} AND action NOT LIKE 'ev:%'"
+        ) as cur:
+            actions = [r[0] for r in await cur.fetchall()]
+        async with db.execute("""
+            SELECT a.tg_id, a.action, a.details, datetime(a.created_at, 'localtime'),
+                   u.first_name, u.username
+            FROM activity_log a LEFT JOIN users u ON u.id = a.tg_id
+            WHERE a.action LIKE 'ev:%' ORDER BY a.id DESC LIMIT 5
+        """) as cur:
+            recent = await cur.fetchall()
+
+    counts = {}
+    for a in actions:
+        kind, _, rest = a.partition(":")
+        key = f"{kind}:{rest.split(':')[0]}"
+        counts[key] = counts.get(key, 0) + 1
+    top = sorted(counts.items(), key=lambda kv: -kv[1])[:5]
+    return {"active_today": active_today, "events_today": events_today,
+            "active_week": active_week, "top_today": top, "recent_events": recent}
+
+
+async def users_by_emails(emails: list) -> dict:
+    """email клиента в панели → (tg_id, имя, username)."""
+    emails = [e for e in emails if e]
+    if not emails:
+        return {}
+    marks = ",".join("?" * len(emails))
+    out = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        for table in ("paid_subs", "admin_subs"):
+            async with db.execute(f"""
+                SELECT s.email, s.tg_id, u.first_name, u.username
+                FROM {table} s LEFT JOIN users u ON u.id = s.tg_id
+                WHERE s.email IN ({marks})
+            """, emails) as cur:
+                for email, tg_id, fn, un in await cur.fetchall():
+                    out.setdefault(email, (tg_id, fn, un))
+    return out
+
+
+async def digest_stats(day_offset: int = 1) -> dict:
+    """Цифры за сутки в местном времени: 1 — вчера, 0 — сегодня."""
+    day = f"date('now', 'localtime', '-{int(day_offset)} day')"
+
+    def on(col: str) -> str:
+        return f"date({col}, 'localtime') = {day}"
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async def one(q):
+            async with db.execute(q) as cur:
+                return await cur.fetchone()
+
+        new_users = (await one(f"SELECT COUNT(*) FROM users WHERE {on('created_at')}"))[0]
+        active, actions = await one(
+            f"SELECT COUNT(DISTINCT tg_id), COUNT(*) FROM activity_log "
+            f"WHERE is_admin = 0 AND {on('created_at')}")
+        trials = (await one(
+            f"SELECT COUNT(*) FROM paid_sub_history WHERE action = 'sub_created' "
+            f"AND details LIKE '%пробный период%' AND {on('created_at')}"))[0]
+        paid_cnt, paid_sum = await one(
+            f"SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
+            f"WHERE paid_at IS NOT NULL AND {on('paid_at')}")
+        ref_cnt, ref_sum = await one(
+            f"SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
+            f"WHERE refunded_at IS NOT NULL AND {on('refunded_at')}")
+        ended = (await one(
+            f"SELECT COUNT(*) FROM activity_log WHERE action = 'ev:period_ended' AND {on('created_at')}"))[0]
+        expired = (await one(
+            f"SELECT COUNT(*) FROM activity_log WHERE action = 'ev:expired' AND {on('created_at')}"))[0]
+        sup_msgs, sup_users = await one(
+            f"SELECT COUNT(*), COUNT(DISTINCT user_id) FROM support_messages "
+            f"WHERE from_admin = 0 AND {on('created_at')}")
+        active_subs = (await one(
+            "SELECT COUNT(*) FROM paid_subs WHERE status IN ('active','renewal')"))[0]
+        label = (await one(f"SELECT strftime('%d.%m', {day})"))[0]
+
+    return {"new_users": new_users, "active": active, "actions": actions,
+            "trials": trials, "paid_cnt": paid_cnt, "paid_sum": paid_sum,
+            "ref_cnt": ref_cnt, "ref_sum": ref_sum, "ended": ended, "expired": expired,
+            "sup_msgs": sup_msgs, "sup_users": sup_users,
+            "active_subs": active_subs, "label": label}
+
+
+async def purge_activity(days: int = 90) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "DELETE FROM activity_log WHERE created_at < datetime('now', ?)",
+            (f"-{int(days)} days",),
+        )
+        await db.commit()
+        return cur.rowcount or 0
 
 
 async def count_support_files(user_id: int) -> int:

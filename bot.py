@@ -1,10 +1,14 @@
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram import Update
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, MessageHandler, TypeHandler, filters,
+)
 from config import BOT_TOKEN
 from database import init_db
 from handlers.start import start
 from handlers.help import help_cmd
 from handlers.callbacks import callback_router
 from handlers.messages import handle_text, handle_media
+from handlers.control import log_update
 
 
 async def post_init(app: Application):
@@ -238,6 +242,10 @@ async def post_init(app: Application):
 
         app.job_queue.run_once(_recovered_job, when=60)
 
+        from handlers.control import digest_tick, purge_tick
+        app.job_queue.run_repeating(digest_tick, interval=600, first=90)
+        app.job_queue.run_repeating(purge_tick, interval=24 * 3600, first=3600)
+
         async def _paid_sync_job(ctx):
             from datetime import datetime
             cfg = load_config()
@@ -327,6 +335,9 @@ def main():
         .build()
     )
 
+    # Журнал: группа -1 видит каждое событие раньше остальных обработчиков
+    # и не мешает им — обработка идёт дальше как обычно.
+    app.add_handler(TypeHandler(Update, log_update), group=-1)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CallbackQueryHandler(callback_router))

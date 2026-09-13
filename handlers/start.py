@@ -14,6 +14,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_new = not await get_user_info(user.id)
     await upsert_user(user.id, user.first_name, user.username)
     if is_new:
+        from database import log_activity
+        await log_activity(user.id, "ev:registered",
+                           context.args[0] if context.args else None)
         from log_channel import send_log
         uname = f"@{user.username}" if user.username else f"id{user.id}"
         await send_log(context.bot,
