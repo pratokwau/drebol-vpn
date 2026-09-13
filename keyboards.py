@@ -4,7 +4,8 @@ from config import load_config
 
 # ── Главное меню ──────────────────────────────────────────────────────────────
 
-def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = "") -> InlineKeyboardMarkup:
+def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = "",
+                  is_helper: bool = False) -> InlineKeyboardMarkup:
     cfg = load_config()
     channel_url = cfg.get("channel_url")
 
@@ -35,6 +36,8 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
     rows.append([InlineKeyboardButton("ℹ️ Инфо", callback_data="info")])
     if is_admin:
         rows.append([InlineKeyboardButton("⚙️ Админка", callback_data="admin_panel")])
+    elif is_helper:
+        rows.append([InlineKeyboardButton("🛡 Панель поддержки", callback_data="admin_panel")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -54,6 +57,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔍 Найти юзера", callback_data="find_user")],
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
+        [InlineKeyboardButton("👥 Помощники", callback_data="helpers_menu")],
         [InlineKeyboardButton("🎯 Winback", callback_data="winback_settings")],
         [InlineKeyboardButton("🖥 Серверы и 3x-UI", callback_data="xui_settings")],
         [InlineKeyboardButton(mnt_label, callback_data="mnt_menu")],

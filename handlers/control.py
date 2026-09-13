@@ -65,6 +65,18 @@ CB_LABELS = {
     "tariff_del_ok": "🗑 Удалил тариф",
     "promo_delete": "🗑 Удалил промокод",
     "promo_toggle": "🎟 Промокод вкл/выкл",
+    "helper_add": "👥 Добавление помощника",
+    "helper_del": "👥 Убрал помощника",
+    "ctl_ch_toggle": "🆘 Помощь с подключением вкл/выкл",
+    # работа в поддержке — в аудите видно, кто из помощников что открывал
+    "admin_panel": "⚙️ Открыл панель",
+    "ticket_list": "🎫 Тикеты",
+    "ticket_view": "🎫 Открыл тикет",
+    "ticket_reply": "✏️ Начал ответ в тикет",
+    "find_user": "🔍 Поиск юзера",
+    "user_profile": "👤 Открыл профиль",
+    "user_activity": "📜 Действия юзера",
+    "dm_user": "📌 Начал сообщение юзеру",
 }
 
 EVENT_LABELS = {
@@ -85,17 +97,22 @@ EVENT_LABELS = {
     "sub_reduced": "➖ Убавлен срок",
     "settings_changed": "⚙️ Изменены условия",
     "user_muted": "🔇 Заглушён",
+    "connect_help": "🆘 Подсказка: не подключился",
 }
 
 STATE_LABELS = {
     "awaiting_support_msg": "✉️ Написал в поддержку",
     "awaiting_promo_code": "🎟 Ввёл промокод",
+    "awaiting_admin_reply": "✉️ Ответил в тикет",
+    "awaiting_dm_user": "📌 Написал юзеру",
+    "awaiting_find_user": "🔍 Искал юзера",
+    "awaiting_helper_id": "👥 Ввёл помощника",
 }
 
 FEED_TITLES = {
     "all": "📜 Лента действий",
     "important": "⭐ Важные события",
-    "admin": "⚙️ Мои действия",
+    "admin": "⚙️ Аудит админки",
 }
 
 
@@ -152,7 +169,7 @@ async def log_update(update, context):
     Хранится только тип действия — какая кнопка, команда или вид сообщения.
     Текст сообщений не сохраняется: обращения в поддержку и так лежат в тикетах.
     """
-    from config import ADMIN_ID
+    from staff import is_staff
     from database import log_activity
     try:
         user = update.effective_user
@@ -176,7 +193,7 @@ async def log_update(update, context):
                 action = f"msg:{kind}"
                 details = (context.user_data or {}).get("state")
         if action:
-            await log_activity(user.id, action, details, user.id == ADMIN_ID)
+            await log_activity(user.id, action, details, is_staff(user.id))
     except Exception:
         # журнал не должен мешать обработке
         pass
@@ -220,16 +237,20 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
     digest_on = cfg.get("digest_enabled", True)
     hour = int(cfg.get("digest_hour", 9))
     lines.append(f"\n📨 Сводка в личку: <b>{f'каждый день в {hour}:00' if digest_on else 'выключена'}</b>")
+    ch_label = (f"через {int(cfg.get('connect_help_hours', 3))} ч"
+                if cfg.get("connect_help_enabled", True) else "выключена")
+    lines.append(f"🆘 Помощь с подключением: <b>{ch_label}</b>")
     lines.append(f"🗄 Журнал хранится {int(cfg.get('activity_retention_days', 90))} дней")
 
     kb = [
         [InlineKeyboardButton("📜 Лента действий", callback_data="act_feed:all:1")],
         [InlineKeyboardButton("⭐ Важные события", callback_data="act_feed:important:1")],
-        [InlineKeyboardButton("⚙️ Мои действия (аудит)", callback_data="act_feed:admin:1")],
+        [InlineKeyboardButton("⚙️ Аудит админки", callback_data="act_feed:admin:1")],
         [
             InlineKeyboardButton("🔌 Кто онлайн", callback_data="ctl_online"),
             InlineKeyboardButton("📊 Трафик", callback_data="ctl_traffic"),
         ],
+        [InlineKeyboardButton("🆘 Помощь с подключением", callback_data="ctl_ch_menu")],
         [InlineKeyboardButton(
             "📨 Сводка: ВКЛ ✅" if digest_on else "📨 Сводка: ВЫКЛ ❌",
             callback_data="ctl_digest_toggle",
@@ -258,6 +279,7 @@ def _nav(base_cb: str, page: int, total_pages: int) -> list:
 
 
 async def handle_activity_feed(query, scope: str = "all", page: int = 1):
+    from config import ADMIN_ID
     from database import list_activity
     if scope not in FEED_TITLES:
         scope = "all"
@@ -267,7 +289,8 @@ async def handle_activity_feed(query, scope: str = "all", page: int = 1):
     if not rows:
         lines.append("Пока пусто.")
     for tg_id, action, details, ts, fn, un in rows:
-        who = "" if scope == "admin" else f"{_who(fn, un, tg_id)} · "
+        # в аудите себя не подписываем, а помощника — да
+        who = "" if scope == "admin" and tg_id == ADMIN_ID else f"{_who(fn, un, tg_id)} · "
         lines.append(f"<code>{_short_ts(ts)}</code> {who}{action_label(action, details)}")
 
     kb = []
@@ -469,3 +492,140 @@ async def handle_digest_now(query, context):
         text, parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([_back("ctl_menu")]),
     )
+
+
+# ── Помощь с подключением ────────────────────────────────────────────────────
+
+CONNECT_HELP_HOURS = (1, 3, 6, 12, 24)
+
+
+def last_seen_text(ms) -> str:
+    """Подпись к времени последнего подключения из панели: мс, 0 — ни разу."""
+    if ms is None:
+        return "<i>клиента нет в панели</i>"
+    if ms <= 0:
+        return "⚪️ подключений ещё не было"
+    ago = datetime.now().timestamp() - ms / 1000
+    if ago < 120:
+        return "🟢 в сети"
+    if ago < 3600:
+        span = f"{int(ago // 60)} мин"
+    elif ago < 48 * 3600:
+        span = f"{int(ago // 3600)} ч"
+    else:
+        span = f"{int(ago // 86400)} дн."
+    return f"последнее подключение {span} назад"
+
+
+async def handle_connect_help_menu(query, context=None):
+    from database import connect_help_stats
+    cfg = load_config()
+    on = cfg.get("connect_help_enabled", True)
+    hours = int(cfg.get("connect_help_hours", 3))
+    st = await connect_help_stats()
+    text = (
+        "🆘 <b>Помощь с подключением</b>\n\n"
+        f"Если человек получил подписку, а VPN за <b>{hours} ч</b> ни разу не "
+        "подключился, бот один раз пишет ему: как подключиться и кнопка в поддержку.\n\n"
+        f"📌 Статус: <b>{'ВКЛ ✅' if on else 'ВЫКЛ ❌'}</b>\n"
+        f"📨 Отправлено за 7 дней: <b>{st['week']}</b> · всего: <b>{st['total']}</b>\n\n"
+        "<i>Подключение бот узнаёт у панели 3x-UI. Хранит только отметку "
+        "«подключался хоть раз» — без времени и адресов.</i>"
+    )
+    rows = [
+        [InlineKeyboardButton("🔴 Выключить" if on else "🟢 Включить",
+                              callback_data="ctl_ch_toggle")],
+        [InlineKeyboardButton(("• " if h == hours else "") + f"{h} ч",
+                              callback_data=f"ctl_ch_set:{h}")
+         for h in CONNECT_HELP_HOURS],
+        _back("ctl_menu"),
+    ]
+    await query.edit_message_text(text, parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def handle_connect_help_toggle(query, context):
+    cfg = load_config()
+    cfg["connect_help_enabled"] = not cfg.get("connect_help_enabled", True)
+    save_config(cfg)
+    await handle_connect_help_menu(query, context)
+
+
+async def handle_connect_help_set(query, context, hours: int):
+    if hours not in CONNECT_HELP_HOURS:
+        return
+    cfg = load_config()
+    cfg["connect_help_hours"] = hours
+    save_config(cfg)
+    await handle_connect_help_menu(query, context)
+
+
+async def connect_help_tick(context):
+    """Раз в полчаса: кому из новых подписчиков помочь с подключением.
+
+    Смотрим только подписки последних двух суток сверх задержки — после
+    выкладки бот не напишет тем, кто получил подписку давно. Кто хоть раз
+    подключался, отмечается и больше не проверяется: после оплаты бот
+    пересоздаёт клиента в панели, и её счётчик подключений обнуляется.
+    """
+    from config import ADMIN_ID
+    import maintenance as mnt
+    from database import (
+        recent_subs_for_connect_help, mark_connect_help, log_activity, is_banned,
+    )
+    from xui_api import get_last_online
+
+    cfg = load_config()
+    if not cfg.get("connect_help_enabled", True) or mnt.is_maintenance():
+        return
+    hours = int(cfg.get("connect_help_hours", 3))
+    rows = await recent_subs_for_connect_help(hours + 48)
+    if not rows:
+        return
+    r = await get_last_online()
+    if not r.get("ok"):
+        return
+    last = r["last"]
+
+    # записей подписки у человека может быть несколько — решаем по человеку
+    seen, due = set(), set()
+    for tg_id, email, status, age in rows:
+        ms = last.get(email)
+        if ms is None:
+            continue  # клиента нет в панели — судить не по чему
+        if ms > 0:
+            seen.add(tg_id)
+        elif status == "active" and (age or 0) >= hours * 3600:
+            due.add(tg_id)
+
+    for tg_id in seen:
+        await mark_connect_help(tg_id, "seen")
+
+    support_on = mnt.feature_enabled("support")
+    kb = [
+        [InlineKeyboardButton("❓ Как подключиться", callback_data="how_to")],
+        [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")],
+    ]
+    if support_on:
+        kb.append([InlineKeyboardButton("💬 Написать в поддержку", callback_data="support_open")])
+    text = (
+        "🔌 <b>Получилось подключиться?</b>\n\n"
+        "Похоже, VPN ещё ни разу не подключался. Настройка занимает пару минут:\n\n"
+        "1. Установите приложение Happ\n"
+        "2. В «👤 Моя подписка» скопируйте ссылку\n"
+        "3. Вставьте её в приложение и подключитесь\n\n"
+        + ("Если не выходит — напишите нам, поможем." if support_on
+           else "Подробная инструкция — по кнопке ниже.")
+    )
+
+    for tg_id in due - seen:
+        if tg_id == ADMIN_ID or await is_banned(tg_id):
+            continue
+        if not await mark_connect_help(tg_id, "sent"):
+            continue
+        try:
+            await context.bot.send_message(chat_id=tg_id, text=text, parse_mode="HTML",
+                                           reply_markup=InlineKeyboardMarkup(kb))
+            await log_activity(tg_id, "ev:connect_help")
+        except Exception:
+            pass

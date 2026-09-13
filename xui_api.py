@@ -84,9 +84,10 @@ async def _get(session: aiohttp.ClientSession, url: str) -> tuple[dict | None, s
         return None, f"{type(e).__name__}: {e}"
 
 
-async def _post(session: aiohttp.ClientSession, url: str, body: dict) -> tuple[dict | None, str]:
+async def _post(session: aiohttp.ClientSession, url: str, body: dict,
+                timeout: float = 15) -> tuple[dict | None, str]:
     try:
-        async with session.post(url, json=body, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+        async with session.post(url, json=body, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
             text = await resp.text()
             if not text.strip() or text.strip() == "null":
                 return None, f"HTTP {resp.status}: пустой ответ"
@@ -325,10 +326,52 @@ async def get_online_emails() -> dict:
         return {"ok": False, "error": "панель не настроена", "emails": []}
     s = _session(token)
     try:
-        data, err = await _post(s, f"{url}/panel/api/inbounds/onlines", {})
-        if not data or not data.get("success"):
-            return {"ok": False, "error": err or str(data)[:120], "emails": []}
-        return {"ok": True, "emails": sorted({e for e in (data.get("obj") or []) if e})}
+        # 3x-UI 3.x отдаёт «онлайн» из API клиентов, 2.x — из API инбаундов
+        first_err = ""
+        for path in ("/panel/api/clients/onlines", "/panel/api/inbounds/onlines"):
+            data, err = await _post(s, f"{url}{path}", {})
+            if data and data.get("success"):
+                obj = data.get("obj") or []
+                emails = {(e.get("email") if isinstance(e, dict) else e) for e in obj}
+                return {"ok": True, "emails": sorted(e for e in emails if e)}
+            first_err = first_err or err or str(data)[:120]
+            if data is None and not err.startswith("HTTP"):
+                break  # панель не отвечает вовсе — второй путь не поможет
+        return {"ok": False, "error": first_err, "emails": []}
+    finally:
+        await s.close()
+
+
+async def get_last_online(timeout: float = 15) -> dict:
+    """Когда каждый клиент последний раз был в сети: мс, 0 — ни разу.
+
+    Панель хранит одно число на клиента, истории подключений у неё нет.
+    Клиент, пересозданный при переносе между инбаундами, начинает с нуля.
+    """
+    cfg = load_config()
+    url = (cfg.get("xui_url") or "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"ok": False, "error": "панель не настроена", "last": {}}
+    s = _session(token)
+    try:
+        first_err = ""
+        # 3x-UI 3.x — API клиентов, 2.x — API инбаундов
+        for path in ("/panel/api/clients/lastOnline", "/panel/api/inbounds/lastOnline"):
+            data, err = await _post(s, f"{url}{path}", {}, timeout)
+            if data and data.get("success"):
+                obj = data.get("obj") or {}
+                last = {}
+                for email, ms in (obj.items() if isinstance(obj, dict) else []):
+                    try:
+                        last[email] = int(ms or 0)
+                    except (TypeError, ValueError):
+                        continue
+                return {"ok": True, "last": last}
+            first_err = first_err or err or str(data)[:120]
+            if data is None and not err.startswith("HTTP"):
+                break
+        return {"ok": False, "error": first_err, "last": {}}
     finally:
         await s.close()
 

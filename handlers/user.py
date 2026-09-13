@@ -864,7 +864,6 @@ async def _do_reissue_job(ctx):
         )
     except Exception:
         pass
-    await query.answer("Ссылка отправлена — нажми на неё, чтобы скопировать")
 
 
 async def handle_referral(query, context):
@@ -943,6 +942,7 @@ async def handle_info(query):
 
 async def handle_back_start(query, user):
     is_admin = user.id == ADMIN_ID
+    from staff import is_helper
     from adminsub.storage import get_sub_by_tg_id
     from paidsub.storage import get_paid_sub_status
     has_sub = bool(await get_sub_by_tg_id(user.id))
@@ -954,5 +954,5 @@ async def handle_back_start(query, user):
         "🌍 Доступ к популярным сервисам\n\n"
         "Выберите нужный раздел ниже 👇",
         parse_mode="HTML",
-        reply_markup=main_keyboard(is_admin, has_sub, paid_status),
+        reply_markup=main_keyboard(is_admin, has_sub, paid_status, is_helper(user.id)),
     )

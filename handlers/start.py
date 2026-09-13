@@ -35,7 +35,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Техработы: пользователь видит сообщение, админ работает как обычно.
     # Регистрацию и реферала выше сохраняем, иначе пришедшие во время работ потеряются.
-    if user.id != ADMIN_ID:
+    # Помощник проходит, чтобы попасть в панель поддержки.
+    from staff import is_helper
+    helper = is_helper(user.id)
+    if user.id != ADMIN_ID and not helper:
         import maintenance as mnt
         if mnt.is_maintenance():
             await mnt.show_maintenance(message=update.message)
@@ -46,7 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
         return
 
-    if not await is_subscribed(context.bot, user.id):
+    if not helper and not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(
             f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
             "🔒 Быстрый и безопасный VPN\n"
@@ -71,5 +74,5 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌍 Доступ к популярным сервисам\n\n"
         "Выберите нужный раздел ниже 👇",
         parse_mode="HTML",
-        reply_markup=main_keyboard(is_admin, has_sub, paid_status),
+        reply_markup=main_keyboard(is_admin, has_sub, paid_status, helper),
     )

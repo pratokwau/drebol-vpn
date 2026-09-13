@@ -29,6 +29,11 @@ from handlers.control import (
     handle_control_menu, handle_activity_feed, handle_user_activity,
     handle_online, handle_traffic, handle_digest_toggle,
     handle_digest_hour_menu, handle_digest_set_hour, handle_digest_now,
+    handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
+)
+from staff import (
+    is_helper, helper_can, handle_helper_panel,
+    handle_helpers_menu, handle_helper_add, handle_helper_del,
 )
 from handlers.payments import (
     handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
@@ -105,12 +110,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     adm = _is_admin(update)
+    # Помощнику открыты только разделы поддержки — белым списком
+    helper = not adm and is_helper(update.effective_user.id)
+    staff_cb = helper and helper_can(data)
 
     if data == "noop":
         return
 
-    # Техработы и выключенные функции. На админа не действуют.
-    if not adm:
+    # Техработы и выключенные функции. На админа и на работу помощника не действуют.
+    if not adm and not staff_cb:
         import maintenance as mnt
         if mnt.is_maintenance():
             context.user_data.pop("state", None)
@@ -134,7 +142,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     # Проверка подписки для не-админов
-    if data != "check_sub" and not adm:
+    if data != "check_sub" and not adm and not staff_cb:
         if not await is_subscribed(context.bot, update.effective_user.id):
             user = update.effective_user
             await query.edit_message_text(
@@ -174,7 +182,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🌍 Доступ к популярным сервисам\n\n"
             "Выберите нужный раздел ниже 👇",
             parse_mode="HTML",
-            reply_markup=main_keyboard(adm, has_sub, paid_status),
+            reply_markup=main_keyboard(adm, has_sub, paid_status, helper),
         )
         return
 
@@ -236,12 +244,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await open_support(query, update.effective_user.id, page)
 
     # ── Только админ ─────────────────────────────────────────────────────────
-    elif not adm:
+    elif not adm and not staff_cb:
         await query.edit_message_text("⛔ Нет доступа.")
 
     elif data == "admin_panel":
         context.user_data.pop("state", None)
-        await handle_admin_panel(query)
+        if helper:
+            await handle_helper_panel(query)
+        else:
+            await handle_admin_panel(query)
     elif data == "channel_menu":
         await handle_channel_menu(query)
 
@@ -290,6 +301,18 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_digest_set_hour(query, context, int(data.split(":")[1]))
     elif data == "ctl_digest_now":
         await handle_digest_now(query, context)
+    elif data == "ctl_ch_menu":
+        await handle_connect_help_menu(query, context)
+    elif data == "ctl_ch_toggle":
+        await handle_connect_help_toggle(query, context)
+    elif data.startswith("ctl_ch_set:"):
+        await handle_connect_help_set(query, context, int(data.split(":")[1]))
+    elif data == "helpers_menu":
+        await handle_helpers_menu(query, context)
+    elif data == "helper_add":
+        await handle_helper_add(query, context)
+    elif data.startswith("helper_del:"):
+        await handle_helper_del(query, context, int(data.split(":")[1]))
     elif data.startswith("payments:"):
         _, st, pg = data.split(":")
         await handle_payments_menu(query, context, st, int(pg))

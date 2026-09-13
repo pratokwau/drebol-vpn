@@ -40,7 +40,7 @@ from states import (
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
-    AWAITING_NODE_HOST, AWAITING_MAINTENANCE_TEXT,
+    AWAITING_NODE_HOST, AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
 )
 
 
@@ -55,9 +55,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text.strip()
     is_admin = user.id == ADMIN_ID
+    # Ввод помощника: ответ в тикет, поиск юзера, сообщение юзеру
+    from staff import HELPER_STATES, is_helper, staff_chat_ids
+    helper_input = state in HELPER_STATES and not is_admin
+    if helper_input and not is_helper(user.id):
+        # доступ сняли, пока ввод был не закончен
+        context.user_data.pop("state", None)
+        state, helper_input = None, False
 
     # ── Техработы и выключенные функции ─────────────────────────────────────
-    if not is_admin:
+    if not is_admin and not helper_input:
         import maintenance as mnt
         if mnt.is_maintenance():
             context.user_data.pop("state", None)
@@ -86,21 +93,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uname = f"@{user.username}" if user.username else f"id{user.id}"
         unread = await get_unread_tickets_count()
         preview = text if len(text) <= 500 else text[:500] + "…"
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                f"📩 <b>Новое обращение в поддержку</b>\n\n"
-                f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
-                f"🆔 <code>{user.id}</code>\n"
-                f"🔴 Всего непрочитанных тикетов: <b>{unread}</b>\n\n"
-                f"💬 {preview}"
-            ),
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
-                [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
-            ]),
-        )
+        # админу и помощникам: если кто-то заблокировал бота, остальным всё равно дойдёт
+        for chat_id in staff_chat_ids():
+            if chat_id == user.id:
+                continue
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"📩 <b>Новое обращение в поддержку</b>\n\n"
+                        f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
+                        f"🆔 <code>{user.id}</code>\n"
+                        f"🔴 Всего непрочитанных тикетов: <b>{unread}</b>\n\n"
+                        f"💬 {preview}"
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
+                        [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
+                    ]),
+                )
+            except Exception:
+                pass
         return
 
     # ── Бан-чек ───────────────────────────────────────────────────────────────
@@ -146,7 +160,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if not is_admin:
+    # дальше только админ — и помощник со своим вводом (ответ, поиск, сообщение)
+    if not is_admin and not helper_input:
         return
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -997,6 +1012,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_user_profile(update.message, int(text), edit=False)
         return
 
+    # ── Новый помощник ────────────────────────────────────────────────────────
+    if state == AWAITING_HELPER_ID and is_admin:
+        from staff import handle_helper_input
+        await handle_helper_input(update, context, text)
+        return
+
     # ── Лог-канал ────────────────────────────────────────────────────────────
     if state == AWAITING_LOG_CHANNEL:
         try:
@@ -1130,8 +1151,14 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     is_admin = user.id == ADMIN_ID
     msg = update.message
+    from staff import is_helper, staff_chat_ids
+    helper_reply = state == AWAITING_ADMIN_REPLY and not is_admin
+    if helper_reply and not is_helper(user.id):
+        # доступ сняли, пока ответ был не закончен
+        context.user_data.pop("state", None)
+        state, helper_reply = None, False
 
-    if not is_admin:
+    if not is_admin and not helper_reply:
         import maintenance as mnt
         if mnt.is_maintenance():
             context.user_data.pop("state", None)
@@ -1175,44 +1202,34 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         uname = f"@{user.username}" if user.username else f"id{user.id}"
         unread = await get_unread_tickets_count()
-        if file_type == "photo":
-            await context.bot.send_photo(
-                chat_id=ADMIN_ID,
-                photo=file_id,
-                caption=(
-                    f"📩 <b>Файл от пользователя</b>\n\n"
-                    f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
-                    f"🆔 <code>{user.id}</code>\n"
-                    f"🔴 Непрочитанных: <b>{unread}</b>"
-                    + (f"\n\n💬 {caption}" if caption else "")
-                ),
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
-                    [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
-                ]),
-            )
-        else:
-            await context.bot.send_document(
-                chat_id=ADMIN_ID,
-                document=file_id,
-                caption=(
-                    f"📩 <b>Файл от пользователя</b>\n\n"
-                    f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
-                    f"🆔 <code>{user.id}</code>\n"
-                    f"🔴 Непрочитанных: <b>{unread}</b>"
-                    + (f"\n\n💬 {caption}" if caption else "")
-                ),
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
-                    [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
-                ]),
-            )
+        notice = (
+            f"📩 <b>Файл от пользователя</b>\n\n"
+            f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
+            f"🆔 <code>{user.id}</code>\n"
+            f"🔴 Непрочитанных: <b>{unread}</b>"
+            + (f"\n\n💬 {caption}" if caption else "")
+        )
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
+            [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{user.id}:1")],
+        ])
+        # админу и помощникам: если кто-то заблокировал бота, остальным всё равно дойдёт
+        for chat_id in staff_chat_ids():
+            if chat_id == user.id:
+                continue
+            try:
+                if file_type == "photo":
+                    await context.bot.send_photo(chat_id=chat_id, photo=file_id, caption=notice,
+                                                 parse_mode="HTML", reply_markup=kb)
+                else:
+                    await context.bot.send_document(chat_id=chat_id, document=file_id, caption=notice,
+                                                    parse_mode="HTML", reply_markup=kb)
+            except Exception:
+                pass
         return
 
     # ── Админ отправляет файл как ответ ─────────────────────────────────────
-    if state == AWAITING_ADMIN_REPLY and is_admin:
+    if state == AWAITING_ADMIN_REPLY and (is_admin or helper_reply):
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         reply_to = context.user_data.pop("reply_to", None)
         context.user_data.pop("state", None)

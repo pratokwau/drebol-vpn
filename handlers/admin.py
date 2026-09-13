@@ -303,6 +303,10 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     _, first_name, username = user_info
     uname = f"@{username}" if username else f"id{tg_id}"
     banned = await is_banned(tg_id)
+    # помощнику карточка без денег и без управления подпиской
+    from staff import is_helper
+    viewer = getattr(query_or_msg, "from_user", None)
+    limited = bool(viewer) and is_helper(viewer.id)
 
     lines = [
         f"👤 <b>Профиль пользователя</b>\n",
@@ -322,6 +326,11 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         lines.append(f"📅 До: <b>{sub[6]}</b>")
         times = sub[12] if len(sub) > 12 else 0
         lines.append(f"🏷 Тип: {'оплаченная' if times > 0 else 'пробная'} (продлений: {times})")
+        from xui_api import get_last_online
+        from handlers.control import last_seen_text
+        lo = await get_last_online(timeout=5)
+        lines.append("🔌 VPN: " + (last_seen_text(lo["last"].get(sub[2])) if lo.get("ok")
+                                   else "<i>панель не ответила</i>"))
     else:
         lines.append("\n💳 Подписка: <b>нет</b>")
 
@@ -344,39 +353,44 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     if ticket_count > 0:
         lines.append(f"🎫 Сообщений в поддержку: <b>{ticket_count}</b>")
 
-    # Оплаты
-    from handlers.payments import user_payments_block
-    pay_block = await user_payments_block(tg_id)
-    if pay_block:
-        lines.append(pay_block)
+    # Оплаты и история — только админу: в истории есть суммы оплат
+    history_count = 0
+    if not limited:
+        from handlers.payments import user_payments_block
+        pay_block = await user_payments_block(tg_id)
+        if pay_block:
+            lines.append(pay_block)
 
-    # История
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT COUNT(*) FROM paid_sub_history WHERE tg_id = ?", (tg_id,)
-        ) as cur:
-            history_count = (await cur.fetchone())[0]
-    if history_count:
-        lines.append(f"\n📜 Записей в истории: <b>{history_count}</b>")
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM paid_sub_history WHERE tg_id = ?", (tg_id,)
+            ) as cur:
+                history_count = (await cur.fetchone())[0]
+        if history_count:
+            lines.append(f"\n📜 Записей в истории: <b>{history_count}</b>")
 
     # Кнопки
     kb_rows = []
-    if sub:
+    if sub and not limited:
         kb_rows.append([InlineKeyboardButton("💳 К подписке", callback_data=f"paid_sub_view:{sub[0]}")])
     kb_rows.append([InlineKeyboardButton("📜 Действия в боте", callback_data=f"user_activity:{tg_id}:1")])
     if ticket_count > 0:
         kb_rows.append([InlineKeyboardButton("🎫 Переписка", callback_data=f"ticket_view:{tg_id}:1")])
     if history_count > 0:
         kb_rows.append([InlineKeyboardButton("🕐 История", callback_data=f"user_history:{tg_id}:1")])
-    if banned:
-        kb_rows.append([InlineKeyboardButton("🔓 Разбанить", callback_data=f"unban_user:{tg_id}")])
+    if limited:
+        kb_rows.append([InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}")])
+        kb_rows.append([InlineKeyboardButton("◀️ В панель поддержки", callback_data="admin_panel")])
     else:
-        kb_rows.append([InlineKeyboardButton("🚫 Забанить", callback_data=f"ban_user:{tg_id}")])
-    kb_rows.append([
-        InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}"),
-        InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}"),
-    ])
-    kb_rows.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
+        if banned:
+            kb_rows.append([InlineKeyboardButton("🔓 Разбанить", callback_data=f"unban_user:{tg_id}")])
+        else:
+            kb_rows.append([InlineKeyboardButton("🚫 Забанить", callback_data=f"ban_user:{tg_id}")])
+        kb_rows.append([
+            InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}"),
+            InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}"),
+        ])
+        kb_rows.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     kb = InlineKeyboardMarkup(kb_rows)
 
     text = "\n".join(lines)

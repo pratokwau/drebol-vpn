@@ -95,3 +95,6 @@ AWAITING_PLATEGA_SECRET = "awaiting_platega_secret"
 
 # Сообщение юзеру из профиля
 AWAITING_DM_USER = "awaiting_dm_user"
+
+# Помощники
+AWAITING_HELPER_ID = "awaiting_helper_id"

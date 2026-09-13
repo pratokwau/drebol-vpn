@@ -223,6 +223,16 @@ async def init_db():
         """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(tg_id, created_at)")
+        # Помощь с подключением: кому уже написали и кто подключался хоть раз.
+        # Время ставим только у отправленных подсказок — для отметки
+        # «подключался» ни время, ни адрес подключения не храним.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS connect_help (
+                tg_id INTEGER PRIMARY KEY,
+                kind TEXT NOT NULL,
+                created_at TIMESTAMP
+            )
+        """)
         # Тарифы: варианты продления, которые видит клиент.
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tariffs (
@@ -870,6 +880,61 @@ async def users_by_emails(emails: list) -> dict:
                 for email, tg_id, fn, un in await cur.fetchall():
                     out.setdefault(email, (tg_id, fn, un))
     return out
+
+
+async def recent_subs_for_connect_help(window_hours: int) -> list[tuple]:
+    """Свежие подписки, по которым ещё не решили, помогать ли с подключением.
+
+    (tg_id, email, status, возраст подписки в секундах)
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT s.tg_id, s.email, s.status,
+                   CAST((julianday('now') - julianday(s.created_at)) * 86400 AS INTEGER)
+            FROM paid_subs s
+            WHERE s.tg_id IS NOT NULL
+              AND s.created_at >= datetime('now', ?)
+              AND s.tg_id NOT IN (SELECT tg_id FROM connect_help)
+        """, (f"-{int(window_hours)} hours",)) as cur:
+            return await cur.fetchall()
+
+
+async def mark_connect_help(tg_id: int, kind: str) -> bool:
+    """Отметка: 'seen' — подключался, 'sent' — ему написали.
+
+    True, если отметка новая: два прохода не напишут одному человеку дважды.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO connect_help (tg_id, kind, created_at) "
+            "VALUES (?, ?, CASE WHEN ? = 'sent' THEN CURRENT_TIMESTAMP END)",
+            (tg_id, kind, kind),
+        )
+        await db.commit()
+        return cur.rowcount == 1
+
+
+async def connect_help_stats() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT COUNT(*),
+                   SUM(CASE WHEN created_at >= datetime('now', '-7 days') THEN 1 ELSE 0 END)
+            FROM connect_help WHERE kind = 'sent'
+        """) as cur:
+            total, week = await cur.fetchone()
+    return {"total": total or 0, "week": week or 0}
+
+
+async def find_user_by_username(username: str) -> tuple | None:
+    """(id, first_name, username) по @username без учёта регистра."""
+    name = username.strip().lstrip("@")
+    if not name:
+        return None
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, first_name, username FROM users WHERE lower(username) = lower(?)", (name,)
+        ) as cur:
+            return await cur.fetchone()
 
 
 async def digest_stats(day_offset: int = 1) -> dict:
