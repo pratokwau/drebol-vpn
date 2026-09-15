@@ -235,7 +235,8 @@ async def handle_refund_start(query, payment_id: int):
                                   callback_data=f"refund_do:{p_id}:1")],
             [InlineKeyboardButton("💸 Вернуть, срок оставить",
                                   callback_data=f"refund_do:{p_id}:0")],
-            [InlineKeyboardButton("◀️ Отмена", callback_data=f"payment_view:{p_id}")],
+            [InlineKeyboardButton("❌ Нет", callback_data=f"payment_view:{p_id}"),
+             InlineKeyboardButton("◀️ Назад", callback_data="payments:paid:1")],
         ]),
     )
 

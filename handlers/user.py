@@ -190,7 +190,7 @@ async def handle_my_paid_sub(query):
 
     text = (
         f"🔐 <b>Drebol VPN — Моя подписка</b>\n"
-        f"{'━' * 24}\n\n"
+        f"{'━' * 14}\n\n"
 
         f"📋 Тип: <b>{sub_type}</b>\n"
         f"{status_emoji} Статус: <b>{status_text}</b>\n"
@@ -202,7 +202,7 @@ async def handle_my_paid_sub(query):
         f"{traffic_block}\n"
         f"{referral_block}\n"
 
-        f"{'━' * 24}\n"
+        f"{'━' * 14}\n"
         f"🔗 <b>Ваша ссылка подписки:</b>\n"
         f"<code>{sub_url}</code>\n\n"
         f"<i>Нажмите на ссылку, чтобы скопировать, и вставьте её в приложение Happ или INCY.</i>"

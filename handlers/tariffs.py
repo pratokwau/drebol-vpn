@@ -118,7 +118,8 @@ async def handle_tariff_delete(query, tariff_id: int):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🗑 Да, удалить", callback_data=f"tariff_del_ok:{tariff_id}")],
-            [InlineKeyboardButton("◀️ Отмена", callback_data=f"tariff_view:{tariff_id}")],
+            [InlineKeyboardButton("❌ Нет", callback_data=f"tariff_view:{tariff_id}"),
+             InlineKeyboardButton("◀️ Назад", callback_data="tariffs_menu")],
         ]),
     )
 

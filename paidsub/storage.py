@@ -42,6 +42,13 @@ async def get_paid_sub(sub_id: int) -> tuple | None:
             return await cur.fetchone()
 
 
+async def count_paid_subs() -> int:
+    """Сколько записей затронет массовый сдвиг срока — он идёт по всем."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM paid_subs") as cur:
+            return (await cur.fetchone())[0]
+
+
 async def get_paid_sub_by_tg_id(tg_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""

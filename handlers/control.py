@@ -52,21 +52,19 @@ CB_LABELS = {
     "paid_approve": "✅ Одобрил триал",
     "paid_reject": "❌ Отклонил триал",
     "refund_do": "💸 Возврат",
-    "ban_user": "🚫 Бан",
+    # бан, удаления, вкл/выкл подписок и техработ идут через «Точно?» —
+    # их подписи в handlers/confirm.py (CONFIRM_TITLES)
     "unban_user": "✅ Разбан",
-    "paid_sub_delete": "🗑 Удалил подписку",
-    "paid_sub_toggle": "⏯ Вкл/выкл подписку",
-    "paid_sub_freeze": "🧊 Заморозил подписку",
     "bcast_send": "📣 Отправил рассылку",
-    "mnt_toggle": "🛠 Техработы вкл/выкл",
+    "paid_bulk_apply": "📦 Массовое изменение срока",
+    "bl_add_apply": "⛔ Внёс в ЧС",
+    "bl_sync": "🔄 Обновил общий ЧС",
     "mnt_feature": "⏸ Выключатель функции",
     "pay_provider_set": "💳 Сменил платёжную систему",
     "tariff_toggle": "💰 Тариф вкл/выкл",
     "tariff_del_ok": "🗑 Удалил тариф",
-    "promo_delete": "🗑 Удалил промокод",
     "promo_toggle": "🎟 Промокод вкл/выкл",
     "helper_add": "👥 Добавление помощника",
-    "helper_del": "👥 Убрал помощника",
     "ctl_ch_toggle": "🆘 Помощь с подключением вкл/выкл",
     # работа в поддержке — в аудите видно, кто из помощников что открывал
     "admin_panel": "⚙️ Открыл панель",
@@ -98,6 +96,8 @@ EVENT_LABELS = {
     "settings_changed": "⚙️ Изменены условия",
     "user_muted": "🔇 Заглушён",
     "connect_help": "🆘 Подсказка: не подключился",
+    "blacklisted": "⛔ Внесён в ЧС",
+    "unblacklisted": "✅ Убран из ЧС",
 }
 
 STATE_LABELS = {
@@ -107,6 +107,9 @@ STATE_LABELS = {
     "awaiting_dm_user": "📌 Написал юзеру",
     "awaiting_find_user": "🔍 Искал юзера",
     "awaiting_helper_id": "👥 Ввёл помощника",
+    "awaiting_bl_add": "⛔ Ввод для ЧС",
+    "awaiting_bl_reason": "⛔ Причина для ЧС",
+    "awaiting_bl_check": "🔍 Проверка в ЧС",
 }
 
 FEED_TITLES = {
@@ -145,6 +148,13 @@ def _fmt_bytes(value) -> str:
 def action_label(action: str, details: str | None) -> str:
     kind, _, rest = (action or "").partition(":")
     if kind == "cb":
+        # опасные кнопки: нажатие только спрашивает «Точно?», действие — ok:…
+        from handlers.confirm import OK_PREFIX, confirm_title
+        if rest.startswith(OK_PREFIX):
+            return f"✅ {confirm_title(rest[len(OK_PREFIX):]) or _esc(rest)}"
+        title = confirm_title(rest)
+        if title:
+            return f"❔ {title}?"
         return CB_LABELS.get(rest.split(":")[0], f"⚙️ {_esc(rest)}")
     if kind == "cmd":
         return f"▶️ /{_esc(rest)}" + (f" <code>{_esc(details)}</code>" if details else "")
@@ -573,6 +583,7 @@ async def connect_help_tick(context):
     from database import (
         recent_subs_for_connect_help, mark_connect_help, log_activity, is_banned,
     )
+    from blacklist import is_blacklisted
     from xui_api import get_last_online
 
     cfg = load_config()
@@ -619,7 +630,7 @@ async def connect_help_tick(context):
     )
 
     for tg_id in due - seen:
-        if tg_id == ADMIN_ID or await is_banned(tg_id):
+        if tg_id == ADMIN_ID or await is_banned(tg_id) or await is_blacklisted(tg_id):
             continue
         if not await mark_connect_help(tg_id, "sent"):
             continue

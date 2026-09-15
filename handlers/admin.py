@@ -316,6 +316,12 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
 
     if banned:
         lines.append("🚫 <b>ЗАБАНЕН</b>")
+    from blacklist import entry as bl_entry, public_reason
+    ble = await bl_entry(tg_id)
+    if ble:
+        from html import escape
+        src = "вручную" if ble["source"] == "manual" else "общий список"
+        lines.append(f"⛔ <b>В чёрном списке</b> ({src}): {escape(public_reason(ble['reason']))}")
 
     # Подписка
     sub = await get_paid_sub_by_tg_id(tg_id)
@@ -386,6 +392,7 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
             kb_rows.append([InlineKeyboardButton("🔓 Разбанить", callback_data=f"unban_user:{tg_id}")])
         else:
             kb_rows.append([InlineKeyboardButton("🚫 Забанить", callback_data=f"ban_user:{tg_id}")])
+        kb_rows.append([InlineKeyboardButton("⛔ Чёрный список", callback_data=f"bl_view:{tg_id}")])
         kb_rows.append([
             InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}"),
             InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}"),

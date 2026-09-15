@@ -58,6 +58,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
         [InlineKeyboardButton("👥 Помощники", callback_data="helpers_menu")],
+        [InlineKeyboardButton("⛔ Чёрный список", callback_data="bl_menu")],
         [InlineKeyboardButton("🎯 Winback", callback_data="winback_settings")],
         [InlineKeyboardButton("🖥 Серверы и 3x-UI", callback_data="xui_settings")],
         [InlineKeyboardButton(mnt_label, callback_data="mnt_menu")],

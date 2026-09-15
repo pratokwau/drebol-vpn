@@ -35,6 +35,12 @@ from staff import (
     is_helper, helper_can, handle_helper_panel,
     handle_helpers_menu, handle_helper_add, handle_helper_del,
 )
+from handlers.confirm import confirm_gate
+from blacklist import (
+    handle_bl_menu, handle_bl_list, handle_bl_view, handle_bl_add_start, handle_bl_add_for,
+    handle_bl_check_start, handle_bl_add_apply, handle_bl_del, handle_bl_stop, handle_bl_readd,
+    handle_bl_sync_now, handle_bl_remote_toggle,
+)
 from handlers.payments import (
     handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
 )
@@ -97,7 +103,7 @@ from paidsub.handlers import (
     handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
     handle_promos_menu, handle_promo_view, handle_promo_create,
     handle_promo_toggle, handle_promo_delete,
-    handle_toggle_auto_trial,
+    handle_toggle_auto_trial, handle_paid_bulk_apply,
 )
 
 
@@ -116,6 +122,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "noop":
         return
+
+    # Опасные кнопки админки: сначала «Точно?», выполняем только после «Да»
+    if adm:
+        data = await confirm_gate(query, data)
+        if data is None:
+            return
 
     # Техработы и выключенные функции. На админа и на работу помощника не действуют.
     if not adm and not staff_cb:
@@ -140,6 +152,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if await is_banned(update.effective_user.id):
             await query.edit_message_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
             return
+
+    # Чёрный список: остаётся только поддержка — чтобы можно было оспорить
+    if not adm and not staff_cb:
+        from blacklist import entry as bl_entry, user_may, show_blocked
+        if not user_may(data):
+            ble = await bl_entry(update.effective_user.id)
+            if ble:
+                context.user_data.pop("state", None)
+                await show_blocked(ble, query=query)
+                return
 
     # Проверка подписки для не-админов
     if data != "check_sub" and not adm and not staff_cb:
@@ -313,6 +335,33 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_helper_add(query, context)
     elif data.startswith("helper_del:"):
         await handle_helper_del(query, context, int(data.split(":")[1]))
+
+    # Чёрный список
+    elif data == "bl_menu":
+        await handle_bl_menu(query, context)
+    elif data.startswith("bl_list:"):
+        _, scope, pg = data.split(":")
+        await handle_bl_list(query, scope, int(pg))
+    elif data.startswith("bl_view:"):
+        await handle_bl_view(query, int(data.split(":")[1]))
+    elif data == "bl_add":
+        await handle_bl_add_start(query, context)
+    elif data == "bl_check":
+        await handle_bl_check_start(query, context)
+    elif data.startswith("bl_add_for:"):
+        await handle_bl_add_for(query, context, int(data.split(":")[1]))
+    elif data == "bl_add_apply":
+        await handle_bl_add_apply(query, context)
+    elif data.startswith("bl_del:"):
+        await handle_bl_del(query, context, int(data.split(":")[1]))
+    elif data.startswith("bl_stop:"):
+        await handle_bl_stop(query, context, int(data.split(":")[1]))
+    elif data.startswith("bl_readd:"):
+        await handle_bl_readd(query, context, int(data.split(":")[1]))
+    elif data == "bl_sync":
+        await handle_bl_sync_now(query, context)
+    elif data == "bl_remote_toggle":
+        await handle_bl_remote_toggle(query, context)
     elif data.startswith("payments:"):
         _, st, pg = data.split(":")
         await handle_payments_menu(query, context, st, int(pg))
@@ -531,6 +580,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_bulk_extend(query, context)
     elif data == "paid_bulk_reduce":
         await handle_paid_bulk_reduce(query, context)
+    elif data == "paid_bulk_apply":
+        await handle_paid_bulk_apply(query, context)
     elif data == "paid_fix_renew":
         await handle_paid_fix_renew(query, context)
     elif data == "paid_fix_renew_apply":

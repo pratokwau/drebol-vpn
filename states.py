@@ -98,3 +98,8 @@ AWAITING_DM_USER = "awaiting_dm_user"
 
 # Помощники
 AWAITING_HELPER_ID = "awaiting_helper_id"
+
+# Чёрный список
+AWAITING_BL_ADD = "awaiting_bl_add"
+AWAITING_BL_REASON = "awaiting_bl_reason"
+AWAITING_BL_CHECK = "awaiting_bl_check"

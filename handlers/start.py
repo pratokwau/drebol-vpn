@@ -49,6 +49,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
         return
 
+    # Чёрный список: вместо меню — причина и кнопка поддержки
+    if user.id != ADMIN_ID and not helper:
+        from blacklist import entry as bl_entry, show_blocked
+        ble = await bl_entry(user.id)
+        if ble:
+            await show_blocked(ble, message=update.message)
+            return
+
     if not helper and not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(
             f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"

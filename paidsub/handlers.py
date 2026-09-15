@@ -1109,6 +1109,27 @@ async def handle_paid_bulk_reduce(query, context):
     )
 
 
+async def handle_paid_bulk_apply(query, context):
+    """Массовый сдвиг срока — только после «Да» на вопросе с числом подписок."""
+    pending = context.user_data.pop("bulk_pending", None)
+    if not pending:
+        # уже применено или бот перезапускался — вводить срок заново
+        await handle_paid_bulk_menu(query)
+        return
+    seconds, direction = int(pending["seconds"]), int(pending["direction"])
+    await query.edit_message_text("⏳ Применяю ко всем подпискам...")
+    result = await bulk_shift_expire(seconds, direction, context)
+    action = "добавлен" if direction > 0 else "убавлен"
+    await query.edit_message_text(
+        f"✅ <b>Массовое действие завершено</b>\n\n"
+        f"Срок {action} на <b>{fmt_duration(seconds)}</b>\n"
+        f"📊 Обработано: <b>{result['updated']}/{result['total']}</b>\n"
+        + (f"⛔ Пропущено — в чёрном списке: <b>{result['skipped']}</b>\n" if result.get("skipped") else "")
+        + (f"❌ Ошибок: <b>{result['errors']}</b>" if result['errors'] else ""),
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
 async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
     """Сдвигает дату окончания у всех платных подписок.
     direction = +1 (добавить) или -1 (убавить). Возвращает отчёт."""
@@ -1123,6 +1144,10 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
     create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
     updated = 0
     errors = 0
+    # подписки людей из ЧС не трогаем: добавление срока включило бы их обратно
+    from blacklist import blacklisted_ids
+    skip_ids = await blacklisted_ids()
+    skipped = 0
 
     for sid in all_ids:
         row = await get_paid_sub(sid)
@@ -1130,6 +1155,9 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
             continue
         email = row[2]
         tg_id = row[1]
+        if tg_id in skip_ids:
+            skipped += 1
+            continue
         expire_str = row[6]
         for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
             try:
@@ -1186,7 +1214,7 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
         except Exception:
             errors += 1
 
-    return {"updated": updated, "errors": errors, "total": len(all_ids)}
+    return {"updated": updated, "errors": errors, "total": len(all_ids), "skipped": skipped}
 
 
 # ── Индивидуальные настройки платной подписки ─────────────────────────────────
@@ -1674,6 +1702,13 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     period_seconds — срок из оплаченного тарифа. Он зафиксирован в счёте,
     поэтому правка тарифа после оплаты не меняет уже купленный срок.
     """
+    # Человек из ЧС: деньги пришли, но срок не начисляем — иначе оплата по
+    # счёту, выставленному до внесения в ЧС, включила бы подписку обратно
+    from blacklist import is_blacklisted
+    if await is_blacklisted(tg_id):
+        return {"ok": False, "error": "пользователь в чёрном списке — срок не начислен: "
+                                      "верни деньги или убери из ЧС"}
+
     row = await get_paid_sub_by_tg_id(tg_id)
     if not row:
         return {"ok": False, "error": "подписка не найдена"}

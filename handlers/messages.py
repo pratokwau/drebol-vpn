@@ -41,6 +41,7 @@ from states import (
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
     AWAITING_NODE_HOST, AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
+    AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK,
 )
 
 
@@ -122,6 +123,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from database import is_banned
         if await is_banned(user.id):
             await update.message.reply_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
+            return
+
+    # ── Чёрный список: писать можно только в поддержку (она выше) ────────────
+    if not is_admin and not helper_input:
+        from blacklist import entry as bl_entry, show_blocked
+        ble = await bl_entry(user.id)
+        if ble:
+            context.user_data.pop("state", None)
+            await show_blocked(ble, message=update.message)
             return
 
     # ── Юзер вводит промокод ─────────────────────────────────────────────────
@@ -684,17 +694,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         direction = 1 if state == AWAITING_PAID_BULK_EXTEND else -1
         context.user_data.pop("state", None)
-        sent = await update.message.reply_text("⏳ Применяю ко всем подпискам...")
-        from paidsub.handlers import bulk_shift_expire
+        # меняет срок всем сразу — сначала спрашиваем, применяем после «Да»
+        context.user_data["bulk_pending"] = {"seconds": seconds, "direction": direction}
+        from paidsub.storage import count_paid_subs
         from paidsub.time_parser import fmt_duration as fmt_dur
-        result = await bulk_shift_expire(seconds, direction, context)
-        action = "добавлен" if direction > 0 else "убавлен"
-        await sent.edit_text(
-            f"✅ <b>Массовое действие завершено</b>\n\n"
-            f"Срок {action} на <b>{fmt_dur(seconds)}</b>\n"
-            f"📊 Обработано: <b>{result['updated']}/{result['total']}</b>\n"
-            + (f"❌ Ошибок: <b>{result['errors']}</b>" if result['errors'] else ""),
-            parse_mode="HTML", reply_markup=back_admin(),
+        from handlers.confirm import confirm_keyboard
+        total = await count_paid_subs()
+        if direction > 0:
+            question = (
+                f"➕ <b>Добавить {fmt_dur(seconds)} всем подпискам?</b>\n\n"
+                f"Затронет подписок: <b>{total}</b> — все, включая истёкшие: они снова включатся.\n"
+                "Каждому клиенту придёт уведомление."
+            )
+            yes = "➕ Да, добавить всем"
+        else:
+            question = (
+                f"➖ <b>Убавить {fmt_dur(seconds)} у всех подписок?</b>\n\n"
+                f"Затронет подписок: <b>{total}</b>. У кого срок уйдёт в прошлое — подписка закончится."
+            )
+            yes = "➖ Да, убавить всем"
+        await update.message.reply_text(
+            question, parse_mode="HTML",
+            reply_markup=confirm_keyboard(yes, "paid_bulk_apply", "paid_bulk_menu", "paid_subs"),
         )
         return
 
@@ -1016,6 +1037,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == AWAITING_HELPER_ID and is_admin:
         from staff import handle_helper_input
         await handle_helper_input(update, context, text)
+        return
+
+    # ── Чёрный список: внести, причина, проверить ────────────────────────────
+    if state in (AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK) and is_admin:
+        from blacklist import handle_bl_input
+        await handle_bl_input(update, context, state, text)
         return
 
     # ── Лог-канал ────────────────────────────────────────────────────────────

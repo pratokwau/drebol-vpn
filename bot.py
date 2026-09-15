@@ -247,6 +247,10 @@ async def post_init(app: Application):
         app.job_queue.run_repeating(purge_tick, interval=24 * 3600, first=3600)
         app.job_queue.run_repeating(connect_help_tick, interval=1800, first=240)
 
+        from blacklist import blacklist_sync_tick
+        bl_hours = int(load_config().get("blacklist_sync_hours", 6) or 6)
+        app.job_queue.run_repeating(blacklist_sync_tick, interval=bl_hours * 3600, first=120)
+
         async def _paid_sync_job(ctx):
             from datetime import datetime
             cfg = load_config()
@@ -293,6 +297,10 @@ async def post_init(app: Application):
                 if (now - expire_dt).days < days:
                     continue
                 if await is_winback_sent(tg_id):
+                    continue
+                # человеку из ЧС скидку на возвращение не предлагаем
+                from blacklist import is_blacklisted
+                if await is_blacklisted(tg_id):
                     continue
                 # Создаём персональный промокод
                 code = f"BACK{tg_id}"
