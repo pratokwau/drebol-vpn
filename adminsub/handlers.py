@@ -361,7 +361,7 @@ async def do_create_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_
             f"📅 Действует до: <b>{result['expire']}</b>\n"
             f"📶 Трафик: <b>{traffic_str}</b>\n\n"
             f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
-            "Скопируй ссылку и вставь в приложение (Happ, v2rayNG и др.)"
+            "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)"
         )
 
 

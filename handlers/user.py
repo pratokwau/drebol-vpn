@@ -30,7 +30,7 @@ async def handle_my_sub(query):
         f"📶 Трафик: <b>{traffic}</b>\n"
         f"{status_line}\n\n"
         f"🔗 <b>Ссылка подписки:</b>\n<code>{sub_url}</code>\n\n"
-        "Скопируй ссылку и вставь в приложение (Happ, v2rayNG и др.)",
+        "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)",
         parse_mode="HTML",
         reply_markup=back_main(),
     )
@@ -205,7 +205,7 @@ async def handle_my_paid_sub(query):
         f"{'━' * 14}\n"
         f"🔗 <b>Ваша ссылка подписки:</b>\n"
         f"<code>{sub_url}</code>\n\n"
-        f"<i>Нажмите на ссылку, чтобы скопировать, и вставьте её в приложение Happ или INCY.</i>"
+        f"<i>Нажмите на ссылку, чтобы скопировать, и вставьте её в приложение INCY или Happ.</i>"
     )
 
     # выключенные функции прячем от пользователей, админ видит всё
@@ -612,20 +612,20 @@ async def handle_how_to(query):
         "<b>❓ Как подключиться?</b>\n\n"
         "<b>Основной способ ⬇️</b>\n"
         "1. Оформи пробный период или подписку\n"
-        "2. Установи приложение — рекомендуем Happ\n"
-        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>\n"
-        "• <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Android</a>\n"
-        "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n"
-        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">MacOS</a>\n"
-        "3. Скопируй ссылку подписки и вставь её в приложение\n"
-        "4. Выбери сервер и подключайся\n\n"
-        "<b>Альтернативный способ ⬇️</b>\n"
-        "1. Оформи пробный период или подписку\n"
-        "2. Установи приложение — INCY\n"
+        "2. Установи приложение — рекомендуем INCY\n"
         "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">iOS</a>\n"
         "• <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Android</a>\n"
         "• <a href=\"https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe\">Windows</a>\n"
         "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">MacOS</a>\n"
+        "3. Скопируй ссылку подписки и вставь её в приложение\n"
+        "4. Выбери сервер и подключайся\n\n"
+        "<b>Альтернативный способ ⬇️</b>\n"
+        "1. Оформи пробный период или подписку\n"
+        "2. Установи приложение — Happ\n"
+        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>\n"
+        "• <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Android</a>\n"
+        "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n"
+        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">MacOS</a>\n"
         "3. Скопируй ссылку подписки и вставь её в приложение\n"
         "4. Выбери сервер и подключайся",
         parse_mode="HTML",
@@ -771,7 +771,7 @@ async def handle_qr_code(query, context):
         await context.bot.send_photo(
             chat_id=user_id,
             photo=buf,
-            caption="📱 <b>QR-код подписки</b>\n\nОтсканируйте в приложении Happ или INCY.",
+            caption="📱 <b>QR-код подписки</b>\n\nОтсканируйте в приложении INCY или Happ.",
             parse_mode="HTML",
         )
         await query.answer()
@@ -852,7 +852,7 @@ async def _do_reissue_job(ctx):
                 "✅ <b>Ключ перевыпущен!</b>\n\n"
                 "Удалите старую подписку из приложения и добавьте заново:\n\n"
                 f"🔗 <code>{sub_url}</code>\n\n"
-                "<i>Скопируйте ссылку и вставьте в Happ или INCY.</i>"
+                "<i>Скопируйте ссылку и вставьте в INCY или Happ.</i>"
             ),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([

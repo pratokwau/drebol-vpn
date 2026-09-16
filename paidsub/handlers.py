@@ -484,7 +484,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
         f"📅 Действует до: <b>{result['expire']}</b>\n"
         f"📶 Трафик: <b>{traffic_str}</b>\n\n"
         f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
-        "Скопируйте ссылку и вставьте в приложение (Happ или INCY)"
+        "Скопируйте ссылку и вставьте в приложение (INCY или Happ)"
     )
 
     if for_user:
