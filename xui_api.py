@@ -180,6 +180,57 @@ async def check_tcp(host: str, port, timeout: float = 4.0) -> dict:
                 pass
 
 
+UDP_PROTOCOLS = {"hysteria", "hysteria2", "tuic", "wireguard"}
+
+
+async def check_udp(host: str, port, timeout: float = 2.0) -> dict:
+    """Мягкая проверка UDP-порта: живой сервис на чужой пакет не отвечает.
+
+    Поэтому «живым» считаем всё, кроме явного отказа: на закрытый порт ядро
+    присылает ICMP «port unreachable», и он приходит сюда как
+    ConnectionRefusedError. Если ICMP режет фаервол, порт будет выглядеть
+    живым — проверить UDP надёжнее нельзя, не говоря на языке самого протокола.
+    """
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "некорректный порт"}
+    if not host or not (0 < port < 65536):
+        return {"ok": False, "error": "нет адреса"}
+
+    loop = asyncio.get_running_loop()
+    start = time.monotonic()
+    refused = loop.create_future()
+
+    class _Proto(asyncio.DatagramProtocol):
+        def error_received(self, exc):
+            if not refused.done():
+                refused.set_result(exc)
+
+    transport = None
+    try:
+        transport, _ = await asyncio.wait_for(
+            loop.create_datagram_endpoint(_Proto, remote_addr=(host, port)), timeout=timeout
+        )
+        transport.sendto(b"\x00")
+        try:
+            exc = await asyncio.wait_for(refused, timeout=timeout)
+        except asyncio.TimeoutError:
+            return {"ok": True, "ms": int((time.monotonic() - start) * 1000), "soft": True}
+        return {"ok": False, "error": "порт закрыт" if isinstance(exc, ConnectionRefusedError)
+                else str(exc)[:50]}
+    except OSError as e:
+        return {"ok": False, "error": (e.strerror or str(e))[:50]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:50]}
+    finally:
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:
+                pass
+
+
 async def check_sub_service(timeout: float = 6.0) -> dict:
     """Проверяет сервис подписок — тот самый адрес, по которому ходят клиенты.
 
@@ -291,9 +342,17 @@ async def probe_servers() -> dict:
     if panel["ok"]:
         raw = inb_result.get("inbounds") or []
         hosts = [resolve_inbound_host(inb, host) for inb in raw]
+
+        def _probe(inb, h):
+            # hysteria и прочие UDP по TCP не проверить: они молчат, и обычная
+            # проверка называла бы живой инбаунд закрытым портом
+            if (inb.get("protocol") or "").lower() in UDP_PROTOCOLS:
+                return check_udp(h, inb.get("port"))
+            return check_tcp(h, inb.get("port"))
+
         # порты проверяем параллельно, иначе на десятке инбаундов экран висит
         checks = await asyncio.gather(*[
-            check_tcp(h, inb.get("port")) for inb, (h, _m) in zip(raw, hosts)
+            _probe(inb, h) for inb, (h, _m) in zip(raw, hosts)
         ], return_exceptions=True)
 
         for inb, (inb_host, mapped), chk in zip(raw, hosts, checks):
@@ -306,6 +365,7 @@ async def probe_servers() -> dict:
                 "host": inb_host,
                 "mapped": mapped,
                 "protocol": inb.get("protocol", "?"),
+                "udp": (inb.get("protocol") or "").lower() in UDP_PROTOCOLS,
                 "port": inb.get("port"),
                 "enabled": inb.get("enable", True),
                 "clients": _inbound_clients(inb),

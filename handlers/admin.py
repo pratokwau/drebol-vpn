@@ -149,7 +149,8 @@ async def handle_healthcheck(query):
                     icon, tail = "⚪️", " · выключен"
                 elif i["reachable"]:
                     where = "" if not i.get("mapped") else f" · {i['host']}"
-                    icon, tail = "🟢", f"{where} · {i['ms']} мс"
+                    icon = "🟢"
+                    tail = f"{where} · UDP, отказа нет" if i.get("udp") else f"{where} · {i['ms']} мс"
                 elif not i.get("mapped"):
                     # проверяли по адресу панели, а инбаунд может жить на узле —
                     # это не авария, а незаданная привязка
@@ -159,6 +160,11 @@ async def handle_healthcheck(query):
                 lines.append(
                     f"{icon} <b>{i['tag']}</b> ({i['protocol']}:{i['port']}) "
                     f"· 👤 {i['clients']}{tail}"
+                )
+            if any(i.get("udp") for i in inbounds if i["enabled"]):
+                lines.append(
+                    "\n<i>UDP-инбаунды (hysteria и подобные) на чужие пакеты не отвечают, "
+                    "поэтому проверяются мягко: «живым» считается всё, кроме отказа порта.</i>"
                 )
 
     problems = []
