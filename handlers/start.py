@@ -1,3 +1,5 @@
+from html import escape
+
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID
@@ -18,9 +20,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await log_activity(user.id, "ev:registered",
                            context.args[0] if context.args else None)
         from log_channel import send_log
-        uname = f"@{user.username}" if user.username else f"id{user.id}"
+        # имя человек задаёт сам — без экранирования запись в лог-канал пропадёт
+        uname = escape(f"@{user.username}" if user.username else f"id{user.id}")
         await send_log(context.bot,
-            f"👤 Новый пользователь: {user.first_name} ({uname}) · <code>{user.id}</code>"
+            f"👤 Новый пользователь: {escape(str(user.first_name or user.id))} "
+            f"({uname}) · <code>{user.id}</code>"
         )
 
     # Реферальная ссылка: /start ref_123456
@@ -59,7 +63,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not helper and not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(
-            f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+            f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
             "🔒 Быстрый и безопасный VPN\n"
             "⚡️ Стабильное подключение\n"
             "🌍 Доступ к популярным сервисам\n\n"
@@ -76,7 +80,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     has_sub = bool(await get_sub_by_tg_id(user.id))
     paid_status = await get_paid_sub_status(user.id)
     await update.message.reply_text(
-        f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+        f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
         "🔒 Быстрый и безопасный VPN\n"
         "⚡️ Стабильное подключение\n"
         "🌍 Доступ к популярным сервисам\n\n"

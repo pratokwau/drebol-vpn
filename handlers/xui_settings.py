@@ -175,10 +175,13 @@ async def handle_test_xui(query):
             reply_markup=back_admin(),
         )
     else:
+        # панель в ошибке может вернуть HTML-страницу — без экранирования
+        # сообщение не отправится вовсе, и админ не увидит причину
+        from html import escape
         await query.edit_message_text(
             f"❌ <b>Ошибка соединения</b>\n\n"
-            f"URL: <code>{result.get('url', 'не задан')}</code>\n\n"
-            f"Детали:\n<code>{result['error']}</code>",
+            f"URL: <code>{escape(str(result.get('url', 'не задан')))}</code>\n\n"
+            f"Детали:\n<code>{escape(str(result['error']))}</code>",
             parse_mode="HTML",
             reply_markup=back_admin(),
         )

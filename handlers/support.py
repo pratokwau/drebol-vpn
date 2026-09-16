@@ -1,4 +1,6 @@
 from datetime import datetime
+from html import escape
+
 from database import get_support_messages, count_support_files, get_support_files
 from keyboards import support_keyboard
 
@@ -41,7 +43,8 @@ def _build_text(msgs: list, page: int, total_pages: int) -> str:
         file_mark = ""
         if file_id:
             file_mark = " 🖼" if file_type == "photo" else " 📎"
-        lines.append(f"{who} · 🕐 {_fmt_time(created_at)}{file_mark}\n{text}")
+        # переписку пишут люди: один «<» в сообщении ломал бы весь экран
+        lines.append(f"{who} · 🕐 {_fmt_time(created_at)}{file_mark}\n{escape(text or '')}")
     lines.append("\n✍️ Напишите сообщение или отправьте файл/фото:")
     return "\n\n".join(lines)
 

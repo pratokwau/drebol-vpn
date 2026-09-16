@@ -25,6 +25,16 @@ from paidsub.keyboards import (
 from paidsub.time_parser import fmt_duration, fmt_duration_precise
 
 
+def _esc_name(value, fallback="") -> str:
+    """Имя или @username человека для сообщения с разметкой.
+
+    Без экранирования имя вида «<b>Иван» срывает отправку уведомления целиком,
+    и админ просто не узнаёт о заявке.
+    """
+    from html import escape
+    return escape(str(value if value not in (None, "") else fallback))
+
+
 async def _notify_user(bot: Bot, tg_id, text: str):
     if not tg_id:
         return
@@ -565,10 +575,12 @@ async def handle_request_sub(query, context):
 
             await do_create_paid_sub(query, user.id, context, _edit, trial=True, for_user=True)
             await _process_referral_bonus(user.id, context)
+            from html import escape
             from log_channel import send_log
-            uname_a = f"@{user.username}" if user.username else f"id{user.id}"
+            uname_a = escape(f"@{user.username}" if user.username else f"id{user.id}")
             await send_log(context.bot,
-                f"⚡ Авто-триал выдан: {user.first_name} ({uname_a}) · <code>{user.id}</code>"
+                f"⚡ Авто-триал выдан: {escape(str(user.first_name or user.id))} "
+                f"({uname_a}) · <code>{user.id}</code>"
             )
             return
 
@@ -590,7 +602,8 @@ async def handle_request_sub(query, context):
         chat_id=ADMIN_ID,
         text=(
             f"🆕 <b>Запрос на подписку</b>\n\n"
-            f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
+            f'👤 <a href="tg://user?id={user.id}">{_esc_name(user.first_name, user.id)}</a> '
+            f"({_esc_name(uname, user.id)})\n"
             f"🆔 TG ID: <code>{user.id}</code>\n\n"
             f"<b>Параметры подписки:</b>\n"
             f"🆓 Пробный период: <b>{fmt_duration(trial_sec)}</b>\n"
@@ -737,7 +750,7 @@ async def handle_approve(query, tg_id: int, context):
     from log_channel import send_log
     from database import get_user_info
     u = await get_user_info(tg_id)
-    u_name = u[1] if u else str(tg_id)
+    u_name = _esc_name(u[1] if u else None, tg_id)
     await send_log(context.bot, f"✅ Триал одобрен: {u_name} (<code>{tg_id}</code>)")
 
     # Реферальный бонус
@@ -1772,7 +1785,7 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     from log_channel import send_log
     from database import get_user_info
     u = await get_user_info(tg_id)
-    u_name = u[1] if u else str(tg_id)
+    u_name = _esc_name(u[1] if u else None, tg_id)
     await send_log(context.bot,
         f"💰 Оплата через {source}: {u_name} (<code>{tg_id}</code>) — {amount} ₽\n"
         f"{promo_line}📅 До: {new_expire_str}"
@@ -1896,7 +1909,7 @@ async def handle_confirm_payment(query, tg_id: int, context):
     from log_channel import send_log
     from database import get_user_info
     u = await get_user_info(tg_id)
-    u_name = u[1] if u else str(tg_id)
+    u_name = _esc_name(u[1] if u else None, tg_id)
     await send_log(context.bot,
         f"💰 Оплата подтверждена: {u_name} (<code>{tg_id}</code>)\n"
         f"{promo_line}📅 До: {new_expire_str}"

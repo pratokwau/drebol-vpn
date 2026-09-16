@@ -87,13 +87,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Сообщение отправлено в поддержку! Мы ответим как можно скорее.",
             reply_markup=support_keyboard(total_pages, total_pages),
         )
+        from html import escape
         from log_channel import send_log
+        # имя и текст пишет человек: «<» без экранирования срывает отправку целиком
+        who = escape(str(user.first_name or user.id))
         await send_log(context.bot,
-            f"📩 Обращение в поддержку: {user.first_name} (<code>{user.id}</code>)"
+            f"📩 Обращение в поддержку: {who} (<code>{user.id}</code>)"
         )
-        uname = f"@{user.username}" if user.username else f"id{user.id}"
+        uname = escape(f"@{user.username}" if user.username else f"id{user.id}")
         unread = await get_unread_tickets_count()
-        preview = text if len(text) <= 500 else text[:500] + "…"
+        preview = escape(text if len(text) <= 500 else text[:500] + "…")
         # админу и помощникам: если кто-то заблокировал бота, остальным всё равно дойдёт
         for chat_id in staff_chat_ids():
             if chat_id == user.id:
@@ -103,7 +106,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=chat_id,
                     text=(
                         f"📩 <b>Новое обращение в поддержку</b>\n\n"
-                        f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
+                        f'👤 <a href="tg://user?id={user.id}">{who}</a> ({uname})\n'
                         f"🆔 <code>{user.id}</code>\n"
                         f"🔴 Всего непрочитанных тикетов: <b>{unread}</b>\n\n"
                         f"💬 {preview}"
@@ -1129,9 +1132,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     text=f"📌 <b>Сообщение от администратора:</b>\n\n{text}",
                     parse_mode="HTML",
                 )
+                from html import escape
                 from log_channel import send_log
                 await send_log(context.bot,
-                    f"📌 Админ → <code>{dm_target}</code>: {text[:100]}"
+                    f"📌 Админ → <code>{dm_target}</code>: {escape(text[:100])}"
                 )
                 await update.message.reply_text(
                     f"✅ Сообщение отправлено пользователю <code>{dm_target}</code>.",
@@ -1223,18 +1227,21 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Файл отправлен в поддержку! Мы ответим как можно скорее.",
             reply_markup=support_keyboard(total_pages, total_pages, has_files),
         )
+        from html import escape
         from log_channel import send_log
+        # имя и подпись к файлу задаёт человек — экранируем, иначе уведомление не уйдёт
+        who = escape(str(user.first_name or user.id))
         await send_log(context.bot,
-            f"📩 Файл в поддержку: {user.first_name} (<code>{user.id}</code>) — {fallback_label}"
+            f"📩 Файл в поддержку: {who} (<code>{user.id}</code>) — {escape(fallback_label)}"
         )
-        uname = f"@{user.username}" if user.username else f"id{user.id}"
+        uname = escape(f"@{user.username}" if user.username else f"id{user.id}")
         unread = await get_unread_tickets_count()
         notice = (
             f"📩 <b>Файл от пользователя</b>\n\n"
-            f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
+            f'👤 <a href="tg://user?id={user.id}">{who}</a> ({uname})\n'
             f"🆔 <code>{user.id}</code>\n"
             f"🔴 Непрочитанных: <b>{unread}</b>"
-            + (f"\n\n💬 {caption}" if caption else "")
+            + (f"\n\n💬 {escape(caption)}" if caption else "")
         )
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],

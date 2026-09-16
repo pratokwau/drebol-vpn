@@ -1,3 +1,5 @@
+from html import escape
+
 from config import ADMIN_ID, load_config
 from keyboards import main_keyboard, back_main, back_info
 
@@ -587,7 +589,8 @@ async def handle_i_paid(query, context):
         chat_id=ADMIN_ID,
         text=(
             f"💰 <b>Заявка на оплату</b>\n\n"
-            f'👤 <a href="tg://user?id={user.id}">{user.first_name}</a> ({uname})\n'
+            f'👤 <a href="tg://user?id={user.id}">{escape(str(user.first_name or user.id))}</a> '
+            f"({escape(str(uname))})\n"
             f"🆔 TG ID: <code>{user.id}</code>"
             f"{sub_info}\n"
             f"{promo_admin_line}\n"
@@ -948,7 +951,7 @@ async def handle_back_start(query, user):
     has_sub = bool(await get_sub_by_tg_id(user.id))
     paid_status = await get_paid_sub_status(user.id)
     await query.edit_message_text(
-        f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+        f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
         "🔒 Быстрый и безопасный VPN\n"
         "⚡️ Стабильное подключение\n"
         "🌍 Доступ к популярным сервисам\n\n"

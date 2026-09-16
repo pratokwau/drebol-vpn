@@ -48,8 +48,10 @@ def _fmt_ts(raw: str) -> str:
 
 
 def _who(first_name, username, tg_id) -> str:
-    name = first_name or str(tg_id)
-    return f"{name} (@{username})" if username else name
+    # имя человек задаёт сам: без экранирования «<» ломает всю разметку экрана
+    from html import escape
+    name = escape(str(first_name or tg_id))
+    return f"{name} (@{escape(username)})" if username else name
 
 
 async def handle_payments_menu(query, context: ContextTypes.DEFAULT_TYPE = None,

@@ -1,3 +1,5 @@
+from html import escape
+
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID, load_config, save_config
@@ -168,7 +170,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await is_subscribed(context.bot, update.effective_user.id):
             user = update.effective_user
             await query.edit_message_text(
-                f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+                f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
                 "🔒 Быстрый и безопасный VPN\n"
                 "⚡️ Стабильное подключение\n"
                 "🌍 Доступ к популярным сервисам\n\n"
@@ -183,7 +185,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         if not await is_subscribed(context.bot, user.id):
             await query.edit_message_text(
-                f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+                f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
                 "🔒 Быстрый и безопасный VPN\n"
                 "⚡️ Стабильное подключение\n"
                 "🌍 Доступ к популярным сервисам\n\n"
@@ -198,7 +200,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         has_sub = bool(await get_sub_by_tg_id(user.id))
         paid_status = await get_paid_sub_status(user.id)
         await query.edit_message_text(
-            f"👋 {user.first_name}, добро пожаловать в <b>Drebol VPN</b>\n\n"
+            f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
             "🔒 Быстрый и безопасный VPN\n"
             "⚡️ Стабильное подключение\n"
             "🌍 Доступ к популярным сервисам\n\n"

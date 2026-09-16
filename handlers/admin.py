@@ -119,10 +119,12 @@ async def handle_healthcheck(query):
     lines = ["🩺 <b>Здоровье серверов</b>\n"]
 
     # Панель
+    # ошибки панели приходят её же словами и могут содержать HTML-страницу
+    from html import escape
     if panel["ok"]:
         lines.append(f"🟢 <b>Панель</b> — отвечает, {panel['ms']} мс")
     else:
-        lines.append(f"🔴 <b>Панель недоступна</b>\n     <code>{panel['error']}</code>")
+        lines.append(f"🔴 <b>Панель недоступна</b>\n     <code>{escape(str(panel['error']))}</code>")
 
     # Подписки — отдельный сервис на своём порту, падает независимо от панели
     if sub["ok"]:
@@ -131,7 +133,7 @@ async def handle_healthcheck(query):
     else:
         lines.append(
             f"🔴 <b>Подписки не работают</b> — порт {sub.get('port', '?')}\n"
-            f"     <code>{sub['error']}</code>\n"
+            f"     <code>{escape(str(sub['error']))}</code>\n"
             f"     <i>Клиенты не смогут обновить ключ.</i>"
         )
 
@@ -156,7 +158,7 @@ async def handle_healthcheck(query):
                     # это не авария, а незаданная привязка
                     icon, tail = "⚪️", " · узел не привязан"
                 else:
-                    icon, tail = "🔴", f" · {i['host']} · {i['error']}"
+                    icon, tail = "🔴", f" · {escape(str(i['host']))} · {escape(str(i['error']))}"
                 lines.append(
                     f"{icon} <b>{i['tag']}</b> ({i['protocol']}:{i['port']}) "
                     f"· 👤 {i['clients']}{tail}"
@@ -306,8 +308,11 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
             await query_or_msg.reply_text(text, parse_mode="HTML", reply_markup=kb)
         return
 
+    from html import escape
     _, first_name, username = user_info
-    uname = f"@{username}" if username else f"id{tg_id}"
+    # имя человек задаёт сам — экранируем, иначе карточка не откроется
+    first_name = escape(str(first_name or tg_id))
+    uname = escape(f"@{username}" if username else f"id{tg_id}")
     banned = await is_banned(tg_id)
     # помощнику карточка без денег и без управления подпиской
     from staff import is_helper
@@ -434,9 +439,10 @@ _ACTION_LABELS_ADMIN = {
 async def handle_user_history(query, tg_id: int, page: int = 1):
     from database import get_user_info
     from paidsub.storage import get_user_history
+    from html import escape
     rows, total_pages = await get_user_history(tg_id, page)
     u = await get_user_info(tg_id)
-    name = u[1] if u else str(tg_id)
+    name = escape(str(u[1] if u else tg_id))
 
     if not rows:
         await query.edit_message_text(
@@ -452,7 +458,7 @@ async def handle_user_history(query, tg_id: int, page: int = 1):
     for entry_id, _, action, details, created_at in rows:
         label = _ACTION_LABELS_ADMIN.get(action, action)
         ts = created_at[:16] if created_at else ""
-        detail_line = f"\n     <i>{details[:100]}</i>" if details else ""
+        detail_line = f"\n     <i>{escape(details[:100])}</i>" if details else ""
         lines.append(f"{label} · {ts}{detail_line}")
 
     kb = []
@@ -601,9 +607,10 @@ async def handle_set_winback_percent(query, context: ContextTypes.DEFAULT_TYPE):
 async def handle_dm_user(query, tg_id: int, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_DM_USER
     context.user_data["dm_target"] = tg_id
+    from html import escape
     from database import get_user_info
     u = await get_user_info(tg_id)
-    name = u[1] if u else str(tg_id)
+    name = escape(str(u[1] if u else tg_id))
     await query.edit_message_text(
         f"📌 <b>Сообщение для {name}</b> (<code>{tg_id}</code>)\n\n"
         "Напиши текст сообщения одним сообщением:",

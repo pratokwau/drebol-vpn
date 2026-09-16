@@ -1,4 +1,6 @@
 from datetime import datetime
+from html import escape
+
 from telegram.ext import ContextTypes
 from database import (
     get_ticket_users, get_support_messages, get_user_info, add_support_message,
@@ -44,8 +46,9 @@ async def handle_ticket_view(query, user_id: int, page: int = 1):
     await mark_ticket_read(user_id)
 
     user_info = await get_user_info(user_id)
-    first_name = user_info[1] if user_info else str(user_id)
-    username = f" (@{user_info[2]})" if user_info and user_info[2] else ""
+    # имя и переписку пишут люди — экранируем, иначе тикет не открыть
+    first_name = escape(str(user_info[1] if user_info else user_id))
+    username = f" (@{escape(user_info[2])})" if user_info and user_info[2] else ""
 
     msgs, total_pages = await get_support_messages(user_id, page)
     has_files = (await count_support_files(user_id)) > 0
@@ -61,7 +64,7 @@ async def handle_ticket_view(query, user_id: int, page: int = 1):
         file_mark = ""
         if file_id:
             file_mark = " 🖼" if file_type == "photo" else " 📎"
-        lines.append(f"{who} · 🕐 {_fmt_time(created_at)}{file_mark}\n{text}")
+        lines.append(f"{who} · 🕐 {_fmt_time(created_at)}{file_mark}\n{escape(text or '')}")
 
     await query.edit_message_text(
         "\n\n".join(lines),
@@ -74,7 +77,7 @@ async def handle_ticket_reply_start(query, user_id: int, context: ContextTypes.D
     context.user_data["state"] = AWAITING_ADMIN_REPLY
     context.user_data["reply_to"] = user_id
     user_info = await get_user_info(user_id)
-    name = user_info[1] if user_info else str(user_id)
+    name = escape(str(user_info[1] if user_info else user_id))
     await query.edit_message_text(
         f"✏️ <b>Ответ пользователю {name}</b>\n\nНапишите ответ или отправьте файл/фото:",
         parse_mode="HTML",
