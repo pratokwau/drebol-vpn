@@ -403,7 +403,10 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
             kb_rows.append([InlineKeyboardButton("🔓 Разбанить", callback_data=f"unban_user:{tg_id}")])
         else:
             kb_rows.append([InlineKeyboardButton("🚫 Забанить", callback_data=f"ban_user:{tg_id}")])
-        kb_rows.append([InlineKeyboardButton("⛔ Чёрный список", callback_data=f"bl_view:{tg_id}")])
+        kb_rows.append([
+            InlineKeyboardButton("🎁 Выдать промокод", callback_data=f"promo_give_for:{tg_id}"),
+            InlineKeyboardButton("⛔ Чёрный список", callback_data=f"bl_view:{tg_id}"),
+        ])
         kb_rows.append([
             InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}"),
             InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}"),

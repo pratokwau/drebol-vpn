@@ -210,6 +210,22 @@ async def init_db():
             await db.execute("ALTER TABLE paid_subs ADD COLUMN pending_promo TEXT")
         except Exception:
             pass
+        # Промокоды: личные (привязаны к человеку), общий лимит использований,
+        # тип награды — скидка в % или подаренные дни.
+        for col, decl in (
+            ("owner_tg_id", "INTEGER"),          # NULL — код для всех
+            ("max_uses", "INTEGER NOT NULL DEFAULT 0"),   # 0 — без лимита
+            ("kind", "TEXT NOT NULL DEFAULT 'percent'"),  # percent | days
+            ("days", "INTEGER NOT NULL DEFAULT 0"),
+            ("note", "TEXT"),                    # за что выдан, видит только админ
+            ("source", "TEXT NOT NULL DEFAULT 'manual'"),  # manual|personal|segment|winback
+        ):
+            try:
+                await db.execute(f"ALTER TABLE promo_codes ADD COLUMN {col} {decl}")
+            except Exception:
+                pass
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_promo_owner ON promo_codes(owner_tg_id)")
         # Журнал действий в боте: тип действия без содержимого сообщений.
         await db.execute("""
             CREATE TABLE IF NOT EXISTS activity_log (

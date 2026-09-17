@@ -43,6 +43,11 @@ from blacklist import (
     handle_bl_check_start, handle_bl_add_apply, handle_bl_del, handle_bl_stop, handle_bl_readd,
     handle_bl_sync_now, handle_bl_remote_toggle,
 )
+from promos import (
+    handle_promo_give_start, handle_promo_give_for, handle_promo_give_custom,
+    handle_promo_give_pick, handle_promo_give_do, handle_promo_seg, handle_promo_seg_pick,
+    handle_promo_seg_preview, handle_promo_seg_do, handle_promo_income,
+)
 from handlers.payments import (
     handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
 )
@@ -624,6 +629,29 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_promos_menu(query)
     elif data == "promo_create":
         await handle_promo_create(query, context)
+    elif data == "promo_give":
+        await handle_promo_give_start(query, context)
+    elif data.startswith("promo_give_for:"):
+        await handle_promo_give_for(query, context, int(data.split(":")[1]))
+    elif data.startswith("promo_give_custom:"):
+        await handle_promo_give_custom(query, context, int(data.split(":")[1]))
+    elif data.startswith("promo_give_pick:"):
+        _, uid, kind, val = data.split(":")
+        await handle_promo_give_pick(query, context, int(uid), kind, int(val))
+    elif data.startswith("promo_give_do:"):
+        _, uid, kind, val = data.split(":")
+        await handle_promo_give_do(query, context, int(uid), kind, int(val))
+    elif data == "promo_seg":
+        await handle_promo_seg(query, context)
+    elif data.startswith("promo_seg_pick:"):
+        await handle_promo_seg_pick(query, context, data.split(":")[1])
+    elif data.startswith("promo_seg_val:"):
+        _, kind, val, seg = data.split(":")
+        await handle_promo_seg_preview(query, context, kind, int(val), seg)
+    elif data == "promo_seg_do":
+        await handle_promo_seg_do(query, context)
+    elif data == "promo_income":
+        await handle_promo_income(query)
     elif data.startswith("promo_view:"):
         await handle_promo_view(query, int(data.split(":")[1]))
     elif data.startswith("promo_toggle:"):

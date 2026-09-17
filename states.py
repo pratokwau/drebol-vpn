@@ -99,6 +99,10 @@ AWAITING_DM_USER = "awaiting_dm_user"
 # Помощники
 AWAITING_HELPER_ID = "awaiting_helper_id"
 
+# Выдача промокодов
+AWAITING_PROMO_GIVE_USER = "awaiting_promo_give_user"
+AWAITING_PROMO_CUSTOM = "awaiting_promo_custom"
+
 # Чёрный список
 AWAITING_BL_ADD = "awaiting_bl_add"
 AWAITING_BL_REASON = "awaiting_bl_reason"

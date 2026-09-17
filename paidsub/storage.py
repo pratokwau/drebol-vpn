@@ -419,12 +419,21 @@ async def get_all_referral_stats() -> dict:
 
 # ── Промокоды ────────────────────────────────────────────────────────────────
 
-async def create_promo(code: str, percent: int, expires_at: str | None) -> bool:
+# Новые поля идут в конце выборок: старый код читает промокод по индексам
+_PROMO_COLS = ("id, code, percent, expires_at, active, created_at, "
+               "owner_tg_id, max_uses, kind, days, note, source")
+
+
+async def create_promo(code: str, percent: int, expires_at: str | None,
+                       owner_tg_id: int | None = None, max_uses: int = 0,
+                       kind: str = "percent", days: int = 0,
+                       note: str | None = None, source: str = "manual") -> bool:
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
-                "INSERT INTO promo_codes (code, percent, expires_at) VALUES (?, ?, ?)",
-                (code.upper(), percent, expires_at),
+                "INSERT INTO promo_codes (code, percent, expires_at, owner_tg_id, "
+                "max_uses, kind, days, note, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (code.upper(), percent, expires_at, owner_tg_id, max_uses, kind, days, note, source),
             )
             await db.commit()
         return True
@@ -435,8 +444,7 @@ async def create_promo(code: str, percent: int, expires_at: str | None) -> bool:
 async def get_promo(code: str) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT id, code, percent, expires_at, active, created_at FROM promo_codes WHERE code = ?",
-            (code.upper(),),
+            f"SELECT {_PROMO_COLS} FROM promo_codes WHERE code = ?", (code.upper(),)
         ) as cur:
             return await cur.fetchone()
 
@@ -444,18 +452,62 @@ async def get_promo(code: str) -> tuple | None:
 async def get_promo_by_id(promo_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT id, code, percent, expires_at, active, created_at FROM promo_codes WHERE id = ?",
-            (promo_id,),
+            f"SELECT {_PROMO_COLS} FROM promo_codes WHERE id = ?", (promo_id,)
         ) as cur:
             return await cur.fetchone()
 
 
-async def list_promos() -> list:
+async def list_promos(owner_tg_id: int | None = None, limit: int = 60) -> list:
+    """Промокоды: id, код, %, до, активен, кому выдан, лимит, тип, дни, сколько раз применён."""
+    q = ("SELECT p.id, p.code, p.percent, p.expires_at, p.active, p.owner_tg_id, "
+         "p.max_uses, p.kind, p.days, "
+         "(SELECT COUNT(*) FROM promo_uses u WHERE u.code = p.code) "
+         "FROM promo_codes p")
+    params: list = []
+    if owner_tg_id is not None:
+        q += " WHERE p.owner_tg_id = ?"
+        params.append(owner_tg_id)
+    q += " ORDER BY p.created_at DESC LIMIT ?"
+    params.append(limit)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(q, params) as cur:
+            return await cur.fetchall()
+
+
+async def promo_income(code: str) -> tuple:
+    """Сколько оплат прошло с этим кодом и на какую сумму (возвраты не в счёт)."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT id, code, percent, expires_at, active FROM promo_codes ORDER BY created_at DESC"
+            "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
+            "WHERE promo_code = ? AND status = 'paid'", (code.upper(),)
         ) as cur:
+            return await cur.fetchone()
+
+
+async def promo_income_all() -> list:
+    """По каждому коду: применений и заработанная сумма — сверху самые денежные."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT p.code, p.kind, p.percent, p.days,
+                   (SELECT COUNT(*) FROM promo_uses u WHERE u.code = p.code),
+                   (SELECT COUNT(*) FROM payments pay WHERE pay.promo_code = p.code AND pay.status = 'paid'),
+                   (SELECT COALESCE(SUM(amount), 0) FROM payments pay
+                    WHERE pay.promo_code = p.code AND pay.status = 'paid')
+            FROM promo_codes p
+            ORDER BY 7 DESC, 5 DESC LIMIT 30
+        """) as cur:
             return await cur.fetchall()
+
+
+async def unique_promo_code(prefix: str) -> str:
+    """Короткий код без похожих друг на друга букв и цифр."""
+    import random
+    alphabet = "ACDEFGHJKLMNPQRTUVWXY34679"
+    for _ in range(50):
+        code = f"{prefix}{''.join(random.choices(alphabet, k=5))}"
+        if not await get_promo(code):
+            return code
+    return f"{prefix}{random.randint(100000, 999999)}"
 
 
 async def toggle_promo(promo_id: int):

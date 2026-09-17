@@ -59,6 +59,9 @@ CB_LABELS = {
     "paid_bulk_apply": "📦 Массовое изменение срока",
     "bl_add_apply": "⛔ Внёс в ЧС",
     "bl_sync": "🔄 Обновил общий ЧС",
+    "promo_give_do": "🎁 Выдал промокод",
+    "promo_seg_do": "📤 Раздал промокоды",
+    "promo_income": "📊 Что принесли промокоды",
     "mnt_feature": "⏸ Выключатель функции",
     "pay_provider_set": "💳 Сменил платёжную систему",
     "tariff_toggle": "💰 Тариф вкл/выкл",
@@ -98,6 +101,8 @@ EVENT_LABELS = {
     "connect_help": "🆘 Подсказка: не подключился",
     "blacklisted": "⛔ Внесён в ЧС",
     "unblacklisted": "✅ Убран из ЧС",
+    "promo_issued": "🎁 Выдан промокод",
+    "promo_days": "🎁 Начислены дни по промокоду",
 }
 
 STATE_LABELS = {
@@ -110,6 +115,8 @@ STATE_LABELS = {
     "awaiting_bl_add": "⛔ Ввод для ЧС",
     "awaiting_bl_reason": "⛔ Причина для ЧС",
     "awaiting_bl_check": "🔍 Проверка в ЧС",
+    "awaiting_promo_give_user": "🎁 Кому выдать промокод",
+    "awaiting_promo_custom": "🎁 Своя величина промокода",
 }
 
 FEED_TITLES = {

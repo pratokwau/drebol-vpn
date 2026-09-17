@@ -42,6 +42,7 @@ from states import (
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
     AWAITING_NODE_HOST, AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
     AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK,
+    AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
 )
 
 
@@ -160,6 +161,31 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🎟 Ещё раз", callback_data="enter_promo")],
                     [InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")],
+                ]),
+            )
+            return
+        kind = promo[8] if len(promo) > 8 else "percent"
+        if kind == "days":
+            # подарочные дни начисляем сразу — платить за них не нужно
+            from paidsub.storage import record_promo_use
+            from promos import apply_days
+            days = promo[9] if len(promo) > 9 else 0
+            res = await apply_days(user.id, days)
+            if not res.get("ok"):
+                await update.message.reply_text(
+                    "❌ Не удалось начислить дни — напишите в поддержку.",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")]
+                    ]),
+                )
+                return
+            await record_promo_use(promo[1], user.id)
+            await update.message.reply_text(
+                f"🎁 <b>Начислено {days} дней!</b>\n\n"
+                f"Подписка действует до <b>{res['until']}</b>.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")]
                 ]),
             )
             return
@@ -1046,6 +1072,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state in (AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK) and is_admin:
         from blacklist import handle_bl_input
         await handle_bl_input(update, context, state, text)
+        return
+
+    # ── Выдача промокода: кому и какая награда ───────────────────────────────
+    if state in (AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM) and is_admin:
+        from promos import handle_promo_input
+        await handle_promo_input(update, context, state, text)
         return
 
     # ── Лог-канал ────────────────────────────────────────────────────────────

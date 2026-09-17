@@ -2350,36 +2350,55 @@ async def validate_promo(code: str, tg_id: int):
     promo = await get_promo(code)
     if not promo:
         return None, "❌ Промокод не найден."
-    _id, code_u, percent, expires_at, active, _ = promo
+    _id, code_u, percent, expires_at, active, _ = promo[:6]
+    owner = promo[6] if len(promo) > 6 else None
+    max_uses = promo[7] if len(promo) > 7 else 0
     if not active:
         return None, "❌ Промокод неактивен."
     if expires_at:
         exp = _parse_date(expires_at)
         if exp and datetime.now() > exp:
             return None, "❌ Срок действия промокода истёк."
+    # личный код работает только у того, кому его выдали
+    if owner and int(owner) != int(tg_id):
+        return None, "❌ Этот промокод выдан другому пользователю."
     if await promo_used_by(code_u, tg_id):
         return None, "❌ Вы уже использовали этот промокод."
+    if max_uses and await promo_use_count(code_u) >= int(max_uses):
+        return None, "❌ Промокод уже разобрали — закончились активации."
     return promo, None
 
 
 async def handle_promos_menu(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from promos import reward_label
     promos = await list_promos()
     kb = []
-    if promos:
-        for pid, code, percent, expires_at, active in promos:
-            mark = "🟢" if active else "🔴"
-            exp = f" · до {expires_at}" if expires_at else ""
-            kb.append([InlineKeyboardButton(
-                f"{mark} {code} · −{percent}%{exp}",
-                callback_data=f"promo_view:{pid}",
-            )])
-    kb.append([InlineKeyboardButton("➕ Создать промокод", callback_data="promo_create")])
+    personal = 0
+    for pid, code, percent, expires_at, active, owner, max_uses, kind, days, uses in promos:
+        mark = "🟢" if active else "🔴"
+        if owner:
+            personal += 1
+        who = "🎯" if owner else "🌍"
+        limit = f"/{max_uses}" if max_uses else ""
+        exp = f" · до {expires_at}" if expires_at else ""
+        kb.append([InlineKeyboardButton(
+            f"{mark}{who} {code} · {reward_label(kind or 'percent', days if kind == 'days' else percent)}"
+            f" · {uses}{limit}{exp}",
+            callback_data=f"promo_view:{pid}",
+        )])
+    kb.append([InlineKeyboardButton("🎁 Выдать лично", callback_data="promo_give"),
+               InlineKeyboardButton("📤 Раздать сегменту", callback_data="promo_seg")])
+    kb.append([InlineKeyboardButton("➕ Создать общий код", callback_data="promo_create"),
+               InlineKeyboardButton("📊 Что принесли", callback_data="promo_income")])
     kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
-    body = "Список промокодов:" if promos else "Промокодов пока нет."
+    body = (f"Всего кодов: <b>{len(promos)}</b> · из них личных: <b>{personal}</b>"
+            if promos else "Промокодов пока нет.")
     await query.edit_message_text(
         "🎟 <b>Промокоды</b>\n\n"
-        "Скидка в % на стоимость продления.\n\n"
+        "🌍 — общий код, работает у всех, кто его узнает.\n"
+        "🎯 — личный: привязан к человеку, у чужого не сработает.\n"
+        "Награда — скидка в % на продление или подаренные дни.\n\n"
         f"{body}",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
@@ -2392,24 +2411,44 @@ async def handle_promo_view(query, promo_id: int):
     if not promo:
         await query.answer("Промокод не найден", show_alert=True)
         return
-    pid, code, percent, expires_at, active, created_at = promo
+    from paidsub.storage import promo_income
+    from promos import reward_text
+    pid, code, percent, expires_at, active, created_at = promo[:6]
+    owner = promo[6] if len(promo) > 6 else None
+    max_uses = promo[7] if len(promo) > 7 else 0
+    kind = promo[8] if len(promo) > 8 else "percent"
+    days = promo[9] if len(promo) > 9 else 0
+    note = promo[10] if len(promo) > 10 else None
     used = await promo_use_count(code)
+    pays, income = await promo_income(code)
     status = "🟢 активен" if active else "🔴 выключен"
     exp_line = f"📅 Действует до: <b>{expires_at}</b>\n" if expires_at else "📅 Без срока действия\n"
-    toggle_label = "🔴 Выключить" if active else "🟢 Включить"
+    limit_line = (f"🎯 Применений: <b>{used}</b> из <b>{max_uses}</b>\n" if max_uses
+                  else f"👥 Использован: <b>{used}</b> раз\n")
+    if owner:
+        from database import get_user_info
+        u = await get_user_info(owner)
+        owner_line = f"👤 Личный код для: {u[1] if u and u[1] else ''} <code>{owner}</code>\n"
+    else:
+        owner_line = "🌍 Общий код — сработает у любого, кто его узнает\n"
+    kb = [[InlineKeyboardButton("🔴 Выключить" if active else "🟢 Включить",
+                                callback_data=f"promo_toggle:{pid}")],
+          [InlineKeyboardButton("🗑 Удалить", callback_data=f"promo_delete:{pid}")]]
+    if owner:
+        kb.append([InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{owner}")])
+    kb.append([InlineKeyboardButton("◀️ К промокодам", callback_data="promo_menu")])
     await query.edit_message_text(
         f"🎟 <b>Промокод {code}</b>\n\n"
-        f"💯 Скидка: <b>−{percent}%</b>\n"
+        f"🎁 Награда: <b>{reward_text(kind or 'percent', days if kind == 'days' else percent)}</b>\n"
+        f"{owner_line}"
         f"📌 Статус: <b>{status}</b>\n"
         f"{exp_line}"
-        f"👥 Использован: <b>{used}</b> раз\n"
-        f"🕐 Создан: {created_at[:16] if created_at else '?'}",
+        f"{limit_line}"
+        f"💰 Оплат с ним: <b>{pays}</b> на <b>{income} ₽</b>\n"
+        f"🕐 Создан: {created_at[:16] if created_at else '?'}"
+        + (f"\n📝 {note}" if note else ""),
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(toggle_label, callback_data=f"promo_toggle:{pid}")],
-            [InlineKeyboardButton("🗑 Удалить", callback_data=f"promo_delete:{pid}")],
-            [InlineKeyboardButton("◀️ К промокодам", callback_data="promo_menu")],
-        ]),
+        reply_markup=InlineKeyboardMarkup(kb),
     )
 
 
