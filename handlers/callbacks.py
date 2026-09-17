@@ -65,6 +65,7 @@ from handlers.broadcast import (
     handle_broadcast_start, handle_broadcast_segment,
     handle_bcast_buttons_add, handle_bcast_buttons_skip,
     handle_bcast_edit_text, handle_bcast_cancel, handle_bcast_send,
+    handle_bcast_photo_add, handle_bcast_photo_skip, handle_bcast_photo_del,
 )
 from handlers.tickets import (
     handle_ticket_list, handle_ticket_view, handle_ticket_reply_start,
@@ -420,6 +421,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_bcast_buttons_add(query, context)
     elif data == "bcast_buttons_skip":
         await handle_bcast_buttons_skip(query, context)
+    elif data == "bcast_photo_add":
+        await handle_bcast_photo_add(query, context)
+    elif data == "bcast_photo_skip":
+        await handle_bcast_photo_skip(query, context)
+    elif data == "bcast_photo_del":
+        await handle_bcast_photo_del(query, context)
     elif data == "bcast_edit_text":
         await handle_bcast_edit_text(query, context)
     elif data == "bcast_send":

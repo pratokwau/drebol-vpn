@@ -2,6 +2,7 @@
 AWAITING_CHANNEL = "awaiting_channel"
 AWAITING_BROADCAST = "awaiting_broadcast"
 AWAITING_BROADCAST_BUTTONS = "awaiting_broadcast_buttons"
+AWAITING_BROADCAST_PHOTO = "awaiting_broadcast_photo"
 AWAITING_SUPPORT_MSG = "awaiting_support_msg"
 AWAITING_ADMIN_REPLY = "awaiting_admin_reply"
 AWAITING_PRIVACY_URL = "awaiting_privacy_url"

@@ -7,7 +7,7 @@ from config import ADMIN_ID, load_config, save_config
 from database import add_support_message, get_support_messages
 from keyboards import back_admin, support_keyboard
 from states import (
-    AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS,
+    AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_XUI_URL, AWAITING_XUI_TOKEN,
@@ -220,10 +220,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Рассылка: текст ─────────────────────────────────────────────────────
     if state == AWAITING_BROADCAST:
-        from handlers.broadcast import extract_html, ask_buttons
+        from handlers.broadcast import extract_html, ask_photo
         context.user_data.pop("state", None)
         context.user_data["bcast_text"] = extract_html(update.message)
-        await ask_buttons(update.message, context)
+        await ask_photo(update.message, context)
         return
 
     # ── Рассылка: инлайн-кнопки ─────────────────────────────────────────────
@@ -1245,6 +1245,16 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     caption = msg.caption or ""
+
+    # ── Картинка для рассылки ───────────────────────────────────────────────
+    if is_admin and msg.photo and state in (AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST):
+        from handlers.broadcast import accept_photo, accept_photo_with_text
+        if state == AWAITING_BROADCAST_PHOTO:
+            await accept_photo(msg, context)
+        else:
+            # фото прислали вместо текста — подпись станет текстом рассылки
+            await accept_photo_with_text(msg, context)
+        return
 
     # ── Юзер отправляет файл в поддержку ────────────────────────────────────
     if state == AWAITING_SUPPORT_MSG and not is_admin:

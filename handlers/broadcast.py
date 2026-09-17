@@ -4,7 +4,10 @@ from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from database import get_users_by_segment
 from keyboards import cancel_admin
-from states import AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS
+from states import AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO
+
+# В подпись к картинке Telegram пускает 1024 символа, в обычное сообщение — 4096
+CAPTION_LIMIT = 1024
 
 
 SEGMENTS = {
@@ -122,7 +125,7 @@ def build_markup(spec) -> InlineKeyboardMarkup | None:
 
 
 def _reset(context):
-    for key in ("bcast_text", "bcast_buttons", "bcast_segment"):
+    for key in ("bcast_text", "bcast_buttons", "bcast_segment", "bcast_photo"):
         context.user_data.pop(key, None)
     context.user_data.pop("state", None)
 
@@ -158,7 +161,71 @@ async def handle_broadcast_segment(query, context: ContextTypes.DEFAULT_TYPE, se
     )
 
 
-# ── Шаг 3: кнопки ────────────────────────────────────────────────────────────
+# ── Шаг 3: картинка ──────────────────────────────────────────────────────────
+
+async def ask_photo(message, context: ContextTypes.DEFAULT_TYPE):
+    """Текст принят — предлагаем прикрепить картинку."""
+    photo = context.user_data.get("bcast_photo")
+    rows = [[InlineKeyboardButton("📷 Заменить картинку" if photo else "📷 Добавить картинку",
+                                  callback_data="bcast_photo_add")]]
+    if photo:
+        rows.append([InlineKeyboardButton("🗑 Убрать картинку", callback_data="bcast_photo_del")])
+    rows.append([InlineKeyboardButton("➡️ Дальше" if photo else "⏭ Без картинки",
+                                      callback_data="bcast_photo_skip")])
+    rows.append([InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")])
+    await message.reply_text(
+        "✅ Текст принят.\n\n"
+        + ("🖼 Картинка прикреплена." if photo else "🖼 Добавить к рассылке картинку?"),
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def handle_bcast_photo_add(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_BROADCAST_PHOTO
+    await query.edit_message_text(
+        "🖼 <b>Картинка для рассылки</b>\n\n"
+        "Пришлите фото одним сообщением — подпись писать не нужно, "
+        "текст рассылки уже принят.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⏭ Без картинки", callback_data="bcast_photo_skip")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
+        ]),
+    )
+
+
+async def handle_bcast_photo_skip(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("state", None)
+    await ask_buttons(query.message, context)
+
+
+async def handle_bcast_photo_del(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("bcast_photo", None)
+    context.user_data.pop("state", None)
+    await ask_photo(query.message, context)
+
+
+async def accept_photo(message, context: ContextTypes.DEFAULT_TYPE):
+    """Фото пришло на шаге картинки."""
+    context.user_data["bcast_photo"] = message.photo[-1].file_id
+    context.user_data.pop("state", None)
+    await message.reply_text("🖼 Картинка принята.")
+    await ask_buttons(message, context)
+
+
+async def accept_photo_with_text(message, context: ContextTypes.DEFAULT_TYPE):
+    """Фото прислали вместо текста: подпись становится текстом рассылки."""
+    context.user_data["bcast_photo"] = message.photo[-1].file_id
+    caption = extract_html(message)
+    if not caption.strip():
+        await message.reply_text("🖼 Картинка принята. Теперь пришлите текст рассылки.")
+        return
+    context.user_data["bcast_text"] = caption
+    context.user_data.pop("state", None)
+    await ask_buttons(message, context)
+
+
+# ── Шаг 4: кнопки ────────────────────────────────────────────────────────────
 
 async def ask_buttons(message, context: ContextTypes.DEFAULT_TYPE):
     """Текст принят — спрашиваем про инлайн-кнопки."""
@@ -198,6 +265,7 @@ async def show_preview(message, context: ContextTypes.DEFAULT_TYPE):
     text = context.user_data.get("bcast_text")
     segment = context.user_data.get("bcast_segment", "all")
     spec = context.user_data.get("bcast_buttons")
+    photo = context.user_data.get("bcast_photo")
     if not text:
         await message.reply_text("❌ Текст рассылки потерян, начните заново.")
         return
@@ -209,12 +277,18 @@ async def show_preview(message, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
     )
     try:
-        await message.reply_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=build_markup(spec),
-            disable_web_page_preview=False,
-        )
+        if photo and len(text) <= CAPTION_LIMIT:
+            await message.reply_photo(photo, caption=text, parse_mode="HTML",
+                                      reply_markup=build_markup(spec))
+        else:
+            if photo:
+                await message.reply_photo(photo)
+            await message.reply_text(
+                text,
+                parse_mode="HTML",
+                reply_markup=build_markup(spec),
+                disable_web_page_preview=False,
+            )
     except Exception as e:
         await message.reply_text(
             f"❌ <b>Ошибка разметки</b>\n\n<code>{e}</code>\n\n"
@@ -228,17 +302,24 @@ async def show_preview(message, context: ContextTypes.DEFAULT_TYPE):
         return
 
     btn_line = f"🔘 Кнопок: <b>{sum(len(r) for r in spec)}</b>\n" if spec else ""
+    photo_line = ""
+    if photo:
+        photo_line = "🖼 Картинка: <b>есть</b>\n"
+        if len(text) > CAPTION_LIMIT:
+            photo_line += ("<i>Текст длиннее 1024 символов — картинка уйдёт "
+                           "отдельным сообщением перед текстом.</i>\n")
     await message.reply_text(
         f"📣 <b>Проверьте рассылку</b>\n\n"
         f"🎯 Сегмент: <b>{SEGMENTS.get(segment, 'Все')}</b>\n"
         f"👥 Получателей: <b>{count}</b>\n"
-        f"{btn_line}\n"
+        f"{photo_line}{btn_line}\n"
         "Отправляем?",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Отправить", callback_data="bcast_send")],
             [
                 InlineKeyboardButton("✏️ Текст", callback_data="bcast_edit_text"),
+                InlineKeyboardButton("🖼 Картинка", callback_data="bcast_photo_add"),
                 InlineKeyboardButton("🔘 Кнопки", callback_data="bcast_buttons_add"),
             ],
             [InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
@@ -270,6 +351,7 @@ async def handle_bcast_send(query, context: ContextTypes.DEFAULT_TYPE):
     text = context.user_data.get("bcast_text")
     segment = context.user_data.get("bcast_segment", "all")
     spec = context.user_data.get("bcast_buttons")
+    photo = context.user_data.get("bcast_photo")
     if not text:
         await query.edit_message_text("❌ Текст рассылки потерян, начните заново.")
         return
@@ -278,7 +360,7 @@ async def handle_bcast_send(query, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(
         f"⏳ Отправляю рассылку — {len(user_ids)} получателям...",
     )
-    ok, fail = await do_broadcast(context.bot, text, segment, build_markup(spec))
+    ok, fail = await do_broadcast(context.bot, text, segment, build_markup(spec), photo)
 
     from keyboards import back_admin
     from log_channel import send_log
@@ -299,16 +381,27 @@ async def handle_bcast_send(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def do_broadcast(bot: Bot, text: str, segment: str = "all",
-                       reply_markup: InlineKeyboardMarkup | None = None) -> tuple[int, int]:
+                       reply_markup: InlineKeyboardMarkup | None = None,
+                       photo: str | None = None) -> tuple[int, int]:
     user_ids = await get_users_by_segment(segment)
     ok = 0
     fail = 0
+    # длинный текст в подпись не влезет — тогда картинка идёт отдельным сообщением
+    split = bool(photo) and len(text) > CAPTION_LIMIT
     for uid in user_ids:
         try:
-            await bot.send_message(
-                chat_id=uid, text=text, parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
+            if photo and not split:
+                await bot.send_photo(
+                    chat_id=uid, photo=photo, caption=text, parse_mode="HTML",
+                    reply_markup=reply_markup,
+                )
+            else:
+                if photo:
+                    await bot.send_photo(chat_id=uid, photo=photo)
+                await bot.send_message(
+                    chat_id=uid, text=text, parse_mode="HTML",
+                    reply_markup=reply_markup,
+                )
             ok += 1
         except Exception:
             fail += 1
