@@ -31,11 +31,6 @@ def subscribe_keyboard() -> InlineKeyboardMarkup:
     cfg = load_config()
     channel_url = cfg.get("channel_url", "https://t.me/")
     return InlineKeyboardMarkup([
-        # Цвет кнопки — поле style из Bot API 9.4: danger, success или primary.
-        # Библиотека 21.9 про это поле не знает, поэтому передаём через api_kwargs:
-        # to_dict() отправляет их как есть, а старые клиенты просто игнорируют.
-        [InlineKeyboardButton("📢 Подписаться на канал", url=channel_url,
-                              api_kwargs={"style": "primary"})],
-        [InlineKeyboardButton("✅ Я подписался", callback_data="check_sub",
-                              api_kwargs={"style": "success"})],
+        [InlineKeyboardButton("📢 Подписаться на канал", url=channel_url)],
+        [InlineKeyboardButton("✅ Я подписался", callback_data="check_sub")],
     ])

@@ -363,10 +363,6 @@ def main():
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN не задан в .env")
 
-    # Цвета кнопок: опасные красные, подтверждения зелёные, главные синие
-    from keyboards import enable_button_colors
-    enable_button_colors()
-
     app = (
         Application.builder()
         .token(BOT_TOKEN)
