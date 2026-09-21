@@ -10,6 +10,7 @@ from config import load_config
 
 _DANGER_EXACT = {
     "clear_log_channel", "git_update", "bl_add", "bl_add_apply", "paid_bulk_reduce",
+    "support_open",
 }
 _DANGER_PREFIX = (
     "paid_sub_delete:", "sub_delete:", "promo_delete:", "tariff_del:", "tariff_del_ok:",
@@ -26,8 +27,8 @@ _SUCCESS_PREFIX = (
     "bl_del:", "promo_give_do:", "paid_sub_extend:",
 )
 _PRIMARY_EXACT = {
-    "my_paid_sub", "renew_sub", "pay_invoice", "enter_promo", "support_open",
-    "qr_code", "copy_sub", "reissue_key", "buy", "prices", "how_to", "referral",
+    "my_paid_sub", "renew_sub", "pay_invoice", "enter_promo",
+    "qr_code", "copy_sub", "reissue_key", "buy", "prices", "how_to",
     "admin_panel",
 }
 _PRIMARY_PREFIX = ("pay_invoice:",)
