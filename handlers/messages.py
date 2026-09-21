@@ -32,6 +32,7 @@ from states import (
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE, AWAITING_PAID_FIX_RENEW,
+    AWAITING_PAID_BULK_IP, AWAITING_PAID_BULK_HWID,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE,
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
@@ -777,19 +778,37 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
+    if state in (AWAITING_PAID_BULK_IP, AWAITING_PAID_BULK_HWID):
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число. <code>0</code> — без ограничения.",
+                                            parse_mode="HTML", reply_markup=back_admin())
+            return
+        kind = "ip" if state == AWAITING_PAID_BULK_IP else "hwid"
+        context.user_data.pop("state", None)
+        from paidsub.handlers import preview_bulk_limits
+        await preview_bulk_limits(update.message, context, kind, int(text))
+        return
+
     if state == AWAITING_PAID_SUB_EDIT_IP:
         if not text.isdigit():
             await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
             return
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
+        panel_note = ""
         if sub_id:
             from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
+            from xui_api import update_client_limits
             await update_paid_sub_field(sub_id, "limit_ip", int(text))
             r = await get_paid_sub(sub_id)
             if r:
+                # без этого лимит менялся только в базе, а панель жила со старым
+                res = await update_client_limits(r[2], limit_ip=int(text))
+                if not res.get("success"):
+                    panel_note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
                 await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: лимит IP → {text}")
-        await update.message.reply_text(f"✅ Лимит IP обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Лимит IP обновлён: <b>{text}</b>{panel_note}",
+                                        parse_mode="HTML", reply_markup=back_admin())
         return
 
     if state == AWAITING_PAID_SUB_EDIT_HWID:
@@ -798,13 +817,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
+        panel_note = ""
         if sub_id:
             from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
+            from xui_api import update_client_limits
             await update_paid_sub_field(sub_id, "limit_hwid", int(text))
             r = await get_paid_sub(sub_id)
             if r:
+                res = await update_client_limits(r[2], limit_hwid=int(text))
+                if not res.get("success"):
+                    panel_note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
                 await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: лимит HWID → {text}")
-        await update.message.reply_text(f"✅ Лимит HWID обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Лимит HWID обновлён: <b>{text}</b>{panel_note}",
+                                        parse_mode="HTML", reply_markup=back_admin())
         return
 
     if state == AWAITING_PAID_SUB_EDIT_TRAFFIC:

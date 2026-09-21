@@ -1093,6 +1093,8 @@ async def handle_paid_bulk_menu(query):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("➕ Добавить срок всем", callback_data="paid_bulk_extend")],
             [InlineKeyboardButton("➖ Убавить срок всем", callback_data="paid_bulk_reduce")],
+            [InlineKeyboardButton("📱 Лимит IP всем", callback_data="paid_bulk_ip"),
+             InlineKeyboardButton("🔑 Лимит HWID всем", callback_data="paid_bulk_hwid")],
             [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
         ]),
     )
@@ -1141,6 +1143,270 @@ async def handle_paid_bulk_apply(query, context):
         + (f"❌ Ошибок: <b>{result['errors']}</b>" if result['errors'] else ""),
         parse_mode="HTML", reply_markup=back_admin(),
     )
+
+
+def _when(ms) -> str:
+    """Время из панели приходит в миллисекундах."""
+    try:
+        ms = int(ms or 0)
+    except (TypeError, ValueError):
+        return "?"
+    if ms <= 0:
+        return "—"
+    return datetime.fromtimestamp(ms / 1000).strftime("%d.%m %H:%M")
+
+
+async def handle_paid_devices(query, sub_id: int):
+    """Устройства (HWID), которые панель запомнила по этой подписке."""
+    from html import escape
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from xui_api import get_client_hwids
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    email, limit_hwid = row[2], row[8]
+    await query.edit_message_text("📱 Спрашиваю панель…")
+    r = await get_client_hwids(email)
+
+    lines = [f"📱 <b>Устройства подписки #{sub_id}</b>\n",
+             f"🔑 Лимит HWID: <b>{limit_hwid or 'без ограничения'}</b>"]
+    kb = []
+    if not r.get("ok"):
+        lines.append(f"\n❌ Панель не ответила:\n<code>{escape(str(r.get('error')))}</code>")
+    else:
+        items = r["items"]
+        lines.append(f"📦 Запомнено устройств: <b>{len(items)}</b>\n")
+        if not items:
+            lines.append("<i>Пока ни одного — клиент ещё не подключался "
+                         "или панель не считает HWID.</i>")
+        for i, d in enumerate(items[:12], 1):
+            name = " · ".join(str(x) for x in (d.get("deviceOs"), d.get("osVersion"),
+                                               d.get("deviceModel")) if x) or "устройство"
+            lines.append(f"{i}. {escape(name)}\n"
+                         f"     был: {_when(d.get('lastSeen'))} · с {_when(d.get('firstSeen'))}")
+            kb.append([InlineKeyboardButton(
+                f"🗑 Убрать {i} — {name[:24]}",
+                callback_data=f"paid_hwid_del:{sub_id}:{d.get('id')}")])
+        if len(items) > 12:
+            lines.append(f"…и ещё {len(items) - 12}")
+        if items:
+            kb.append([InlineKeyboardButton("🧹 Очистить все устройства",
+                                            callback_data=f"paid_hwid_clear:{sub_id}")])
+    kb.append([InlineKeyboardButton("🌐 IP-адреса", callback_data=f"paid_ips:{sub_id}"),
+               InlineKeyboardButton("🔄 Обновить", callback_data=f"paid_devices:{sub_id}")])
+    kb.append([InlineKeyboardButton("◀️ К подписке", callback_data=f"paid_sub_view:{sub_id}")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
+async def handle_paid_ips(query, sub_id: int):
+    """С каких адресов подключалась подписка."""
+    from html import escape
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from xui_api import get_client_ips
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    email, limit_ip = row[2], row[7]
+    await query.edit_message_text("🌐 Спрашиваю панель…")
+    r = await get_client_ips(email)
+
+    lines = [f"🌐 <b>IP-адреса подписки #{sub_id}</b>\n",
+             f"📱 Лимит IP: <b>{limit_ip or 'без ограничения'}</b>"]
+    kb = []
+    if not r.get("ok"):
+        lines.append(f"\n❌ Панель не ответила:\n<code>{escape(str(r.get('error')))}</code>")
+    else:
+        items = r["items"]
+        lines.append(f"📍 Адресов: <b>{len(items)}</b>\n")
+        if not items:
+            lines.append("<i>Панель пока не записала ни одного адреса.</i>")
+        for i, d in enumerate(items[:15], 1):
+            tail = f" · {_when(d['ts'])}" if d.get("ts") else ""
+            node = f" · {escape(str(d['node']))}" if d.get("node") else ""
+            lines.append(f"{i}. <code>{escape(str(d['ip']))}</code>{tail}{node}")
+        if len(items) > 15:
+            lines.append(f"…и ещё {len(items) - 15}")
+        if items:
+            kb.append([InlineKeyboardButton("🧹 Сбросить список адресов",
+                                            callback_data=f"paid_ips_clear:{sub_id}")])
+    lines.append("\n<i>Список ведёт панель, бот его не хранит.</i>")
+    kb.append([InlineKeyboardButton("📱 Устройства", callback_data=f"paid_devices:{sub_id}"),
+               InlineKeyboardButton("🔄 Обновить", callback_data=f"paid_ips:{sub_id}")])
+    kb.append([InlineKeyboardButton("◀️ К подписке", callback_data=f"paid_sub_view:{sub_id}")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
+async def handle_paid_hwid_del(query, context, sub_id: int, hwid_id: int):
+    from xui_api import delete_client_hwid
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    res = await delete_client_hwid(row[2], hwid_id)
+    if res.get("success"):
+        await query.answer("Устройство убрано")
+        if row[1]:
+            await add_history(row[1], "settings_changed", f"Убрано устройство #{hwid_id}")
+    else:
+        await query.answer(f"Панель не приняла: {res.get('error', '?')}"[:190], show_alert=True)
+    await handle_paid_devices(query, sub_id)
+
+
+async def handle_paid_hwid_clear(query, context, sub_id: int):
+    from xui_api import clear_client_hwids
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    res = await clear_client_hwids(row[2])
+    if res.get("success"):
+        await query.answer("Устройства очищены")
+        if row[1]:
+            await add_history(row[1], "settings_changed", "Очищены все устройства (HWID)")
+            await _notify_user(context.bot, row[1],
+                "ℹ️ <b>Список устройств сброшен</b>\n\n"
+                "Подключите VPN заново на тех устройствах, которыми пользуетесь."
+            )
+    else:
+        await query.answer(f"Панель не приняла: {res.get('error', '?')}"[:190], show_alert=True)
+    await handle_paid_devices(query, sub_id)
+
+
+async def handle_paid_ips_clear(query, context, sub_id: int):
+    from xui_api import clear_client_ips
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    res = await clear_client_ips(row[2])
+    if res.get("success"):
+        await query.answer("Список адресов сброшен")
+        if row[1]:
+            await add_history(row[1], "settings_changed", "Сброшен список IP")
+    else:
+        await query.answer(f"Панель не приняла: {res.get('error', '?')}"[:190], show_alert=True)
+    await handle_paid_ips(query, sub_id)
+
+
+LIMIT_KINDS = {"ip": ("📱", "IP", "limit_ip"), "hwid": ("🔑", "HWID", "limit_hwid")}
+
+
+async def handle_paid_bulk_ip(query, context):
+    from states import AWAITING_PAID_BULK_IP
+    context.user_data["state"] = AWAITING_PAID_BULK_IP
+    await query.edit_message_text(
+        "📱 <b>Лимит IP для всех подписок</b>\n\n"
+        "Сколько одновременных подключений с разных адресов разрешить?\n"
+        "Введи число, <code>0</code> — без ограничения.",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_bulk_hwid(query, context):
+    from states import AWAITING_PAID_BULK_HWID
+    context.user_data["state"] = AWAITING_PAID_BULK_HWID
+    await query.edit_message_text(
+        "🔑 <b>Лимит устройств (HWID) для всех подписок</b>\n\n"
+        "Сколько устройств разрешить на подписку?\n"
+        "Введи число, <code>0</code> — без ограничения.",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def preview_bulk_limits(message, context, kind: str, value: int):
+    """Показывает, кого затронет смена лимита, и спрашивает подтверждение."""
+    import aiosqlite
+    from blacklist import blacklisted_ids
+    from database import DB_PATH
+    from handlers.confirm import confirm_keyboard
+    emoji, label, field = LIMIT_KINDS[kind]
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"SELECT tg_id, {field} FROM paid_subs") as cur:
+            rows = await cur.fetchall()
+    skip = await blacklisted_ids()
+    targets = [r for r in rows if r[0] not in skip]
+    # 0 в лимите — это «без ограничения», поэтому переход с нуля тоже ужесточение
+    tighter = sum(1 for _tg, old in targets if value and (not old or value < old))
+    context.user_data["bulk_limits"] = {"kind": kind, "value": value}
+    await message.reply_text(
+        f"{emoji} <b>Поставить лимит {label} = {value or 'без ограничения'} всем?</b>\n\n"
+        f"👥 Затронет подписок: <b>{len(targets)}</b>"
+        + (f" · пропустим из ЧС: {len(rows) - len(targets)}\n" if len(rows) != len(targets) else "\n")
+        + (f"⚠️ У <b>{tighter}</b> лимит станет строже — им придёт уведомление.\n" if tighter else "")
+        + "\nМеняем и в базе, и в панели 3x-UI. "
+          "Пресет для новых подписок остаётся прежним.",
+        parse_mode="HTML",
+        reply_markup=confirm_keyboard("✅ Да, применить", "paid_bulk_limits_apply",
+                                      "paid_bulk_menu", "paid_subs"),
+    )
+
+
+async def handle_paid_bulk_limits_apply(query, context):
+    plan = context.user_data.pop("bulk_limits", None)
+    if not plan:
+        await handle_paid_bulk_menu(query)
+        return
+    kind, value = plan["kind"], plan["value"]
+    emoji, label, _field = LIMIT_KINDS[kind]
+    await query.edit_message_text(f"{emoji} Меняю лимит {label} у всех подписок…")
+    r = await bulk_set_limits(kind, value, context)
+    await query.edit_message_text(
+        f"✅ <b>Готово</b>\n\n"
+        f"{emoji} Лимит {label}: <b>{value or 'без ограничения'}</b>\n"
+        f"📊 Обновлено подписок: <b>{r['updated']}</b>\n"
+        + (f"⛔ Пропущено — в чёрном списке: <b>{r['skipped']}</b>\n" if r["skipped"] else "")
+        + (f"⚠️ Панель не приняла: <b>{r['panel_fail']}</b>\n" if r["panel_fail"] else "")
+        + (f"📨 Предупредили об ужесточении: <b>{r['tightened']}</b>" if r["tightened"] else ""),
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def bulk_set_limits(kind: str, value: int, context) -> dict:
+    """Ставит лимит устройств всем платным подпискам: в базе и в панели."""
+    import aiosqlite
+    from blacklist import blacklisted_ids
+    from database import DB_PATH
+    from xui_api import update_client_limits
+    emoji, label, field = LIMIT_KINDS[kind]
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"SELECT id, tg_id, email, {field} FROM paid_subs") as cur:
+            rows = await cur.fetchall()
+
+    skip_ids = await blacklisted_ids()
+    bot = context.bot if hasattr(context, "bot") else None
+    updated = panel_fail = skipped = 0
+    tightened = []
+    for sub_id, tg_id, email, old in rows:
+        if tg_id in skip_ids:
+            skipped += 1
+            continue
+        await update_paid_sub_field(sub_id, field, value)
+        res = await update_client_limits(
+            email, **({"limit_ip": value} if kind == "ip" else {"limit_hwid": value}))
+        if not res.get("success"):
+            panel_fail += 1
+        updated += 1
+        if tg_id:
+            await add_history(tg_id, "settings_changed",
+                              f"Массово: лимит {label} → {value or 'без ограничения'}")
+            # пишем только тем, кому стало строже: остальным это не новость.
+            # old == 0 значит «было без ограничения» — любой лимит строже
+            if value and (not old or value < old):
+                tightened.append(tg_id)
+
+    if bot:
+        for tg_id in tightened:
+            await _notify_user(bot, tg_id,
+                f"ℹ️ <b>Изменён лимит устройств</b>\n\n"
+                f"Теперь на подписку разрешено <b>{value}</b> — "
+                f"лишние устройства перестанут подключаться."
+            )
+    return {"updated": updated, "panel_fail": panel_fail,
+            "skipped": skipped, "tightened": len(tightened)}
 
 
 async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:

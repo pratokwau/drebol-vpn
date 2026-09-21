@@ -16,7 +16,8 @@ _DANGER_PREFIX = (
     "paid_sub_delete:", "sub_delete:", "promo_delete:", "tariff_del:", "tariff_del_ok:",
     "ban_user:", "paid_mute_user:", "bl_add_for:", "bl_readd:", "bl_stop:", "helper_del:",
     "paid_reject:", "reject_payment:", "refund_start:", "refund_do:",
-    "paid_sub_reduce:", "paid_sub_freeze:",
+    "paid_sub_reduce:", "paid_sub_freeze:", "paid_hwid_del:", "paid_hwid_clear:",
+    "paid_ips_clear:",
 )
 _SUCCESS_EXACT = {
     "check_sub", "i_paid", "bcast_send", "paid_bulk_extend", "paid_fix_renew_apply",

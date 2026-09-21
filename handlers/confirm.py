@@ -30,6 +30,7 @@ CONFIRM_TITLES = {
     "bl_stop": "Остановка подписки из-за ЧС",
     "bl_readd": "Возврат в ЧС",
     "bl_remote_toggle": "Общий ЧС вкл/выкл",
+    "paid_hwid_clear": "Очистка устройств подписки",
 }
 
 
@@ -222,7 +223,18 @@ async def _bl_remote_toggle(arg):
             "🌐 Да, включить", "bl_menu", "admin_panel")
 
 
+async def _paid_hwid_clear(arg):
+    from paidsub.storage import get_paid_sub
+    row = await get_paid_sub(int(arg))
+    who = await _who(row[1]) if row else "?"
+    return (f"🧹 <b>Очистить все устройства?</b>\n\n👤 {who}\n\n"
+            "Панель забудет все запомненные устройства этой подписки. "
+            "Клиенту придётся подключить их заново — сообщение об этом бот пришлёт.",
+            "🧹 Да, очистить", f"paid_devices:{arg}", f"paid_sub_view:{arg}")
+
+
 RULES = {
+    "paid_hwid_clear": _paid_hwid_clear,
     "paid_sub_delete": _paid_sub_delete,
     "sub_delete": _sub_delete,
     "paid_sub_toggle": lambda arg: _toggle(arg, admin_sub=False),

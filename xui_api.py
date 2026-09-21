@@ -100,6 +100,141 @@ async def _post(session: aiohttp.ClientSession, url: str, body: dict,
         return None, f"{type(e).__name__}: {e}"
 
 
+async def _delete(session: aiohttp.ClientSession, url: str,
+                  timeout: float = 15) -> tuple[dict | None, str]:
+    try:
+        async with session.delete(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            text = await resp.text()
+            if not text.strip() or text.strip() == "null":
+                return None, f"HTTP {resp.status}: пустой ответ"
+            try:
+                return json.loads(text), ""
+            except Exception:
+                return None, f"HTTP {resp.status}: не JSON: {text[:200]}"
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
+def _parse_ip_obj(obj) -> list:
+    """Список IP: сборки панели отдают его по-разному, разбираем терпимо."""
+    out = []
+    if isinstance(obj, str):
+        try:
+            obj = json.loads(obj)
+        except Exception:
+            return [{"ip": s.strip(), "ts": None, "node": None}
+                    for s in obj.replace(";", ",").split(",") if s.strip()]
+    if isinstance(obj, dict):
+        obj = [obj]
+    for item in obj or []:
+        if isinstance(item, str):
+            out.append({"ip": item, "ts": None, "node": None})
+        elif isinstance(item, dict):
+            node = item.get("nodeName") or item.get("node") or item.get("nodeGuid")
+            inner = item.get("ips")
+            if inner is not None:
+                for sub in _parse_ip_obj(inner):
+                    out.append({"ip": sub["ip"], "ts": sub["ts"], "node": sub["node"] or node})
+            elif item.get("ip"):
+                out.append({"ip": item["ip"],
+                            "ts": item.get("timestamp") or item.get("ts"), "node": node})
+    return out
+
+
+async def get_client_ips(email: str) -> dict:
+    """С каких адресов подключался клиент. 3.x — API клиентов, 2.x — инбаундов."""
+    cfg = load_config()
+    url = (cfg.get("xui_url") or "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"ok": False, "error": "панель не настроена", "items": []}
+    safe = quote(email, safe="")
+    s = _session(token)
+    try:
+        first_err = ""
+        for path in (f"/panel/api/clients/ips/{safe}", f"/panel/api/inbounds/clientIps/{safe}"):
+            data, err = await _post(s, f"{url}{path}", {})
+            if data and data.get("success"):
+                return {"ok": True, "items": _parse_ip_obj(data.get("obj"))}
+            first_err = first_err or err or str(data)[:120]
+            if data is None and not err.startswith("HTTP"):
+                break
+        return {"ok": False, "error": first_err, "items": []}
+    finally:
+        await s.close()
+
+
+async def clear_client_ips(email: str) -> dict:
+    cfg = load_config()
+    url = (cfg.get("xui_url") or "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "панель не настроена"}
+    safe = quote(email, safe="")
+    s = _session(token)
+    try:
+        first_err = ""
+        for path in (f"/panel/api/clients/clearIps/{safe}",
+                     f"/panel/api/inbounds/clearClientIps/{safe}"):
+            data, err = await _post(s, f"{url}{path}", {})
+            if data and data.get("success"):
+                return {"success": True}
+            first_err = first_err or err or str(data)[:120]
+        return {"success": False, "error": first_err}
+    finally:
+        await s.close()
+
+
+async def get_client_hwids(email: str) -> dict:
+    """Устройства, которые панель запомнила по подписке (только 3x-UI 3.x)."""
+    cfg = load_config()
+    url = (cfg.get("xui_url") or "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"ok": False, "error": "панель не настроена", "items": []}
+    s = _session(token)
+    try:
+        data, err = await _post(s, f"{url}/panel/api/clients/hwids/{quote(email, safe='')}", {})
+        if data and data.get("success"):
+            return {"ok": True, "items": [d for d in (data.get("obj") or []) if isinstance(d, dict)]}
+        return {"ok": False, "error": err or str(data)[:120], "items": []}
+    finally:
+        await s.close()
+
+
+async def clear_client_hwids(email: str) -> dict:
+    cfg = load_config()
+    url = (cfg.get("xui_url") or "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "панель не настроена"}
+    s = _session(token)
+    try:
+        data, err = await _delete(s, f"{url}/panel/api/clients/hwids/{quote(email, safe='')}")
+        if data and data.get("success"):
+            return {"success": True}
+        return {"success": False, "error": err or str(data)[:120]}
+    finally:
+        await s.close()
+
+
+async def delete_client_hwid(email: str, hwid_id: int) -> dict:
+    cfg = load_config()
+    url = (cfg.get("xui_url") or "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "панель не настроена"}
+    s = _session(token)
+    try:
+        data, err = await _delete(
+            s, f"{url}/panel/api/clients/hwids/{quote(email, safe='')}/{int(hwid_id)}")
+        if data and data.get("success"):
+            return {"success": True}
+        return {"success": False, "error": err or str(data)[:120]}
+    finally:
+        await s.close()
+
+
 async def get_inbounds() -> dict:
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")
@@ -723,6 +858,67 @@ async def delete_client(email: str) -> dict:
                 ib_id = inb.get("id")
                 await _post(s, f"{url}/panel/api/inbounds/delClient/{ib_id}/{safe_email}", {})
         return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        await s.close()
+
+
+async def update_client_limits(email: str, limit_ip: int | None = None,
+                               limit_hwid: int | None = None) -> dict:
+    """Меняет лимит устройств клиента в панели: по IP и по HWID.
+
+    Клиента читаем целиком и правим только нужные поля — иначе обновление
+    затрёт остальные настройки (срок, трафик, включённость).
+    """
+    if limit_ip is None and limit_hwid is None:
+        return {"success": True}
+    cfg = load_config()
+    url = cfg.get("xui_url", "").rstrip("/")
+    token = cfg.get("xui_token", "")
+    if not url or not token:
+        return {"success": False, "error": "URL или токен не заданы"}
+    s = _session(token)
+    try:
+        data, err = await _get(s, f"{url}/panel/api/inbounds/list")
+        if not data or not data.get("success"):
+            return {"success": False, "error": f"Не удалось загрузить инбаунды: {err}"}
+
+        client_obj = None
+        for inb in (data.get("obj") or []):
+            settings_str = inb.get("settings") or "{}"
+            try:
+                settings = json.loads(settings_str) if isinstance(settings_str, str) else settings_str
+            except Exception:
+                continue
+            for c in settings.get("clients", []):
+                if c.get("email") == email:
+                    client_obj = dict(c)
+                    break
+            if client_obj:
+                break
+
+        if not client_obj:
+            return {"success": False, "error": "Клиент не найден в панели"}
+
+        if limit_ip is not None:
+            client_obj["limitIp"] = int(limit_ip)
+        if limit_hwid is not None:
+            client_obj["limitHwId"] = int(limit_hwid)
+        client_obj["flow"] = "xtls-rprx-vision"
+
+        safe_uuid = quote(client_obj.get("id", ""), safe="")
+        safe_email = quote(email, safe="")
+        err2 = ""
+        for path in (
+            f"/panel/api/clients/update/{safe_uuid}",
+            f"/panel/api/clients/update/{safe_email}",
+            f"/panel/api/inbounds/updateClient/{safe_uuid}",
+        ):
+            result, err2 = await _post(s, f"{url}{path}", client_obj)
+            if result and result.get("success"):
+                return {"success": True}
+        return {"success": False, "error": f"API не принял обновление: {err2}"}
     except Exception as e:
         return {"success": False, "error": f"{type(e).__name__}: {e}"}
     finally:

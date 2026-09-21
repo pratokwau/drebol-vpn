@@ -98,6 +98,9 @@ from paidsub.handlers import (
     handle_approve, handle_reject, handle_request_sub,
     handle_paid_sub_freeze, handle_paid_sub_extend, handle_paid_sub_reduce,
     handle_paid_bulk_menu, handle_paid_bulk_extend, handle_paid_bulk_reduce,
+    handle_paid_bulk_ip, handle_paid_bulk_hwid, handle_paid_bulk_limits_apply,
+    handle_paid_devices, handle_paid_ips, handle_paid_hwid_del,
+    handle_paid_hwid_clear, handle_paid_ips_clear,
     handle_paid_fix_renew, handle_paid_fix_renew_apply,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_ip, handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
@@ -572,6 +575,17 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_preset_traffic(query, context)
     elif data.startswith("paid_sub_view:"):
         await handle_paid_sub_view(query, int(data.split(":")[1]))
+    elif data.startswith("paid_devices:"):
+        await handle_paid_devices(query, int(data.split(":")[1]))
+    elif data.startswith("paid_ips:"):
+        await handle_paid_ips(query, int(data.split(":")[1]))
+    elif data.startswith("paid_hwid_del:"):
+        _, sid, hid = data.split(":")
+        await handle_paid_hwid_del(query, context, int(sid), int(hid))
+    elif data.startswith("paid_hwid_clear:"):
+        await handle_paid_hwid_clear(query, context, int(data.split(":")[1]))
+    elif data.startswith("paid_ips_clear:"):
+        await handle_paid_ips_clear(query, context, int(data.split(":")[1]))
     elif data.startswith("paid_sub_toggle:"):
         await handle_paid_sub_toggle(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_delete:"):
@@ -596,6 +610,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_bulk_extend(query, context)
     elif data == "paid_bulk_reduce":
         await handle_paid_bulk_reduce(query, context)
+    elif data == "paid_bulk_ip":
+        await handle_paid_bulk_ip(query, context)
+    elif data == "paid_bulk_hwid":
+        await handle_paid_bulk_hwid(query, context)
+    elif data == "paid_bulk_limits_apply":
+        await handle_paid_bulk_limits_apply(query, context)
     elif data == "paid_bulk_apply":
         await handle_paid_bulk_apply(query, context)
     elif data == "paid_fix_renew":
