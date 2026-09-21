@@ -312,6 +312,17 @@ async def init_db():
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external "
             "ON payments(provider, external_id)"
         )
+        # Докуп устройств: счёт бывает за срок ('period') и за слоты ('devices'),
+        # extra — сколько устройств куплено. Слоты живут вместе с подпиской.
+        for table, col, decl in (
+            ("payments", "kind", "TEXT NOT NULL DEFAULT 'period'"),
+            ("payments", "extra", "INTEGER NOT NULL DEFAULT 0"),
+            ("paid_subs", "extra_devices", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            try:
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+            except Exception:
+                pass
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)"
         )
@@ -562,13 +573,15 @@ async def count_active_tariffs() -> int:
 
 async def add_payment(tg_id: int, provider: str, external_id: str, amount: int,
                       period_seconds: int | None, pay_url: str,
-                      promo_code: str | None = None) -> int:
+                      promo_code: str | None = None,
+                      kind: str = "period", extra: int = 0) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
             INSERT INTO payments (tg_id, provider, external_id, amount,
-                                  period_seconds, promo_code, status, pay_url)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
-        """, (tg_id, provider, external_id, amount, period_seconds, promo_code, pay_url))
+                                  period_seconds, promo_code, status, pay_url, kind, extra)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+        """, (tg_id, provider, external_id, amount, period_seconds, promo_code,
+              pay_url, kind, int(extra)))
         await db.commit()
         return cur.lastrowid
 
@@ -596,8 +609,9 @@ async def record_paid_payment(tg_id: int, provider: str, amount: int,
 
 async def get_pending_payments(provider: str | None = None, limit: int = 50) -> list[tuple]:
     """Счета, ожидающие оплаты — их опрашивает фоновая задача."""
+    # kind и extra в конце: старые распаковки по индексам продолжают работать
     q = """SELECT id, tg_id, provider, external_id, amount, period_seconds,
-                  promo_code, created_at
+                  promo_code, created_at, kind, extra
            FROM payments WHERE status = 'pending'"""
     params: list = []
     if provider:

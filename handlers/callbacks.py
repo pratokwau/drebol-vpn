@@ -11,7 +11,8 @@ from handlers.user import (
     handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_qr_code, handle_reissue_key, handle_prices, handle_info,
-    handle_pay_invoice,
+    handle_pay_invoice, handle_my_devices, handle_dev_del,
+    handle_dev_buy_menu, handle_dev_buy,
 )
 from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
@@ -99,6 +100,7 @@ from paidsub.handlers import (
     handle_paid_sub_freeze, handle_paid_sub_extend, handle_paid_sub_reduce,
     handle_paid_bulk_menu, handle_paid_bulk_extend, handle_paid_bulk_reduce,
     handle_paid_bulk_ip, handle_paid_bulk_hwid, handle_paid_bulk_limits_apply,
+    handle_paid_device_price, handle_paid_device_max,
     handle_paid_devices, handle_paid_ips, handle_paid_hwid_del,
     handle_paid_hwid_clear, handle_paid_ips_clear,
     handle_paid_fix_renew, handle_paid_fix_renew_apply,
@@ -267,6 +269,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_qr_code(query, context)
     elif data == "reissue_key":
         await handle_reissue_key(query, context)
+    elif data == "my_devices":
+        await handle_my_devices(query, context)
+    elif data.startswith("dev_del:"):
+        await handle_dev_del(query, context, int(data.split(":")[1]))
+    elif data == "dev_buy_menu":
+        await handle_dev_buy_menu(query, context)
+    elif data.startswith("dev_buy:"):
+        await handle_dev_buy(query, context, int(data.split(":")[1]))
     elif data == "support_open":
         context.user_data["state"] = AWAITING_SUPPORT_MSG
         await open_support(query, update.effective_user.id)
@@ -610,6 +620,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_bulk_extend(query, context)
     elif data == "paid_bulk_reduce":
         await handle_paid_bulk_reduce(query, context)
+    elif data == "paid_device_price":
+        await handle_paid_device_price(query, context)
+    elif data == "paid_device_max":
+        await handle_paid_device_max(query, context)
     elif data == "paid_bulk_ip":
         await handle_paid_bulk_ip(query, context)
     elif data == "paid_bulk_hwid":

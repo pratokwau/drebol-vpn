@@ -131,10 +131,12 @@ async def post_init(app: Application):
                 return_exceptions=True,
             )
 
-            from paidsub.handlers import apply_paid_payment
-            for (pay_id, tg_id, _prov, ext_id, amount, period, promo, _created), r in zip(
-                [p for p in pending if p[3]], statuses
-            ):
+            from paidsub.handlers import apply_paid_payment, apply_devices_payment
+            for p, r in zip([p for p in pending if p[3]], statuses):
+                pay_id, tg_id, amount, period, promo = p[0], p[1], p[4], p[5], p[6]
+                # счёт бывает за срок и за докуп устройств
+                kind = p[8] if len(p) > 8 else "period"
+                extra = p[9] if len(p) > 9 else 0
                 if isinstance(r, Exception):
                     continue
                 if not r.get("ok"):
@@ -148,10 +150,13 @@ async def post_init(app: Application):
                     # повторный проход не выдаст второй период за один платёж
                     await set_payment_status(pay_id, "paid")
                     try:
-                        res = await apply_paid_payment(
-                            tg_id, amount, ctx, promo_code=promo,
-                            source="Platega", period_seconds=period,
-                        )
+                        if kind == "devices":
+                            res = await apply_devices_payment(tg_id, extra, ctx, amount)
+                        else:
+                            res = await apply_paid_payment(
+                                tg_id, amount, ctx, promo_code=promo,
+                                source="Platega", period_seconds=period,
+                            )
                         if not res.get("ok"):
                             await set_payment_status(pay_id, "paid", res.get("error"))
                             from config import ADMIN_ID

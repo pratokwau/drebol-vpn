@@ -218,6 +218,8 @@ async def handle_my_paid_sub(query):
         copy_btn = InlineKeyboardButton("📋 Скопировать подписку", callback_data="copy_sub")
     kb_rows.append([copy_btn])
     kb_rows.append([InlineKeyboardButton("📱 QR-код", callback_data="qr_code")])
+    if limit_hwid and _on("subscription"):
+        kb_rows.append([InlineKeyboardButton("📱 Мои устройства", callback_data="my_devices")])
     if status in ("renewal", "expired") and _on("payments"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
     # во время окна оплаты доступ ещё работает — перевыпуск должен быть доступен,
@@ -931,6 +933,170 @@ async def handle_info(query):
             [InlineKeyboardButton("💰 Цены", callback_data="prices")],
             [InlineKeyboardButton("📕 О сервисе и документы", callback_data="about")],
             [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
+        ]),
+    )
+
+
+async def handle_my_devices(query, context=None):
+    """Устройства клиента: показать, отключить лишнее, докупить слоты."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_paid_sub_by_tg_id
+    from xui_api import get_client_hwids
+    user = query.from_user
+    row = await get_paid_sub_by_tg_id(user.id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    email, limit = row[2], int(row[8] or 0)
+    await query.edit_message_text("📱 Смотрю устройства…")
+    r = await get_client_hwids(email)
+    cfg = load_config()
+    price = int(cfg.get("device_price") or 0)
+    max_extra = int(cfg.get("device_max_extra") or 5)
+    bought = int(row[18]) if len(row) > 18 and row[18] else 0
+
+    lines = ["📱 <b>Мои устройства</b>\n"]
+    kb = []
+    if not limit:
+        lines.append("Ограничения нет — подключайтесь с любого числа устройств.")
+    elif not r.get("ok"):
+        lines.append(f"Доступно устройств: <b>{limit}</b>\n\n"
+                     "<i>Список сейчас недоступен, попробуйте позже.</i>")
+    else:
+        items = r["items"]
+        lines.append(f"Занято <b>{len(items)}</b> из <b>{limit}</b>\n")
+        for i, d in enumerate(items[:10], 1):
+            name = " · ".join(str(x) for x in (d.get("deviceOs"), d.get("deviceModel")) if x) or "устройство"
+            lines.append(f"{i}. {escape(name)} · был {_when_ms(d.get('lastSeen'))}")
+            kb.append([InlineKeyboardButton(f"🗑 Отключить {i} — {name[:22]}",
+                                            callback_data=f"dev_del:{d.get('id')}")])
+        if not items:
+            lines.append("<i>Пока ни одного. Подключитесь в приложении — устройство появится здесь.</i>")
+        if len(items) >= limit:
+            lines.append("\n⚠️ Свободных слотов нет. Отключите лишнее устройство "
+                         "или добавьте слоты.")
+    if limit and price > 0 and bought < max_extra:
+        lines.append(f"\n➕ Дополнительное устройство — <b>{price} ₽</b> "
+                     "навсегда, пока действует подписка.")
+        kb.append([InlineKeyboardButton("➕ Добавить устройство", callback_data="dev_buy_menu")])
+    kb.append([InlineKeyboardButton("◀️ К подписке", callback_data="my_paid_sub")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
+def _when_ms(ms) -> str:
+    from datetime import datetime
+    try:
+        ms = int(ms or 0)
+    except (TypeError, ValueError):
+        return "?"
+    return datetime.fromtimestamp(ms / 1000).strftime("%d.%m %H:%M") if ms > 0 else "—"
+
+
+async def handle_dev_del(query, context, hwid_id: int):
+    """Клиент сам отключает своё устройство и освобождает слот."""
+    from paidsub.storage import get_paid_sub_by_tg_id
+    from xui_api import delete_client_hwid
+    row = await get_paid_sub_by_tg_id(query.from_user.id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    res = await delete_client_hwid(row[2], hwid_id)
+    await query.answer("Устройство отключено" if res.get("success")
+                       else "Не получилось, попробуйте позже", show_alert=not res.get("success"))
+    await handle_my_devices(query, context)
+
+
+async def handle_dev_buy_menu(query, context):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_paid_sub_by_tg_id
+    cfg = load_config()
+    price = int(cfg.get("device_price") or 0)
+    max_extra = int(cfg.get("device_max_extra") or 5)
+    row = await get_paid_sub_by_tg_id(query.from_user.id)
+    if not row or price <= 0:
+        await query.answer("Сейчас недоступно", show_alert=True)
+        return
+    bought = int(row[18]) if len(row) > 18 and row[18] else 0
+    left = max(0, max_extra - bought)
+    if left <= 0:
+        await query.answer("Больше устройств добавить нельзя", show_alert=True)
+        return
+    kb = [[InlineKeyboardButton(f"+{n} — {n * price} ₽", callback_data=f"dev_buy:{n}")]
+          for n in range(1, min(3, left) + 1)]
+    kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_devices")])
+    await query.edit_message_text(
+        "➕ <b>Добавить устройства</b>\n\n"
+        f"Одно устройство — <b>{price} ₽</b>.\n"
+        "Слоты остаются с подпиской и не сгорают при продлении.\n\n"
+        "Сколько добавить?",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb),
+    )
+
+
+async def handle_dev_buy(query, context, count: int):
+    """Счёт на докуп устройств — теми же платежами, что и продление."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    import platega_api as pg
+    from database import add_payment
+    from paidsub.storage import get_paid_sub_by_tg_id
+    user = query.from_user
+    cfg = load_config()
+    price = int(cfg.get("device_price") or 0)
+    max_extra = int(cfg.get("device_max_extra") or 5)
+    row = await get_paid_sub_by_tg_id(user.id)
+    if not row or price <= 0 or not int(row[8] or 0):
+        await query.answer("Сейчас недоступно", show_alert=True)
+        return
+    bought = int(row[18]) if len(row) > 18 and row[18] else 0
+    count = max(1, min(int(count), max(0, max_extra - bought)))
+    if not count:
+        await query.answer("Больше устройств добавить нельзя", show_alert=True)
+        return
+    if not pg.is_configured():
+        await query.edit_message_text(
+            "➕ <b>Добавить устройства</b>\n\n"
+            "Автоматическая оплата сейчас недоступна — напишите в поддержку, "
+            "и мы добавим устройства вручную.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
+                [InlineKeyboardButton("◀️ Назад", callback_data="my_devices")],
+            ]),
+        )
+        return
+
+    amount = count * price
+    await query.edit_message_text("⏳ Создаю счёт...")
+    result = await pg.create_payment(
+        amount=amount, description=f"Устройства Drebol VPN · +{count} · {user.id}",
+        tg_id=user.id, username=user.username,
+    )
+    if not result["ok"]:
+        await query.edit_message_text(
+            "❌ <b>Не удалось создать счёт</b>\n\nПопробуйте ещё раз или напишите в поддержку.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔁 Ещё раз", callback_data="dev_buy_menu")],
+                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
+            ]),
+        )
+        return
+    await add_payment(
+        tg_id=user.id, provider="platega", external_id=result["transaction_id"],
+        amount=amount, period_seconds=None, pay_url=result["url"],
+        kind="devices", extra=count,
+    )
+    await query.edit_message_text(
+        f"💳 <b>Счёт на {amount} ₽</b>\n"
+        f"➕ Устройств: <b>{count}</b>\n\n"
+        "Нажмите кнопку ниже и оплатите — слоты добавятся автоматически, "
+        "обычно в течение минуты.\n\n"
+        "<i>Если оплатили, а устройства не добавились — напишите в поддержку.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Оплатить", url=result["url"])],
+            [InlineKeyboardButton("📱 Мои устройства", callback_data="my_devices")],
         ]),
     )
 

@@ -51,6 +51,8 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💳 Платёжная система", callback_data="pay_provider_menu")],
         [InlineKeyboardButton("🌐 Лимит IP", callback_data="paid_preset_ip")],
         [InlineKeyboardButton("🖥 Лимит HWID", callback_data="paid_preset_hwid")],
+        [InlineKeyboardButton("📱 Цена устройства", callback_data="paid_device_price"),
+         InlineKeyboardButton("📱 Максимум докупа", callback_data="paid_device_max")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="paid_preset_traffic")],
         [InlineKeyboardButton("📡 Инбаунды создания", callback_data="paid_inbounds_menu")],
         [InlineKeyboardButton("📡 Инбаунды окончания", callback_data="paid_inbounds_expire_menu")],

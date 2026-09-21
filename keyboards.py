@@ -30,9 +30,9 @@ _SUCCESS_PREFIX = (
 _PRIMARY_EXACT = {
     "my_paid_sub", "renew_sub", "pay_invoice", "enter_promo",
     "qr_code", "copy_sub", "reissue_key", "buy", "prices", "how_to",
-    "admin_panel",
+    "admin_panel", "dev_buy_menu", "my_devices",
 }
-_PRIMARY_PREFIX = ("pay_invoice:",)
+_PRIMARY_PREFIX = ("pay_invoice:", "dev_buy:")
 
 
 def style_for(data: str | None) -> str | None:

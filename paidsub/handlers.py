@@ -1145,6 +1145,43 @@ async def handle_paid_bulk_apply(query, context):
     )
 
 
+async def apply_devices_payment(tg_id: int, count: int, context, amount: int = 0) -> dict:
+    """Начисляет докупленные слоты устройств: в базе, в панели и человеку в чат.
+
+    Слоты живут вместе с подпиской и не сгорают при продлении — лимит в панели
+    бот при обновлении клиента больше не обнуляет.
+    """
+    from xui_api import update_client_limits
+    row = await get_paid_sub_by_tg_id(tg_id)
+    if not row:
+        return {"ok": False, "error": "подписка не найдена"}
+    sub_id, email = row[0], row[2]
+    base = int(row[8] or 0)
+    if base <= 0:
+        # лимита нет — докупать нечего, но деньги уже пришли
+        return {"ok": False, "error": "у подписки нет лимита устройств"}
+    count = max(1, int(count))
+    new_limit = base + count
+    extra_now = int(row[18] if len(row) > 18 and row[18] else 0) + count
+
+    await update_paid_sub_field(sub_id, "limit_hwid", new_limit)
+    await update_paid_sub_field(sub_id, "extra_devices", extra_now)
+    res = await update_client_limits(email, limit_hwid=new_limit)
+    note = "" if res.get("success") else f" (панель: {res.get('error', '?')})"
+
+    await add_history(tg_id, "devices_bought",
+                      f"Докуплено устройств: {count} → лимит {new_limit}"
+                      + (f"\nСумма: {amount} ₽" if amount else "") + note)
+    bot = context.bot if hasattr(context, "bot") else None
+    if bot:
+        await _notify_user(bot, tg_id,
+            f"✅ <b>Устройства добавлены</b>\n\n"
+            f"Теперь на подписку можно подключить <b>{new_limit}</b>.\n"
+            f"Просто подключитесь на новом устройстве — слот займётся сам."
+        )
+    return {"ok": True, "limit": new_limit, "panel": res.get("success", False)}
+
+
 def _when(ms) -> str:
     """Время из панели приходит в миллисекундах."""
     try:
@@ -1293,6 +1330,31 @@ async def handle_paid_ips_clear(query, context, sub_id: int):
 
 
 LIMIT_KINDS = {"ip": ("📱", "IP", "limit_ip"), "hwid": ("🔑", "HWID", "limit_hwid")}
+
+
+async def handle_paid_device_price(query, context):
+    from states import AWAITING_DEVICE_PRICE
+    context.user_data["state"] = AWAITING_DEVICE_PRICE
+    cur = int(load_config().get("device_price") or 0)
+    await query.edit_message_text(
+        "📱 <b>Цена дополнительного устройства</b>\n\n"
+        f"Сейчас: <b>{cur} ₽</b>{' — докуп выключен' if not cur else ''}\n\n"
+        "Введи цену за одно устройство в рублях.\n"
+        "<code>0</code> — убрать кнопку докупа у клиентов.",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_device_max(query, context):
+    from states import AWAITING_DEVICE_MAX
+    context.user_data["state"] = AWAITING_DEVICE_MAX
+    cur = int(load_config().get("device_max_extra") or 5)
+    await query.edit_message_text(
+        "📱 <b>Максимум докупа</b>\n\n"
+        f"Сейчас: <b>{cur}</b> устройств сверх тарифа\n\n"
+        "Сколько слотов один человек может добрать?",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
 
 
 async def handle_paid_bulk_ip(query, context):

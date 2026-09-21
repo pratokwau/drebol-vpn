@@ -33,6 +33,7 @@ from states import (
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE, AWAITING_PAID_FIX_RENEW,
     AWAITING_PAID_BULK_IP, AWAITING_PAID_BULK_HWID,
+    AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE,
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
@@ -776,6 +777,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from paidsub.storage import add_history
                 await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: дата окончания → {text}")
         await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state in (AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX):
+        if not text.isdigit():
+            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
+            return
+        context.user_data.pop("state", None)
+        if state == AWAITING_DEVICE_PRICE:
+            _save("device_price", int(text))
+            off = " — докуп выключен" if not int(text) else ""
+            await update.message.reply_text(
+                f"✅ Цена устройства: <b>{text} ₽</b>{off}",
+                parse_mode="HTML", reply_markup=back_admin())
+        else:
+            _save("device_max_extra", int(text))
+            await update.message.reply_text(
+                f"✅ Максимум докупа: <b>{text}</b> устройств",
+                parse_mode="HTML", reply_markup=back_admin())
         return
 
     if state in (AWAITING_PAID_BULK_IP, AWAITING_PAID_BULK_HWID):

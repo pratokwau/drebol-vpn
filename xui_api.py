@@ -40,6 +40,22 @@ def gb_to_bytes(gb: float) -> int:
     return int(gb * 1024 ** 3)
 
 
+def _with_hwid(payload: dict, limit_hwid: int | None = None) -> dict:
+    """Проставляет лимит устройств в обоих написаниях.
+
+    Панель 3.x читает его только из «limitHwid», а в настройках инбаунда то же
+    поле называется «limitHwId». Если отправить лишь старое имя, панель получит
+    ноль и молча снимет лимит — а без лимита она вообще не записывает
+    устройства, и список HWID остаётся пустым.
+    """
+    value = limit_hwid
+    if value is None:
+        value = payload.get("limitHwid", payload.get("limitHwId", 0))
+    payload["limitHwid"] = int(value or 0)
+    payload["limitHwId"] = int(value or 0)
+    return payload
+
+
 def _build_sub_url(scheme: str, hostname: str, port, sub_path: str, sub_id: str) -> str:
     try:
         p = int(port)
@@ -763,6 +779,7 @@ async def update_client_email(old_email: str, new_email: str, client_uuid: str,
             "subId": sub_id,
             "flow": "xtls-rprx-vision",
             "limitIp": limit_ip,
+            "limitHwid": limit_hwid,
             "limitHwId": limit_hwid,
             "totalGB": gb_to_bytes(total_gb) if total_gb > 0 else 0,
             "expiryTime": expire_ms,
@@ -903,8 +920,7 @@ async def update_client_limits(email: str, limit_ip: int | None = None,
 
         if limit_ip is not None:
             client_obj["limitIp"] = int(limit_ip)
-        if limit_hwid is not None:
-            client_obj["limitHwId"] = int(limit_hwid)
+        _with_hwid(client_obj, limit_hwid)
         client_obj["flow"] = "xtls-rprx-vision"
 
         safe_uuid = quote(client_obj.get("id", ""), safe="")
@@ -958,6 +974,8 @@ async def update_client_expire(email: str, new_expire_str: str) -> dict:
         new_expire_ms = date_to_ms(new_expire_str)
         client_obj["expiryTime"] = new_expire_ms
         client_obj["flow"] = "xtls-rprx-vision"
+        # иначе продление сбрасывало лимит устройств в ноль
+        _with_hwid(client_obj)
 
         safe_uuid = quote(client_obj.get("id", ""), safe="")
         safe_email = quote(email, safe="")
@@ -1010,6 +1028,8 @@ async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
             return {"success": False, "error": "Клиент не найден в панели"}
 
         client_obj["flow"] = "xtls-rprx-vision"
+        # при переносе клиент пересоздаётся — лимит устройств должен переехать с ним
+        _with_hwid(client_obj)
         real_ids = {inb.get("id") for inb in (data.get("obj") or [])}
         valid_targets = {int(i) for i in target_inbound_ids if int(i) in real_ids}
         if not valid_targets:
@@ -1217,6 +1237,9 @@ async def create_client(
             "email": email,
             "flow": "xtls-rprx-vision",
             "limitIp": limit_ip,
+            # лимит устройств раньше не отправлялся вовсе — пресет до панели не доезжал
+            "limitHwid": limit_hwid,
+            "limitHwId": limit_hwid,
             "totalGB": gb_to_bytes(total_gb) if total_gb > 0 else 0,
             "expiryTime": expire_ms,
             "enable": True,
