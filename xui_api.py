@@ -40,6 +40,16 @@ def gb_to_bytes(gb: float) -> int:
     return int(gb * 1024 ** 3)
 
 
+def _hwid_from(payload: dict):
+    """Лимит устройств, как его отдала панель. None — поля в объекте нет.
+
+    Написание отличается от версии к версии, а иногда рядом лежат оба ключа,
+    и один из них нулевой. Поэтому берём наибольшее из найденных.
+    """
+    found = [int(payload.get(k) or 0) for k in ("limitHwid", "limitHwId") if k in payload]
+    return max(found) if found else None
+
+
 def _with_hwid(payload: dict, limit_hwid: int | None = None) -> dict:
     """Проставляет лимит устройств в обоих написаниях.
 
@@ -47,13 +57,48 @@ def _with_hwid(payload: dict, limit_hwid: int | None = None) -> dict:
     поле называется «limitHwId». Если отправить лишь старое имя, панель получит
     ноль и молча снимет лимит — а без лимита она вообще не записывает
     устройства, и список HWID остаётся пустым.
+
+    Ноль отправляем только когда его назвали явно: это снятие лимита. Если же
+    значения нет ни в аргументе, ни в объекте, поле не трогаем вовсе — иначе
+    выдуманный ноль снимал бы лимит, который мы просто не смогли прочитать.
     """
     value = limit_hwid
     if value is None:
-        value = payload.get("limitHwid", payload.get("limitHwId", 0))
+        value = _hwid_from(payload) or None
+    if value is None:
+        return payload
     payload["limitHwid"] = int(value or 0)
     payload["limitHwId"] = int(value or 0)
     return payload
+
+
+async def _known_hwid_limit(email: str):
+    """Лимит устройств по нашей базе — на случай, если панель его не отдала.
+
+    В базе он с учётом докупленных слотов, так что это то самое число,
+    которое человек оплатил.
+    """
+    try:
+        import aiosqlite
+        from database import DB_PATH
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT limit_hwid FROM paid_subs WHERE email = ? LIMIT 1", (email,)
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row and row[0] else None
+    except Exception:
+        return None
+
+
+async def _resolve_hwid(email: str, client_obj: dict, explicit: int | None = None):
+    """Какой лимит устройств отправить: явный → из панели → из нашей базы."""
+    if explicit is not None:
+        return int(explicit)
+    from_panel = _hwid_from(client_obj)
+    if from_panel:
+        return from_panel
+    return await _known_hwid_limit(email)
 
 
 def _build_sub_url(scheme: str, hostname: str, port, sub_path: str, sub_id: str) -> str:
@@ -808,7 +853,7 @@ async def update_client_email(old_email: str, new_email: str, client_uuid: str,
         await s.close()
 
 
-async def reissue_subscription(email: str) -> dict:
+async def reissue_subscription(email: str, limit_hwid: int | None = None) -> dict:
     """Выдаёт клиенту новую ссылку подписки: новый subId и новый UUID.
 
     Меняется только доступ: срок, трафик, лимиты и инбаунды остаются как были.
@@ -844,6 +889,7 @@ async def reissue_subscription(email: str) -> dict:
 
         new_uuid = str(uuid.uuid4())
         new_sub_id = generate_sub_id()
+        hwid = await _resolve_hwid(email, copies[0][1], limit_hwid)
         safe_email = quote(email, safe="")
         updated, failed, last_err = [], [], ""
 
@@ -853,7 +899,7 @@ async def reissue_subscription(email: str) -> dict:
             obj["subId"] = new_sub_id
             obj["flow"] = "xtls-rprx-vision"
             # лимит устройств иначе обнулится, и панель перестанет писать HWID
-            _with_hwid(obj)
+            _with_hwid(obj, hwid)
             safe_old = quote(old_uuid, safe="")
             ok = False
             for path in (
@@ -949,7 +995,7 @@ async def update_client_limits(email: str, limit_ip: int | None = None,
 
         if limit_ip is not None:
             client_obj["limitIp"] = int(limit_ip)
-        _with_hwid(client_obj, limit_hwid)
+        _with_hwid(client_obj, await _resolve_hwid(email, client_obj, limit_hwid))
         client_obj["flow"] = "xtls-rprx-vision"
 
         safe_uuid = quote(client_obj.get("id", ""), safe="")
@@ -970,7 +1016,8 @@ async def update_client_limits(email: str, limit_ip: int | None = None,
         await s.close()
 
 
-async def update_client_expire(email: str, new_expire_str: str) -> dict:
+async def update_client_expire(email: str, new_expire_str: str,
+                               limit_hwid: int | None = None) -> dict:
     """Обновляет expiryTime клиента в панели 3x-UI."""
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")
@@ -1004,7 +1051,7 @@ async def update_client_expire(email: str, new_expire_str: str) -> dict:
         client_obj["expiryTime"] = new_expire_ms
         client_obj["flow"] = "xtls-rprx-vision"
         # иначе продление сбрасывало лимит устройств в ноль
-        _with_hwid(client_obj)
+        _with_hwid(client_obj, await _resolve_hwid(email, client_obj, limit_hwid))
 
         safe_uuid = quote(client_obj.get("id", ""), safe="")
         safe_email = quote(email, safe="")
@@ -1023,7 +1070,8 @@ async def update_client_expire(email: str, new_expire_str: str) -> dict:
         await s.close()
 
 
-async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
+async def move_client_inbound(email: str, target_inbound_ids: list,
+                              limit_hwid: int | None = None) -> dict:
     """Перемещает клиента из текущего инбаунда в целевые инбаунды."""
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")
@@ -1058,7 +1106,7 @@ async def move_client_inbound(email: str, target_inbound_ids: list) -> dict:
 
         client_obj["flow"] = "xtls-rprx-vision"
         # при переносе клиент пересоздаётся — лимит устройств должен переехать с ним
-        _with_hwid(client_obj)
+        _with_hwid(client_obj, await _resolve_hwid(email, client_obj, limit_hwid))
         real_ids = {inb.get("id") for inb in (data.get("obj") or [])}
         valid_targets = {int(i) for i in target_inbound_ids if int(i) in real_ids}
         if not valid_targets:
