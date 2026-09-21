@@ -158,6 +158,21 @@ async def init_db():
                 )
         except Exception:
             pass
+
+        # Окно на продление выключаем: подписку теперь продлевают в любой
+        # момент, а остаток срока не сгорает — держать доступ после конца
+        # оплаченного периода незачем. Разовая правка: захочет вернуть —
+        # админ поставит окно в настройках, и оно снова заработает.
+        try:
+            from config import load_config as _lc, save_config as _sc
+            _rc = _lc()
+            if _rc and not _rc.get("renew_window_removed"):
+                await db.execute("UPDATE paid_subs SET ind_renew_time = 0")
+                _rc["paid_renew_time"] = 0
+                _rc["renew_window_removed"] = True
+                _sc(_rc)
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS paid_sub_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -639,7 +654,7 @@ async def get_active_payment(tg_id: int, provider: str) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
             SELECT id, tg_id, provider, external_id, amount, period_seconds,
-                   promo_code, status, pay_url, created_at
+                   promo_code, status, pay_url, created_at, kind, extra
             FROM payments
             WHERE tg_id = ? AND provider = ? AND status = 'pending'
             ORDER BY id DESC LIMIT 1

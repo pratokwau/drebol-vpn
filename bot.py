@@ -157,6 +157,27 @@ async def post_init(app: Application):
                                 tg_id, amount, ctx, promo_code=promo,
                                 source="Platega", period_seconds=period,
                             )
+                            # в счёт за срок могли доложить устройства —
+                            # начисляем их следом, сумма уже учтена выше
+                            if res.get("ok") and extra:
+                                dev = await apply_devices_payment(tg_id, extra, ctx, 0)
+                                if not dev.get("ok"):
+                                    # срок начислен, слоты нет — молчать нельзя,
+                                    # человек за них заплатил
+                                    await set_payment_status(
+                                        pay_id, "paid",
+                                        f"устройства не начислены: {dev.get('error')}")
+                                    from config import ADMIN_ID
+                                    await ctx.bot.send_message(
+                                        chat_id=ADMIN_ID,
+                                        text=(
+                                            "⚠️ <b>Срок продлён, устройства не начислены</b>\n\n"
+                                            f"👤 <code>{tg_id}</code> · +{extra} устр.\n"
+                                            f"<code>{dev.get('error')}</code>\n\n"
+                                            "Добавь слоты вручную."
+                                        ),
+                                        parse_mode="HTML",
+                                    )
                         if not res.get("ok"):
                             await set_payment_status(pay_id, "paid", res.get("error"))
                             from config import ADMIN_ID

@@ -11,7 +11,7 @@ from handlers.user import (
     handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_qr_code, handle_reissue_key, handle_prices, handle_info,
-    handle_pay_invoice, handle_my_devices, handle_dev_del,
+    handle_pay_invoice, handle_tariff_pick, handle_my_devices, handle_dev_del,
     handle_dev_buy_menu, handle_dev_buy,
 )
 from handlers.admin import (
@@ -242,7 +242,13 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "pay_invoice":
         await handle_pay_invoice(query, context)
     elif data.startswith("pay_invoice:"):
-        await handle_pay_invoice(query, context, int(data.split(":")[1]))
+        _p = data.split(":")
+        await handle_pay_invoice(query, context, int(_p[1]),
+                                 int(_p[2]) if len(_p) > 2 else 0)
+    elif data.startswith("tariff_pick:"):
+        _p = data.split(":")
+        await handle_tariff_pick(query, context, int(_p[1]),
+                                 int(_p[2]) if len(_p) > 2 else 0)
     elif data == "i_paid":
         await handle_i_paid(query, context)
     elif data == "my_sub":

@@ -220,7 +220,8 @@ async def handle_my_paid_sub(query):
     kb_rows.append([InlineKeyboardButton("📱 QR-код", callback_data="qr_code")])
     if limit_hwid and _on("subscription"):
         kb_rows.append([InlineKeyboardButton("📱 Мои устройства", callback_data="my_devices")])
-    if status in ("renewal", "expired") and _on("payments"):
+    # продлевать можно в любой момент: остаток срока при оплате не сгорает
+    if _on("payments"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
     # во время окна оплаты доступ ещё работает — перевыпуск должен быть доступен,
     # иначе при утечке ключа человеку нечего сделать до продления
@@ -234,6 +235,35 @@ async def handle_my_paid_sub(query):
         reply_markup=InlineKeyboardMarkup(kb_rows),
         disable_web_page_preview=True,
     )
+
+
+async def _sub_end(row):
+    """Когда кончается текущий срок и сколько его осталось.
+
+    Остаток не сгорает — оплата прибавляется к этой дате, поэтому её видно
+    и на выборе тарифа, и в карточке.
+    """
+    from datetime import datetime
+    from paidsub.storage import get_paid_sub, parse_sub_date
+    now = datetime.now()
+    if not row:
+        return now, 0
+    full = await get_paid_sub(row[0])
+    raw = full[18] if full and len(full) > 18 and full[18] else None
+    end = parse_sub_date(raw) if raw else parse_sub_date(row[6])
+    if not end or end <= now:
+        return now, 0
+    return end, int((end - now).total_seconds())
+
+
+async def _left_line(row) -> str:
+    """Строка про текущий остаток. Пусто, если переносить нечего."""
+    _end, left = await _sub_end(row)
+    if left < 60:
+        return ""
+    from paidsub.time_parser import fmt_duration_precise
+    return (f"⏳ Сейчас осталось: <b>{fmt_duration_precise(left)}</b>\n"
+            f"<i>Остаток не сгорит — новый срок прибавится к нему.</i>\n\n")
 
 
 async def handle_renew_sub(query):
@@ -298,7 +328,7 @@ async def handle_renew_sub(query):
                     if discount:
                         label += f" (−{discount}%)"
                     kb.append([InlineKeyboardButton(
-                        label, callback_data=f"pay_invoice:{t_id}"
+                        label, callback_data=f"tariff_pick:{t_id}"
                     )])
                 kb.append(promo_btn_row)
                 kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
@@ -306,6 +336,7 @@ async def handle_renew_sub(query):
                 await query.edit_message_text(
                     "💳 <b>Продление подписки</b>\n\n"
                     f"{promo_line}"
+                    f"{await _left_line(row)}"
                     "Выберите тариф:\n\n"
                     "<i>Подписка продлится автоматически сразу после оплаты.</i>",
                     parse_mode="HTML",
@@ -313,21 +344,9 @@ async def handle_renew_sub(query):
                 )
                 return
 
-            kb = [
-                [InlineKeyboardButton("💳 Оплатить", callback_data="pay_invoice")],
-                promo_btn_row,
-                [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
-            ]
-            await query.edit_message_text(
-                "💳 <b>Продление подписки</b>\n\n"
-                f"{price_line}"
-                f"{promo_line}"
-                f"⏱ Срок: <b>{period_str}</b>\n\n"
-                "Нажмите <b>Оплатить</b> — я пришлю ссылку.\n"
-                "Подписка продлится автоматически сразу после оплаты.",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(kb),
-            )
+            # Тарифов нет — срок и цена берутся из самой подписки,
+            # но экран тот же: там же добираются устройства
+            await handle_tariff_pick(query, None, 0)
             return
         # ключи не заданы — не оставляем человека без вариантов
         pay_url = pay_url or ""
@@ -344,6 +363,7 @@ async def handle_renew_sub(query):
         f"{price_line}"
         f"{promo_line}"
         f"⏱ Срок: <b>{period_str}</b>\n\n"
+        f"{await _left_line(row)}"
         "При оплате в поле <b>обратная связь</b> введите:\n"
         f"<code>{hint_text}</code>\n\n"
         "Затем нажмите кнопку <b>✅ Я оплатил</b> — "
@@ -353,7 +373,130 @@ async def handle_renew_sub(query):
     )
 
 
-async def handle_pay_invoice(query, context, tariff_id: int | None = None):
+async def _offer_devices(row) -> tuple:
+    """Что предложить по устройствам: цена, сколько ещё можно докупить.
+
+    Докуп идёт только там, где лимит устройств вообще есть: при нулевом
+    лимите панель их не считает, и слот было бы не к чему прибавить.
+    """
+    cfg = load_config()
+    price = int(cfg.get("device_price", 0) or 0)
+    max_extra = int(cfg.get("device_max_extra", 0) or 0)
+    base = int(row[8] or 0) if row else 0
+    bought = int(row[18] or 0) if row and len(row) > 18 else 0
+    free = max(0, max_extra - bought)
+    if not price or not base or not free:
+        return 0, 0, base, bought
+    return price, free, base, bought
+
+
+async def handle_tariff_pick(query, context, tariff_id: int = 0, devices: int = 0):
+    """Карточка тарифа: срок, цена, доп. устройства и промокод — в одном месте.
+
+    Отсюда сразу счёт: человеку не приходится возвращаться за устройствами
+    после оплаты, а нам не нужен второй платёж.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from datetime import timedelta
+    from database import get_tariff
+    from paidsub.storage import get_paid_sub_by_tg_id, sub_settings, get_pending_promo
+    from paidsub.handlers import validate_promo, apply_discount
+    from paidsub.time_parser import fmt_duration, fmt_duration_precise
+
+    user = query.from_user
+    row = await get_paid_sub_by_tg_id(user.id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    settings = sub_settings(row)
+
+    if tariff_id:
+        t = await get_tariff(tariff_id)
+        if not t or not t[4]:
+            await query.answer("Тариф больше недоступен", show_alert=True)
+            await handle_renew_sub(query)
+            return
+        name, pay_seconds, price = t[1], t[2], int(t[3])
+    else:
+        name, pay_seconds, price = "Подписка", settings["pay_period"], int(settings["price"])
+
+    # Промокод действует на срок, устройства считаются отдельно —
+    # иначе скидка растекается на разовую покупку слотов
+    promo_line = ""
+    discount = None
+    promo_btn = [InlineKeyboardButton("🎟 Ввести промокод", callback_data="enter_promo")]
+    pending = await get_pending_promo(user.id)
+    if pending:
+        promo, _err = await validate_promo(pending, user.id)
+        if promo:
+            discount = promo[2]
+            promo_line = f"🎟 Промокод <b>{escape(promo[1])}</b>: <b>−{discount}%</b>\n"
+            promo_btn = [InlineKeyboardButton("❌ Убрать промокод", callback_data="remove_promo")]
+    period_price = apply_discount(price, discount) if discount else price
+
+    dev_price, dev_free, base_hwid, bought = await _offer_devices(row)
+    devices = max(0, min(int(devices or 0), dev_free))
+    dev_sum = devices * dev_price
+    total = period_price + dev_sum
+
+    end, left = await _sub_end(row)
+    new_end = end + timedelta(seconds=pay_seconds)
+
+    price_line = (f"💵 Цена: <s>{price} ₽</s> → <b>{period_price} ₽</b>\n"
+                  if discount else f"💵 Цена: <b>{price} ₽</b>\n")
+    left_line = (f"⏳ Сейчас осталось: <b>{fmt_duration_precise(left)}</b> — не сгорит\n"
+                 if left >= 60 else "")
+
+    dev_block = ""
+    kb = []
+    if dev_price:
+        picked = (f"<b>+{devices}</b> · {dev_sum} ₽" if devices
+                  else "<i>без доп. устройств</i>")
+        dev_block = (
+            f"\n📱 <b>Устройства</b>\n"
+            f"Сейчас в подписке: <b>{base_hwid}</b>"
+            + (f" (докуплено {bought})" if bought else "") + "\n"
+            f"Добавить: {picked}\n"
+            f"<i>Слоты остаются с подпиской и не сгорают при продлении.</i>\n"
+        )
+        row_btns = [InlineKeyboardButton(
+            "✅ Без доп." if devices == 0 else "Без доп.",
+            callback_data=f"tariff_pick:{tariff_id}:0")]
+        for n in range(1, dev_free + 1):
+            row_btns.append(InlineKeyboardButton(
+                f"{'✅ ' if devices == n else ''}+{n}",
+                callback_data=f"tariff_pick:{tariff_id}:{n}"))
+            if len(row_btns) == 4:
+                kb.append(row_btns)
+                row_btns = []
+        if row_btns:
+            kb.append(row_btns)
+
+    kb.append(promo_btn)
+    kb.append([InlineKeyboardButton(f"💳 Оплатить {total} ₽",
+                                    callback_data=f"pay_invoice:{tariff_id}:{devices}")])
+    kb.append([InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")])
+
+    total_line = (f"\n💰 <b>К оплате: {total} ₽</b>\n"
+                  f"<i>{period_price} ₽ за срок + {dev_sum} ₽ за устройства</i>\n"
+                  if dev_sum else f"\n💰 <b>К оплате: {total} ₽</b>\n")
+
+    await query.edit_message_text(
+        f"💳 <b>{escape(str(name))}</b>\n\n"
+        f"⏱ Срок: <b>{fmt_duration(pay_seconds)}</b>\n"
+        f"{price_line}"
+        f"{promo_line}"
+        f"{left_line}"
+        f"📅 После оплаты — до <b>{new_end.strftime('%d.%m.%Y · %H:%M')}</b>\n"
+        f"{dev_block}"
+        f"{total_line}",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb),
+    )
+
+
+async def handle_pay_invoice(query, context, tariff_id: int | None = None,
+                             devices: int = 0):
     """Создаёт счёт в Platega и отдаёт ссылку на оплату."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     import platega_api as pg
@@ -390,17 +533,27 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None):
             promo_code = promo[1]
             price = apply_discount(price, promo[2])
 
-    # уже есть неоплаченный счёт на ту же сумму и срок — переиспользуем ссылку,
-    # чтобы не плодить счета при повторных нажатиях
+    # Докуп устройств едет тем же счётом. Количество перепроверяем здесь:
+    # callback можно прислать и руками, а слоты — это деньги
+    dev_price, dev_free, _base, _bought = await _offer_devices(row)
+    devices = max(0, min(int(devices or 0), dev_free))
+    dev_sum = devices * dev_price
+    price += dev_sum
+
+    # уже есть неоплаченный счёт на ту же сумму, срок и набор устройств —
+    # переиспользуем ссылку, чтобы не плодить счета при повторных нажатиях
     existing = await get_active_payment(user.id, "platega")
-    if existing and existing[4] == price and existing[5] == pay_seconds and existing[8]:
-        await _send_invoice(query, existing[8], price, tariff_name, pay_seconds)
+    same_extra = (len(existing) < 12 or existing[11] == devices) if existing else False
+    if existing and existing[4] == price and existing[5] == pay_seconds and existing[8] and same_extra:
+        await _send_invoice(query, existing[8], price, tariff_name, pay_seconds, devices)
         return
 
     await query.edit_message_text("⏳ Создаю счёт...")
     desc = f"Подписка Drebol VPN"
     if tariff_name:
         desc += f" · {tariff_name}"
+    if devices:
+        desc += f" · +{devices} устр."
     result = await pg.create_payment(
         amount=price,
         description=f"{desc} · {user.id}",
@@ -413,7 +566,8 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None):
             "Попробуйте ещё раз или напишите в поддержку.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Ещё раз", callback_data="pay_invoice")],
+                [InlineKeyboardButton("🔁 Ещё раз",
+                                      callback_data=f"pay_invoice:{tariff_id or 0}:{devices}")],
                 [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
                 [InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")],
             ]),
@@ -437,22 +591,26 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None):
         tg_id=user.id, provider="platega",
         external_id=result["transaction_id"], amount=price,
         period_seconds=pay_seconds, pay_url=result["url"],
-        promo_code=promo_code,
+        promo_code=promo_code, extra=devices,
     )
-    await _send_invoice(query, result["url"], price, tariff_name, pay_seconds)
+    await _send_invoice(query, result["url"], price, tariff_name, pay_seconds, devices)
 
 
 async def _send_invoice(query, url: str, price: int,
                         tariff_name: str | None = None,
-                        period_seconds: int | None = None):
+                        period_seconds: int | None = None,
+                        devices: int = 0):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.time_parser import fmt_duration
+    from html import escape as _esc
 
     head = f"💳 <b>Счёт на {price} ₽</b>"
     if tariff_name:
-        head += f"\n💰 Тариф: <b>{tariff_name}</b>"
+        head += f"\n💰 Тариф: <b>{_esc(str(tariff_name))}</b>"
     if period_seconds:
         head += f"\n⏱ Срок: <b>{fmt_duration(period_seconds)}</b>"
+    if devices:
+        head += f"\n📱 Доп. устройства: <b>+{devices}</b>"
 
     await query.edit_message_text(
         f"{head}\n\n"

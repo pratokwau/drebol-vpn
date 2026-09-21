@@ -30,6 +30,7 @@ CB_LABELS = {
     "my_paid_sub": "👤 Моя подписка",
     "renew_sub": "💳 Открыл продление",
     "pay_invoice": "🧾 Создал счёт",
+    "tariff_pick": "💳 Смотрит тариф",
     "i_paid": "✅ Нажал «Я оплатил»",
     "enter_promo": "🎟 Ввод промокода",
     "remove_promo": "🎟 Убрал промокод",

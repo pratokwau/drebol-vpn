@@ -32,7 +32,7 @@ _PRIMARY_EXACT = {
     "qr_code", "copy_sub", "reissue_key", "buy", "prices", "how_to",
     "admin_panel", "dev_buy_menu", "my_devices",
 }
-_PRIMARY_PREFIX = ("pay_invoice:", "dev_buy:")
+_PRIMARY_PREFIX = ("pay_invoice:", "dev_buy:", "tariff_pick:")
 
 
 def style_for(data: str | None) -> str | None:
@@ -94,7 +94,8 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
 
     rows = []
     rows.append([InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")])
-    if paid_sub_status in ("renewal", "expired") and on("payments"):
+    # продлить можно в любой момент — остаток не сгорает
+    if paid_sub_status and on("payments"):
         rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
     if has_sub:
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])

@@ -78,10 +78,21 @@ def sub_settings(row) -> dict:
         val = row[idx] if row is not None and len(row) > idx else None
         return val if val else cfg.get(key, default)
 
+    def pick_zeroable(idx: int, key: str, default):
+        """Как pick, но 0 — осознанный ноль, а не «не задано».
+
+        Нужно окну на продление: его выключают именно нулём, и подстановка
+        общего значения вместо нуля вернула бы окно обратно.
+        """
+        val = row[idx] if row is not None and len(row) > idx else None
+        if val is None:
+            val = cfg.get(key, default)
+        return int(val or 0)
+
     return {
         "trial_period": pick(13, "paid_trial_period", 86400),
         "pay_period": pick(14, "paid_pay_period", 2592000),
-        "renew_time": pick(15, "paid_renew_time", 86400),
+        "renew_time": pick_zeroable(15, "paid_renew_time", 0),
         "price": pick(16, "paid_price", 0),
         "pay_url": pick(17, "paid_pay_url", ""),
     }

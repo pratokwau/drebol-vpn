@@ -55,6 +55,12 @@ def _paid_presets_ready(cfg: dict) -> bool:
     ])
 
 
+def renew_label(sec) -> str:
+    """Окно на продление словами. Ноль — это выключено, а не «не задано»."""
+    sec = int(sec or 0)
+    return fmt_duration(sec) if sec else "выключено"
+
+
 def _fmt_presets(cfg: dict, inbound_names=None) -> str:
     trial = cfg.get("paid_trial_period")
     trial_str = fmt_duration(trial) if trial else "не задан"
@@ -62,8 +68,7 @@ def _fmt_presets(cfg: dict, inbound_names=None) -> str:
     pay_period = cfg.get("paid_pay_period")
     pay_str = fmt_duration(pay_period) if pay_period else "не задан"
 
-    renew = cfg.get("paid_renew_time")
-    renew_str = fmt_duration(renew) if renew else "не задан"
+    renew_str = renew_label(cfg.get("paid_renew_time"))
 
     price = cfg.get("paid_price")
     price_str = f"{price} ₽" if price is not None else "не задана"
@@ -187,11 +192,11 @@ async def handle_paid_preset_renew(query, context):
     from states import AWAITING_PAID_RENEW_TIME
     context.user_data["state"] = AWAITING_PAID_RENEW_TIME
     cfg = load_config()
-    current = cfg.get("paid_renew_time")
-    cur_str = fmt_duration(current) if current else "не задан"
+    cur_str = renew_label(cfg.get("paid_renew_time"))
     await query.edit_message_text(
-        f"⏳ <b>Время на продление</b>\n\nПосле окончания пробного или оплаченного периода "
-        f"у пользователя будет это время чтобы продлить.\n"
+        f"⏳ <b>Время на продление</b>\n\nСколько доступ ещё работает после конца периода.\n"
+        f"Сейчас продлить можно в любой момент и остаток не сгорает, поэтому окно "
+        f"обычно не нужно — <b>0</b> выключает его.\n"
         f"Сейчас: <b>{cur_str}</b>\n\n{_TIME_HINT}",
         parse_mode="HTML",
         reply_markup=back_admin(),
@@ -608,7 +613,7 @@ async def handle_request_sub(query, context):
             f"<b>Параметры подписки:</b>\n"
             f"🆓 Пробный период: <b>{fmt_duration(trial_sec)}</b>\n"
             f"💰 После оплаты: <b>{fmt_duration(pay_sec)}</b>\n"
-            f"⏳ На продление: <b>{fmt_duration(renew_sec)}</b>\n"
+            f"⏳ На продление: <b>{renew_label(renew_sec)}</b>\n"
             f"💵 Сумма: <b>{price} ₽</b>\n"
             f"🌐 Лимит IP: <b>{ip_str}</b>\n"
             f"🖥 Лимит HWID: <b>{hwid_str}</b>\n"
@@ -911,7 +916,8 @@ async def handle_paid_sub_view(query, sub_id: int):
         time_left_line = (
             f"📅 {period_label.capitalize()} до: <b>{period_end_dt.strftime('%d.%m.%Y %H:%M:%S')}</b>\n"
             f"⏱ Осталось: <b>{fmt_duration_precise(left)}</b>\n"
-            f"⏳ Затем на оплату: <b>{fmt_duration(renew_sec)}</b> — до {expire}\n"
+            + (f"⏳ Затем на оплату: <b>{fmt_duration(renew_sec)}</b> — до {expire}\n"
+               if renew_sec else "")
         )
     elif expire_dt and now_dt < expire_dt:
         left = int((expire_dt - now_dt).total_seconds())
@@ -1594,7 +1600,7 @@ async def handle_paid_sub_settings(query, sub_id: int):
         )
     trial_str = fmt_duration(eff["trial_period"])
     pay_str = fmt_duration(eff["pay_period"])
-    renew_str = fmt_duration(eff["renew_time"])
+    renew_str = renew_label(eff["renew_time"])
     price_str = f"{eff['price']} ₽"
     pay_url_str = eff["pay_url"] or "не задана"
 
@@ -1931,11 +1937,14 @@ async def check_expired_subs(context):
                             period_text = "Подписка истекла"
                         else:
                             period_text = "Пробный период окончился"
+                        # Сколько осталось окна — считаем по датам самой подписки:
+                        # у старых записей окно ещё идёт, даже если в настройках его убрали
+                        window = max(0, int((expire_dt - now).total_seconds()))
                         await context.bot.send_message(
                             chat_id=tg_id,
                             text=(
                                 f"⚠️ <b>{period_text}!</b>\n\n"
-                                f"У вас есть <b>{fmt_duration(renew_seconds)}</b> на продление.\n"
+                                f"У вас есть <b>{fmt_duration_precise(window)}</b> на продление.\n"
                                 f"Продлите подписку, чтобы не потерять доступ."
                             ),
                             parse_mode="HTML",
@@ -1947,9 +1956,15 @@ async def check_expired_subs(context):
             # Время на оплату вышло
             if status != "expired":
                 # Переход → expired: одноразовое уведомление + отключение + смена инбаунда
+                # Без окна на продление период и доступ кончаются в один момент,
+                # поэтому «конец периода» фиксируем здесь же — статистика его ждёт
+                was_active = status == "active"
                 await update_paid_sub_field(sub_id, "status", "expired")
                 if tg_id:
                     from database import log_activity
+                    if was_active:
+                        await log_activity(tg_id, "ev:period_ended",
+                                           "триал" if times_renewed == 0 else "оплаченный")
                     await log_activity(tg_id, "ev:expired")
 
                 from xui_api import get_client_info, toggle_client
@@ -1963,15 +1978,20 @@ async def check_expired_subs(context):
                         [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
                     ])
                     try:
+                        if was_active:
+                            # окна не было: период кончился — доступ выключился сразу
+                            head = ("Пробный период окончился"
+                                    if times_renewed == 0 else "Подписка закончилась")
+                            body = (f"🔴 <b>{head}</b>\n\n"
+                                    "Доступ отключён. Продлите подписку — "
+                                    "она включится сразу после оплаты.")
+                        else:
+                            body = ("🔴 Ваша подписка <b>отключена</b>.\n"
+                                    "Время на продление истекло.\n\n"
+                                    "Нажмите кнопку ниже, чтобы продлить подписку.")
                         await context.bot.send_message(
-                            chat_id=tg_id,
-                            text=(
-                                "🔴 Ваша подписка <b>отключена</b>.\n"
-                                "Время на продление истекло.\n\n"
-                                "Нажмите кнопку ниже, чтобы продлить подписку."
-                            ),
-                            parse_mode="HTML",
-                            reply_markup=kb,
+                            chat_id=tg_id, text=body,
+                            parse_mode="HTML", reply_markup=kb,
                         )
                     except Exception:
                         pass
@@ -2031,6 +2051,29 @@ async def revoke_paid_period(tg_id: int, period_seconds: int | None, context,
     return {"ok": True, "expire": new_expire_str}
 
 
+def _renew_base(full_row) -> tuple:
+    """С какой точки отсчитывать оплаченный срок.
+
+    Остаток не сгорает: если период ещё идёт (в том числе пробный), новый срок
+    прибавляется к его концу. Кончился — считаем от «сейчас».
+    Возвращает (точка отсчёта, сколько секунд остатка перенесли).
+    """
+    from paidsub.storage import parse_sub_date
+    now = datetime.now()
+    raw = full_row[18] if full_row is not None and len(full_row) > 18 else None
+    end = parse_sub_date(raw) if raw else None
+    if end and end > now:
+        return end, int((end - now).total_seconds())
+    return now, 0
+
+
+def _carried_line(carried: int) -> str:
+    """Строка про перенесённый остаток — молчим, если переносить нечего."""
+    if carried < 60:
+        return ""
+    return f"⏳ Остаток прежнего срока сохранён: <b>+{fmt_duration(carried)}</b>\n"
+
+
 async def apply_paid_payment(tg_id: int, amount: int, context,
                              promo_code: str | None = None,
                              source: str = "Platega",
@@ -2064,7 +2107,8 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     pay_seconds = period_seconds or settings["pay_period"]
     renew_seconds = settings["renew_time"]
 
-    new_period_end = datetime.now() + timedelta(seconds=pay_seconds)
+    base, carried = _renew_base(full_row)
+    new_period_end = base + timedelta(seconds=pay_seconds)
     new_expire = new_period_end + timedelta(seconds=renew_seconds)
     new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
 
@@ -2121,8 +2165,10 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
 
     await _notify_user(context.bot, tg_id,
         f"🎉 <b>Оплата получена!</b>\n\n"
-        f"Ваша подписка продлена до <b>{new_expire_str}</b>.\n"
-        "Спасибо за использование Drebol VPN!"
+        f"{_carried_line(carried)}"
+        f"➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
+        f"📅 Подписка активна до <b>{new_expire_str}</b>.\n\n"
+        "Спасибо, что пользуетесь Drebol VPN!"
     )
 
     from config import ADMIN_ID
@@ -2165,7 +2211,8 @@ async def handle_confirm_payment(query, tg_id: int, context):
     settings = sub_settings(full_row)
     pay_seconds = settings["pay_period"]
     renew_seconds = settings["renew_time"]
-    new_period_end = datetime.now() + timedelta(seconds=pay_seconds)
+    base, carried = _renew_base(full_row)
+    new_period_end = base + timedelta(seconds=pay_seconds)
     new_expire = new_period_end + timedelta(seconds=renew_seconds)
     new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
 
@@ -2252,8 +2299,10 @@ async def handle_confirm_payment(query, tg_id: int, context):
 
     await _notify_user(context.bot, tg_id,
         f"🎉 <b>Оплата подтверждена!</b>\n\n"
-        f"Ваша подписка продлена до <b>{new_expire_str}</b>.\n"
-        "Спасибо за использование Drebol VPN!"
+        f"{_carried_line(carried)}"
+        f"➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
+        f"📅 Подписка активна до <b>{new_expire_str}</b>.\n\n"
+        "Спасибо, что пользуетесь Drebol VPN!"
     )
 
 

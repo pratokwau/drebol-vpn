@@ -506,16 +506,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if state == AWAITING_PAID_RENEW_TIME:
-        seconds = parse_duration(text)
-        if not seconds:
+        # Ноль выключает окно: продлить можно в любой момент,
+        # а остаток срока при оплате не сгорает
+        seconds = 0 if text.strip().lower() in ("0", "выкл", "нет", "off") else parse_duration(text)
+        if seconds is None:
             await update.message.reply_text(
-                "❌ Не удалось распознать. Примеры: <code>3 дня</code>, <code>12 часов</code>",
+                "❌ Не удалось распознать. Примеры: <code>3 дня</code>, <code>12 часов</code>, <code>0</code> — выключить.",
                 parse_mode="HTML", reply_markup=back_admin(),
             )
             return
         _save("paid_renew_time", seconds)
         context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Время на продление: <b>{fmt_duration(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
+        from paidsub.handlers import renew_label
+        await update.message.reply_text(f"✅ Время на продление: <b>{renew_label(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     if state == AWAITING_PAID_PRICE:
@@ -908,8 +911,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if state == AWAITING_PAID_SUB_EDIT_RENEW_TIME:
-        seconds = parse_duration(text)
-        if not seconds:
+        seconds = 0 if text.strip().lower() in ("0", "выкл", "нет", "off") else parse_duration(text)
+        if seconds is None:
             await update.message.reply_text(
                 "❌ Не удалось распознать. Примеры: <code>3 дня</code>, <code>12 часов</code>",
                 parse_mode="HTML", reply_markup=back_admin(),
@@ -952,8 +955,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
             else:
                 await update_paid_sub_field(sub_id, "ind_renew_time", seconds)
+        from paidsub.handlers import renew_label
         await update.message.reply_text(
-            f"✅ Время на продление: <b>{fmt_dur(seconds)}</b>{note}",
+            f"✅ Время на продление: <b>{renew_label(seconds)}</b>{note}",
             parse_mode="HTML", reply_markup=back_admin(),
         )
         return
