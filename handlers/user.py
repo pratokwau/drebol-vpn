@@ -109,43 +109,41 @@ async def handle_my_paid_sub(query):
     settings = sub_settings(row)
     renew_sec = settings["renew_time"]
 
-    # --- Статус ---
+    # --- Статус и остаток срока ---
+    left_sec, left_note = 0, ""
     if status == "expired":
-        status_emoji = "🔴"
-        status_text = "отключена"
-        status_detail = "Время на продление истекло"
+        status_emoji, status_text = "🔴", "Отключена"
+        left_note = "время на продление истекло"
     elif status == "renewal":
-        status_emoji = "🟡"
-        status_text = "ожидает оплаты"
-        remaining_sec = max(0, int((expire_dt - datetime.now()).total_seconds()))
-        status_detail = f"Осталось {fmt_duration_precise(remaining_sec)} на продление"
+        status_emoji, status_text = "🟡", "Ожидает оплаты"
+        left_sec = max(0, int((expire_dt - datetime.now()).total_seconds()))
+        left_note = "на продление"
     elif not enabled:
-        status_emoji = "❄️"
-        status_text = "заморожена"
-        status_detail = "Подписка приостановлена"
+        status_emoji, status_text = "❄️", "Заморожена"
+        left_note = "подписка приостановлена"
     else:
-        status_emoji = "🟢"
-        status_text = "активна"
-        real_sec = max(0, int((expire_dt - datetime.now()).total_seconds()) - renew_sec)
-        status_detail = f"Осталось {fmt_duration_precise(real_sec)}" if real_sec > 0 else "Скоро закончится"
+        status_emoji, status_text = "🟢", "Активна"
+        # окно на оплату идёт уже после конца периода, поэтому вычитаем его
+        left_sec = max(0, int((expire_dt - datetime.now()).total_seconds()) - renew_sec)
+        if not left_sec:
+            left_note = "скоро закончится"
 
     # --- Трафик ---
     if total_gb > 0:
-        traffic_limit = f"{total_gb} ГБ"
         used_gb = total_used / (1024 ** 3)
-        bar = _progress_bar(used_gb, total_gb)
-        traffic_block = (
+        traffic_head = (
             f"📊 <b>Трафик</b>\n"
-            f"     {used_str} из {traffic_limit}\n"
-            f"     <code>{bar}</code>\n"
-            f"     ⬆️ {up_str}   ⬇️ {down_str}"
+            f"{used_str} из <b>{total_gb} ГБ</b>\n"
+            f"<code>{_progress_bar(used_gb, total_gb)}</code>"
         )
     else:
-        traffic_block = (
-            f"📊 <b>Трафик</b>\n"
-            f"     ♾ Безлимит  —  использовано {used_str}\n"
-            f"     ⬆️ {up_str}   ⬇️ {down_str}"
-        )
+        traffic_head = "📊 <b>Трафик</b>\n♾️ Безлимитный"
+    traffic_block = (
+        f"{traffic_head}\n\n"
+        f"┌ ⬆️ Отправлено: <b>{up_str}</b>\n"
+        f"└ ⬇️ Получено: <b>{down_str}</b>\n\n"
+        f"📦 Всего использовано: <b>{used_str}</b>"
+    )
 
     # --- Дата подключения ---
     try:
@@ -154,60 +152,54 @@ async def handle_my_paid_sub(query):
     except Exception:
         created_str = str(created_at)[:10]
 
-    # --- Тип подписки ---
-    if status == "expired":
-        sub_type = "🚫 Требуется продление"
-    elif status == "renewal":
-        sub_type = "⏳ Ожидает оплаты"
-    elif not enabled:
-        sub_type = "❄️ Заморожена"
-    elif times_renewed > 0:
-        sub_type = "⭐️ Премиум"
-    else:
-        sub_type = "🆓 Пробный период"
+    # --- Тариф: он про сам план, состояние показывает статус рядом ---
+    plan = "⭐️ <b>Премиум</b>" if times_renewed > 0 else "🆓 <b>Пробный период</b>"
+    expire_display = expire_dt.strftime("%d.%m.%Y · %H:%M")
 
-    # --- Дата окончания без времени, если полночь ---
-    expire_display = expire_dt.strftime("%d.%m.%Y в %H:%M")
-
-    # --- Реферальный блок ---
+    # --- Приглашения ---
     referral_block = ""
     from paidsub.storage import get_referral_stats
+    from paidsub.time_parser import _plural
     ref_stats = await get_referral_stats(user_id)
     bonus_cfg = cfg_tmp.get("referral_bonus")
     invited_bonus_cfg = cfg_tmp.get("referral_invited_bonus")
     if ref_stats["total"] > 0:
-        earned = f" · +{fmt_duration(ref_stats['total_bonus'])}" if ref_stats["total_bonus"] > 0 else ""
-        referral_block = (
-            f"\n👥 <b>Приглашено друзей:</b> {ref_stats['total']}{earned}\n"
-        )
+        rows_ref = ["👥 <b>Приглашения</b>",
+                    f"Приглашено: <b>{_plural(ref_stats['total'], ('друг', 'друга', 'друзей'))}</b>"]
+        if ref_stats["total_bonus"] > 0:
+            rows_ref.append(f"🎁 Получено: <b>+{fmt_duration(ref_stats['total_bonus'])}</b>")
+        referral_block = "\n".join(rows_ref)
     elif bonus_cfg or invited_bonus_cfg:
         parts = []
         if bonus_cfg:
-            parts.append(f"получай +{fmt_duration(bonus_cfg)}")
+            parts.append(f"вам +{fmt_duration(bonus_cfg)}")
         if invited_bonus_cfg:
-            parts.append(f"друг получит +{fmt_duration(invited_bonus_cfg)}")
-        referral_block = (
-            f"\n🎁 <b>Приглашай друзей</b> — {', '.join(parts)}!\n"
-        )
+            parts.append(f"другу +{fmt_duration(invited_bonus_cfg)}")
+        referral_block = ("👥 <b>Приглашения</b>\n"
+                          f"🎁 Пригласите друга — {', '.join(parts)}")
+
+    sep = "━" * 14
+    if left_sec:
+        left_line = fmt_duration_precise(left_sec) + (f" <i>({left_note})</i>" if left_note else "")
+    else:
+        left_line = f"<i>{left_note or 'время вышло'}</i>"
 
     text = (
-        f"🔐 <b>Drebol VPN — Моя подписка</b>\n"
-        f"{'━' * 14}\n\n"
+        f"🔐 <b>Drebol VPN · Моя подписка</b>\n\n"
+        f"{plan} · {status_emoji} <b>{status_text}</b>\n\n"
 
-        f"📋 Тип: <b>{sub_type}</b>\n"
-        f"{status_emoji} Статус: <b>{status_text}</b>\n"
-        f"     <i>{status_detail}</i>\n\n"
+        f"⏳ <b>Осталось</b>\n{left_line}\n\n"
+        f"📅 <b>Действует до:</b>\n{expire_display}\n\n"
+        f"📆 <b>Подключена:</b>\n{created_str}\n\n"
 
-        f"📅 Активна до: <b>{expire_display}</b>\n"
-        f"📆 Подключён с: {created_str}\n\n"
-
-        f"{traffic_block}\n"
-        f"{referral_block}\n"
-
-        f"{'━' * 14}\n"
-        f"🔗 <b>Ваша ссылка подписки:</b>\n"
+        f"{sep}\n\n"
+        f"{traffic_block}\n\n"
+        + (f"{sep}\n\n{referral_block}\n\n" if referral_block else "")
+        + f"{sep}\n\n"
+        f"🔗 <b>Ссылка на подписку</b>\n"
         f"<code>{sub_url}</code>\n\n"
-        f"<i>Нажмите на ссылку, чтобы скопировать, и вставьте её в приложение INCY или Happ.</i>"
+        f"💡 <i>Нажмите на ссылку, чтобы скопировать её,\n"
+        f"затем вставьте в INCY или Happ.</i>"
     )
 
     # выключенные функции прячем от пользователей, админ видит всё
