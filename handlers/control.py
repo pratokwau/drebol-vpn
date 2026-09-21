@@ -37,6 +37,7 @@ CB_LABELS = {
     "qr_code": "📱 QR-код",
     "copy_sub": "📋 Скопировал ссылку",
     "reissue_key": "🔁 Перевыпуск ключа",
+    "reissue_do": "🔁 Подтвердил перевыпуск",
     "support_open": "💬 Открыл поддержку",
     "support_page": "💬 Листал поддержку",
     "support_files": "📎 Файлы поддержки",

@@ -10,7 +10,7 @@ from config import load_config
 
 _DANGER_EXACT = {
     "clear_log_channel", "git_update", "bl_add", "bl_add_apply", "paid_bulk_reduce",
-    "support_open",
+    "support_open", "reissue_do",
 }
 _DANGER_PREFIX = (
     "paid_sub_delete:", "sub_delete:", "promo_delete:", "tariff_del:", "tariff_del_ok:",

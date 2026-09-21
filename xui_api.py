@@ -808,10 +808,18 @@ async def update_client_email(old_email: str, new_email: str, client_uuid: str,
         await s.close()
 
 
-async def reissue_client_uuid(email: str) -> dict:
+async def reissue_subscription(email: str) -> dict:
+    """Выдаёт клиенту новую ссылку подписки: новый subId и новый UUID.
+
+    Меняется только доступ: срок, трафик, лимиты и инбаунды остаются как были.
+    Клиент может лежать в нескольких инбаундах, и subId нужен новый во всех —
+    иначе новая ссылка отдаст только часть серверов, а старая продолжит жить.
+    """
     cfg = load_config()
     url = cfg.get("xui_url", "").rstrip("/")
     token = cfg.get("xui_token", "")
+    sub_port = cfg.get("xui_sub_port", "")
+    sub_path = cfg.get("xui_sub_path", "/sub/")
     if not url or not token:
         return {"success": False, "error": "URL или токен не заданы"}
     s = _session(token)
@@ -819,8 +827,8 @@ async def reissue_client_uuid(email: str) -> dict:
         data, err = await _get(s, f"{url}/panel/api/inbounds/list")
         if not data or not data.get("success"):
             return {"success": False, "error": f"Не удалось загрузить инбаунды: {err}"}
-        client_obj = None
-        old_uuid = None
+
+        copies = []
         for inb in (data.get("obj") or []):
             settings_str = inb.get("settings") or "{}"
             try:
@@ -829,27 +837,48 @@ async def reissue_client_uuid(email: str) -> dict:
                 continue
             for c in settings.get("clients", []):
                 if c.get("email") == email:
-                    client_obj = dict(c)
-                    old_uuid = c.get("id", "")
-                    break
-            if client_obj:
-                break
-        if not client_obj:
+                    copies.append((inb.get("id"), dict(c)))
+
+        if not copies:
             return {"success": False, "error": "Клиент не найден в панели"}
+
         new_uuid = str(uuid.uuid4())
-        client_obj["id"] = new_uuid
-        client_obj["flow"] = "xtls-rprx-vision"
-        safe_old = quote(old_uuid, safe="")
+        new_sub_id = generate_sub_id()
         safe_email = quote(email, safe="")
-        for path in (
-            f"/panel/api/clients/update/{safe_old}",
-            f"/panel/api/clients/update/{safe_email}",
-            f"/panel/api/inbounds/updateClient/{safe_old}",
-        ):
-            result, err2 = await _post(s, f"{url}{path}", client_obj)
-            if result and result.get("success"):
-                return {"success": True, "new_uuid": new_uuid}
-        return {"success": False, "error": f"API не принял обновление: {err2}"}
+        updated, failed, last_err = [], [], ""
+
+        for ib_id, obj in copies:
+            old_uuid = obj.get("id", "")
+            obj["id"] = new_uuid
+            obj["subId"] = new_sub_id
+            obj["flow"] = "xtls-rprx-vision"
+            # лимит устройств иначе обнулится, и панель перестанет писать HWID
+            _with_hwid(obj)
+            safe_old = quote(old_uuid, safe="")
+            ok = False
+            for path in (
+                f"/panel/api/clients/update/{safe_old}",
+                f"/panel/api/clients/update/{safe_email}",
+                f"/panel/api/inbounds/updateClient/{safe_old}",
+            ):
+                res, last_err = await _post(s, f"{url}{path}", obj)
+                if res and res.get("success"):
+                    ok = True
+                    break
+            (updated if ok else failed).append(ib_id)
+
+        if not updated:
+            return {"success": False, "error": f"API не принял обновление: {last_err}"}
+
+        parsed = urlparse(url)
+        sub_url = _build_sub_url(parsed.scheme, parsed.hostname, sub_port, sub_path, new_sub_id)
+        return {
+            "success": True,
+            "new_uuid": new_uuid,
+            "sub_id": new_sub_id,
+            "sub_url": strip_default_port(sub_url),
+            "failed_inbounds": sorted(i for i in failed if i is not None),
+        }
     except Exception as e:
         return {"success": False, "error": f"{type(e).__name__}: {e}"}
     finally:

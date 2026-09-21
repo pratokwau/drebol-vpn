@@ -935,90 +935,94 @@ async def handle_qr_code(query, context):
 
 
 async def handle_reissue_key(query, context):
+    """Спрашивает подтверждение: перевыпуск рвёт доступ на всех устройствах."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import get_paid_sub_by_tg_id
+    row = await get_paid_sub_by_tg_id(query.from_user.id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    await query.edit_message_text(
+        "🔁 <b>Перевыпуск ключа</b>\n\n"
+        "Вы уверены, что хотите перевыпустить ключ?\n\n"
+        "⚠️ <b>Старая ссылка перестанет работать.</b>\n"
+        "VPN отключится на всех устройствах, пока вы не добавите новую ссылку.\n\n"
+        "Срок подписки, трафик и лимиты сохранятся.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Да, перевыпустить", callback_data="reissue_do")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+        ]),
+    )
+
+
+async def handle_reissue_do(query, context):
+    """Меняет ссылку подписки: новый subId и UUID, данные подписки на месте."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field, add_history
+    from log_channel import send_log
+
     user_id = query.from_user.id
     row = await get_paid_sub_by_tg_id(user_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    sub_url = row[5]
+    sub_id, email, old_url = row[0], row[2], row[5]
+
+    await query.edit_message_text("⏳ Перевыпускаю ключ...")
+
+    from xui_api import reissue_subscription
+    result = await reissue_subscription(email)
+    if not result["success"]:
+        await query.edit_message_text(
+            "❌ <b>Не удалось перевыпустить ключ</b>\n\n"
+            f"<code>{escape(str(result['error']))}</code>\n\n"
+            "Старая ссылка продолжает работать. Попробуйте позже или напишите в поддержку.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
+                [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+            ]),
+        )
+        return
+
+    new_url = result["sub_url"]
+    await update_paid_sub_field(sub_id, "uuid", result["new_uuid"])
+    await update_paid_sub_field(sub_id, "sub_id", result["sub_id"])
+    await update_paid_sub_field(sub_id, "sub_url", new_url)
+    await add_history(user_id, "key_reissued", f"Новая ссылка: {new_url}")
+
+    # Часть инбаундов могла не принять правку: там останется старый доступ,
+    # и человек этого не увидит — зовём админа
+    missed = result.get("failed_inbounds") or []
+    await send_log(context.bot,
+        f"🔁 Перевыпуск ключа: <code>{user_id}</code>\n"
+        f"🔗 {escape(new_url)}"
+        + (f"\n⚠️ Не приняли инбаунды: <code>{missed}</code>" if missed else "")
+    )
+
+    try:
+        from telegram import CopyTextButton
+        copy_btn = InlineKeyboardButton("📋 Скопировать подписку",
+                                        copy_text=CopyTextButton(text=new_url))
+    except (ImportError, TypeError):
+        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", callback_data="copy_sub")
+
     await query.edit_message_text(
-        "🔁 <b>Перевыпуск ключа</b>\n\n"
-        "Ваш ключ будет перевыпущен через <b>10 секунд</b>.\n\n"
-        "⚠️ После перевыпуска удалите старую подписку из приложения "
-        "и добавьте заново по ссылке ниже:\n\n"
-        f"🔗 <code>{sub_url}</code>",
+        "✅ <b>Ключ перевыпущен!</b>\n\n"
+        "Старая ссылка больше не работает.\n"
+        "Удалите старую подписку в приложении и добавьте новую:\n\n"
+        f"🔗 <code>{escape(new_url)}</code>\n\n"
+        "<i>Нажмите на ссылку, чтобы скопировать её,\n"
+        "затем вставьте в INCY или Happ.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("❌ Отмена", callback_data="my_paid_sub")],
+            [copy_btn],
+            [InlineKeyboardButton("📱 QR-код", callback_data="qr_code")],
+            [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")],
         ]),
         disable_web_page_preview=True,
     )
-    context.application.job_queue.run_once(
-        _do_reissue_job, 10,
-        data={"tg_id": user_id, "chat_id": query.message.chat_id, "message_id": query.message.message_id},
-        name=f"reissue_{user_id}",
-    )
-
-
-async def _do_reissue_job(ctx):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field, add_history
-    from log_channel import send_log
-    data = ctx.job.data
-    tg_id = data["tg_id"]
-    chat_id = data["chat_id"]
-    message_id = data["message_id"]
-    row = await get_paid_sub_by_tg_id(tg_id)
-    if not row:
-        return
-    sub_id = row[0]
-    email = row[2]
-    sub_url = row[5]
-    from xui_api import reissue_client_uuid
-    result = await reissue_client_uuid(email)
-    if not result["success"]:
-        try:
-            await ctx.bot.edit_message_text(
-                chat_id=chat_id, message_id=message_id,
-                text=f"❌ Ошибка перевыпуска: <code>{result['error']}</code>",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
-                ]),
-            )
-        except Exception:
-            pass
-        return
-    new_uuid = result["new_uuid"]
-    await update_paid_sub_field(sub_id, "uuid", new_uuid)
-    await add_history(tg_id, "key_reissued", f"Новый UUID: {new_uuid[:8]}…")
-    await send_log(ctx.bot, f"🔁 Перевыпуск ключа: <code>{tg_id}</code>")
-    try:
-        from telegram import CopyTextButton
-        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", copy_text=CopyTextButton(text=sub_url))
-    except (ImportError, TypeError):
-        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", callback_data="copy_sub")
-    try:
-        await ctx.bot.edit_message_text(
-            chat_id=chat_id, message_id=message_id,
-            text=(
-                "✅ <b>Ключ перевыпущен!</b>\n\n"
-                "Удалите старую подписку из приложения и добавьте заново:\n\n"
-                f"🔗 <code>{sub_url}</code>\n\n"
-                "<i>Скопируйте ссылку и вставьте в INCY или Happ.</i>"
-            ),
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [copy_btn],
-                [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")],
-                [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
-            ]),
-            disable_web_page_preview=True,
-        )
-    except Exception:
-        pass
 
 
 async def handle_referral(query, context):
