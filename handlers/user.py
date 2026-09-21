@@ -1036,36 +1036,46 @@ async def handle_referral(query, context):
 
     stats = await get_referral_stats(user.id)
     ref_rows = await get_referral_list(user.id)
-
-    lines = [
-        "👥 <b>Реферальная программа</b>\n",
-        "Приглашай друзей и получай бонусные дни к подписке!\n",
-    ]
-
     cfg = load_config()
     bonus = cfg.get("referral_bonus")
     invited_bonus = cfg.get("referral_invited_bonus")
-    if bonus:
-        lines.append(f"🎁 Вам за каждого друга: <b>+{fmt_duration(bonus)}</b>")
-    if invited_bonus:
-        lines.append(f"🎁 Другу за регистрацию: <b>+{fmt_duration(invited_bonus)}</b>")
-    if bonus or invited_bonus:
-        lines.append("")
+    sep = "━" * 14
 
-    lines.append(f"👤 Приглашено: <b>{stats['total']}</b>")
-    lines.append(f"✅ С бонусом: <b>{stats['rewarded']}</b>")
-    if stats['total_bonus'] > 0:
-        lines.append(f"⏱ Всего начислено: <b>{fmt_duration(stats['total_bonus'])}</b>")
+    head = ["👥 <b>Drebol VPN · Реферальная программа</b>", "",
+            "🎁 <b>Приглашай друзей — получай дни к подписке!</b>", ""]
+    if bonus:
+        head.append(f"Тебе: <b>+{fmt_duration(bonus)}</b> за каждого друга")
+    if invited_bonus:
+        head.append(f"Другу: <b>+{fmt_duration(invited_bonus)}</b> за регистрацию")
+
+    body = [f"📊 <b>Ваша статистика</b>", "",
+            f"👤 Приглашено: <b>{stats['total']}</b>",
+            f"🎁 Получили бонус: <b>{stats['rewarded']}</b>"]
+    if stats["total_bonus"] > 0:
+        body.append(f"⏱ Начислено: <b>+{fmt_duration(stats['total_bonus'])}</b>")
+
+    link = ["🔗 <b>Ваша реферальная ссылка</b>",
+            f"<code>{ref_link}</code>", "",
+            "💡 <i>Поделитесь ссылкой с другом — после регистрации",
+            "вы оба получите бонусные дни.</i>"]
+
+    blocks = ["\n".join(head), "\n".join(body), "\n".join(link)]
 
     if ref_rows:
-        lines.append("\n<b>Приглашённые:</b>")
+        invited = ["👥 <b>Приглашённые</b>", ""]
         for tg_id, rewarded, bonus_sec, created_at in ref_rows[:10]:
             u_info = await get_user_info(tg_id)
-            name = u_info[1] if u_info else str(tg_id)
-            status = "✅" if rewarded else "⏳"
-            bonus_txt = f" (+{fmt_duration(bonus_sec)})" if rewarded and bonus_sec else ""
-            ts = created_at[:10] if created_at else ""
-            lines.append(f"{status} {name} · {ts}{bonus_txt}")
+            name = escape(str(u_info[1] if u_info and u_info[1] else tg_id))
+            when = _ref_date(created_at)
+            mark = "✅" if rewarded else "⏳"
+            gift = (f"🎁 +{fmt_duration(bonus_sec)}" if rewarded and bonus_sec
+                    else "🎁 бонус после оплаты")
+            invited.append(f"{mark} <b>{name}</b>")
+            invited.append(f"📅 {when} · {gift}")
+            invited.append("")
+        blocks.append("\n".join(invited).rstrip("\n"))
+        if len(ref_rows) > 10:
+            blocks[-1] += f"\n\n<i>…и ещё {len(ref_rows) - 10}</i>"
 
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     share_text = "Попробуй Drebol VPN — быстрый и безопасный VPN!"
@@ -1076,11 +1086,21 @@ async def handle_referral(query, context):
     ])
 
     await query.edit_message_text(
-        "\n".join(lines),
+        f"\n\n{sep}\n\n".join(blocks),
         parse_mode="HTML",
         reply_markup=kb,
         disable_web_page_preview=True,
     )
+
+
+def _ref_date(raw) -> str:
+    """Дата приглашения в привычном виде. База хранит её как YYYY-MM-DD."""
+    from datetime import datetime
+    text = str(raw or "")[:10]
+    try:
+        return datetime.strptime(text, "%Y-%m-%d").strftime("%d.%m.%Y")
+    except ValueError:
+        return text
 
 
 async def handle_info(query):
