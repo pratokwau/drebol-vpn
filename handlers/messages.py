@@ -38,6 +38,7 @@ from states import (
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
+    AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
@@ -519,6 +520,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         from paidsub.handlers import renew_label
         await update.message.reply_text(f"✅ Время на продление: <b>{renew_label(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state in (AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND):
+        # ноль выключает конкретное напоминание, остальное — обычный срок
+        seconds = 0 if text.strip().lower() in ("0", "выкл", "нет", "off") else parse_duration(text)
+        if seconds is None:
+            await update.message.reply_text(
+                "❌ Не разобрал. Примеры: <code>3 дня</code>, <code>12 часов</code>, <code>0</code> — выключить.",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+            return
+        key = "remind_first" if state == AWAITING_REMIND_FIRST else "remind_second"
+        _save(key, seconds)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(
+            "✅ Напоминание: <b>"
+            + (f"за {fmt_duration(seconds)}" if seconds else "выключено") + "</b>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
         return
 
     if state == AWAITING_PAID_PRICE:

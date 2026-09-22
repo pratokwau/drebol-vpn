@@ -20,8 +20,13 @@ from handlers.admin import (
     handle_channel_menu, handle_dashboard, handle_healthcheck,
     handle_find_user, handle_user_profile, handle_ban_user, handle_unban_user,
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
-    handle_winback_settings, handle_toggle_winback, handle_set_winback_days, handle_set_winback_percent,
+    handle_winback_settings, handle_toggle_winback,
+    handle_remind_settings, handle_toggle_remind, handle_set_remind,
+    handle_set_winback_days, handle_set_winback_percent,
     handle_user_history, handle_dm_user, handle_payment_stats,
+)
+from fraud import (
+    handle_fraud_menu, handle_fraud_toggle, handle_fraud_scan, handle_fraud_ok,
 )
 from handlers.support import open_support, handle_support_files
 from maintenance import (
@@ -426,6 +431,23 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_log_channel(query, context)
     elif data == "clear_log_channel":
         await handle_clear_log_channel(query)
+    elif data == "fraud_menu":
+        await handle_fraud_menu(query)
+    elif data == "fraud_toggle":
+        await handle_fraud_toggle(query)
+    elif data == "fraud_scan":
+        await handle_fraud_scan(query, context)
+    elif data.startswith("fraud_ok:"):
+        _f = data.split(":")
+        await handle_fraud_ok(query, int(_f[1]), int(_f[2]))
+    elif data == "remind_settings":
+        await handle_remind_settings(query)
+    elif data == "toggle_remind":
+        await handle_toggle_remind(query)
+    elif data == "set_remind_first":
+        await handle_set_remind(query, context, "first")
+    elif data == "set_remind_second":
+        await handle_set_remind(query, context, "second")
     elif data == "winback_settings":
         await handle_winback_settings(query)
     elif data == "toggle_winback":

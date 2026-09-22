@@ -134,6 +134,7 @@ async def set_expire_date(sub_id: int, new_expire: str):
     renew = int(sub_settings(row)["renew_time"])
     period_end = (parsed - timedelta(seconds=renew)).strftime("%d.%m.%Y %H:%M:%S")
     await update_paid_sub_field(sub_id, "period_end", period_end)
+    await update_paid_sub_field(sub_id, "remind_stage", 0)
 
 
 async def snapshot_sub_settings(sub_id: int):
@@ -192,7 +193,7 @@ async def update_paid_sub_field(sub_id: int, field: str, value):
     allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending",
                 "ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url",
                 "times_renewed", "pending_promo", "uuid", "period_end", "extra_devices",
-                "sub_id", "sub_url"}
+                "sub_id", "sub_url", "remind_stage"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:
@@ -421,6 +422,17 @@ async def get_referral_list(referrer_tg_id: int) -> list:
             WHERE r.referred_by = ?
             ORDER BY r.created_at DESC
         """, (referrer_tg_id,)) as cur:
+            return await cur.fetchall()
+
+
+async def get_subs_for_reminder() -> list:
+    """Активные подписки с известным концом периода — кандидаты на напоминание."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, period_end, times_renewed, remind_stage
+            FROM paid_subs
+            WHERE tg_id IS NOT NULL AND status = 'active' AND period_end IS NOT NULL
+        """) as cur:
             return await cur.fetchall()
 
 

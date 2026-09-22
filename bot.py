@@ -38,6 +38,9 @@ async def post_init(app: Application):
         from paidsub.handlers import check_expired_subs, paid_sync_usernames
         app.job_queue.run_repeating(check_expired_subs, interval=10, first=10)
 
+        from paidsub.handlers import expiry_reminder_tick
+        app.job_queue.run_repeating(expiry_reminder_tick, interval=1800, first=180)
+
         async def _healthcheck_job(ctx):
             """Следит за панелью, сервисом подписок и портами инбаундов.
 
@@ -274,6 +277,9 @@ async def post_init(app: Application):
         app.job_queue.run_repeating(digest_tick, interval=600, first=90)
         app.job_queue.run_repeating(purge_tick, interval=24 * 3600, first=3600)
         app.job_queue.run_repeating(connect_help_tick, interval=1800, first=240)
+
+        from fraud import fraud_tick
+        app.job_queue.run_repeating(fraud_tick, interval=1800, first=420)
 
         from blacklist import blacklist_sync_tick
         bl_hours = int(load_config().get("blacklist_sync_hours", 6) or 6)

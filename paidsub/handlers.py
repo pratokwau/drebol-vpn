@@ -1475,7 +1475,6 @@ async def bulk_set_limits(kind: str, value: int, context) -> dict:
     from blacklist import blacklisted_ids
     from database import DB_PATH
     from xui_api import update_client_limits
-    from paidsub.storage import base_hwid
     emoji, label, field = LIMIT_KINDS[kind]
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -1884,6 +1883,76 @@ async def handle_paid_fix_renew_apply(query, context):
     )
 
 
+# ── Job: напоминания о скором конце ───────────────────────────────────────────
+
+async def expiry_reminder_tick(context):
+    """Пишет заранее, что срок подходит к концу.
+
+    Раньше первое письмо человек получал уже после отключения — когда VPN
+    перестал работать. Два срока: заранее и впритык. Отправленная стадия
+    хранится в подписке, поэтому повторов нет, а продление её сбрасывает.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_subs_for_reminder, parse_sub_date
+    from blacklist import blacklisted_ids
+    cfg = load_config()
+    if not cfg.get("remind_enabled", True):
+        return
+    stages = [int(cfg.get("remind_first", 3 * 86400) or 0),
+              int(cfg.get("remind_second", 86400) or 0)]
+    if not any(stages):
+        return
+
+    rows = await get_subs_for_reminder()
+    if not rows:
+        return
+    now = datetime.now()
+    skip = await blacklisted_ids()
+
+    for sub_id, tg_id, period_end_str, times_renewed, stage in rows:
+        if not tg_id or tg_id in skip:
+            continue
+        end = parse_sub_date(period_end_str)
+        if not end:
+            continue
+        left = int((end - now).total_seconds())
+        if left <= 0:
+            continue
+        # какая стадия подходит: считаем от самой поздней, чтобы при долгом
+        # простое бота человек получил одно письмо, а не оба подряд
+        target = 0
+        for idx, window in enumerate(stages, start=1):
+            if window and left <= window:
+                target = idx
+        if not target or target <= int(stage or 0):
+            continue
+
+        await update_paid_sub_field(sub_id, "remind_stage", target)
+        trial = not times_renewed
+        head = ("🆓 <b>Пробный период заканчивается</b>" if trial
+                else "⏳ <b>Подписка заканчивается</b>")
+        action = "Оформить подписку" if trial else "Продлить подписку"
+        try:
+            await context.bot.send_message(
+                chat_id=tg_id,
+                text=(
+                    f"{head}\n\n"
+                    f"Осталось: <b>{fmt_duration_precise(left)}</b>\n"
+                    f"📅 До: <b>{end.strftime('%d.%m.%Y · %H:%M')}</b>\n\n"
+                    "Оплатите сейчас — остаток не сгорит, новый срок "
+                    "прибавится к нему."
+                ),
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"💳 {action}", callback_data="renew_sub")]
+                ]),
+            )
+            from database import log_activity
+            await log_activity(tg_id, "ev:reminded", f"этап {target}")
+        except Exception:
+            pass
+
+
 # ── Job: проверка истечения подписок ──────────────────────────────────────────
 
 async def check_expired_subs(context):
@@ -2161,6 +2230,8 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     )
     await update_paid_sub_field(sub_id, "status", "active")
     await update_paid_sub_field(sub_id, "payment_pending", 0)
+    # срок сдвинулся — напоминания о скором конце начинают отсчёт заново
+    await update_paid_sub_field(sub_id, "remind_stage", 0)
     cur_renewed = row[12] if len(row) > 12 else 0
     await update_paid_sub_field(sub_id, "times_renewed", cur_renewed + 1)
 
@@ -2265,6 +2336,8 @@ async def handle_confirm_payment(query, tg_id: int, context):
     )
     await update_paid_sub_field(sub_id, "status", "active")
     await update_paid_sub_field(sub_id, "payment_pending", 0)
+    # срок сдвинулся — напоминания о скором конце начинают отсчёт заново
+    await update_paid_sub_field(sub_id, "remind_stage", 0)
     cur_renewed = row[12] if len(row) > 12 else 0
     await update_paid_sub_field(sub_id, "times_renewed", cur_renewed + 1)
 

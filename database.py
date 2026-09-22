@@ -333,11 +333,41 @@ async def init_db():
             ("payments", "kind", "TEXT NOT NULL DEFAULT 'period'"),
             ("payments", "extra", "INTEGER NOT NULL DEFAULT 0"),
             ("paid_subs", "extra_devices", "INTEGER NOT NULL DEFAULT 0"),
+            # какое напоминание о скором конце уже отправлено: 0 — ни одного
+            ("paid_subs", "remind_stage", "INTEGER NOT NULL DEFAULT 0"),
         ):
             try:
                 await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             except Exception:
                 pass
+        # Отпечатки подписок: с каких устройств и адресов они работают.
+        # Нужны, чтобы заметить второй триал с того же телефона.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS device_seen (
+                email TEXT NOT NULL,
+                tg_id INTEGER,
+                kind TEXT NOT NULL,
+                value TEXT NOT NULL,
+                first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(email, kind, value)
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_device_seen_value ON device_seen(kind, value)"
+        )
+        # Найденные пары аккаунтов: одну пару показываем админу один раз
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS fraud_pairs (
+                tg_a INTEGER NOT NULL,
+                tg_b INTEGER NOT NULL,
+                kind TEXT,
+                value TEXT,
+                status TEXT NOT NULL DEFAULT 'new',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tg_a, tg_b)
+            )
+        """)
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)"
         )
@@ -1332,3 +1362,76 @@ async def mark_winback_sent(tg_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT OR REPLACE INTO winback_sent (tg_id) VALUES (?)", (tg_id,))
         await db.commit()
+
+
+# ── Отпечатки подписок и находки антифрода ───────────────────────────────────
+
+async def remember_fingerprints(email: str, tg_id: int, kind: str, values) -> list:
+    """Запоминает отпечатки подписки. Возвращает те, что увидели впервые.
+
+    Только новые и возвращаем: сверять заново каждый раз одно и то же —
+    это лишние тревоги админу про давно известную пару.
+    """
+    values = [str(v) for v in (values or []) if v]
+    if not values:
+        return []
+    fresh = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        for value in values:
+            cur = await db.execute(
+                "UPDATE device_seen SET last_seen = CURRENT_TIMESTAMP, tg_id = ? "
+                "WHERE email = ? AND kind = ? AND value = ?",
+                (tg_id, email, kind, value),
+            )
+            if not cur.rowcount:
+                await db.execute(
+                    "INSERT OR IGNORE INTO device_seen (email, tg_id, kind, value) "
+                    "VALUES (?, ?, ?, ?)", (email, tg_id, kind, value),
+                )
+                fresh.append(value)
+        await db.commit()
+    return fresh
+
+
+async def fingerprint_owners(kind: str, value: str, exclude_tg: int) -> list:
+    """Чьи ещё подписки засветились с этим отпечатком."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT DISTINCT tg_id, email FROM device_seen "
+            "WHERE kind = ? AND value = ? AND tg_id IS NOT NULL AND tg_id != ?",
+            (kind, value, exclude_tg),
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def note_fraud_pair(a: int, b: int, kind: str, value: str) -> bool:
+    """Записывает находку. False — про эту пару уже говорили."""
+    lo, hi = (a, b) if a <= b else (b, a)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO fraud_pairs (tg_a, tg_b, kind, value) VALUES (?, ?, ?, ?)",
+            (lo, hi, kind, value),
+        )
+        await db.commit()
+        return bool(cur.rowcount)
+
+
+async def ignore_fraud_pair(a: int, b: int):
+    lo, hi = (a, b) if a <= b else (b, a)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE fraud_pairs SET status = 'ignored' WHERE tg_a = ? AND tg_b = ?", (lo, hi)
+        )
+        await db.commit()
+
+
+async def fraud_stats() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async def one(q):
+            async with db.execute(q) as cur:
+                return (await cur.fetchone())[0]
+        return {
+            "fingerprints": await one("SELECT COUNT(*) FROM device_seen"),
+            "pairs": await one("SELECT COUNT(*) FROM fraud_pairs"),
+            "ignored": await one("SELECT COUNT(*) FROM fraud_pairs WHERE status = 'ignored'"),
+        }

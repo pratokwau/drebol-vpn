@@ -546,6 +546,58 @@ async def handle_clear_log_channel(query):
 
 # ── Winback ──────────────────────────────────────────────────────────────────
 
+async def handle_remind_settings(query):
+    cfg = load_config()
+    enabled = cfg.get("remind_enabled", True)
+    from paidsub.time_parser import fmt_duration
+    first = int(cfg.get("remind_first", 3 * 86400) or 0)
+    second = int(cfg.get("remind_second", 86400) or 0)
+    status = "ВКЛ ✅" if enabled else "ВЫКЛ ❌"
+    await query.edit_message_text(
+        "⏰ <b>Напоминания о конце подписки</b>\n\n"
+        f"📌 Статус: <b>{status}</b>\n"
+        f"1️⃣ Первое: за <b>{fmt_duration(first) if first else 'выключено'}</b>\n"
+        f"2️⃣ Второе: за <b>{fmt_duration(second) if second else 'выключено'}</b>\n\n"
+        "Бот пишет заранее, что срок подходит к концу, и зовёт продлить. "
+        "Остаток при оплате не сгорает, поэтому платить заранее людям выгодно.\n"
+        "Каждое напоминание уходит один раз за период; продление сбрасывает счёт.\n"
+        "<i>0 выключает отдельное напоминание.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "🔴 Выключить" if enabled else "🟢 Включить",
+                callback_data="toggle_remind",
+            )],
+            [InlineKeyboardButton("1️⃣ Первое напоминание", callback_data="set_remind_first")],
+            [InlineKeyboardButton("2️⃣ Второе напоминание", callback_data="set_remind_second")],
+            [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+        ]),
+    )
+
+
+async def handle_toggle_remind(query):
+    cfg = load_config()
+    cfg["remind_enabled"] = not cfg.get("remind_enabled", True)
+    save_config(cfg)
+    await handle_remind_settings(query)
+
+
+async def handle_set_remind(query, context: ContextTypes.DEFAULT_TYPE, which: str):
+    from states import AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND
+    context.user_data["state"] = (AWAITING_REMIND_FIRST if which == "first"
+                                  else AWAITING_REMIND_SECOND)
+    num = "Первое" if which == "first" else "Второе"
+    await query.edit_message_text(
+        f"⏰ <b>{num} напоминание</b>\n\n"
+        "За сколько до конца периода писать?\n"
+        "Примеры: <code>3 дня</code>, <code>12 часов</code>, <code>0</code> — выключить.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ Назад", callback_data="remind_settings")],
+        ]),
+    )
+
+
 async def handle_winback_settings(query):
     cfg = load_config()
     enabled = cfg.get("winback_enabled", False)
