@@ -22,7 +22,10 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
         return is_admin or mnt.feature_enabled(key)
 
     rows = []
-    rows.append([InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")])
+    # у кого подписка есть — заходит в действия с ней, у кого нет — оформляет
+    rows.append([InlineKeyboardButton(
+        "⚙️ Действия с подпиской" if paid_sub_status else "🆓 Получить подписку",
+        callback_data="my_paid_sub")])
     # продлить можно в любой момент — остаток не сгорает
     if paid_sub_status and on("payments"):
         rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])

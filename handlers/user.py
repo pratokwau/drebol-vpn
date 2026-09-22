@@ -58,31 +58,35 @@ def _progress_bar(used_gb: float, total_gb: int) -> str:
 
 
 async def handle_my_paid_sub(query):
+    """Действия с подпиской: сама информация живёт на главном экране."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     user_id = query.from_user.id
     from paidsub.storage import get_paid_sub_by_tg_id
     row = await get_paid_sub_by_tg_id(user_id)
     if not row:
         await query.edit_message_text(
-            "🔐 <b>Моя подписка</b>\n\nПодписки пока нет.",
+            "⚙️ <b>Действия с подпиской</b>\n\nПодписки пока нет.",
             parse_mode="HTML",
             reply_markup=back_main(),
         )
         return
-    email, sub_url, limit_hwid, total_gb = row[2], row[5], row[8], row[9]
+    email, sub_url, limit_hwid = row[2], row[5], row[8]
     status = row[11] if len(row) > 11 else "active"
+    renewed = row[12] if len(row) > 12 else 0
 
-    from xui_api import get_client_info, get_client_traffic
+    from xui_api import get_client_info
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
-    t = await get_client_traffic(email)
-    used = (t.get("up", 0) + t.get("down", 0)) if t.get("success") else 0
 
-    traffic = (f"📊 {_fmt_bytes_user(used)} из {total_gb} ГБ"
-               if total_gb and total_gb > 0 else "")
-
-    summary = await _sub_summary(row, frozen=not enabled, extra=traffic)
-    text = f"🔐 <b>Моя подписка</b>\n\n{summary}"
+    plan = "⭐️ Премиум" if renewed else "🆓 Пробный период"
+    if status == "expired":
+        mark = "🔴 Закончилась"
+    elif not enabled:
+        mark = "❄️ Заморожена"
+    elif status == "renewal":
+        mark = "🟡 Ждёт оплаты"
+    else:
+        mark = "🟢 Активна"
 
     # выключенные функции прячем от пользователей, админ видит всё
     import maintenance as mnt
@@ -92,7 +96,7 @@ async def handle_my_paid_sub(query):
         return _is_adm or mnt.feature_enabled(key)
 
     kb_rows = []
-    # Кнопка "Скопировать подписку": CopyTextButton если поддерживается, иначе callback
+    # Кнопка "Скопировать ссылку": CopyTextButton если поддерживается, иначе callback
     try:
         from telegram import CopyTextButton
         copy_btn = InlineKeyboardButton("📋 Скопировать ссылку", copy_text=CopyTextButton(text=sub_url))
@@ -111,7 +115,7 @@ async def handle_my_paid_sub(query):
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
-        text,
+        f"⚙️ <b>Действия с подпиской</b>\n\n{plan} · {mark}",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb_rows),
         disable_web_page_preview=True,
@@ -1253,8 +1257,31 @@ async def _sub_summary(row, frozen: bool = False, extra: str = "") -> str:
             + f"\n🔗 <code>{escape(row[5])}</code>")
 
 
+async def _sub_facts(row) -> str:
+    """Трафик и устройства — то, что человек хочет видеть сразу.
+
+    Панель может не ответить: тогда просто не показываем строку,
+    а не пугаем ошибкой на главном экране.
+    """
+    email, limit_hwid, total_gb = row[2], int(row[8] or 0), int(row[9] or 0)
+    parts = []
+    try:
+        from xui_api import get_client_traffic
+        t = await get_client_traffic(email)
+        if t.get("success"):
+            used = t.get("up", 0) + t.get("down", 0)
+            parts.append(f"📊 {_fmt_bytes_user(used)}"
+                         + (f" из {total_gb} ГБ" if total_gb > 0 else ""))
+    except Exception:
+        pass
+    if limit_hwid:
+        from paidsub.time_parser import _plural
+        parts.append("📱 " + _plural(limit_hwid, ("устройство", "устройства", "устройств")))
+    return " · ".join(parts)
+
+
 async def start_screen(user, fresh: bool = False):
-    """Главный экран: приветствие, сводка подписки и меню. Один на все входы."""
+    """Главный экран: приветствие, состояние подписки и меню."""
     from staff import is_helper
     from adminsub.storage import get_sub_by_tg_id
     from paidsub.storage import get_paid_sub_by_tg_id
@@ -1265,7 +1292,14 @@ async def start_screen(user, fresh: bool = False):
 
     head = f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>"
     if row:
-        body = await _sub_summary(row)
+        enabled = True
+        try:
+            from xui_api import get_client_info
+            info = await get_client_info(row[2])
+            enabled = info.get("enabled", True) if info.get("success") else True
+        except Exception:
+            pass
+        body = await _sub_summary(row, frozen=not enabled, extra=await _sub_facts(row))
         if fresh:
             body = ("🎉 <b>Пробный период активирован!</b>\n\n" + body
                     + "\n\n<i>Нажмите на ссылку и вставьте её в INCY.</i>")
