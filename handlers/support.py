@@ -15,73 +15,45 @@ from database import (
 )
 from keyboards import support_keyboard, support_topics_keyboard
 
-SEP = "━" * 14
-
 # Темы обращения: эмодзи, название и подсказка, которую бот даёт до переписки.
 # Кнопки в подсказке ведут туда, где вопрос решается сам.
 TOPICS = {
     "connect": {
         "emoji": "🔌",
         "name": "Не подключается",
-        "hint": (
-            "Чаще всего помогает одно из трёх:\n\n"
-            "1️⃣ <b>Обновите подписку в приложении.</b>\n"
-            "В INCY или Happ откройте подписку и потяните список вниз — "
-            "сервера обновятся.\n\n"
-            "2️⃣ <b>Проверьте срок.</b>\n"
-            "Если подписка закончилась, доступ выключен до оплаты.\n\n"
-            "3️⃣ <b>Перевыпустите ключ.</b>\n"
-            "Если ссылка попала к кому-то ещё или приложение путается — "
-            "новая ссылка решает это за минуту."
-        ),
-        "buttons": [("👤 Моя подписка", "my_paid_sub"), ("🔁 Перевыпуск ключа", "reissue_key")],
+        "hint": ("Обновите подписку в приложении — потяните список вниз.\n"
+                 "Не помогло — перевыпустите ключ."),
+        "buttons": [("🔁 Перевыпуск ключа", "reissue_key")],
     },
     "devices": {
         "emoji": "📱",
-        "name": "Устройства и лимит",
-        "hint": (
-            "На подписку можно подключить ограниченное число устройств.\n\n"
-            "Если лимит занят — отключите ненужное устройство в разделе "
-            "<b>«Мои устройства»</b>, и слот освободится сразу.\n"
-            "Нужно больше — там же можно добавить устройства."
-        ),
+        "name": "Устройства",
+        "hint": "Лимит занят? Отключите лишнее устройство — место освободится сразу.",
         "buttons": [("📱 Мои устройства", "my_devices")],
     },
     "pay": {
         "emoji": "💳",
-        "name": "Оплата и продление",
-        "hint": (
-            "Оплата засчитывается автоматически — обычно в течение минуты.\n\n"
-            "Продлить можно <b>в любой момент</b>: остаток срока не сгорает, "
-            "новые дни прибавятся к нему.\n\n"
-            "Если деньги ушли, а подписка не продлилась дольше 10 минут — "
-            "напишите нам, разберёмся вручную."
-        ),
+        "name": "Оплата",
+        "hint": ("Оплата засчитывается сама за минуту.\n"
+                 "Прошло больше 10 минут — напишите нам."),
         "buttons": [("💳 Продлить подписку", "renew_sub")],
     },
     "speed": {
         "emoji": "🐢",
-        "name": "Медленно работает",
-        "hint": (
-            "Попробуйте по порядку:\n\n"
-            "1️⃣ Выберите <b>другой сервер</b> в приложении — скорость сильно "
-            "зависит от точки подключения.\n"
-            "2️⃣ Переключитесь между Wi-Fi и мобильным интернетом.\n"
-            "3️⃣ Закройте и откройте приложение заново.\n\n"
-            "Если не помогло — напишите, какой сервер и какая скорость без VPN."
-        ),
+        "name": "Медленно",
+        "hint": "Смените сервер в приложении или переключитесь между Wi-Fi и мобильной сетью.",
         "buttons": [],
     },
     "idea": {
         "emoji": "💡",
-        "name": "Идея или пожелание",
-        "hint": "Расскажите, чего не хватает — мы правда читаем и добавляем.",
+        "name": "Идея",
+        "hint": "Напишите — мы читаем всё.",
         "buttons": [],
     },
     "other": {
         "emoji": "✍️",
         "name": "Другое",
-        "hint": "Опишите вопрос своими словами — ответим.",
+        "hint": "Опишите вопрос — ответим.",
         "buttons": [],
     },
 }
@@ -104,10 +76,10 @@ def _fmt_time(raw: str) -> str:
 def _status_line(ticket: dict) -> str:
     status = ticket["status"]
     if status == "closed":
-        return "✅ <b>Вопрос закрыт</b>\n<i>Напишите снова, если понадобится.</i>"
+        return "✅ вопрос закрыт"
     if status == "answered":
-        return "🛡 <b>Поддержка ответила</b>\n<i>Если вопрос остался — пишите дальше.</i>"
-    return "🟢 <b>Ждём ответа поддержки</b>\n<i>Обычно отвечаем в течение часа.</i>"
+        return "🛡 поддержка ответила"
+    return "🟢 ждём ответа"
 
 
 def _bubble(row) -> str:
@@ -138,16 +110,10 @@ async def open_support(query, user_id: int, page: int | None = None):
     has_files = (await count_support_files(user_id)) > 0
     ticket = await get_ticket(user_id)
 
-    parts = [
-        "💬 <b>Drebol VPN · Поддержка</b>",
-        _status_line(ticket),
-    ]
-    head = "\n\n".join(parts) + f"\n📌 Тема: <b>{topic_label(ticket['topic'])}</b>"
+    head = (f"💬 <b>Поддержка</b> · {_status_line(ticket)}\n"
+            f"📌 {topic_label(ticket['topic'])}")
     body = "\n\n".join(_bubble(r) for r in msgs)
-    tail = "✍️ <i>Напишите сообщение или отправьте файл — всё придёт сюда.</i>"
-    text = f"{head}\n\n{SEP}\n\n{body}\n\n{SEP}\n\n{tail}"
-    if total_pages > 1:
-        text += f"\n<i>Страница {page} из {total_pages}</i>"
+    text = f"{head}\n\n{body}\n\n<i>✍️ Пишите сюда</i>"
 
     await query.edit_message_text(
         text,
@@ -160,11 +126,7 @@ async def open_support(query, user_id: int, page: int | None = None):
 async def show_topics(query):
     """Первый экран: с чем помочь."""
     await query.edit_message_text(
-        "💬 <b>Drebol VPN · Поддержка</b>\n\n"
-        "Выберите тему — по частым вопросам я подскажу сразу, "
-        "без ожидания ответа.\n\n"
-        f"{SEP}\n\n"
-        "<i>Если нужного нет — выбирайте «Другое» и пишите своими словами.</i>",
+        "💬 <b>С чем помочь?</b>",
         parse_mode="HTML",
         reply_markup=support_topics_keyboard(TOPICS),
     )
@@ -176,14 +138,11 @@ async def show_topic_hint(query, context, topic: str):
     t = TOPICS.get(topic) or TOPICS["other"]
     rows = [[InlineKeyboardButton(label, callback_data=data)]
             for label, data in t["buttons"]]
-    rows.append([InlineKeyboardButton("✍️ Написать в поддержку",
+    rows.append([InlineKeyboardButton("✍️ Написать нам",
                                       callback_data=f"support_write:{topic}")])
-    rows.append([InlineKeyboardButton("◀️ Другая тема", callback_data="support_open")])
+    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="support_open")])
     await query.edit_message_text(
-        f"{t['emoji']} <b>{t['name']}</b>\n\n"
-        f"{t['hint']}\n\n"
-        f"{SEP}\n\n"
-        "<i>Не помогло? Напишите нам — разберёмся вместе.</i>",
+        f"{t['emoji']} <b>{t['name']}</b>\n\n{t['hint']}",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(rows),
     )
@@ -196,10 +155,8 @@ async def start_writing(query, context, topic: str):
     context.user_data["state"] = AWAITING_SUPPORT_MSG
     context.user_data["support_topic"] = topic
     await query.edit_message_text(
-        f"✍️ <b>Ваше обращение</b>\n"
-        f"📌 Тема: <b>{topic_label(topic)}</b>\n\n"
-        "Опишите вопрос одним сообщением. Можно приложить фото или файл — "
-        "скриншот ошибки помогает решить всё быстрее.",
+        "✍️ <b>Опишите вопрос</b>\n"
+        "<i>Можно приложить скриншот.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data=f"support_topic:{topic}")],
@@ -212,9 +169,7 @@ async def handle_support_close(query, user_id: int):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     await ticket_closed(user_id)
     await query.edit_message_text(
-        "✅ <b>Вопрос закрыт</b>\n\n"
-        "Спасибо, что написали! Если понадобимся снова — "
-        "просто откройте поддержку и напишите.",
+        "✅ <b>Вопрос закрыт</b>\n\nСпасибо! Если что — пишите снова.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("💬 Открыть поддержку", callback_data="support_open")],

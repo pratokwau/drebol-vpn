@@ -92,8 +92,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, total_pages = await get_support_messages(user.id)
         has_files = (await count_support_files(user.id)) > 0
         await update.message.reply_text(
-            "✅ <b>Отправлено в поддержку</b>\n\n"
-            "Обычно отвечаем в течение часа — ответ придёт сюда.",
+            "✅ <b>Отправлено</b> — ответ придёт сюда.",
             parse_mode="HTML",
             reply_markup=support_keyboard(total_pages, total_pages, has_files),
         )
@@ -1369,7 +1368,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, total_pages = await get_support_messages(user.id)
         has_files = (await count_support_files(user.id)) > 0
         await msg.reply_text(
-            "✅ Файл отправлен в поддержку! Мы ответим как можно скорее.",
+            "✅ Файл отправлен — ответ придёт сюда.",
             reply_markup=support_keyboard(total_pages, total_pages, has_files),
         )
         from html import escape

@@ -59,148 +59,30 @@ def _progress_bar(used_gb: float, total_gb: int) -> str:
 
 async def handle_my_paid_sub(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from datetime import datetime, timedelta
     user_id = query.from_user.id
     from paidsub.storage import get_paid_sub_by_tg_id
     row = await get_paid_sub_by_tg_id(user_id)
     if not row:
         await query.edit_message_text(
-            "🔐 <b>Drebol VPN</b>\n\n"
-            "У вас пока нет подписки.\n"
-            "Нажмите <b>👤 Моя подписка</b> чтобы оформить пробный период.",
+            "🔐 <b>Моя подписка</b>\n\nПодписки пока нет.",
             parse_mode="HTML",
             reply_markup=back_main(),
         )
         return
-    _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at, status, times_renewed = row[:13]
+    email, sub_url, limit_hwid, total_gb = row[2], row[5], row[8], row[9]
+    status = row[11] if len(row) > 11 else "active"
 
-    from paidsub.time_parser import fmt_duration, fmt_duration_precise
     from xui_api import get_client_info, get_client_traffic
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
-
     t = await get_client_traffic(email)
-    if t.get("success"):
-        up = t.get("up", 0)
-        down = t.get("down", 0)
-        total_used = up + down
-        used_str = _fmt_bytes_user(total_used)
-        up_str = _fmt_bytes_user(up)
-        down_str = _fmt_bytes_user(down)
-    else:
-        total_used = 0
-        used_str = "0 КБ"
-        up_str = "0 КБ"
-        down_str = "0 КБ"
+    used = (t.get("up", 0) + t.get("down", 0)) if t.get("success") else 0
 
-    def _parse_dt(s):
-        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-            try:
-                return datetime.strptime(s, fmt)
-            except ValueError:
-                continue
-        return datetime.now()
+    traffic = (f"📊 {_fmt_bytes_user(used)} из {total_gb} ГБ"
+               if total_gb and total_gb > 0 else "")
 
-    expire_dt = _parse_dt(expire)
-    cfg_tmp = load_config()
-    # условия берём из самой подписки, а не из общих настроек —
-    # иначе экран показывает не то, по чему реально живёт подписка
-    from paidsub.storage import sub_settings
-    settings = sub_settings(row)
-    renew_sec = settings["renew_time"]
-
-    # --- Статус и остаток срока ---
-    left_sec, left_note = 0, ""
-    if status == "expired":
-        status_emoji, status_text = "🔴", "Отключена"
-        left_note = "время на продление истекло"
-    elif status == "renewal":
-        status_emoji, status_text = "🟡", "Ожидает оплаты"
-        left_sec = max(0, int((expire_dt - datetime.now()).total_seconds()))
-        left_note = "на продление"
-    elif not enabled:
-        status_emoji, status_text = "❄️", "Заморожена"
-        left_note = "подписка приостановлена"
-    else:
-        status_emoji, status_text = "🟢", "Активна"
-        # окно на оплату идёт уже после конца периода, поэтому вычитаем его
-        left_sec = max(0, int((expire_dt - datetime.now()).total_seconds()) - renew_sec)
-        if not left_sec:
-            left_note = "скоро закончится"
-
-    # --- Трафик ---
-    if total_gb > 0:
-        used_gb = total_used / (1024 ** 3)
-        traffic_head = (
-            f"📊 <b>Трафик</b>\n"
-            f"{used_str} из <b>{total_gb} ГБ</b>\n"
-            f"<code>{_progress_bar(used_gb, total_gb)}</code>"
-        )
-    else:
-        traffic_head = "📊 <b>Трафик</b>\n♾️ Безлимитный"
-    traffic_block = (
-        f"{traffic_head}\n\n"
-        f"┌ ⬆️ Отправлено: <b>{up_str}</b>\n"
-        f"└ ⬇️ Получено: <b>{down_str}</b>\n\n"
-        f"📦 Всего использовано: <b>{used_str}</b>"
-    )
-
-    # --- Дата подключения ---
-    try:
-        created_dt = _parse_dt(created_at)
-        created_str = created_dt.strftime("%d.%m.%Y")
-    except Exception:
-        created_str = str(created_at)[:10]
-
-    # --- Тариф: он про сам план, состояние показывает статус рядом ---
-    plan = "⭐️ <b>Премиум</b>" if times_renewed > 0 else "🆓 <b>Пробный период</b>"
-    expire_display = expire_dt.strftime("%d.%m.%Y · %H:%M")
-
-    # --- Приглашения ---
-    referral_block = ""
-    from paidsub.storage import get_referral_stats
-    from paidsub.time_parser import _plural
-    ref_stats = await get_referral_stats(user_id)
-    bonus_cfg = cfg_tmp.get("referral_bonus")
-    invited_bonus_cfg = cfg_tmp.get("referral_invited_bonus")
-    if ref_stats["total"] > 0:
-        rows_ref = ["👥 <b>Приглашения</b>",
-                    f"Приглашено: <b>{_plural(ref_stats['total'], ('друг', 'друга', 'друзей'))}</b>"]
-        if ref_stats["total_bonus"] > 0:
-            rows_ref.append(f"🎁 Получено: <b>+{fmt_duration(ref_stats['total_bonus'])}</b>")
-        referral_block = "\n".join(rows_ref)
-    elif bonus_cfg or invited_bonus_cfg:
-        parts = []
-        if bonus_cfg:
-            parts.append(f"вам +{fmt_duration(bonus_cfg)}")
-        if invited_bonus_cfg:
-            parts.append(f"другу +{fmt_duration(invited_bonus_cfg)}")
-        referral_block = ("👥 <b>Приглашения</b>\n"
-                          f"🎁 Пригласите друга — {', '.join(parts)}")
-
-    sep = "━" * 14
-    if left_sec:
-        left_line = fmt_duration_precise(left_sec) + (f" <i>({left_note})</i>" if left_note else "")
-    else:
-        left_line = f"<i>{left_note or 'время вышло'}</i>"
-
-    text = (
-        f"🔐 <b>Drebol VPN · Моя подписка</b>\n\n"
-        f"{plan} · {status_emoji} <b>{status_text}</b>\n\n"
-
-        f"⏳ <b>Осталось</b>\n{left_line}\n\n"
-        f"📅 <b>Действует до:</b>\n{expire_display}\n\n"
-        f"📆 <b>Подключена:</b>\n{created_str}\n\n"
-
-        f"{sep}\n\n"
-        f"{traffic_block}\n\n"
-        + (f"{sep}\n\n{referral_block}\n\n" if referral_block else "")
-        + f"{sep}\n\n"
-        f"🔗 <b>Ссылка на подписку</b>\n"
-        f"<code>{sub_url}</code>\n\n"
-        f"💡 <i>Нажмите на ссылку, чтобы скопировать её,\n"
-        f"затем вставьте в INCY или Happ.</i>"
-    )
+    summary = await _sub_summary(row, frozen=not enabled, extra=traffic)
+    text = f"🔐 <b>Моя подписка</b>\n\n{summary}"
 
     # выключенные функции прячем от пользователей, админ видит всё
     import maintenance as mnt
@@ -213,11 +95,10 @@ async def handle_my_paid_sub(query):
     # Кнопка "Скопировать подписку": CopyTextButton если поддерживается, иначе callback
     try:
         from telegram import CopyTextButton
-        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", copy_text=CopyTextButton(text=sub_url))
+        copy_btn = InlineKeyboardButton("📋 Скопировать ссылку", copy_text=CopyTextButton(text=sub_url))
     except (ImportError, TypeError):
-        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", callback_data="copy_sub")
-    kb_rows.append([copy_btn])
-    kb_rows.append([InlineKeyboardButton("📱 QR-код", callback_data="qr_code")])
+        copy_btn = InlineKeyboardButton("📋 Скопировать ссылку", callback_data="copy_sub")
+    kb_rows.append([copy_btn, InlineKeyboardButton("📱 QR-код", callback_data="qr_code")])
     if limit_hwid and _on("subscription"):
         kb_rows.append([InlineKeyboardButton("📱 Мои устройства", callback_data="my_devices")])
     # продлевать можно в любой момент: остаток срока при оплате не сгорает
@@ -261,9 +142,7 @@ async def _left_line(row) -> str:
     _end, left = await _sub_end(row)
     if left < 60:
         return ""
-    from paidsub.time_parser import fmt_duration_precise
-    return (f"⏳ Сейчас осталось: <b>{fmt_duration_precise(left)}</b>\n"
-            f"<i>Остаток не сгорит — новый срок прибавится к нему.</i>\n\n")
+    return "<i>Остаток не сгорит — дни прибавятся.</i>"
 
 
 async def handle_renew_sub(query):
@@ -333,12 +212,9 @@ async def handle_renew_sub(query):
                 kb.append(promo_btn_row)
                 kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
 
+                extra = (promo_line + await _left_line(row)).strip()
                 await query.edit_message_text(
-                    "💳 <b>Продление подписки</b>\n\n"
-                    f"{promo_line}"
-                    f"{await _left_line(row)}"
-                    "Выберите тариф:\n\n"
-                    "<i>Подписка продлится автоматически сразу после оплаты.</i>",
+                    "💳 <b>Выберите тариф</b>" + (f"\n\n{extra}" if extra else ""),
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup(kb),
                 )
@@ -359,15 +235,12 @@ async def handle_renew_sub(query):
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
 
     await query.edit_message_text(
-        "💳 <b>Продление подписки</b>\n\n"
+        f"💳 <b>Продление · {period_str}</b>\n\n"
         f"{price_line}"
-        f"{promo_line}"
-        f"⏱ Срок: <b>{period_str}</b>\n\n"
-        f"{await _left_line(row)}"
-        "При оплате в поле <b>обратная связь</b> введите:\n"
+        f"{promo_line}\n"
+        "В комментарии к оплате укажите:\n"
         f"<code>{hint_text}</code>\n\n"
-        "Затем нажмите кнопку <b>✅ Я оплатил</b> — "
-        "администратор проверит и активирует вашу подписку.",
+        "Потом нажмите «✅ Я оплатил».",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
     )
@@ -398,17 +271,13 @@ def _device_state(row) -> tuple:
 
 
 async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
-    """Карточка тарифа: срок, цена, доп. устройства и промокод — в одном месте.
-
-    Отсюда сразу счёт: человеку не приходится возвращаться за устройствами
-    после оплаты, а нам не нужен второй платёж.
-    """
+    """Карточка тарифа: цена, до какого числа продлится, устройства — и сразу оплата."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from datetime import timedelta
     from database import get_tariff
     from paidsub.storage import get_paid_sub_by_tg_id, sub_settings, get_pending_promo
     from paidsub.handlers import validate_promo, apply_discount
-    from paidsub.time_parser import fmt_duration, fmt_duration_precise
+    from paidsub.time_parser import fmt_duration
 
     user = query.from_user
     row = await get_paid_sub_by_tg_id(user.id)
@@ -429,16 +298,15 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
 
     # Промокод действует на срок, устройства считаются отдельно —
     # иначе скидка растекается на разовую покупку слотов
-    promo_line = ""
     discount = None
-    promo_btn = [InlineKeyboardButton("🎟 Ввести промокод", callback_data="enter_promo")]
+    promo_btn = [InlineKeyboardButton("🎟 Промокод", callback_data="enter_promo")]
     pending = await get_pending_promo(user.id)
     if pending:
         promo, _err = await validate_promo(pending, user.id)
         if promo:
             discount = promo[2]
-            promo_line = f"🎟 Промокод <b>{escape(promo[1])}</b>: <b>−{discount}%</b>\n"
-            promo_btn = [InlineKeyboardButton("❌ Убрать промокод", callback_data="remove_promo")]
+            promo_btn = [InlineKeyboardButton(f"❌ Убрать промокод −{discount}%",
+                                              callback_data="remove_promo")]
     period_price = apply_discount(price, discount) if discount else price
 
     # Устройства выбираются на новый период: по умолчанию столько же,
@@ -453,30 +321,23 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
     dev_sum = devices * dev_price
     total = period_price + dev_sum
 
-    end, left = await _sub_end(row)
+    end, _left = await _sub_end(row)
     new_end = end + timedelta(seconds=pay_seconds)
 
-    price_line = (f"💵 Цена: <s>{price} ₽</s> → <b>{period_price} ₽</b>\n"
-                  if discount else f"💵 Цена: <b>{price} ₽</b>\n")
-    left_line = (f"⏳ Сейчас осталось: <b>{fmt_duration_precise(left)}</b> — не сгорит\n"
-                 if left >= 60 else "")
+    price_line = (f"💵 <s>{price}</s> <b>{period_price} ₽</b>" if discount
+                  else f"💵 <b>{price} ₽</b>")
+    lines = [
+        f"💳 <b>{escape(str(name))}</b> · {fmt_duration(pay_seconds)}",
+        price_line,
+        f"📅 Продлится до <b>{new_end.strftime('%d.%m.%Y')}</b>",
+    ]
 
-    dev_block = ""
     kb = []
     if dev_price:
-        picked = (f"<b>+{devices}</b> · {dev_sum} ₽ за период" if devices
-                  else "<i>без доп. устройств — 0 ₽</i>")
-        now_line = (f"Сейчас оплачено: <b>+{bought}</b> (до конца текущего периода)\n"
-                    if bought else "")
-        dev_block = (
-            f"\n📱 <b>Устройства</b>\n"
-            f"Ваш лимит: <b>{own_limit}</b>\n"
-            f"{now_line}"
-            f"На новый период: {picked}\n"
-            f"Всего будет: <b>{own_limit + devices}</b>\n"
-            + ("<i>Не нужны — выберите «Без доп.», лимит вернётся к своему "
-               "и платить за них не придётся.</i>\n" if bought else "")
-        )
+        dev_line = f"📱 Устройств: <b>{own_limit + devices}</b>"
+        if devices:
+            dev_line += f" (+{devices} · {dev_sum} ₽)"
+        lines += ["", dev_line]
         row_btns = [InlineKeyboardButton(
             "✅ Без доп." if devices == 0 else "Без доп.",
             callback_data=f"tariff_pick:{tariff_id}:0")]
@@ -490,24 +351,15 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
         if row_btns:
             kb.append(row_btns)
 
+    lines += ["", f"💰 <b>К оплате: {total} ₽</b>"]
+
     kb.append(promo_btn)
     kb.append([InlineKeyboardButton(f"💳 Оплатить {total} ₽",
                                     callback_data=f"pay_invoice:{tariff_id}:{devices}")])
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")])
 
-    total_line = (f"\n💰 <b>К оплате: {total} ₽</b>\n"
-                  f"<i>{period_price} ₽ за срок + {dev_sum} ₽ за {devices} устр.</i>\n"
-                  if dev_sum else f"\n💰 <b>К оплате: {total} ₽</b>\n")
-
     await query.edit_message_text(
-        f"💳 <b>{escape(str(name))}</b>\n\n"
-        f"⏱ Срок: <b>{fmt_duration(pay_seconds)}</b>\n"
-        f"{price_line}"
-        f"{promo_line}"
-        f"{left_line}"
-        f"📅 После оплаты — до <b>{new_end.strftime('%d.%m.%Y · %H:%M')}</b>\n"
-        f"{dev_block}"
-        f"{total_line}",
+        "\n".join(lines),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
     )
@@ -629,19 +481,19 @@ async def _send_invoice(query, url: str, price: int,
     from paidsub.time_parser import fmt_duration
     from html import escape as _esc
 
-    head = f"💳 <b>Счёт на {price} ₽</b>"
+    parts = []
     if tariff_name:
-        head += f"\n💰 Тариф: <b>{_esc(str(tariff_name))}</b>"
+        parts.append(_esc(str(tariff_name)))
     if period_seconds:
-        head += f"\n⏱ Срок: <b>{fmt_duration(period_seconds)}</b>"
+        parts.append(fmt_duration(period_seconds))
     if devices:
-        head += f"\n📱 Доп. устройства на период: <b>+{devices}</b>"
+        parts.append(f"+{devices} устр.")
+    what = " · ".join(parts)
 
     await query.edit_message_text(
-        f"{head}\n\n"
-        "Нажмите кнопку ниже и оплатите.\n"
-        "Подписка продлится автоматически — обычно в течение минуты после оплаты.\n\n"
-        "<i>Если оплатили, а подписка не продлилась — напишите в поддержку.</i>",
+        f"💳 <b>Счёт на {price} ₽</b>\n"
+        + (f"{what}\n" if what else "")
+        + "\nОплатите — подписка продлится сама.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Перейти к оплате", url=url)],
@@ -656,7 +508,7 @@ async def handle_enter_promo(query, context):
     from states import AWAITING_PROMO_CODE
     context.user_data["state"] = AWAITING_PROMO_CODE
     await query.edit_message_text(
-        "🎟 <b>Промокод</b>\n\nВведите промокод одним сообщением:",
+        "🎟 <b>Введите промокод</b>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")]
@@ -788,26 +640,20 @@ async def handle_news(query):
 
 
 async def handle_how_to(query):
+    incy = ('<a href="https://apps.apple.com/ru/app/incy/id6756943388">iOS</a> · '
+            '<a href="https://play.google.com/store/apps/details?id=llc.itdev.incy">Android</a> · '
+            '<a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe">Windows</a> · '
+            '<a href="https://apps.apple.com/ru/app/incy/id6756943388">macOS</a>')
+    happ = ('<a href="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215">iOS</a> · '
+            '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
+            '<a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe">Windows</a> · '
+            '<a href="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215">macOS</a>')
     await query.edit_message_text(
-        "<b>❓ Как подключиться?</b>\n\n"
-        "<b>Основной способ ⬇️</b>\n"
-        "1. Оформи пробный период или подписку\n"
-        "2. Установи приложение — рекомендуем INCY\n"
-        "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">iOS</a>\n"
-        "• <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Android</a>\n"
-        "• <a href=\"https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe\">Windows</a>\n"
-        "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">MacOS</a>\n"
-        "3. Скопируй ссылку подписки и вставь её в приложение\n"
-        "4. Выбери сервер и подключайся\n\n"
-        "<b>Альтернативный способ ⬇️</b>\n"
-        "1. Оформи пробный период или подписку\n"
-        "2. Установи приложение — Happ\n"
-        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>\n"
-        "• <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Android</a>\n"
-        "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n"
-        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">MacOS</a>\n"
-        "3. Скопируй ссылку подписки и вставь её в приложение\n"
-        "4. Выбери сервер и подключайся",
+        "❓ <b>Как подключиться</b>\n\n"
+        f"1. Установите <b>INCY</b>: {incy}\n"
+        "2. Скопируйте ссылку в «👤 Моя подписка»\n"
+        "3. Вставьте её в приложение и подключайтесь\n\n"
+        f"Запасной вариант — <b>Happ</b>: {happ}",
         parse_mode="HTML",
         reply_markup=back_info(),
         disable_web_page_preview=True,
@@ -826,25 +672,18 @@ async def handle_about(query):
     cfg = load_config()
     privacy_url = cfg.get("privacy_url", "")
     terms_url = cfg.get("terms_url", "")
-
-    if privacy_url and terms_url:
-        docs = (
-            f'<a href="{privacy_url}">политика конфиденциальности</a>'
-            f' и <a href="{terms_url}">пользовательское соглашение</a>'
-        )
-    elif privacy_url:
-        docs = f'<a href="{privacy_url}">политика конфиденциальности</a> и пользовательское соглашение'
-    elif terms_url:
-        docs = f'политика конфиденциальности и <a href="{terms_url}">пользовательское соглашение</a>'
-    else:
-        docs = "политика конфиденциальности и пользовательское соглашение"
+    docs = []
+    if privacy_url:
+        docs.append(f'<a href="{privacy_url}">Политика</a>')
+    if terms_url:
+        docs.append(f'<a href="{terms_url}">Соглашение</a>')
 
     await query.edit_message_text(
-        "<b>ℹ️ О сервисе</b>\n\n"
-        "<b>🖥️ Любая платформа</b> — iOS, MacOS, Android, Windows\n\n"
-        "<b>🛡️ Без логов</b> — не храним данные об активности пользователей\n\n"
-        "<b>💳 Прозрачные платежи</b> — без скрытых списаний и автопродления\n\n"
-        f"<b>📕 Документы</b> — {docs}",
+        "ℹ️ <b>О сервисе</b>\n\n"
+        "🖥 Все платформы\n"
+        "🛡 Без логов\n"
+        "💳 Без автосписаний"
+        + (f"\n\n📕 {' · '.join(docs)}" if docs else ""),
         parse_mode="HTML",
         reply_markup=back_info(),
         disable_web_page_preview=True,
@@ -852,61 +691,44 @@ async def handle_about(query):
 
 
 async def handle_prices(query):
-    """Простая витрина цен — всё видно сразу, без переходов."""
-    from paidsub.time_parser import fmt_duration
+    """Витрина цен: сколько стоит и что входит — в пару строк."""
+    from paidsub.time_parser import fmt_duration, _plural
     cfg = load_config()
 
     price = cfg.get("paid_price", 0) or 0
     pay_period = cfg.get("paid_pay_period")
     trial_period = cfg.get("paid_trial_period")
     traffic = int(cfg.get("paid_preset_traffic", 0) or 0)
-    limit_ip = int(cfg.get("paid_preset_ip", 0) or 0)
+    # устройства — это лимит HWID из настроек платных подписок
+    devices = int(cfg.get("paid_preset_hwid", 0) or 0)
 
-    lines = ["💰 <b>Цены</b>\n"]
-
+    lines = ["💰 <b>Цены</b>", ""]
     if trial_period:
-        lines.append(f"🆓 <b>Пробный период</b> — бесплатно\n     {fmt_duration(trial_period)}\n")
+        lines.append(f"🆓 Пробный — {fmt_duration(trial_period)} бесплатно")
 
     # Тарифы — то же, что человек увидит при продлении.
     # Пока их нет, показываем одну цену из общих настроек.
     from database import list_tariffs
     tariffs = await list_tariffs(only_active=True)
-
     if tariffs:
-        lines.append("💳 <b>Тарифы</b>")
         base = None
         for _id, name, t_period, t_price, _a, _s in tariffs:
             per_month = t_price / (t_period / 2592000) if t_period else None
             note = ""
-            # показываем выгоду длинных тарифов относительно самого короткого
+            # выгода длинных тарифов относительно самого короткого
             if base and per_month and per_month < base * 0.97:
-                note = f"  <i>−{round((1 - per_month / base) * 100)}%</i>"
+                note = f" · <i>−{round((1 - per_month / base) * 100)}%</i>"
             if base is None and per_month:
                 base = per_month
-            lines.append(f"     <b>{name}</b> — {t_price} ₽ · {fmt_duration(t_period)}{note}")
-        lines.append("")
-    elif price and pay_period:
-        lines.append(f"💳 <b>Подписка</b> — <b>{price} ₽</b>\n     {fmt_duration(pay_period)}\n")
+            lines.append(f"💳 {escape(str(name))} — <b>{t_price} ₽</b>{note}")
     elif price:
-        lines.append(f"💳 <b>Подписка</b> — <b>{price} ₽</b>\n")
-    else:
-        lines.append("💳 <b>Подписка</b> — цена уточняется\n")
+        period = f" · {fmt_duration(pay_period)}" if pay_period else ""
+        lines.append(f"💳 Подписка — <b>{price} ₽</b>{period}")
 
-    lines.append("<b>Что входит:</b>")
-    lines.append(f"📶 Трафик — {f'{traffic} ГБ' if traffic > 0 else 'безлимит'}")
-    lines.append(f"📱 Устройств — {limit_ip if limit_ip > 0 else 'без ограничений'}")
-    lines.append("🖥️ iOS, Android, Windows, macOS")
-    lines.append("🛡️ Без логов и скрытых списаний")
-
-    from database import DB_PATH
-    import aiosqlite
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT COUNT(*) FROM promo_codes WHERE active = 1"
-        ) as cur:
-            has_promo = (await cur.fetchone())[0] > 0
-    if has_promo:
-        lines.append("\n🎟 Действуют промокоды — скидка применится при оплате.")
+    dev = (_plural(devices, ("устройство", "устройства", "устройств"))
+           if devices > 0 else "без лимита устройств")
+    traf = f"{traffic} ГБ" if traffic > 0 else "безлимит"
+    lines += ["", f"📱 {dev} · 📶 {traf}"]
 
     await query.edit_message_text(
         "\n".join(lines),
@@ -968,11 +790,8 @@ async def handle_reissue_key(query, context):
         await query.answer("Подписка не найдена", show_alert=True)
         return
     await query.edit_message_text(
-        "🔁 <b>Перевыпуск ключа</b>\n\n"
-        "Вы уверены, что хотите перевыпустить ключ?\n\n"
-        "⚠️ <b>Старая ссылка перестанет работать.</b>\n"
-        "VPN отключится на всех устройствах, пока вы не добавите новую ссылку.\n\n"
-        "Срок подписки, трафик и лимиты сохранятся.",
+        "🔁 <b>Перевыпустить ключ?</b>\n\n"
+        "Старая ссылка перестанет работать на всех устройствах.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Да, перевыпустить", callback_data="reissue_do")],
@@ -992,17 +811,20 @@ async def handle_reissue_do(query, context):
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    sub_id, email, old_url = row[0], row[2], row[5]
+    sub_id, email = row[0], row[2]
 
     await query.edit_message_text("⏳ Перевыпускаю ключ...")
 
     from xui_api import reissue_subscription
     result = await reissue_subscription(email)
     if not result["success"]:
+        # техническая причина нужна админу, человеку — что делать дальше
+        await send_log(context.bot,
+            f"⚠️ Перевыпуск не удался: <code>{user_id}</code>\n"
+            f"<code>{escape(str(result['error']))}</code>")
         await query.edit_message_text(
-            "❌ <b>Не удалось перевыпустить ключ</b>\n\n"
-            f"<code>{escape(str(result['error']))}</code>\n\n"
-            "Старая ссылка продолжает работать. Попробуйте позже или напишите в поддержку.",
+            "❌ <b>Не получилось</b>\n\n"
+            "Старая ссылка продолжает работать. Попробуйте позже.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
@@ -1028,22 +850,18 @@ async def handle_reissue_do(query, context):
 
     try:
         from telegram import CopyTextButton
-        copy_btn = InlineKeyboardButton("📋 Скопировать подписку",
+        copy_btn = InlineKeyboardButton("📋 Скопировать ссылку",
                                         copy_text=CopyTextButton(text=new_url))
     except (ImportError, TypeError):
-        copy_btn = InlineKeyboardButton("📋 Скопировать подписку", callback_data="copy_sub")
+        copy_btn = InlineKeyboardButton("📋 Скопировать ссылку", callback_data="copy_sub")
 
     await query.edit_message_text(
-        "✅ <b>Ключ перевыпущен!</b>\n\n"
-        "Старая ссылка больше не работает.\n"
-        "Удалите старую подписку в приложении и добавьте новую:\n\n"
-        f"🔗 <code>{escape(new_url)}</code>\n\n"
-        "<i>Нажмите на ссылку, чтобы скопировать её,\n"
-        "затем вставьте в INCY или Happ.</i>",
+        "✅ <b>Ключ перевыпущен</b>\n\n"
+        f"<code>{escape(new_url)}</code>\n\n"
+        "Замените подписку в приложении на новую.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [copy_btn],
-            [InlineKeyboardButton("📱 QR-код", callback_data="qr_code")],
+            [copy_btn, InlineKeyboardButton("📱 QR-код", callback_data="qr_code")],
             [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")],
         ]),
         disable_web_page_preview=True,
@@ -1132,13 +950,12 @@ async def handle_info(query):
     """Раздел «Инфо»: как подключиться, цены, документы."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     await query.edit_message_text(
-        "ℹ️ <b>Инфо</b>\n\n"
-        "Здесь всё о сервисе — как подключиться, сколько стоит и наши документы.",
+        "ℹ️ <b>Инфо</b>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to")],
             [InlineKeyboardButton("💰 Цены", callback_data="prices")],
-            [InlineKeyboardButton("📕 О сервисе и документы", callback_data="about")],
+            [InlineKeyboardButton("📕 О сервисе", callback_data="about")],
             [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
         ]),
     )
@@ -1162,34 +979,27 @@ async def handle_my_devices(query, context=None):
     max_extra = int(cfg.get("device_max_extra") or 5)
     bought = int(row[18]) if len(row) > 18 and row[18] else 0
 
-    lines = ["📱 <b>Мои устройства</b>\n"]
     kb = []
     if not limit:
-        lines.append("Ограничения нет — подключайтесь с любого числа устройств.")
+        lines = ["📱 <b>Устройства</b>", "", "Без ограничений."]
     elif not r.get("ok"):
-        lines.append(f"Доступно устройств: <b>{limit}</b>\n\n"
-                     "<i>Список сейчас недоступен, попробуйте позже.</i>")
+        lines = [f"📱 <b>Устройств: до {limit}</b>", "",
+                 "<i>Список сейчас недоступен.</i>"]
     else:
         items = r["items"]
-        lines.append(f"Занято <b>{len(items)}</b> из <b>{limit}</b>\n")
+        lines = [f"📱 <b>Устройства: {len(items)} из {limit}</b>", ""]
         for i, d in enumerate(items[:10], 1):
             name = " · ".join(str(x) for x in (d.get("deviceOs"), d.get("deviceModel")) if x) or "устройство"
-            lines.append(f"{i}. {escape(name)} · был {_when_ms(d.get('lastSeen'))}")
-            kb.append([InlineKeyboardButton(f"🗑 Отключить {i} — {name[:22]}",
+            lines.append(f"{i}. {escape(name)} · {_when_ms(d.get('lastSeen'))}")
+            kb.append([InlineKeyboardButton(f"🗑 Отключить {i}",
                                             callback_data=f"dev_del:{d.get('id')}")])
         if not items:
-            lines.append("<i>Пока ни одного. Подключитесь в приложении — устройство появится здесь.</i>")
-        if len(items) >= limit:
-            lines.append("\n⚠️ Свободных слотов нет. Отключите лишнее устройство "
-                         "или добавьте слоты.")
-    if bought:
-        lines.append(f"\n📦 Из них оплачено дополнительно: <b>+{bought}</b> "
-                     "— до конца текущего периода.")
+            lines.append("Пока ни одного — подключитесь в приложении.")
+        elif len(items) >= limit:
+            lines += ["", "⚠️ Мест нет — отключите лишнее или добавьте."]
     if limit and price > 0 and bought < max_extra:
-        lines.append(f"\n➕ Дополнительное устройство — <b>{price} ₽</b> "
-                     "до конца оплаченного периода.\n"
-                     "<i>При продлении сами решите, оставлять их или нет.</i>")
-        kb.append([InlineKeyboardButton("➕ Добавить устройство", callback_data="dev_buy_menu")])
+        kb.append([InlineKeyboardButton(f"➕ Добавить · {price} ₽",
+                                        callback_data="dev_buy_menu")])
     kb.append([InlineKeyboardButton("◀️ К подписке", callback_data="my_paid_sub")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb))
@@ -1237,10 +1047,8 @@ async def handle_dev_buy_menu(query, context):
           for n in range(1, min(3, left) + 1)]
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_devices")])
     await query.edit_message_text(
-        "➕ <b>Добавить устройства</b>\n\n"
-        f"Одно устройство — <b>{price} ₽</b> до конца оплаченного периода.\n"
-        "При продлении вы сами решите, оставлять их или нет.\n\n"
-        "Сколько добавить?",
+        "➕ <b>Сколько добавить?</b>\n"
+        "<i>До конца оплаченного срока.</i>",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb),
     )
 
@@ -1266,9 +1074,8 @@ async def handle_dev_buy(query, context, count: int):
         return
     if not pg.is_configured():
         await query.edit_message_text(
-            "➕ <b>Добавить устройства</b>\n\n"
-            "Автоматическая оплата сейчас недоступна — напишите в поддержку, "
-            "и мы добавим устройства вручную.",
+            "➕ <b>Оплата сейчас недоступна</b>\n\n"
+            "Напишите в поддержку — добавим вручную.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
@@ -1300,10 +1107,8 @@ async def handle_dev_buy(query, context, count: int):
     )
     await query.edit_message_text(
         f"💳 <b>Счёт на {amount} ₽</b>\n"
-        f"➕ Устройств: <b>{count}</b>\n\n"
-        "Нажмите кнопку ниже и оплатите — слоты добавятся автоматически, "
-        "обычно в течение минуты.\n\n"
-        "<i>Если оплатили, а устройства не добавились — напишите в поддержку.</i>",
+        f"+{count} устр.\n\n"
+        "Оплатите — устройства добавятся сами.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("💳 Оплатить", url=result["url"])],
@@ -1393,40 +1198,34 @@ async def ensure_trial(user, context, on_start=None) -> bool:
         _ISSUING.discard(user.id)
 
 
-async def _start_sub_block(row, fresh: bool) -> str:
-    """Короткая сводка подписки для главного экрана."""
+async def _sub_summary(row, frozen: bool = False, extra: str = "") -> str:
+    """Сводка подписки в три строки: что за план, до когда, ссылка."""
     from datetime import datetime
     from paidsub.storage import get_paid_sub, parse_sub_date
     from paidsub.time_parser import fmt_duration_precise
     status = row[11] if len(row) > 11 else "active"
     renewed = row[12] if len(row) > 12 else 0
-    sub_url = row[5]
     plan = "⭐️ <b>Премиум</b>" if renewed else "🆓 <b>Пробный период</b>"
 
     full = await get_paid_sub(row[0])
     end = parse_sub_date(full[18]) if full and len(full) > 18 and full[18] else None
     end = end or parse_sub_date(row[6])
     left = int((end - datetime.now()).total_seconds()) if end else 0
-    until = end.strftime("%d.%m.%Y · %H:%M") if end else row[6]
-
-    lines = []
-    if fresh:
-        lines += ["🎉 <b>Пробный период активирован!</b>", ""]
 
     if status == "expired" or (left <= 0 and status != "renewal"):
-        lines += [f"{plan} · 🔴 <b>Закончилась</b>", "",
-                  "Продлите подписку — доступ включится сразу после оплаты."]
-        return "\n".join(lines)
+        return f"{plan} · 🔴 Закончилась\nПродлите — доступ вернётся сразу."
 
-    mark = "🟡 <b>Ожидает оплаты</b>" if status == "renewal" else "🟢 <b>Активна</b>"
-    lines += [f"{plan} · {mark}",
-              f"⏳ Осталось: <b>{fmt_duration_precise(max(left, 0))}</b>",
-              f"📅 До: <b>{until}</b>",
-              "",
-              "🔗 <b>Ваша ссылка</b>",
-              f"<code>{escape(sub_url)}</code>",
-              "<i>Нажмите, чтобы скопировать, и вставьте в INCY или Happ.</i>"]
-    return "\n".join(lines)
+    if frozen:
+        mark = "❄️ Заморожена"
+    elif status == "renewal":
+        mark = "🟡 Ждёт оплаты"
+    else:
+        mark = "🟢 Активна"
+    until = end.strftime("%d.%m %H:%M") if end else row[6]
+    return (f"{plan} · {mark}\n"
+            f"⏳ {fmt_duration_precise(max(left, 0))} · до {until}\n"
+            + (f"{extra}\n" if extra else "")
+            + f"\n🔗 <code>{escape(row[5])}</code>")
 
 
 async def start_screen(user, fresh: bool = False):
@@ -1441,12 +1240,13 @@ async def start_screen(user, fresh: bool = False):
 
     head = f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>"
     if row:
-        body = await _start_sub_block(row, fresh)
+        body = await _sub_summary(row)
+        if fresh:
+            body = ("🎉 <b>Пробный период активирован!</b>\n\n" + body
+                    + "\n\n<i>Нажмите на ссылку и вставьте её в INCY.</i>")
     else:
-        body = ("🔒 Быстрый и безопасный VPN\n"
-                "⚡️ Стабильное подключение\n"
-                "🌍 Доступ к популярным сервисам")
-    text = f"{head}\n\n{body}\n\n{'━' * 14}\n\nВыберите нужный раздел ниже 👇"
+        body = "Быстрый VPN без логов 🔒"
+    text = f"{head}\n\n{body}"
     return text, main_keyboard(is_admin, has_sub, paid_status, is_helper(user.id))
 
 

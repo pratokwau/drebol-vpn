@@ -269,8 +269,7 @@ async def handle_ticket_close(query, user_id: int, context):
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         await context.bot.send_message(
             chat_id=user_id,
-            text=("✅ <b>Вопрос закрыт</b>\n\n"
-                  "Надеемся, всё решилось. Если нет — просто напишите снова."),
+            text="✅ <b>Вопрос закрыт</b>\nЕсли что — пишите снова.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],

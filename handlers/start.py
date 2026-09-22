@@ -63,12 +63,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not helper and not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(
             f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
-            "🔒 Быстрый и безопасный VPN\n"
-            "⚡️ Стабильное подключение\n"
-            "🌍 Доступ к популярным сервисам\n\n"
-            "🔒 Для дальнейшего пользования ботом подпишитесь на наш канал.\n\n"
-            "Там новости сервиса, новые серверы и предупреждения о техработах.\n"
-            "После подписки нажмите кнопку <b>✅ Я подписался</b>.",
+            "Подпишитесь на наш канал, чтобы продолжить 👇",
             parse_mode="HTML",
             reply_markup=subscribe_keyboard(),
         )
