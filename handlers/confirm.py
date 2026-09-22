@@ -31,6 +31,7 @@ CONFIRM_TITLES = {
     "bl_readd": "Возврат в ЧС",
     "bl_remote_toggle": "Общий ЧС вкл/выкл",
     "paid_hwid_clear": "Очистка устройств подписки",
+    "site_delete": "Удаление сайта",
 }
 
 
@@ -159,6 +160,15 @@ async def _git_update(arg):
             "🔄 Да, обновить", "admin_panel", "admin_panel")
 
 
+async def _site_delete(arg):
+    from site_deploy import site_url
+    url = site_url()
+    return ("🗑 <b>Удалить сайт?</b>\n\n"
+            f"Страница {url} и её настройки nginx будут стёрты со второго сервера.\n"
+            "Бот и подписки не тронутся — развернуть заново можно одной кнопкой.",
+            "🗑 Да, удалить", "site_menu", "admin_panel")
+
+
 async def _clear_log_channel(arg):
     return ("🗑 <b>Отключить лог-канал?</b>\n\n"
             "События перестанут дублироваться в канал. Вернуть можно, снова указав его ID.",
@@ -234,6 +244,7 @@ async def _paid_hwid_clear(arg):
 
 
 RULES = {
+    "site_delete": _site_delete,
     "paid_hwid_clear": _paid_hwid_clear,
     "paid_sub_delete": _paid_sub_delete,
     "sub_delete": _sub_delete,

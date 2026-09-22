@@ -27,6 +27,10 @@ from handlers.admin import (
 from fraud import (
     handle_fraud_menu, handle_fraud_toggle, handle_fraud_scan, handle_fraud_ok,
 )
+from site_deploy import (
+    handle_site_menu, handle_site_server, handle_site_domain,
+    handle_site_deploy, handle_site_cert, handle_site_delete,
+)
 from handlers.support import (
     open_support, handle_support_files, show_topics, show_topic_hint,
     start_writing, handle_support_close,
@@ -429,6 +433,19 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_log_channel(query, context)
     elif data == "clear_log_channel":
         await handle_clear_log_channel(query)
+    elif data == "site_menu":
+        context.user_data.pop("state", None)
+        await handle_site_menu(query)
+    elif data == "site_server":
+        await handle_site_server(query, context)
+    elif data == "site_domain":
+        await handle_site_domain(query, context)
+    elif data == "site_deploy":
+        await handle_site_deploy(query, context)
+    elif data == "site_cert":
+        await handle_site_cert(query, context)
+    elif data == "site_delete":
+        await handle_site_delete(query, context)
     elif data == "fraud_menu":
         await handle_fraud_menu(query)
     elif data == "fraud_toggle":

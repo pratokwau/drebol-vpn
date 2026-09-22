@@ -39,6 +39,8 @@ from states import (
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_QUICK_REPLY,
+    AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
+    AWAITING_SITE_DOMAIN,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
@@ -548,6 +550,66 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + (f"за {fmt_duration(seconds)}" if seconds else "выключено") + "</b>",
             parse_mode="HTML", reply_markup=back_admin(),
         )
+        return
+
+    # ── Сайт на втором сервере: адрес, пользователь, пароль ──────────────────
+    if state in (AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
+                 AWAITING_SITE_DOMAIN):
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from html import escape
+        from site_deploy import save_creds, check_connection
+        back = InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")]])
+
+        if state == AWAITING_SITE_HOST:
+            host, _, port = text.strip().replace("http://", "").strip("/").partition(":")
+            if not host:
+                await update.message.reply_text("❌ Пришли IP сервера.", reply_markup=back)
+                return
+            save_creds(site_host=host, site_port=int(port) if port.isdigit() else 22)
+            context.user_data["state"] = AWAITING_SITE_USER
+            await update.message.reply_text(
+                "🖥 <b>Шаг 2 из 3</b>\n\nИмя пользователя — обычно <code>root</code>.",
+                parse_mode="HTML", reply_markup=back)
+            return
+
+        if state == AWAITING_SITE_USER:
+            save_creds(site_user=text.strip() or "root")
+            context.user_data["state"] = AWAITING_SITE_PASS
+            await update.message.reply_text(
+                "🖥 <b>Шаг 3 из 3</b>\n\nПароль от сервера.\n"
+                "<i>Сообщение с паролем удалю сразу после сохранения.</i>",
+                parse_mode="HTML", reply_markup=back)
+            return
+
+        if state == AWAITING_SITE_PASS:
+            save_creds(site_pass=text)
+            context.user_data.pop("state", None)
+            # пароль не должен остаться в переписке
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+            note = await update.message.reply_text("🔌 Проверяю подключение…")
+            res = await check_connection()
+            if res.get("ok"):
+                body = ("✅ <b>Сервер на связи</b>\n\n"
+                        f"🖥 {escape(str(res.get('host', '?')))}\n"
+                        f"💿 {escape(str(res.get('os', '?')))}\n\n"
+                        "Теперь можно разворачивать сайт.")
+            else:
+                body = ("❌ <b>Не подключиться</b>\n\n"
+                        f"<code>{escape(str(res.get('error'))[:300])}</code>\n\n"
+                        "Проверь IP, пользователя и пароль.")
+            await note.edit_text(body, parse_mode="HTML", reply_markup=back)
+            return
+
+        domain = text.strip().lower().replace("https://", "").replace("http://", "").strip("/")
+        save_creds(site_domain="" if domain == "-" else domain, site_https=False)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(
+            "🌍 Домен убран." if domain == "-" else f"🌍 Домен: <b>{escape(domain)}</b>",
+            parse_mode="HTML", reply_markup=back)
         return
 
     if state == AWAITING_QUICK_REPLY:

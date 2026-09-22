@@ -64,6 +64,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🎯 Winback", callback_data="winback_settings")],
         [InlineKeyboardButton("⏰ Напоминания", callback_data="remind_settings")],
         [InlineKeyboardButton("🖥 Серверы и 3x-UI", callback_data="xui_settings")],
+        [InlineKeyboardButton("🌐 Сайт", callback_data="site_menu")],
         [InlineKeyboardButton(mnt_label, callback_data="mnt_menu")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
         [InlineKeyboardButton("📢 Управление каналом", callback_data="channel_menu")],
