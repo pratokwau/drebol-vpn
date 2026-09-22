@@ -340,6 +340,30 @@ async def init_db():
                 await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             except Exception:
                 pass
+        # Тикет — одна переписка с человеком. Статус и тема живут здесь,
+        # сами сообщения остаются в support_messages.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tickets (
+                user_id INTEGER PRIMARY KEY,
+                topic TEXT NOT NULL DEFAULT 'other',
+                status TEXT NOT NULL DEFAULT 'open',
+                waiting_since TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                closed_at TIMESTAMP
+            )
+        """)
+        # Переписки, начатые до появления статусов, заводим как открытые:
+        # иначе они пропали бы из списка «открытые»
+        await db.execute("""
+            INSERT OR IGNORE INTO tickets (user_id, topic, status, waiting_since, updated_at)
+            SELECT sm.user_id, 'other',
+                   CASE WHEN MAX(CASE WHEN sm.from_admin = 0 THEN sm.id ELSE 0 END) >
+                             MAX(CASE WHEN sm.from_admin = 1 THEN sm.id ELSE 0 END)
+                        THEN 'open' ELSE 'answered' END,
+                   MAX(sm.created_at), MAX(sm.created_at)
+            FROM support_messages sm GROUP BY sm.user_id
+        """)
+
         # Отпечатки подписок: с каких устройств и адресов они работают.
         # Нужны, чтобы заметить второй триал с того же телефона.
         await db.execute("""
@@ -551,7 +575,8 @@ async def get_support_messages(user_id: int, page: int = 1):
         ) as cur:
             total = (await cur.fetchone())[0]
         async with db.execute("""
-            SELECT text, from_admin, created_at, file_id, file_type FROM support_messages
+            SELECT text, from_admin, datetime(created_at, 'localtime'), file_id, file_type
+            FROM support_messages
             WHERE user_id = ?
             ORDER BY created_at ASC
             LIMIT ? OFFSET ?
@@ -1267,7 +1292,8 @@ async def count_support_files(user_id: int) -> int:
 async def get_support_files(user_id: int) -> list[tuple]:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT file_id, file_type, from_admin, created_at FROM support_messages
+            SELECT file_id, file_type, from_admin, datetime(created_at, 'localtime')
+            FROM support_messages
             WHERE user_id = ? AND file_id IS NOT NULL
             ORDER BY created_at ASC
         """, (user_id,)) as cur:
@@ -1293,33 +1319,144 @@ async def get_unread_tickets_count() -> int:
             return (await cur.fetchone())[0]
 
 
-async def get_ticket_users(page: int = 1):
+async def get_ticket_users(page: int = 1, status: str = "open"):
+    """Переписки для админского списка.
+
+    Открытые идут первыми и сортируются по времени ожидания: дольше всех
+    ждущий человек оказывается наверху, а не теряется под свежими.
+    """
     offset = (page - 1) * TICKETS_PER_PAGE
+    where = ""
+    params: list = []
+    if status == "open":
+        where = "WHERE COALESCE(t.status, 'open') = 'open'"
+    elif status == "closed":
+        where = "WHERE t.status = 'closed'"
+    elif status == "answered":
+        where = "WHERE t.status = 'answered'"
+
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
+        async with db.execute(f"""
             SELECT COUNT(*) FROM (
-                SELECT user_id FROM support_messages WHERE from_admin = 0 GROUP BY user_id
+                SELECT sm.user_id FROM support_messages sm
+                LEFT JOIN tickets t ON t.user_id = sm.user_id
+                {where}
+                GROUP BY sm.user_id
+                HAVING SUM(CASE WHEN sm.from_admin = 0 THEN 1 ELSE 0 END) > 0
             )
-        """) as cur:
+        """, params) as cur:
             total = (await cur.fetchone())[0]
-        async with db.execute("""
+        async with db.execute(f"""
             SELECT
                 u.id, u.first_name, u.username,
                 COUNT(sm.id) AS total,
                 SUM(CASE WHEN sm.from_admin = 0 AND sm.is_read = 0 THEN 1 ELSE 0 END) AS unread,
-                MAX(sm.created_at) AS last_time,
+                datetime(MAX(sm.created_at), 'localtime') AS last_time,
                 (SELECT text FROM support_messages s2 WHERE s2.user_id = u.id ORDER BY s2.id DESC LIMIT 1) AS last_text,
-                (SELECT from_admin FROM support_messages s3 WHERE s3.user_id = u.id ORDER BY s3.id DESC LIMIT 1) AS last_from_admin
+                (SELECT from_admin FROM support_messages s3 WHERE s3.user_id = u.id ORDER BY s3.id DESC LIMIT 1) AS last_from_admin,
+                COALESCE(t.status, 'open') AS status,
+                COALESCE(t.topic, 'other') AS topic,
+                CAST(strftime('%s', 'now') - strftime('%s', t.waiting_since) AS INTEGER) AS waiting
             FROM support_messages sm
             JOIN users u ON u.id = sm.user_id
+            LEFT JOIN tickets t ON t.user_id = sm.user_id
+            {where}
             GROUP BY sm.user_id
             HAVING SUM(CASE WHEN sm.from_admin = 0 THEN 1 ELSE 0 END) > 0
-            ORDER BY unread DESC, last_time DESC
+            ORDER BY CASE WHEN COALESCE(t.status, 'open') = 'open' THEN 0 ELSE 1 END,
+                     waiting DESC, last_time DESC
             LIMIT ? OFFSET ?
-        """, (TICKETS_PER_PAGE, offset)) as cur:
+        """, params + [TICKETS_PER_PAGE, offset]) as cur:
             rows = await cur.fetchall()
     total_pages = max(1, (total + TICKETS_PER_PAGE - 1) // TICKETS_PER_PAGE)
     return rows, total_pages
+
+
+async def ticket_opened(user_id: int, topic: str | None = None):
+    """Человек написал: переписка открыта и ждёт ответа.
+
+    Время ожидания ставим только если его ещё нет — иначе каждое новое
+    сообщение сбрасывало бы счётчик, и давно ждущий уходил бы вниз списка.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO tickets (user_id, topic, status, waiting_since, updated_at)
+            VALUES (?, COALESCE(?, 'other'), 'open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                status = 'open',
+                topic = COALESCE(?, tickets.topic),
+                waiting_since = COALESCE(tickets.waiting_since, CURRENT_TIMESTAMP),
+                updated_at = CURRENT_TIMESTAMP,
+                closed_at = NULL
+        """, (user_id, topic, topic))
+        await db.commit()
+
+
+async def ticket_answered(user_id: int):
+    """Поддержка ответила — ожидание закончилось."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO tickets (user_id, status, waiting_since, updated_at)
+            VALUES (?, 'answered', NULL, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                status = 'answered', waiting_since = NULL, updated_at = CURRENT_TIMESTAMP
+        """, (user_id,))
+        await db.commit()
+
+
+async def ticket_closed(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO tickets (user_id, status, waiting_since, updated_at, closed_at)
+            VALUES (?, 'closed', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                status = 'closed', waiting_since = NULL,
+                updated_at = CURRENT_TIMESTAMP, closed_at = CURRENT_TIMESTAMP
+        """, (user_id,))
+        await db.commit()
+
+
+async def get_ticket(user_id: int) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT topic, status,
+                   CAST(strftime('%s', 'now') - strftime('%s', waiting_since) AS INTEGER)
+            FROM tickets WHERE user_id = ?
+        """, (user_id,)) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return {"topic": "other", "status": "open", "waiting": 0}
+    return {"topic": row[0] or "other", "status": row[1] or "open",
+            "waiting": int(row[2] or 0)}
+
+
+async def ticket_counts() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        out = {}
+        for key, cond in (("open", "= 'open'"), ("answered", "= 'answered'"),
+                          ("closed", "= 'closed'")):
+            async with db.execute(f"""
+                SELECT COUNT(*) FROM (
+                    SELECT sm.user_id FROM support_messages sm
+                    LEFT JOIN tickets t ON t.user_id = sm.user_id
+                    WHERE COALESCE(t.status, 'open') {cond}
+                    GROUP BY sm.user_id
+                    HAVING SUM(CASE WHEN sm.from_admin = 0 THEN 1 ELSE 0 END) > 0
+                )
+            """) as cur:
+                out[key] = (await cur.fetchone())[0]
+        out["all"] = out["open"] + out["answered"] + out["closed"]
+        return out
+
+
+async def user_payment_total(tg_id: int) -> tuple:
+    """Сколько человек заплатил всего и сколько было платежей."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COALESCE(SUM(amount), 0), COUNT(*) FROM payments "
+            "WHERE tg_id = ? AND status = 'paid'", (tg_id,)
+        ) as cur:
+            return await cur.fetchone()
 
 
 async def get_user_info(user_id: int) -> tuple | None:

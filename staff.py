@@ -21,6 +21,7 @@ from states import (
 HELPER_EXACT = {"admin_panel", "find_user", "back_start"}
 HELPER_PREFIXES = (
     "ticket_list:", "ticket_view:", "ticket_files:", "ticket_reply:",
+    "ticket_tab:", "ticket_quick:", "ticket_send:", "ticket_close:",
     "user_profile:", "user_activity:", "dm_user:",
 )
 # Ввод, который помощник запускает этими кнопками

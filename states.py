@@ -77,6 +77,7 @@ AWAITING_FIND_USER = "awaiting_find_user"
 AWAITING_LOG_CHANNEL = "awaiting_log_channel"
 
 # Winback
+AWAITING_QUICK_REPLY = "awaiting_quick_reply"
 AWAITING_REMIND_FIRST = "awaiting_remind_first"
 AWAITING_REMIND_SECOND = "awaiting_remind_second"
 AWAITING_WINBACK_DAYS = "awaiting_winback_days"

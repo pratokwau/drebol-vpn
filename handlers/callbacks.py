@@ -28,7 +28,10 @@ from handlers.admin import (
 from fraud import (
     handle_fraud_menu, handle_fraud_toggle, handle_fraud_scan, handle_fraud_ok,
 )
-from handlers.support import open_support, handle_support_files
+from handlers.support import (
+    open_support, handle_support_files, show_topics, show_topic_hint,
+    start_writing, handle_support_close,
+)
 from maintenance import (
     handle_maintenance_menu, handle_maintenance_toggle,
     handle_maintenance_text, handle_feature_toggle,
@@ -75,7 +78,8 @@ from handlers.broadcast import (
 )
 from handlers.tickets import (
     handle_ticket_list, handle_ticket_view, handle_ticket_reply_start,
-    handle_ticket_files,
+    handle_ticket_files, handle_ticket_quick, handle_ticket_send_quick,
+    handle_ticket_close, handle_quick_menu, handle_quick_add, handle_quick_del,
 )
 from handlers.xui_settings import (
     handle_xui_settings, handle_set_xui_url, handle_set_xui_token,
@@ -293,6 +297,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "support_open":
         context.user_data["state"] = AWAITING_SUPPORT_MSG
         await open_support(query, update.effective_user.id)
+    elif data == "support_topics":
+        await show_topics(query)
+    elif data.startswith("support_topic:"):
+        await show_topic_hint(query, context, data.split(":")[1])
+    elif data.startswith("support_write:"):
+        await start_writing(query, context, data.split(":")[1])
+    elif data == "support_close":
+        context.user_data.pop("state", None)
+        await handle_support_close(query, update.effective_user.id)
     elif data == "support_files":
         context.user_data["state"] = AWAITING_SUPPORT_MSG
         await handle_support_files(query, update.effective_user.id)
@@ -482,6 +495,22 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Тикеты
     elif data.startswith("ticket_list:"):
         await handle_ticket_list(query, int(data.split(":")[1]))
+    elif data.startswith("ticket_tab:"):
+        _t = data.split(":")
+        await handle_ticket_list(query, int(_t[2]), _t[1])
+    elif data.startswith("ticket_quick:"):
+        await handle_ticket_quick(query, int(data.split(":")[1]))
+    elif data.startswith("ticket_send:"):
+        _t = data.split(":")
+        await handle_ticket_send_quick(query, int(_t[1]), int(_t[2]), context)
+    elif data.startswith("ticket_close:"):
+        await handle_ticket_close(query, int(data.split(":")[1]), context)
+    elif data == "quick_menu":
+        await handle_quick_menu(query)
+    elif data == "quick_add":
+        await handle_quick_add(query, context)
+    elif data.startswith("quick_del:"):
+        await handle_quick_del(query, int(data.split(":")[1]))
     elif data.startswith("ticket_view:"):
         _, uid, page = data.split(":")
         await handle_ticket_view(query, int(uid), int(page))
