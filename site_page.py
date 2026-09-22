@@ -18,7 +18,11 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     Если его нет, страница рисует логотип линиями — так она никогда не
     остаётся без знака, даже когда картинку не залили.
     """
-    bot_url = f"https://t.me/{bot_username.lstrip('@')}" if bot_username else "https://t.me/"
+    handle = bot_username.lstrip("@")
+    bot_url = f"https://t.me/{handle}" if handle else "https://t.me/"
+    hint_html = (f'<p class="hint">Не открылось? Введите в Telegram '
+                 f'<span class="handle">@{escape(handle)}</span></p>'
+                 if handle else "")
     docs = []
     if privacy_url:
         docs.append(f'<a href="{escape(privacy_url)}">Политика</a>')
@@ -189,6 +193,15 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     50%      {{ box-shadow: 0 10px 52px rgba(120,170,255,.45); }}
   }}
 
+  .hint {{
+    margin: 14px 0 0; font-size: 14px; color: rgba(255,255,255,.45);
+    opacity: 0; animation: rise .9s 1.1s cubic-bezier(.2,.8,.2,1) forwards;
+  }}
+  .handle {{
+    color: rgba(255,255,255,.85); font-weight: 600;
+    user-select: all; -webkit-user-select: all;
+  }}
+
   .feats {{
     list-style: none; padding: 0; margin: 40px 0 0;
     display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
@@ -212,7 +225,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 
   @media (prefers-reduced-motion: reduce) {{
     *, *::before, *::after {{ animation: none !important; transition: none !important; }}
-    .word, .tagline, .cta, .feats, footer, .logo-img {{ opacity: 1; }}
+    .word, .tagline, .cta, .hint, .feats, footer, .logo-img {{ opacity: 1; }}
     .mark circle, .mark ellipse {{ stroke-dashoffset: 0; }}
   }}
 </style>
@@ -234,6 +247,8 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     </svg>
     Открыть в Telegram
   </a>
+
+  {hint_html}
 
   <ul class="feats">
     <li>Без логов</li>
