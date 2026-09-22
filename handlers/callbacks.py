@@ -244,11 +244,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("pay_invoice:"):
         _p = data.split(":")
         await handle_pay_invoice(query, context, int(_p[1]),
-                                 int(_p[2]) if len(_p) > 2 else 0)
+                                 int(_p[2]) if len(_p) > 2 else None)
     elif data.startswith("tariff_pick:"):
         _p = data.split(":")
         await handle_tariff_pick(query, context, int(_p[1]),
-                                 int(_p[2]) if len(_p) > 2 else 0)
+                                 int(_p[2]) if len(_p) > 2 else None)
     elif data == "i_paid":
         await handle_i_paid(query, context)
     elif data == "my_sub":

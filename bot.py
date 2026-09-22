@@ -157,10 +157,12 @@ async def post_init(app: Application):
                                 tg_id, amount, ctx, promo_code=promo,
                                 source="Platega", period_seconds=period,
                             )
-                            # в счёт за срок могли доложить устройства —
-                            # начисляем их следом, сумма уже учтена выше
-                            if res.get("ok") and extra:
-                                dev = await apply_devices_payment(tg_id, extra, ctx, 0)
+                            # в счёте за срок ехал выбор устройств на новый
+                            # период: ставим ровно столько, сколько взяли.
+                            # Ноль — человек от них отказался, и это не ошибка
+                            if res.get("ok") and kind == "period_dev":
+                                dev = await apply_devices_payment(
+                                    tg_id, extra, ctx, 0, mode="set")
                                 if not dev.get("ok"):
                                     # срок начислен, слоты нет — молчать нельзя,
                                     # человек за них заплатил
@@ -171,8 +173,8 @@ async def post_init(app: Application):
                                     await ctx.bot.send_message(
                                         chat_id=ADMIN_ID,
                                         text=(
-                                            "⚠️ <b>Срок продлён, устройства не начислены</b>\n\n"
-                                            f"👤 <code>{tg_id}</code> · +{extra} устр.\n"
+                                            "⚠️ <b>Срок продлён, устройства не применены</b>\n\n"
+                                            f"👤 <code>{tg_id}</code> · выбрано {extra} устр.\n"
                                             f"<code>{dev.get('error')}</code>\n\n"
                                             "Добавь слоты вручную."
                                         ),

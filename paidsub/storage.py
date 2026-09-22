@@ -98,6 +98,16 @@ def sub_settings(row) -> dict:
     }
 
 
+def base_hwid(limit_hwid, extra_devices) -> int:
+    """Лимит устройств без докупленных слотов.
+
+    В базе limit_hwid — итог: свой лимит подписки плюс оплаченные слоты.
+    Админ и пресеты оперируют именно своим лимитом, поэтому слоты при
+    любой правке прибавляются сверху, а не съедаются ею.
+    """
+    return max(0, int(limit_hwid or 0) - int(extra_devices or 0))
+
+
 def parse_sub_date(raw: str):
     from datetime import datetime
     for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):

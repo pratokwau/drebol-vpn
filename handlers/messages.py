@@ -841,15 +841,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         panel_note = ""
         if sub_id:
-            from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
+            from paidsub.storage import (update_paid_sub_field, get_paid_sub,
+                                         add_history, get_paid_sub_by_tg_id)
             from xui_api import update_client_limits
-            await update_paid_sub_field(sub_id, "limit_hwid", int(text))
             r = await get_paid_sub(sub_id)
+            # оплаченные устройства идут сверх лимита, который ставит админ
+            extra = 0
+            if r and r[1]:
+                by_tg = await get_paid_sub_by_tg_id(r[1])
+                extra = int(by_tg[18] or 0) if by_tg and len(by_tg) > 18 else 0
+            target = int(text) + extra if int(text) else 0
+            await update_paid_sub_field(sub_id, "limit_hwid", target)
             if r:
-                res = await update_client_limits(r[2], limit_hwid=int(text))
+                res = await update_client_limits(r[2], limit_hwid=target)
                 if not res.get("success"):
                     panel_note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
-                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: лимит HWID → {text}")
+                if extra and target:
+                    panel_note = f"\n📱 Плюс оплаченные устройства: <b>+{extra}</b>" + panel_note
+                await add_history(r[1], "settings_changed",
+                                  f"Подписка #{sub_id}: лимит HWID → {target}")
         await update.message.reply_text(f"✅ Лимит HWID обновлён: <b>{text}</b>{panel_note}",
                                         parse_mode="HTML", reply_markup=back_admin())
         return

@@ -1151,41 +1151,69 @@ async def handle_paid_bulk_apply(query, context):
     )
 
 
-async def apply_devices_payment(tg_id: int, count: int, context, amount: int = 0) -> dict:
-    """Начисляет докупленные слоты устройств: в базе, в панели и человеку в чат.
+async def apply_devices_payment(tg_id: int, count: int, context, amount: int = 0,
+                                mode: str = "add") -> dict:
+    """Начисляет оплаченные слоты устройств: в базе, в панели и человеку в чат.
 
-    Слоты живут вместе с подпиской и не сгорают при продлении — лимит в панели
-    бот при обновлении клиента больше не обнуляет.
+    mode="add" — докуп среди периода: слоты прибавляются к уже оплаченным.
+    mode="set" — выбор при продлении: слотов становится ровно столько, сколько
+    человек взял на новый период. Ноль возвращает лимит к своему значению
+    подписки, и платить за устройства больше не нужно.
     """
     from xui_api import update_client_limits
+    from paidsub.storage import base_hwid
     row = await get_paid_sub_by_tg_id(tg_id)
     if not row:
         return {"ok": False, "error": "подписка не найдена"}
     sub_id, email = row[0], row[2]
-    base = int(row[8] or 0)
-    if base <= 0:
-        # лимита нет — докупать нечего, но деньги уже пришли
-        return {"ok": False, "error": "у подписки нет лимита устройств"}
-    count = max(1, int(count))
-    new_limit = base + count
-    extra_now = int(row[18] if len(row) > 18 and row[18] else 0) + count
+    extra_was = int(row[18] if len(row) > 18 and row[18] else 0)
+    base = base_hwid(row[8], extra_was)
+    count = int(count or 0)
 
+    if mode == "set":
+        extra_now = max(0, count)
+        if extra_now == extra_was:
+            return {"ok": True, "limit": int(row[8] or 0), "changed": False}
+    else:
+        if base <= 0:
+            # лимита нет — докупать нечего, но деньги уже пришли
+            return {"ok": False, "error": "у подписки нет лимита устройств"}
+        extra_now = extra_was + max(1, count)
+
+    if base <= 0:
+        # лимит без ограничения: слоты не к чему прибавлять, но и терять нечего
+        await update_paid_sub_field(sub_id, "extra_devices", extra_now)
+        return {"ok": True, "limit": 0, "changed": False}
+
+    new_limit = base + extra_now
     await update_paid_sub_field(sub_id, "limit_hwid", new_limit)
     await update_paid_sub_field(sub_id, "extra_devices", extra_now)
     res = await update_client_limits(email, limit_hwid=new_limit)
     note = "" if res.get("success") else f" (панель: {res.get('error', '?')})"
 
+    added = extra_now - extra_was
+    if added > 0:
+        action = f"Оплачено устройств: +{added} → лимит {new_limit}"
+    else:
+        action = f"Отказ от устройств: {extra_was} → {extra_now}, лимит {new_limit}"
     await add_history(tg_id, "devices_bought",
-                      f"Докуплено устройств: {count} → лимит {new_limit}"
-                      + (f"\nСумма: {amount} ₽" if amount else "") + note)
+                      action + (f"\nСумма: {amount} ₽" if amount else "") + note)
+
     bot = context.bot if hasattr(context, "bot") else None
-    if bot:
+    if bot and added > 0:
         await _notify_user(bot, tg_id,
             f"✅ <b>Устройства добавлены</b>\n\n"
             f"Теперь на подписку можно подключить <b>{new_limit}</b>.\n"
             f"Просто подключитесь на новом устройстве — слот займётся сам."
         )
-    return {"ok": True, "limit": new_limit, "panel": res.get("success", False)}
+    elif bot and added < 0:
+        await _notify_user(bot, tg_id,
+            f"ℹ️ <b>Дополнительные устройства отключены</b>\n\n"
+            f"На новый период вы их не выбрали, лимит снова <b>{new_limit}</b>.\n"
+            f"Докупить можно в любой момент в разделе «Мои устройства»."
+        )
+    return {"ok": True, "limit": new_limit, "changed": True,
+            "panel": res.get("success", False)}
 
 
 def _when(ms) -> str:
@@ -1393,18 +1421,26 @@ async def preview_bulk_limits(message, context, kind: str, value: int):
     from handlers.confirm import confirm_keyboard
     emoji, label, field = LIMIT_KINDS[kind]
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(f"SELECT tg_id, {field} FROM paid_subs") as cur:
+        async with db.execute(
+            f"SELECT tg_id, {field}, extra_devices FROM paid_subs"
+        ) as cur:
             rows = await cur.fetchall()
     skip = await blacklisted_ids()
     targets = [r for r in rows if r[0] not in skip]
+    with_extra = sum(1 for _tg, _old, ex in targets if kind == "hwid" and ex)
     # 0 в лимите — это «без ограничения», поэтому переход с нуля тоже ужесточение
-    tighter = sum(1 for _tg, old in targets if value and (not old or value < old))
+    def _target(ex):
+        return value + int(ex or 0) if (kind == "hwid" and value) else value
+    tighter = sum(1 for _tg, old, ex in targets
+                  if _target(ex) and (not old or _target(ex) < old))
     context.user_data["bulk_limits"] = {"kind": kind, "value": value}
     await message.reply_text(
         f"{emoji} <b>Поставить лимит {label} = {value or 'без ограничения'} всем?</b>\n\n"
         f"👥 Затронет подписок: <b>{len(targets)}</b>"
         + (f" · пропустим из ЧС: {len(rows) - len(targets)}\n" if len(rows) != len(targets) else "\n")
         + (f"⚠️ У <b>{tighter}</b> лимит станет строже — им придёт уведомление.\n" if tighter else "")
+        + (f"📱 У <b>{with_extra}</b> есть оплаченные устройства — им добавим сверх этого числа.\n"
+           if with_extra else "")
         + "\nМеняем и в базе, и в панели 3x-UI. "
           "Пресет для новых подписок остаётся прежним.",
         parse_mode="HTML",
@@ -1439,38 +1475,45 @@ async def bulk_set_limits(kind: str, value: int, context) -> dict:
     from blacklist import blacklisted_ids
     from database import DB_PATH
     from xui_api import update_client_limits
+    from paidsub.storage import base_hwid
     emoji, label, field = LIMIT_KINDS[kind]
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(f"SELECT id, tg_id, email, {field} FROM paid_subs") as cur:
+        async with db.execute(
+            f"SELECT id, tg_id, email, {field}, extra_devices FROM paid_subs"
+        ) as cur:
             rows = await cur.fetchall()
 
     skip_ids = await blacklisted_ids()
     bot = context.bot if hasattr(context, "bot") else None
     updated = panel_fail = skipped = 0
     tightened = []
-    for sub_id, tg_id, email, old in rows:
+    for sub_id, tg_id, email, old, extra in rows:
         if tg_id in skip_ids:
             skipped += 1
             continue
-        await update_paid_sub_field(sub_id, field, value)
+        # человек оплатил дополнительные устройства — они идут сверх общего
+        # лимита, иначе массовая правка молча отбирала бы купленное
+        target = value + int(extra or 0) if (kind == "hwid" and value) else value
+        await update_paid_sub_field(sub_id, field, target)
         res = await update_client_limits(
-            email, **({"limit_ip": value} if kind == "ip" else {"limit_hwid": value}))
+            email, **({"limit_ip": target} if kind == "ip" else {"limit_hwid": target}))
         if not res.get("success"):
             panel_fail += 1
         updated += 1
         if tg_id:
             await add_history(tg_id, "settings_changed",
-                              f"Массово: лимит {label} → {value or 'без ограничения'}")
+                              f"Массово: лимит {label} → {target or 'без ограничения'}"
+                              + (f" (в т.ч. докуплено {extra})" if target != value else ""))
             # пишем только тем, кому стало строже: остальным это не новость.
             # old == 0 значит «было без ограничения» — любой лимит строже
-            if value and (not old or value < old):
-                tightened.append(tg_id)
+            if target and (not old or target < old):
+                tightened.append((tg_id, target))
 
     if bot:
-        for tg_id in tightened:
+        for tg_id, target in tightened:
             await _notify_user(bot, tg_id,
                 f"ℹ️ <b>Изменён лимит устройств</b>\n\n"
-                f"Теперь на подписку разрешено <b>{value}</b> — "
+                f"Теперь на подписку разрешено <b>{target}</b> — "
                 f"лишние устройства перестанут подключаться."
             )
     return {"updated": updated, "panel_fail": panel_fail,

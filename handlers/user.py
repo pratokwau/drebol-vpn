@@ -378,19 +378,26 @@ async def _offer_devices(row) -> tuple:
 
     Докуп идёт только там, где лимит устройств вообще есть: при нулевом
     лимите панель их не считает, и слот было бы не к чему прибавить.
+    Возвращает (цена, сколько ещё можно взять, текущий лимит, докуплено).
     """
+    price, max_extra, limit_now, bought = _device_state(row)
+    free = max(0, max_extra - bought)
+    if not price or not limit_now or not free:
+        return 0, 0, limit_now, bought
+    return price, free, limit_now, bought
+
+
+def _device_state(row) -> tuple:
+    """Цена слота, потолок докупа, текущий лимит и сколько слотов оплачено."""
     cfg = load_config()
     price = int(cfg.get("device_price", 0) or 0)
     max_extra = int(cfg.get("device_max_extra", 0) or 0)
-    base = int(row[8] or 0) if row else 0
+    limit_now = int(row[8] or 0) if row else 0
     bought = int(row[18] or 0) if row and len(row) > 18 else 0
-    free = max(0, max_extra - bought)
-    if not price or not base or not free:
-        return 0, 0, base, bought
-    return price, free, base, bought
+    return price, max_extra, limit_now, bought
 
 
-async def handle_tariff_pick(query, context, tariff_id: int = 0, devices: int = 0):
+async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
     """Карточка тарифа: срок, цена, доп. устройства и промокод — в одном месте.
 
     Отсюда сразу счёт: человеку не приходится возвращаться за устройствами
@@ -434,8 +441,15 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices: int = 
             promo_btn = [InlineKeyboardButton("❌ Убрать промокод", callback_data="remove_promo")]
     period_price = apply_discount(price, discount) if discount else price
 
-    dev_price, dev_free, base_hwid, bought = await _offer_devices(row)
-    devices = max(0, min(int(devices or 0), dev_free))
+    # Устройства выбираются на новый период: по умолчанию столько же,
+    # сколько сейчас, но можно отказаться и не платить за них
+    from paidsub.storage import base_hwid as _base_hwid
+    dev_price, dev_max, limit_now, bought = _device_state(row)
+    own_limit = _base_hwid(limit_now, bought)
+    if not own_limit:
+        dev_price = 0
+    devices = bought if devices is None else int(devices)
+    devices = max(0, min(devices, dev_max))
     dev_sum = devices * dev_price
     total = period_price + dev_sum
 
@@ -450,19 +464,23 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices: int = 
     dev_block = ""
     kb = []
     if dev_price:
-        picked = (f"<b>+{devices}</b> · {dev_sum} ₽" if devices
-                  else "<i>без доп. устройств</i>")
+        picked = (f"<b>+{devices}</b> · {dev_sum} ₽ за период" if devices
+                  else "<i>без доп. устройств — 0 ₽</i>")
+        now_line = (f"Сейчас оплачено: <b>+{bought}</b> (до конца текущего периода)\n"
+                    if bought else "")
         dev_block = (
             f"\n📱 <b>Устройства</b>\n"
-            f"Сейчас в подписке: <b>{base_hwid}</b>"
-            + (f" (докуплено {bought})" if bought else "") + "\n"
-            f"Добавить: {picked}\n"
-            f"<i>Слоты остаются с подпиской и не сгорают при продлении.</i>\n"
+            f"Ваш лимит: <b>{own_limit}</b>\n"
+            f"{now_line}"
+            f"На новый период: {picked}\n"
+            f"Всего будет: <b>{own_limit + devices}</b>\n"
+            + ("<i>Не нужны — выберите «Без доп.», лимит вернётся к своему "
+               "и платить за них не придётся.</i>\n" if bought else "")
         )
         row_btns = [InlineKeyboardButton(
             "✅ Без доп." if devices == 0 else "Без доп.",
             callback_data=f"tariff_pick:{tariff_id}:0")]
-        for n in range(1, dev_free + 1):
+        for n in range(1, dev_max + 1):
             row_btns.append(InlineKeyboardButton(
                 f"{'✅ ' if devices == n else ''}+{n}",
                 callback_data=f"tariff_pick:{tariff_id}:{n}"))
@@ -478,7 +496,7 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices: int = 
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")])
 
     total_line = (f"\n💰 <b>К оплате: {total} ₽</b>\n"
-                  f"<i>{period_price} ₽ за срок + {dev_sum} ₽ за устройства</i>\n"
+                  f"<i>{period_price} ₽ за срок + {dev_sum} ₽ за {devices} устр.</i>\n"
                   if dev_sum else f"\n💰 <b>К оплате: {total} ₽</b>\n")
 
     await query.edit_message_text(
@@ -496,7 +514,7 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices: int = 
 
 
 async def handle_pay_invoice(query, context, tariff_id: int | None = None,
-                             devices: int = 0):
+                             devices=None):
     """Создаёт счёт в Platega и отдаёт ссылку на оплату."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     import platega_api as pg
@@ -533,12 +551,19 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
             promo_code = promo[1]
             price = apply_discount(price, promo[2])
 
-    # Докуп устройств едет тем же счётом. Количество перепроверяем здесь:
-    # callback можно прислать и руками, а слоты — это деньги
-    dev_price, dev_free, _base, _bought = await _offer_devices(row)
-    devices = max(0, min(int(devices or 0), dev_free))
+    # Устройства едут тем же счётом: сколько выбрал, столько и будет
+    # на новый период. Количество перепроверяем здесь — callback можно
+    # прислать и руками, а слоты это деньги
+    from paidsub.storage import base_hwid as _base_hwid
+    dev_price, dev_max, limit_now, bought = _device_state(row)
+    if not _base_hwid(limit_now, bought):
+        dev_price = 0
+    devices = bought if devices is None else int(devices)
+    devices = max(0, min(devices, dev_max if dev_price else 0))
     dev_sum = devices * dev_price
     price += dev_sum
+    # по этой пометке фоновая задача поймёт, что в счёте был выбор устройств
+    pay_kind = "period_dev" if dev_price else "period"
 
     # уже есть неоплаченный счёт на ту же сумму, срок и набор устройств —
     # переиспользуем ссылку, чтобы не плодить счета при повторных нажатиях
@@ -591,7 +616,7 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
         tg_id=user.id, provider="platega",
         external_id=result["transaction_id"], amount=price,
         period_seconds=pay_seconds, pay_url=result["url"],
-        promo_code=promo_code, extra=devices,
+        promo_code=promo_code, kind=pay_kind, extra=devices,
     )
     await _send_invoice(query, result["url"], price, tariff_name, pay_seconds, devices)
 
@@ -610,7 +635,7 @@ async def _send_invoice(query, url: str, price: int,
     if period_seconds:
         head += f"\n⏱ Срок: <b>{fmt_duration(period_seconds)}</b>"
     if devices:
-        head += f"\n📱 Доп. устройства: <b>+{devices}</b>"
+        head += f"\n📱 Доп. устройства на период: <b>+{devices}</b>"
 
     await query.edit_message_text(
         f"{head}\n\n"
@@ -1157,9 +1182,13 @@ async def handle_my_devices(query, context=None):
         if len(items) >= limit:
             lines.append("\n⚠️ Свободных слотов нет. Отключите лишнее устройство "
                          "или добавьте слоты.")
+    if bought:
+        lines.append(f"\n📦 Из них оплачено дополнительно: <b>+{bought}</b> "
+                     "— до конца текущего периода.")
     if limit and price > 0 and bought < max_extra:
         lines.append(f"\n➕ Дополнительное устройство — <b>{price} ₽</b> "
-                     "навсегда, пока действует подписка.")
+                     "до конца оплаченного периода.\n"
+                     "<i>При продлении сами решите, оставлять их или нет.</i>")
         kb.append([InlineKeyboardButton("➕ Добавить устройство", callback_data="dev_buy_menu")])
     kb.append([InlineKeyboardButton("◀️ К подписке", callback_data="my_paid_sub")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
@@ -1209,8 +1238,8 @@ async def handle_dev_buy_menu(query, context):
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_devices")])
     await query.edit_message_text(
         "➕ <b>Добавить устройства</b>\n\n"
-        f"Одно устройство — <b>{price} ₽</b>.\n"
-        "Слоты остаются с подпиской и не сгорают при продлении.\n\n"
+        f"Одно устройство — <b>{price} ₽</b> до конца оплаченного периода.\n"
+        "При продлении вы сами решите, оставлять их или нет.\n\n"
         "Сколько добавить?",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb),
     )
