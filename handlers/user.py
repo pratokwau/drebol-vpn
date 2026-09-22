@@ -677,18 +677,26 @@ async def handle_about(query):
     cfg = load_config()
     privacy_url = cfg.get("privacy_url", "")
     terms_url = cfg.get("terms_url", "")
+
+    lines = [
+        "ℹ️ <b>О сервисе</b>", "",
+        "🖥 <b>Любая платформа</b>",
+        "iOS, Android, Windows и macOS", "",
+        "🛡 <b>Без логов</b>",
+        "Не храним данные о вашей активности", "",
+        "💳 <b>Честные платежи</b>",
+        "Без скрытых списаний и автопродления",
+    ]
     docs = []
     if privacy_url:
-        docs.append(f'<a href="{privacy_url}">Политика</a>')
+        docs.append(f'• <a href="{privacy_url}">Политика конфиденциальности</a>')
     if terms_url:
-        docs.append(f'<a href="{terms_url}">Соглашение</a>')
+        docs.append(f'• <a href="{terms_url}">Пользовательское соглашение</a>')
+    if docs:
+        lines += ["", "━━━━━━━━━━━━━━", "", "📕 <b>Документы</b>"] + docs
 
     await query.edit_message_text(
-        "ℹ️ <b>О сервисе</b>\n\n"
-        "🖥 Все платформы\n"
-        "🛡 Без логов\n"
-        "💳 Без автосписаний"
-        + (f"\n\n📕 {' · '.join(docs)}" if docs else ""),
+        "\n".join(lines),
         parse_mode="HTML",
         reply_markup=back_info(),
         disable_web_page_preview=True,
@@ -696,8 +704,8 @@ async def handle_about(query):
 
 
 async def handle_prices(query):
-    """Витрина цен: сколько стоит и что входит — в пару строк."""
-    from paidsub.time_parser import fmt_duration, _plural
+    """Витрина цен: сколько стоит и что входит."""
+    from paidsub.time_parser import fmt_duration
     cfg = load_config()
 
     price = cfg.get("paid_price", 0) or 0
@@ -706,34 +714,46 @@ async def handle_prices(query):
     traffic = int(cfg.get("paid_preset_traffic", 0) or 0)
     # устройства — это лимит HWID из настроек платных подписок
     devices = int(cfg.get("paid_preset_hwid", 0) or 0)
+    device_price = int(cfg.get("device_price", 0) or 0)
 
     lines = ["💰 <b>Цены</b>", ""]
     if trial_period:
-        lines.append(f"🆓 Пробный — {fmt_duration(trial_period)} бесплатно")
+        lines += ["🆓 <b>Пробный период</b>",
+                  f"{fmt_duration(trial_period)} — бесплатно", ""]
 
     # Тарифы — то же, что человек увидит при продлении.
     # Пока их нет, показываем одну цену из общих настроек.
     from database import list_tariffs
     tariffs = await list_tariffs(only_active=True)
     if tariffs:
+        lines.append("💳 <b>Тарифы</b>")
         base = None
         for _id, name, t_period, t_price, _a, _s in tariffs:
             per_month = t_price / (t_period / 2592000) if t_period else None
             note = ""
             # выгода длинных тарифов относительно самого короткого
             if base and per_month and per_month < base * 0.97:
-                note = f" · <i>−{round((1 - per_month / base) * 100)}%</i>"
+                note = f" · выгода {round((1 - per_month / base) * 100)}%"
             if base is None and per_month:
                 base = per_month
-            lines.append(f"💳 {escape(str(name))} — <b>{t_price} ₽</b>{note}")
+            lines.append(f"• {escape(str(name))} — <b>{t_price} ₽</b>{note}")
     elif price:
+        lines.append("💳 <b>Подписка</b>")
         period = f" · {fmt_duration(pay_period)}" if pay_period else ""
-        lines.append(f"💳 Подписка — <b>{price} ₽</b>{period}")
+        lines.append(f"<b>{price} ₽</b>{period}")
 
-    dev = (_plural(devices, ("устройство", "устройства", "устройств"))
-           if devices > 0 else "без лимита устройств")
-    traf = f"{traffic} ГБ" if traffic > 0 else "безлимит"
-    lines += ["", f"📱 {dev} · 📶 {traf}"]
+    if devices > 0:
+        word = "устройства" if devices % 10 == 1 and devices % 100 != 11 else "устройств"
+        dev_line = f"📱 До {devices} {word} одновременно"
+    else:
+        dev_line = "📱 Без ограничения устройств"
+    lines += ["", "━━━━━━━━━━━━━━", "",
+              "✨ <b>Что входит</b>",
+              dev_line,
+              "📶 Безлимитный трафик" if traffic <= 0 else f"📶 {traffic} ГБ трафика",
+              "🖥 iOS, Android, Windows, macOS"]
+    if devices > 0 and device_price > 0:
+        lines.append(f"➕ Доп. устройство — {device_price} ₽")
 
     await query.edit_message_text(
         "\n".join(lines),
