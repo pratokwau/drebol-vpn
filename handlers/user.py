@@ -640,20 +640,25 @@ async def handle_news(query):
 
 
 async def handle_how_to(query):
-    incy = ('<a href="https://apps.apple.com/ru/app/incy/id6756943388">iOS</a> · '
-            '<a href="https://play.google.com/store/apps/details?id=llc.itdev.incy">Android</a> · '
-            '<a href="https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe">Windows</a> · '
-            '<a href="https://apps.apple.com/ru/app/incy/id6756943388">macOS</a>')
-    happ = ('<a href="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215">iOS</a> · '
-            '<a href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a> · '
-            '<a href="https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe">Windows</a> · '
-            '<a href="https://apps.apple.com/us/app/happ-proxy-utility/id6504287215">macOS</a>')
     await query.edit_message_text(
         "❓ <b>Как подключиться</b>\n\n"
-        f"1. Установите <b>INCY</b>: {incy}\n"
-        "2. Скопируйте ссылку в «👤 Моя подписка»\n"
-        "3. Вставьте её в приложение и подключайтесь\n\n"
-        f"Запасной вариант — <b>Happ</b>: {happ}",
+        "<b>1️⃣ Установите приложение INCY</b> — рекомендуем\n"
+        "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">iOS</a>\n"
+        "• <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Android</a>\n"
+        "• <a href=\"https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe\">Windows</a>\n"
+        "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">macOS</a>\n\n"
+        "<b>2️⃣ Скопируйте ссылку подписки</b>\n"
+        "Откройте «👤 Моя подписка» и нажмите на ссылку — она скопируется.\n\n"
+        "<b>3️⃣ Вставьте ссылку в приложение</b>\n"
+        "Серверы подтянутся сами.\n\n"
+        "<b>4️⃣ Выберите сервер и подключайтесь</b>\n\n"
+        "━━━━━━━━━━━━━━\n\n"
+        "🔄 <b>Запасной вариант — Happ</b>\n"
+        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>\n"
+        "• <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Android</a>\n"
+        "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n"
+        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">macOS</a>\n"
+        "Дальше всё так же: скопируйте ссылку и вставьте её в Happ.",
         parse_mode="HTML",
         reply_markup=back_info(),
         disable_web_page_preview=True,
