@@ -4,7 +4,6 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID
 from database import upsert_user
-from keyboards import main_keyboard
 from subscription import is_subscribed, subscribe_keyboard
 
 
@@ -75,17 +74,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    is_admin = user.id == ADMIN_ID
-    from adminsub.storage import get_sub_by_tg_id
-    from paidsub.storage import get_paid_sub_status
-    has_sub = bool(await get_sub_by_tg_id(user.id))
-    paid_status = await get_paid_sub_status(user.id)
-    await update.message.reply_text(
-        f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
-        "🔒 Быстрый и безопасный VPN\n"
-        "⚡️ Стабильное подключение\n"
-        "🌍 Доступ к популярным сервисам\n\n"
-        "Выберите нужный раздел ниже 👇",
-        parse_mode="HTML",
-        reply_markup=main_keyboard(is_admin, has_sub, paid_status, helper),
-    )
+    # Канал пройден — пробный период выдаём сразу, без лишних нажатий.
+    # Пока панель создаёт клиента, человек видит «⏳», а не тишину
+    from handlers.user import ensure_trial, start_screen
+    waiting = []
+
+    async def _show_progress():
+        waiting.append(await update.message.reply_text("⏳ Готовлю ваш доступ…"))
+
+    fresh = await ensure_trial(user, context, on_start=_show_progress)
+    text, markup = await start_screen(user, fresh=fresh)
+    if waiting:
+        await waiting[0].edit_text(text, parse_mode="HTML", reply_markup=markup,
+                                   disable_web_page_preview=True)
+    else:
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=markup,
+                                        disable_web_page_preview=True)

@@ -5,7 +5,6 @@ from telegram.ext import ContextTypes
 from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard
-from keyboards import main_keyboard
 from handlers.user import (
     handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub,
     handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
@@ -217,19 +216,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=subscribe_keyboard(),
             )
             return
-        from adminsub.storage import get_sub_by_tg_id
-        from paidsub.storage import get_paid_sub_status
-        has_sub = bool(await get_sub_by_tg_id(user.id))
-        paid_status = await get_paid_sub_status(user.id)
-        await query.edit_message_text(
-            f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
-            "🔒 Быстрый и безопасный VPN\n"
-            "⚡️ Стабильное подключение\n"
-            "🌍 Доступ к популярным сервисам\n\n"
-            "Выберите нужный раздел ниже 👇",
-            parse_mode="HTML",
-            reply_markup=main_keyboard(adm, has_sub, paid_status, helper),
-        )
+        # подписался на канал — сразу выдаём пробный период и показываем его
+        from handlers.user import ensure_trial, start_screen
+        fresh = await ensure_trial(
+            user, context,
+            on_start=lambda: query.edit_message_text("⏳ Готовлю ваш доступ…"))
+        text, markup = await start_screen(user, fresh=fresh)
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
+                                      disable_web_page_preview=True)
         return
 
     # ── Юзер ─────────────────────────────────────────────────────────────────

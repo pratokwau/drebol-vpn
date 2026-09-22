@@ -1312,19 +1312,147 @@ async def handle_dev_buy(query, context, count: int):
     )
 
 
-async def handle_back_start(query, user):
-    is_admin = user.id == ADMIN_ID
+# ── Главный экран ─────────────────────────────────────────────────────────────
+
+# Кому прямо сейчас выдаётся триал: двойное нажатие «Я подписался» иначе
+# создало бы в панели два клиента на одного человека
+_ISSUING: set = set()
+
+
+async def ensure_trial(user, context, on_start=None) -> bool:
+    """Выдаёт пробный период сразу, без нажатия «Моя подписка».
+
+    Срабатывает, только когда выдача без одобрения включена (⚡ Авто-триал),
+    выдача триалов не выключена в техработах и пресеты заполнены. Админу и
+    помощникам не выдаём. True — подписку только что создали.
+    on_start вызывается перед созданием: показать «⏳ …», пока идёт панель.
+    """
+    from staff import is_helper
+    if user.id == ADMIN_ID or is_helper(user.id):
+        return False
+    from paidsub.storage import (get_paid_sub_by_tg_id, get_muted_until,
+                                 get_pending_request, add_request, resolve_request,
+                                 add_history, parse_sub_date)
+    if await get_paid_sub_by_tg_id(user.id):
+        return False
+    cfg = load_config()
+    if not cfg.get("auto_approve_trial", False):
+        return False
+    import maintenance as mnt
+    if not mnt.feature_enabled("trial"):
+        return False
+    from paidsub.handlers import _paid_presets_ready, do_create_paid_sub, _process_referral_bonus
+    if not _paid_presets_ready(cfg):
+        return False
+    muted = await get_muted_until(user.id)
+    if muted:
+        from datetime import datetime
+        until = parse_sub_date(muted)
+        if until and datetime.now() < until:
+            return False
+    if user.id in _ISSUING:
+        return False
+
+    _ISSUING.add(user.id)
+    try:
+        if await get_paid_sub_by_tg_id(user.id):
+            return False
+        if on_start:
+            try:
+                await on_start()
+            except Exception:
+                pass
+        if not await get_pending_request(user.id):
+            await add_request(user.id)
+        await resolve_request(user.id, "approved")
+        await add_history(user.id, "trial_approved", "Авто-выдача при входе")
+
+        replies = []
+
+        async def _collect(text, **kw):
+            replies.append(text)
+
+        await do_create_paid_sub(None, user.id, context, _collect, trial=True, for_user=True)
+        created = bool(await get_paid_sub_by_tg_id(user.id))
+
+        from log_channel import send_log
+        uname = escape(f"@{user.username}" if user.username else f"id{user.id}")
+        who = escape(str(user.first_name or user.id))
+        if created:
+            await _process_referral_bonus(user.id, context)
+            await send_log(context.bot,
+                f"⚡ Триал выдан при входе: {who} ({uname}) · <code>{user.id}</code>")
+        else:
+            # панель не ответила — человек увидит обычное меню, а админ причину
+            reason = escape(replies[-1][:300]) if replies else "неизвестно"
+            await send_log(context.bot,
+                f"⚠️ Не удалось выдать триал при входе: {who} · <code>{user.id}</code>\n"
+                f"{reason}")
+        return created
+    finally:
+        _ISSUING.discard(user.id)
+
+
+async def _start_sub_block(row, fresh: bool) -> str:
+    """Короткая сводка подписки для главного экрана."""
+    from datetime import datetime
+    from paidsub.storage import get_paid_sub, parse_sub_date
+    from paidsub.time_parser import fmt_duration_precise
+    status = row[11] if len(row) > 11 else "active"
+    renewed = row[12] if len(row) > 12 else 0
+    sub_url = row[5]
+    plan = "⭐️ <b>Премиум</b>" if renewed else "🆓 <b>Пробный период</b>"
+
+    full = await get_paid_sub(row[0])
+    end = parse_sub_date(full[18]) if full and len(full) > 18 and full[18] else None
+    end = end or parse_sub_date(row[6])
+    left = int((end - datetime.now()).total_seconds()) if end else 0
+    until = end.strftime("%d.%m.%Y · %H:%M") if end else row[6]
+
+    lines = []
+    if fresh:
+        lines += ["🎉 <b>Пробный период активирован!</b>", ""]
+
+    if status == "expired" or (left <= 0 and status != "renewal"):
+        lines += [f"{plan} · 🔴 <b>Закончилась</b>", "",
+                  "Продлите подписку — доступ включится сразу после оплаты."]
+        return "\n".join(lines)
+
+    mark = "🟡 <b>Ожидает оплаты</b>" if status == "renewal" else "🟢 <b>Активна</b>"
+    lines += [f"{plan} · {mark}",
+              f"⏳ Осталось: <b>{fmt_duration_precise(max(left, 0))}</b>",
+              f"📅 До: <b>{until}</b>",
+              "",
+              "🔗 <b>Ваша ссылка</b>",
+              f"<code>{escape(sub_url)}</code>",
+              "<i>Нажмите, чтобы скопировать, и вставьте в INCY или Happ.</i>"]
+    return "\n".join(lines)
+
+
+async def start_screen(user, fresh: bool = False):
+    """Главный экран: приветствие, сводка подписки и меню. Один на все входы."""
     from staff import is_helper
     from adminsub.storage import get_sub_by_tg_id
-    from paidsub.storage import get_paid_sub_status
+    from paidsub.storage import get_paid_sub_by_tg_id
+    is_admin = user.id == ADMIN_ID
     has_sub = bool(await get_sub_by_tg_id(user.id))
-    paid_status = await get_paid_sub_status(user.id)
-    await query.edit_message_text(
-        f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
-        "🔒 Быстрый и безопасный VPN\n"
-        "⚡️ Стабильное подключение\n"
-        "🌍 Доступ к популярным сервисам\n\n"
-        "Выберите нужный раздел ниже 👇",
-        parse_mode="HTML",
-        reply_markup=main_keyboard(is_admin, has_sub, paid_status, is_helper(user.id)),
-    )
+    row = await get_paid_sub_by_tg_id(user.id)
+    paid_status = (row[11] if len(row) > 11 else "active") if row else ""
+
+    head = f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>"
+    if row:
+        body = await _start_sub_block(row, fresh)
+    else:
+        body = ("🔒 Быстрый и безопасный VPN\n"
+                "⚡️ Стабильное подключение\n"
+                "🌍 Доступ к популярным сервисам")
+    text = f"{head}\n\n{body}\n\n{'━' * 14}\n\nВыберите нужный раздел ниже 👇"
+    return text, main_keyboard(is_admin, has_sub, paid_status, is_helper(user.id))
+
+
+async def handle_back_start(query, user):
+    text, markup = await start_screen(user)
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
+                                  disable_web_page_preview=True)
+
+
