@@ -990,8 +990,70 @@ async def handle_info(query):
     )
 
 
+# Приложения, которыми подключаются: как оно представляется → как показываем.
+# Панель кладёт название по-разному (userAgent, appName…), поэтому ищем по всему
+_APPS = (
+    ("happ", "Happ"), ("incy", "INCY"), ("hiddify", "Hiddify"),
+    ("streisand", "Streisand"), ("shadowrocket", "Shadowrocket"),
+    ("v2rayng", "v2RayNG"), ("v2rayn", "v2RayN"), ("v2box", "V2Box"),
+    ("nekobox", "NekoBox"), ("nekoray", "NekoRay"), ("sing-box", "sing-box"),
+    ("singbox", "sing-box"), ("clash", "Clash"), ("foxray", "FoXray"),
+    ("karing", "Karing"), ("exclave", "Exclave"), ("throne", "Throne"),
+    ("husi", "Husi"), ("loon", "Loon"), ("stash", "Stash"), ("quantumult", "Quantumult"),
+)
+
+_OS_ICONS = (("ios", "🍎"), ("mac", "🍎"), ("iphone", "🍎"), ("ipad", "🍎"),
+             ("android", "🤖"), ("windows", "🪟"), ("win", "🪟"),
+             ("linux", "🐧"), ("tv", "📺"))
+
+
+def _pick(item: dict, *keys) -> str:
+    for k in keys:
+        val = item.get(k)
+        if val:
+            return str(val).strip()
+    return ""
+
+
+def _device_app(item: dict) -> str:
+    """Каким приложением подключались — Happ, INCY и так далее."""
+    blob = " ".join(str(item.get(k, "")) for k in
+                    ("userAgent", "user_agent", "ua", "appName", "app", "client",
+                     "clientName", "deviceApp", "software", "platform")).lower()
+    for needle, name in _APPS:
+        if needle in blob:
+            return name
+    # «Happ/2.1.0 (iPhone)» — берём то, что стоит до слеша
+    raw = _pick(item, "userAgent", "user_agent", "ua", "appName", "client")
+    head = raw.split("/")[0].strip()
+    return head if 1 < len(head) <= 20 else ""
+
+
+def _device_title(item: dict) -> str:
+    """Что за устройство: модель и система, насколько панель их знает."""
+    model = _pick(item, "deviceModel", "model", "deviceName", "device", "name")
+    system = _pick(item, "deviceOs", "os", "osVersion", "system", "platform")
+    parts = [p for p in (model, system) if p]
+    # «Windows 11 · Windows» или «iPhone · iPhone 15» — оставляем подробное
+    if len(parts) == 2:
+        a, b = parts[0].lower(), parts[1].lower()
+        if a in b:
+            parts.pop(0)
+        elif b in a:
+            parts.pop(1)
+    return " · ".join(parts) or "устройство"
+
+
+def _os_icon(text: str) -> str:
+    low = text.lower()
+    for needle, icon in _OS_ICONS:
+        if needle in low:
+            return icon
+    return "📱"
+
+
 async def handle_my_devices(query, context=None):
-    """Устройства клиента: показать, отключить лишнее, докупить слоты."""
+    """Устройства клиента: что подключено, откуда и чем — и что можно отключить."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import get_paid_sub_by_tg_id
     from xui_api import get_client_hwids
@@ -1018,14 +1080,28 @@ async def handle_my_devices(query, context=None):
         items = r["items"]
         lines = [f"📱 <b>Устройства: {len(items)} из {limit}</b>", ""]
         for i, d in enumerate(items[:10], 1):
-            name = " · ".join(str(x) for x in (d.get("deviceOs"), d.get("deviceModel")) if x) or "устройство"
-            lines.append(f"{i}. {escape(name)} · {_when_ms(d.get('lastSeen'))}")
-            kb.append([InlineKeyboardButton(f"🗑 Отключить {i}",
+            title = _device_title(d)
+            app = _device_app(d)
+            when = _when_ms(_pick(d, "lastSeen", "lastUpdate", "updatedAt",
+                                  "lastOnline", "createdAt", "time"))
+            lines.append(f"{i}. {_os_icon(title)} <b>{escape(title)}</b>")
+            tail = " · ".join(x for x in (f"📲 {escape(app)}" if app else "",
+                                          f"был {when}" if when else "") if x)
+            if tail:
+                lines.append(f"    {tail}")
+            # на кнопке только модель: длинный хвост с системой всё равно обрежется
+            short = title.split(" · ")[0]
+            if len(short) > 16:
+                short = short[:15].rstrip() + "…"
+            kb.append([InlineKeyboardButton(f"🗑 Отключить {i} · {short}",
                                             callback_data=f"dev_del:{d.get('id')}")])
         if not items:
             lines.append("Пока ни одного — подключитесь в приложении.")
-        elif len(items) >= limit:
-            lines += ["", "⚠️ Мест нет — отключите лишнее или добавьте."]
+        else:
+            lines += ["", "<i>Не узнали устройство? Отключите его "
+                      "и перевыпустите ключ.</i>"]
+            if len(items) >= limit:
+                lines.insert(-1, "⚠️ Мест нет — отключите лишнее или добавьте.")
     if limit and price > 0 and bought < max_extra:
         kb.append([InlineKeyboardButton(f"➕ Добавить · {price} ₽",
                                         callback_data="dev_buy_menu")])
@@ -1034,13 +1110,38 @@ async def handle_my_devices(query, context=None):
                                   reply_markup=InlineKeyboardMarkup(kb))
 
 
-def _when_ms(ms) -> str:
+def _when_ms(value) -> str:
+    """Когда устройство было на связи.
+
+    Панель отдаёт то миллисекунды, то секунды, то строку с датой —
+    разбираем все варианты, а непонятное просто не показываем.
+    """
     from datetime import datetime
+    if value in (None, "", 0, "0"):
+        return ""
     try:
-        ms = int(ms or 0)
-    except (TypeError, ValueError):
-        return "?"
-    return datetime.fromtimestamp(ms / 1000).strftime("%d.%m %H:%M") if ms > 0 else "—"
+        num = int(float(value))
+        # секунды это или миллисекунды — видно по порядку числа
+        if num > 10 ** 12:
+            num //= 1000
+        if num <= 0:
+            return ""
+        dt = datetime.fromtimestamp(num)
+    except (TypeError, ValueError, OSError, OverflowError):
+        text = str(value).strip().replace("T", " ")[:19]
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d.%m.%Y %H:%M:%S",
+                    "%d.%m.%Y %H:%M", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+        else:
+            return ""
+    today = datetime.now().date()
+    if dt.date() == today:
+        return f"сегодня в {dt.strftime('%H:%M')}"
+    return dt.strftime("%d.%m в %H:%M")
 
 
 async def handle_dev_del(query, context, hwid_id: int):
