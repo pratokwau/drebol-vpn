@@ -12,7 +12,12 @@ from html import escape
 def build_page(bot_username: str, title: str = "Drebol VPN",
                tagline: str = "Быстрый VPN без логов",
                privacy_url: str = "", terms_url: str = "",
-               channel_url: str = "") -> str:
+               channel_url: str = "", logo_file: str = "") -> str:
+    """logo_file — имя файла с настоящим логотипом рядом со страницей.
+
+    Если его нет, страница рисует логотип линиями — так она никогда не
+    остаётся без знака, даже когда картинку не залили.
+    """
     bot_url = f"https://t.me/{bot_username.lstrip('@')}" if bot_username else "https://t.me/"
     docs = []
     if privacy_url:
@@ -25,6 +30,20 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
         if channel_url else ""
     )
     year = "2026"
+    if logo_file:
+        logo_html = (f'<img class="logo-img" src="{escape(logo_file)}" '
+                     f'alt="{escape(title)}" width="523" height="162">')
+    else:
+        logo_html = (
+            '<div class="logo">'
+            '<svg class="mark" viewBox="0 0 100 100" aria-hidden="true">'
+            '<circle cx="50" cy="50" r="40"></circle>'
+            '<ellipse class="flat" cx="50" cy="50" rx="40" ry="13"></ellipse>'
+            '<ellipse class="lens" cx="50" cy="50" rx="22" ry="40"></ellipse>'
+            '</svg>'
+            f'<div class="word">{escape(title.split()[0].lower())}</div>'
+            '</div>'
+        )
 
     return f"""<!DOCTYPE html>
 <html lang="ru">
@@ -120,6 +139,16 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 
   main {{ position: relative; z-index: 3; text-align: center; max-width: 560px; width: 100%; }}
 
+  .logo-img {{
+    display: block; width: min(78vw, 360px); height: auto; margin: 0 auto;
+    opacity: 0; filter: drop-shadow(0 8px 30px rgba(120,170,255,.25));
+    animation: rise 1s .2s cubic-bezier(.2,.8,.2,1) forwards, float 8s 1.2s ease-in-out infinite;
+  }}
+  @keyframes float {{
+    0%, 100% {{ transform: translateY(0); }}
+    50%      {{ transform: translateY(-7px); }}
+  }}
+
   .logo {{ display: flex; align-items: center; justify-content: center; gap: 18px; }}
   .mark {{ width: 68px; height: 68px; flex: none; animation: breathe 7s ease-in-out infinite; }}
   .mark circle, .mark ellipse {{
@@ -183,7 +212,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 
   @media (prefers-reduced-motion: reduce) {{
     *, *::before, *::after {{ animation: none !important; transition: none !important; }}
-    .word, .tagline, .cta, .feats, footer {{ opacity: 1; }}
+    .word, .tagline, .cta, .feats, footer, .logo-img {{ opacity: 1; }}
     .mark circle, .mark ellipse {{ stroke-dashoffset: 0; }}
   }}
 </style>
@@ -195,14 +224,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 <div class="grain"></div>
 
 <main>
-  <div class="logo">
-    <svg class="mark" viewBox="0 0 100 100" aria-hidden="true">
-      <circle cx="50" cy="50" r="40"></circle>
-      <ellipse class="flat" cx="50" cy="50" rx="40" ry="13"></ellipse>
-      <ellipse class="lens" cx="50" cy="50" rx="22" ry="40"></ellipse>
-    </svg>
-    <div class="word">{escape(title.split()[0].lower())}</div>
-  </div>
+  {logo_html}
 
   <p class="tagline">{escape(tagline)}</p>
 

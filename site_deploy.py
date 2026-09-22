@@ -18,6 +18,75 @@ from config import load_config, save_config
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_ROOT = "/var/www/drebol"
 NGINX_CONF = "/etc/nginx/sites-available/drebol"
+LOGO_NAME = "logo.png"
+
+
+def _asset(name: str) -> bytes:
+    """Файл из папки assets. Нет файла — пустые байты, не падаем."""
+    try:
+        with open(os.path.join(PROJECT_DIR, "assets", name), "rb") as f:
+            return f.read()
+    except OSError:
+        return b""
+
+
+def save_logo(data: bytes):
+    os.makedirs(os.path.join(PROJECT_DIR, "assets"), exist_ok=True)
+    with open(os.path.join(PROJECT_DIR, "assets", LOGO_NAME), "wb") as f:
+        f.write(data)
+
+
+def has_logo() -> bool:
+    return bool(_asset(LOGO_NAME))
+
+
+def process_logo(data: bytes) -> bytes:
+    """Готовит присланную картинку к вставке на тёмную страницу.
+
+    Обрезает пустые поля и, если логотип белый на тёмном фоне, делает фон
+    прозрачным — иначе на сайте вокруг знака висел бы тёмный прямоугольник.
+    Картинку с настоящей прозрачностью не трогаем, только подрезаем.
+    """
+    try:
+        import io
+        from PIL import Image
+    except ImportError:
+        return data
+    try:
+        im = Image.open(io.BytesIO(data))
+        im.load()
+    except Exception:
+        return data
+
+    has_alpha = im.mode in ("RGBA", "LA") and im.getchannel("A").getextrema()[0] < 255
+    if not has_alpha:
+        grey = im.convert("L")
+        # тёмный фон — берём прозрачность из яркости, знак остаётся белым
+        if sum(grey.getdata()) / max(1, grey.width * grey.height) < 110:
+            # фон почти никогда не бывает чисто чёрным, поэтому тёмное уводим
+            # в полную прозрачность, светлое — в полную непрозрачность,
+            # а между ними оставляем мягкий край, чтобы буквы не рвало
+            ramp = grey.point(lambda v: 0 if v < 95 else
+                              (255 if v > 190 else int((v - 95) * 255 / 95)))
+            im = Image.merge("RGBA", (
+                Image.new("L", grey.size, 255), Image.new("L", grey.size, 255),
+                Image.new("L", grey.size, 255), ramp))
+        else:
+            im = im.convert("RGBA")
+    else:
+        im = im.convert("RGBA")
+
+    alpha = im.getchannel("A")
+    # обрезаем по заметной части, а не по первому ненулевому пикселю
+    box = alpha.point(lambda v: 255 if v > 60 else 0).getbbox()
+    if box:
+        im = im.crop(box)
+    if im.width > 900:
+        im = im.resize((900, max(1, round(im.height * 900 / im.width))), Image.LANCZOS)
+
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def creds() -> dict:
@@ -97,7 +166,7 @@ def _check_sync() -> dict:
         cli.close()
 
 
-def _deploy_sync(page: str, og_bytes: bytes) -> dict:
+def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"") -> dict:
     c = creds()
     try:
         cli = _client()
@@ -125,6 +194,9 @@ chmod 755 {WEB_ROOT}
                 f.write(page)
             with sftp.open("/tmp/drebol_og.webp", "wb") as f:
                 f.write(og_bytes)
+            if logo_bytes:
+                with sftp.open("/tmp/drebol_logo", "wb") as f:
+                    f.write(logo_bytes)
         finally:
             sftp.close()
 
@@ -132,7 +204,9 @@ chmod 755 {WEB_ROOT}
         install = f"""set -e
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html
 mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
+[ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp
+[ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
 cat > {NGINX_CONF} <<'NGINXCONF'
 server {{
     listen 80 default_server;
@@ -229,19 +303,16 @@ async def deploy(bot_username: str) -> dict:
     """Собирает страницу и раскатывает её на сервер."""
     from site_page import build_page
     cfg = load_config()
+    og_bytes = _asset("og.webp")
+    logo_bytes = _asset(LOGO_NAME)
     page = build_page(
         bot_username=bot_username,
         privacy_url=cfg.get("privacy_url", "") or "",
         terms_url=cfg.get("terms_url", "") or "",
         channel_url=cfg.get("channel_url", "") or "",
+        logo_file=LOGO_NAME if logo_bytes else "",
     )
-    og_path = os.path.join(PROJECT_DIR, "assets", "og.webp")
-    try:
-        with open(og_path, "rb") as f:
-            og_bytes = f.read()
-    except OSError:
-        og_bytes = b""
-    res = await asyncio.to_thread(_deploy_sync, page, og_bytes)
+    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes)
     if res.get("ok"):
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"))
     return res
@@ -259,6 +330,22 @@ async def remove_site() -> dict:
     if res.get("ok"):
         save_creds(site_deployed_at="", site_https=False)
     return res
+
+
+def pip_path() -> str:
+    """pip того же окружения, в котором крутится бот.
+
+    Бот запускается из venv, а привычный «pip install» ставит пакет в
+    системный Python — библиотека появляется, но бот её не видит.
+    """
+    import sys
+    from pathlib import Path
+    exe = Path(sys.executable)
+    for name in ("pip", "pip3"):
+        candidate = exe.with_name(name)
+        if candidate.exists():
+            return str(candidate)
+    return f"{exe} -m pip"
 
 
 def paramiko_ready() -> bool:
@@ -279,11 +366,15 @@ async def handle_site_menu(query):
     if not ready:
         await query.edit_message_text(
             "🌐 <b>Сайт-визитка</b>\n\n"
-            "Нужна библиотека для SSH. На сервере бота выполни:\n"
-            "<code>pip install paramiko</code>\n"
-            "и перезапусти бота.",
+            "Нужна библиотека для SSH. Ставить её надо в тот же Python, "
+            "из которого работает бот:\n\n"
+            f"<code>{escape(pip_path())} install paramiko</code>\n"
+            "<code>systemctl restart drebol-vpn</code>\n\n"
+            "<i>Обычный «pip install» ставит в системный Python, "
+            "а бот живёт в своём venv — поэтому и не видит библиотеку.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Проверить снова", callback_data="site_menu")],
                 [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
             ]),
         )
@@ -298,6 +389,7 @@ async def handle_site_menu(query):
     lines = ["🌐 <b>Сайт-визитка</b>", "",
              f"🖥 Сервер: {server}",
              f"🌍 Домен: {domain}",
+             f"🖼 Логотип: {'свой' if has_logo() else 'нарисованный'}",
              f"🚀 Статус: {state}"]
     if url and c["deployed_at"]:
         lines.append(f"🔗 {escape(url)}")
@@ -305,7 +397,8 @@ async def handle_site_menu(query):
               "Разворачивается на втором сервере, бота не трогает.</i>"]
 
     kb = [[InlineKeyboardButton("🖥 Данные сервера", callback_data="site_server"),
-           InlineKeyboardButton("🌍 Домен", callback_data="site_domain")]]
+           InlineKeyboardButton("🌍 Домен", callback_data="site_domain")],
+          [InlineKeyboardButton("🖼 Логотип", callback_data="site_logo")]]
     if configured():
         kb.append([InlineKeyboardButton(
             "🔄 Обновить сайт" if c["deployed_at"] else "🚀 Развернуть сайт",
@@ -351,6 +444,24 @@ async def handle_site_domain(query, context):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
+        ]),
+    )
+
+
+async def handle_site_logo(query, context):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from states import AWAITING_SITE_LOGO
+    context.user_data["state"] = AWAITING_SITE_LOGO
+    cur = "сейчас стоит твой файл" if has_logo() else "сейчас нарисованный знак"
+    await query.edit_message_text(
+        "🖼 <b>Логотип сайта</b>\n\n"
+        f"{cur}.\n\n"
+        "Пришли картинку — лучше PNG с прозрачным фоном.\n"
+        "Тёмную подложку уберу сам, если её видно.\n\n"
+        "<i>После замены нажми «Обновить сайт».</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
         ]),
     )
 

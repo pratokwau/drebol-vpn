@@ -41,6 +41,7 @@ CB_LABELS = {
     "remind_settings": "⏰ Напоминания",
     "fraud_menu": "🕵 Повторные триалы",
     "site_menu": "🌐 Сайт",
+    "site_logo": "🖼 Логотип сайта",
     "site_deploy": "🚀 Разворачивает сайт",
     "site_delete": "🗑 Удаляет сайт",
     "fraud_scan": "🕵 Ручная проверка",

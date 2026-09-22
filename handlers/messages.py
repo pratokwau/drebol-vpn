@@ -40,7 +40,7 @@ from states import (
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_QUICK_REPLY,
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
-    AWAITING_SITE_DOMAIN,
+    AWAITING_SITE_DOMAIN, AWAITING_SITE_LOGO,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
@@ -550,6 +550,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + (f"за {fmt_duration(seconds)}" if seconds else "выключено") + "</b>",
             parse_mode="HTML", reply_markup=back_admin(),
         )
+        return
+
+    if state == AWAITING_SITE_LOGO:
+        await update.message.reply_text("🖼 Пришли картинку файлом или фото.")
         return
 
     # ── Сайт на втором сервере: адрес, пользователь, пароль ──────────────────
@@ -1407,6 +1411,26 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     caption = msg.caption or ""
+
+    # ── Логотип для сайта ───────────────────────────────────────────────────
+    if is_admin and state == AWAITING_SITE_LOGO:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from site_deploy import process_logo, save_logo
+        context.user_data.pop("state", None)
+        tg_file = await context.bot.get_file(file_id)
+        raw = bytes(await tg_file.download_as_bytearray())
+        ready = process_logo(raw)
+        save_logo(ready)
+        await msg.reply_text(
+            "🖼 <b>Логотип сохранён</b>\n\n"
+            "Нажми «Обновить сайт» — он поедет на страницу.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Обновить сайт", callback_data="site_deploy")],
+                [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
+            ]),
+        )
+        return
 
     # ── Картинка для рассылки ───────────────────────────────────────────────
     if is_admin and msg.photo and state in (AWAITING_BROADCAST_PHOTO, AWAITING_BROADCAST):
