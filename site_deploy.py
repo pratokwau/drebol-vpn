@@ -201,6 +201,7 @@ chmod 755 {WEB_ROOT}
             sftp.close()
 
         server_name = c["domain"] or "_"
+        cert_domain = c["domain"]
         install = f"""set -e
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html
 mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
@@ -232,6 +233,14 @@ systemctl reload nginx 2>/dev/null || systemctl restart nginx
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
   ufw allow 80/tcp >/dev/null 2>&1 || true
   ufw allow 443/tcp >/dev/null 2>&1 || true
+fi
+# Конфиг мы переписали с нуля, поэтому блок HTTPS, который добавлял certbot,
+# пропал бы вместе с ним. Сертификат на месте — просто прописываем его заново
+if [ -n "{cert_domain}" ] && [ -d "/etc/letsencrypt/live/{cert_domain}" ] \
+   && command -v certbot >/dev/null 2>&1; then
+  certbot --nginx -d {cert_domain} --agree-tos --register-unsafely-without-email \
+          --non-interactive --redirect --reinstall >/dev/null 2>&1 || true
+  systemctl reload nginx 2>/dev/null || true
 fi
 echo DEPLOY_OK
 """
@@ -270,6 +279,68 @@ echo CERT_OK
         return {"ok": True}
     finally:
         cli.close()
+
+
+DIAG_SCRIPT = """
+D="__DOMAIN__"
+echo "domain=$D"
+echo "ip=$(curl -s -m 5 https://api.ipify.org 2>/dev/null || echo '?')"
+if [ -n "$D" ]; then
+  if command -v dig >/dev/null 2>&1; then
+    echo "dns=$(dig +short A "$D" | tr '\n' ' ')"
+  elif command -v getent >/dev/null 2>&1; then
+    echo "dns=$(getent ahostsv4 "$D" | awk '{print $1}' | sort -u | tr '\n' ' ')"
+  else
+    echo "dns=?"
+  fi
+  [ -d "/etc/letsencrypt/live/$D" ] && echo "cert=yes" || echo "cert=no"
+  echo "https=$(curl -s -o /dev/null -w '%{http_code}' -m 8 "https://$D/" 2>/dev/null || echo '-')"
+fi
+echo "nginx443=$(grep -c 'listen 443' /etc/nginx/sites-available/drebol 2>/dev/null || echo 0)"
+echo "listen443=$( (ss -lnt 2>/dev/null || netstat -lnt 2>/dev/null) | grep -c ':443 ' )"
+echo "http=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1/ 2>/dev/null || echo '-')"
+echo "certbot=$(command -v certbot >/dev/null 2>&1 && echo yes || echo no)"
+echo DIAG_OK
+"""
+
+
+def _diagnose_sync() -> dict:
+    """Собирает с сервера всё, что объясняет, почему сайт не на HTTPS."""
+    c = creds()
+    try:
+        cli = _client()
+    except Exception as e:
+        return {"ok": False, "error": f"не подключиться: {type(e).__name__}: {e}"}
+    try:
+        code, out, err = _run(cli, DIAG_SCRIPT.replace("__DOMAIN__", c["domain"]))
+        if "DIAG_OK" not in out:
+            return {"ok": False, "error": (err or out)[-300:]}
+        data = {}
+        for line in out.splitlines():
+            if "=" in line:
+                k, _, v = line.partition("=")
+                data[k.strip()] = v.strip()
+        return {"ok": True, "data": data}
+    finally:
+        cli.close()
+
+
+async def diagnose() -> dict:
+    res = await asyncio.to_thread(_diagnose_sync)
+    # Галочку HTTPS поправляем, только когда проверка дала ясный ответ:
+    # молчание сервера бывает от случайной сети, и снимать из-за него
+    # уже работающий HTTPS неправильно
+    if res.get("ok"):
+        data = res["data"]
+        code = data.get("https", "")
+        if code in ("200", "301", "302"):
+            if not creds()["https"]:
+                save_creds(site_https=True)
+        elif code not in ("", "-") and creds()["https"]:
+            # «000» и прочие коды — сервер ответил внятным отказом,
+            # а пустое значение или «-» значит, что проверить не вышло
+            save_creds(site_https=False)
+    return res
 
 
 def _remove_sync() -> dict:
@@ -430,6 +501,8 @@ async def handle_site_menu(query):
             callback_data="site_deploy")])
         if c["domain"] and c["deployed_at"] and not c["https"]:
             kb.append([InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert")])
+        if c["deployed_at"]:
+            kb.append([InlineKeyboardButton("🩺 Проверить сайт", callback_data="site_check")])
         if c["deployed_at"] and url:
             kb.append([InlineKeyboardButton("🔗 Открыть сайт", url=url)])
             kb.append([InlineKeyboardButton("🗑 Удалить сайт", callback_data="site_delete")])
@@ -524,6 +597,76 @@ async def handle_site_deploy(query, context):
     )
 
 
+async def handle_site_check(query, context):
+    """Почему сайт не на HTTPS — по фактам с самого сервера."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    await query.edit_message_text("🩺 Проверяю сервер…")
+    res = await diagnose()
+    if not res.get("ok"):
+        await query.edit_message_text(
+            f"❌ <b>Не проверить</b>\n\n<code>{escape(str(res.get('error'))[:300])}</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")]]),
+        )
+        return
+
+    d = res["data"]
+    domain = d.get("domain", "")
+    ip = d.get("ip", "?")
+    dns = d.get("dns", "")
+    cert = d.get("cert") == "yes"
+    conf443 = d.get("nginx443", "0") != "0"
+    listen443 = d.get("listen443", "0") != "0"
+    https_code = d.get("https", "-")
+    http_code = d.get("http", "-")
+    dns_ok = bool(dns) and ip != "?" and ip in dns.split()
+
+    def mark(ok):
+        return "✅" if ok else "❌"
+
+    lines = ["🩺 <b>Проверка сайта</b>", ""]
+    if not domain:
+        lines += ["❌ <b>Домен не задан</b>", "",
+                  "По IP сертификат не выпустить — HTTPS бывает только с доменом.",
+                  "Задай домен, направь его A-запись на "
+                  f"<code>{escape(ip)}</code> и включи HTTPS."]
+    else:
+        lines += [f"🌍 Домен: <code>{escape(domain)}</code>",
+                  f"🖥 IP сервера: <code>{escape(ip)}</code>",
+                  f"{mark(dns_ok)} A-запись: <code>{escape(dns or 'не найдена')}</code>",
+                  f"{mark(cert)} Сертификат на сервере",
+                  f"{mark(conf443)} 443 в конфиге nginx",
+                  f"{mark(listen443)} nginx слушает 443",
+                  f"🌐 Ответ по http: <b>{escape(http_code)}</b> · "
+                  f"по https: <b>{escape(https_code)}</b>", ""]
+        # первая же невыполненная причина и объясняет всё остальное
+        if not dns_ok:
+            lines += ["<b>Причина: домен не смотрит на этот сервер.</b>",
+                      "Поправь A-запись у регистратора на IP выше и подожди "
+                      "до часа — потом включи HTTPS."]
+        elif not cert:
+            lines += ["<b>Причина: сертификата нет.</b>",
+                      "Нажми «🔒 Включить HTTPS» — теперь домен смотрит куда надо."]
+        elif not conf443 or not listen443:
+            lines += ["<b>Причина: сертификат есть, но nginx его не подхватил.</b>",
+                      "Нажми «🔒 Включить HTTPS» — конфиг пропишется заново."]
+        elif https_code in ("200", "301", "302"):
+            lines += ["<b>HTTPS работает.</b>",
+                      "Если открывается по http — проверь, что заходишь "
+                      f"на <code>https://{escape(domain)}</code>, а не по IP."]
+        else:
+            lines += ["<b>Сертификат и конфиг на месте, но сайт по https молчит.</b>",
+                      "Обычно мешает закрытый 443 порт у хостера или фаервол."]
+
+    kb = [[InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert")]] if domain else []
+    kb.append([InlineKeyboardButton("🔄 Проверить снова", callback_data="site_check")])
+    kb.append([InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb),
+                                  disable_web_page_preview=True)
+
+
 async def handle_site_cert(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     await query.edit_message_text("🔒 Выпускаю сертификат… до минуты.")
@@ -541,7 +684,7 @@ async def handle_site_cert(query, context):
         )
         return
     await query.answer("HTTPS включён")
-    await handle_site_menu(query)
+    await handle_site_check(query, context)
 
 
 async def handle_site_delete(query, context):
