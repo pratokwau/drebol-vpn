@@ -36,7 +36,8 @@ _HTML_TAG_RE = re.compile(
 _BUTTON_RE = re.compile(r"^(.*?)\s*[-–—]\s*((?:https?://|tg://)\S+)$")
 
 FORMAT_HELP = (
-    "Форматировать можно двумя способами:\n\n"
+    "💡 <b>Как оформить</b>\n"
+    "<blockquote expandable>"
     "1️⃣ <b>Прямо в Telegram</b> — выделите текст и примените жирный, курсив, "
     "ссылку, моноширинный, зачёркнутый, скрытый. Всё сохранится.\n\n"
     "2️⃣ <b>HTML-тегами</b>:\n"
@@ -48,9 +49,11 @@ FORMAT_HELP = (
     "<code>&lt;tg-spoiler&gt;скрытый&lt;/tg-spoiler&gt;</code>\n"
     "<code>&lt;a href=\"https://...\"&gt;ссылка&lt;/a&gt;</code>\n"
     "<code>&lt;blockquote&gt;цитата&lt;/blockquote&gt;</code>"
+    "</blockquote>"
 )
 
 BUTTONS_HELP = (
+    "<blockquote>"
     "Формат — по одной кнопке в строке:\n"
     "<code>Текст кнопки - https://example.com</code>\n\n"
     "Несколько кнопок в один ряд — через <code>|</code>:\n"
@@ -58,6 +61,7 @@ BUTTONS_HELP = (
     "Пример:\n"
     "<code>💳 Продлить - https://example.com/pay\n"
     "📰 Наш канал - https://t.me/channel</code>"
+    "</blockquote>"
 )
 
 
@@ -134,11 +138,16 @@ def _reset(context):
 
 async def handle_broadcast_start(query, context: ContextTypes.DEFAULT_TYPE):
     _reset(context)
-    kb = [[InlineKeyboardButton(label, callback_data=f"bcast_seg:{key}")]
-          for key, label in SEGMENTS.items()]
+    # сегменты парами: «Все пользователи» первым и во всю ширину
+    items = list(SEGMENTS.items())
+    kb = [[InlineKeyboardButton(items[0][1], callback_data=f"bcast_seg:{items[0][0]}")]]
+    for i in range(1, len(items), 2):
+        kb.append([InlineKeyboardButton(label, callback_data=f"bcast_seg:{key}")
+                   for key, label in items[i:i + 2]])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text(
-        "📣 <b>Рассылка</b>\n\nВыберите, кому отправить сообщение:",
+        "📣 <b>Рассылка</b>  ·  <i>шаг 1 из 4</i>\n\n"
+        "Кому отправить сообщение?",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
     )
@@ -153,9 +162,11 @@ async def handle_broadcast_segment(query, context: ContextTypes.DEFAULT_TYPE, se
     context.user_data["bcast_segment"] = segment
     count = len(await get_users_by_segment(segment))
     await query.edit_message_text(
-        f"📣 <b>Рассылка · {SEGMENTS[segment]}</b>\n\n"
-        f"👥 Получателей: <b>{count}</b>\n\n"
-        f"✍️ Отправьте текст сообщения.\n\n{FORMAT_HELP}",
+        "📣 <b>Рассылка</b>  ·  <i>шаг 2 из 4</i>\n\n"
+        f"<blockquote>🎯 {SEGMENTS[segment]}\n"
+        f"👥 Получателей: <b>{count}</b></blockquote>\n\n"
+        "✍️ <b>Пришлите текст сообщения</b>\n\n"
+        f"{FORMAT_HELP}",
         parse_mode="HTML",
         reply_markup=cancel_admin(),
     )
@@ -174,8 +185,9 @@ async def ask_photo(message, context: ContextTypes.DEFAULT_TYPE):
                                       callback_data="bcast_photo_skip")])
     rows.append([InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")])
     await message.reply_text(
+        "📣 <b>Рассылка</b>  ·  <i>шаг 3 из 4</i>\n\n"
         "✅ Текст принят.\n\n"
-        + ("🖼 Картинка прикреплена." if photo else "🖼 Добавить к рассылке картинку?"),
+        + ("🖼 Картинка прикреплена." if photo else "🖼 <b>Добавить картинку?</b>"),
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
     )
 
@@ -184,12 +196,12 @@ async def handle_bcast_photo_add(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_BROADCAST_PHOTO
     await query.edit_message_text(
         "🖼 <b>Картинка для рассылки</b>\n\n"
-        "Пришлите фото одним сообщением — подпись писать не нужно, "
-        "текст рассылки уже принят.",
+        "<i>Пришлите фото одним сообщением. Подпись писать не нужно — "
+        "текст рассылки уже принят.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏭ Без картинки", callback_data="bcast_photo_skip")],
-            [InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
+            [InlineKeyboardButton("⏭ Без картинки", callback_data="bcast_photo_skip"),
+             InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
         ]),
     )
 
@@ -209,7 +221,7 @@ async def accept_photo(message, context: ContextTypes.DEFAULT_TYPE):
     """Фото пришло на шаге картинки."""
     context.user_data["bcast_photo"] = message.photo[-1].file_id
     context.user_data.pop("state", None)
-    await message.reply_text("🖼 Картинка принята.")
+    await message.reply_text("🖼 <b>Картинка принята</b>", parse_mode="HTML")
     await ask_buttons(message, context)
 
 
@@ -218,7 +230,8 @@ async def accept_photo_with_text(message, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["bcast_photo"] = message.photo[-1].file_id
     caption = extract_html(message)
     if not caption.strip():
-        await message.reply_text("🖼 Картинка принята. Теперь пришлите текст рассылки.")
+        await message.reply_text("🖼 <b>Картинка принята</b>\n\n"
+                                 "<i>Теперь пришлите текст рассылки.</i>", parse_mode="HTML")
         return
     context.user_data["bcast_text"] = caption
     context.user_data.pop("state", None)
@@ -230,12 +243,13 @@ async def accept_photo_with_text(message, context: ContextTypes.DEFAULT_TYPE):
 async def ask_buttons(message, context: ContextTypes.DEFAULT_TYPE):
     """Текст принят — спрашиваем про инлайн-кнопки."""
     await message.reply_text(
-        "✅ Текст принят.\n\n"
-        "🔘 Прикрепить к рассылке инлайн-кнопки?",
+        "📣 <b>Рассылка</b>  ·  <i>шаг 4 из 4</i>\n\n"
+        "🔘 <b>Прикрепить кнопки-ссылки?</b>\n"
+        "<i>Например, «Продлить» или «Наш канал».</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Добавить кнопки", callback_data="bcast_buttons_add")],
-            [InlineKeyboardButton("⏭ Без кнопок", callback_data="bcast_buttons_skip")],
+            [InlineKeyboardButton("➕ Добавить кнопки", callback_data="bcast_buttons_add"),
+             InlineKeyboardButton("⏭ Без кнопок", callback_data="bcast_buttons_skip")],
             [InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
         ]),
     )
@@ -247,8 +261,8 @@ async def handle_bcast_buttons_add(query, context: ContextTypes.DEFAULT_TYPE):
         f"🔘 <b>Кнопки для рассылки</b>\n\n{BUTTONS_HELP}",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏭ Пропустить", callback_data="bcast_buttons_skip")],
-            [InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
+            [InlineKeyboardButton("⏭ Пропустить", callback_data="bcast_buttons_skip"),
+             InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
         ]),
     )
 
@@ -267,13 +281,14 @@ async def show_preview(message, context: ContextTypes.DEFAULT_TYPE):
     spec = context.user_data.get("bcast_buttons")
     photo = context.user_data.get("bcast_photo")
     if not text:
-        await message.reply_text("❌ Текст рассылки потерян, начните заново.")
+        await message.reply_text("😕 <b>Текст рассылки потерялся</b>\n\n<i>Начните заново.</i>",
+                                 parse_mode="HTML")
         return
 
     count = len(await get_users_by_segment(segment))
 
     await message.reply_text(
-        "👀 <b>Так увидят получатели:</b>",
+        "👀 <b>Так увидят получатели</b> 👇",
         parse_mode="HTML",
     )
     try:
@@ -291,32 +306,31 @@ async def show_preview(message, context: ContextTypes.DEFAULT_TYPE):
             )
     except Exception as e:
         await message.reply_text(
-            f"❌ <b>Ошибка разметки</b>\n\n<code>{e}</code>\n\n"
-            "Исправьте текст и отправьте заново.",
+            f"❌ <b>Ошибка разметки</b>\n\n<blockquote><code>{e}</code></blockquote>\n\n"
+            "<i>Исправьте текст и отправьте заново.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✏️ Изменить текст", callback_data="bcast_edit_text")],
-                [InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
+                [InlineKeyboardButton("✏️ Изменить текст", callback_data="bcast_edit_text"),
+                 InlineKeyboardButton("❌ Отмена", callback_data="bcast_cancel")],
             ]),
         )
         return
 
-    btn_line = f"🔘 Кнопок: <b>{sum(len(r) for r in spec)}</b>\n" if spec else ""
-    photo_line = ""
-    if photo:
-        photo_line = "🖼 Картинка: <b>есть</b>\n"
-        if len(text) > CAPTION_LIMIT:
-            photo_line += ("<i>Текст длиннее 1024 символов — картинка уйдёт "
-                           "отдельным сообщением перед текстом.</i>\n")
+    btn_line = f"\n🔘 Кнопок: <b>{sum(len(r) for r in spec)}</b>" if spec else ""
+    photo_line = "\n🖼 Картинка: <b>есть</b>" if photo else ""
+    photo_note = ("\n\n<i>Текст длиннее 1024 символов — картинка уйдёт "
+                  "отдельным сообщением перед текстом.</i>"
+                  if photo and len(text) > CAPTION_LIMIT else "")
     await message.reply_text(
-        f"📣 <b>Проверьте рассылку</b>\n\n"
-        f"🎯 Сегмент: <b>{SEGMENTS.get(segment, 'Все')}</b>\n"
-        f"👥 Получателей: <b>{count}</b>\n"
-        f"{photo_line}{btn_line}\n"
-        "Отправляем?",
+        "📣 <b>Проверьте рассылку</b>\n\n"
+        f"<blockquote>🎯 {SEGMENTS.get(segment, 'Все')}\n"
+        f"👥 Получателей: <b>{count}</b>"
+        f"{photo_line}{btn_line}</blockquote>"
+        f"{photo_note}\n\n"
+        "<b>Отправляем?</b>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Отправить", callback_data="bcast_send")],
+            [InlineKeyboardButton(f"🚀 Отправить · {count}", callback_data="bcast_send")],
             [
                 InlineKeyboardButton("✏️ Текст", callback_data="bcast_edit_text"),
                 InlineKeyboardButton("🖼 Картинка", callback_data="bcast_photo_add"),
@@ -330,7 +344,7 @@ async def show_preview(message, context: ContextTypes.DEFAULT_TYPE):
 async def handle_bcast_edit_text(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_BROADCAST
     await query.edit_message_text(
-        f"✍️ Отправьте новый текст рассылки.\n\n{FORMAT_HELP}",
+        f"✍️ <b>Пришлите новый текст рассылки</b>\n\n{FORMAT_HELP}",
         parse_mode="HTML",
         reply_markup=cancel_admin(),
     )
@@ -340,7 +354,7 @@ async def handle_bcast_cancel(query, context: ContextTypes.DEFAULT_TYPE):
     _reset(context)
     from keyboards import back_admin
     await query.edit_message_text(
-        "❌ Рассылка отменена.",
+        "❌ <b>Рассылка отменена</b>", parse_mode="HTML",
         reply_markup=back_admin(),
     )
 
@@ -353,12 +367,14 @@ async def handle_bcast_send(query, context: ContextTypes.DEFAULT_TYPE):
     spec = context.user_data.get("bcast_buttons")
     photo = context.user_data.get("bcast_photo")
     if not text:
-        await query.edit_message_text("❌ Текст рассылки потерян, начните заново.")
+        await query.edit_message_text("😕 <b>Текст рассылки потерялся</b>\n\n<i>Начните заново.</i>",
+                                      parse_mode="HTML")
         return
 
     user_ids = await get_users_by_segment(segment)
     await query.edit_message_text(
-        f"⏳ Отправляю рассылку — {len(user_ids)} получателям...",
+        f"⏳ <b>Отправляю рассылку…</b>\n\n<i>Получателей: {len(user_ids)}. "
+        "Не закрывайте — это займёт немного времени.</i>", parse_mode="HTML",
     )
     ok, fail = await do_broadcast(context.bot, text, segment, build_markup(spec), photo)
 
@@ -370,11 +386,12 @@ async def handle_bcast_send(query, context: ContextTypes.DEFAULT_TYPE):
     )
     _reset(context)
     await query.edit_message_text(
-        f"✅ <b>Рассылка завершена</b>\n\n"
-        f"🎯 Сегмент: {SEGMENTS.get(segment, 'Все')}\n"
-        f"👥 Получателей: {len(user_ids)}\n"
+        "✅ <b>Рассылка завершена</b>\n\n"
+        f"<blockquote>🎯 {SEGMENTS.get(segment, 'Все')}\n"
+        f"👥 Получателей: <b>{len(user_ids)}</b>\n"
         f"📨 Доставлено: <b>{ok}</b>\n"
-        f"❌ Ошибок: <b>{fail}</b>",
+        f"❌ Не дошло: <b>{fail}</b></blockquote>"
+        + ("\n\n<i>Не дошло обычно тем, кто заблокировал бота.</i>" if fail else ""),
         parse_mode="HTML",
         reply_markup=back_admin(),
     )

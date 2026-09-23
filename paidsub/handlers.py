@@ -102,15 +102,17 @@ def _fmt_presets(cfg: dict, inbound_names=None) -> str:
         expire_label = "не заданы"
 
     return (
+        "⏱ <b>Сроки</b>\n<blockquote>"
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
         f"💰 Период оплаты: <b>{pay_str}</b>\n"
         f"⏳ Время на продление: <b>{renew_str}</b>\n"
-        f"🔗 Ссылка на оплату: <b>{pay_url}</b>\n"
-        f"🌐 Лимит IP: <b>{ip}</b>\n"
-        f"🖥 Лимит HWID: <b>{hwid}</b>\n"
-        f"📶 Трафик: <b>{traf}</b>\n"
-        f"📡 Инбаунды создания: <b>{create_label}</b>\n"
-        f"📡 Инбаунды окончания: <b>{expire_label}</b>"
+        f"🔗 Ссылка на оплату: <b>{_esc_name(pay_url)}</b></blockquote>\n\n"
+        "📊 <b>Лимиты</b>\n<blockquote>"
+        f"🌐 IP: <b>{ip}</b>  ·  🖥 HWID: <b>{hwid}</b>\n"
+        f"📶 Трафик: <b>{traf}</b></blockquote>\n\n"
+        "📡 <b>Инбаунды</b>\n<blockquote>"
+        f"Создания: <b>{_esc_name(create_label)}</b>\n"
+        f"Окончания: <b>{_esc_name(expire_label)}</b></blockquote>"
     )
 
 
@@ -145,20 +147,19 @@ async def handle_paid_presets_menu(query):
             for inb in result["inbounds"]:
                 inbound_names[inb.get("id")] = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
     await query.edit_message_text(
-        "⚙️ <b>Настройки платной подписки</b>\n\n"
-        "<i>Применяются только к новым подпискам. У выданных условия\n"
-        "зафиксированы при создании — меняются в самой подписке.</i>\n\n"
+        "⚙️ <b>Настройки подписок</b>\n\n"
         + _fmt_presets(cfg, inbound_names)
-        + "\n\nВыбери параметр для изменения:",
+        + "\n\n<i>Применяются только к новым подпискам. У выданных условия "
+          "зафиксированы при создании — меняются в самой подписке.</i>",
         parse_mode="HTML",
         reply_markup=paid_presets_keyboard(),
     )
 
 
 _TIME_HINT = (
-    "Введи время в свободной форме:\n"
+    "<blockquote>Время — в свободной форме:\n"
     "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, "
-    "<code>44 минуты</code>, <code>3 месяца</code>"
+    "<code>44 минуты</code>, <code>3 месяца</code></blockquote>"
 )
 
 
@@ -169,7 +170,7 @@ async def handle_paid_preset_trial(query, context):
     current = cfg.get("paid_trial_period")
     cur_str = fmt_duration(current) if current else "не задан"
     await query.edit_message_text(
-        f"🆓 <b>Пробный период</b>\n\nСейчас: <b>{cur_str}</b>\n\n{_TIME_HINT}",
+        f"🆓 <b>Пробный период</b>\n\n<blockquote>Сейчас: <b>{cur_str}</b></blockquote>\n\n{_TIME_HINT}",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -211,7 +212,7 @@ async def handle_paid_preset_price(query, context):
     current = cfg.get("paid_price")
     cur_str = f"{current} ₽" if current is not None else "не задана"
     await query.edit_message_text(
-        f"💵 <b>Сумма подписки</b>\n\nСейчас: <b>{cur_str}</b>\n\nВведи сумму в рублях (число):",
+        f"💵 <b>Сумма подписки</b>\n\n<blockquote>Сейчас: <b>{cur_str}</b></blockquote>\n\n<i>Пришли сумму в рублях (число).</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -223,7 +224,7 @@ async def handle_paid_preset_pay_url(query, context):
     cfg = load_config()
     current = cfg.get("paid_pay_url") or "не задана"
     await query.edit_message_text(
-        f"🔗 <b>Ссылка на оплату</b>\n\nСейчас: <b>{current}</b>\n\nВведи URL:",
+        f"🔗 <b>Ссылка на оплату</b>\n\n<blockquote>Сейчас: <b>{current}</b></blockquote>\n\n<i>Пришли URL.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -233,7 +234,7 @@ async def handle_paid_preset_ip(query, context):
     from states import AWAITING_PAID_PRESET_IP
     context.user_data["state"] = AWAITING_PAID_PRESET_IP
     await query.edit_message_text(
-        "🌐 <b>Лимит IP</b>\n\nВведи число (0 = безлимит):",
+        "🌐 <b>Лимит IP</b>\n\n<i>Пришли число (0 = безлимит).</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -243,7 +244,7 @@ async def handle_paid_preset_hwid(query, context):
     from states import AWAITING_PAID_PRESET_HWID
     context.user_data["state"] = AWAITING_PAID_PRESET_HWID
     await query.edit_message_text(
-        "🖥 <b>Лимит HWID</b>\n\nВведи число (0 = безлимит):",
+        "🖥 <b>Лимит HWID</b>\n\n<i>Пришли число (0 = безлимит).</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -253,7 +254,7 @@ async def handle_paid_preset_traffic(query, context):
     from states import AWAITING_PAID_PRESET_TRAFFIC
     context.user_data["state"] = AWAITING_PAID_PRESET_TRAFFIC
     await query.edit_message_text(
-        "📶 <b>Трафик (ГБ)</b>\n\nВведи число в ГБ или <code>-</code> для безлимита:",
+        "📶 <b>Трафик (ГБ)</b>\n\n<i>Пришли число в ГБ или <code>-</code> для безлимита.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -1079,8 +1080,8 @@ async def handle_paid_sub_extend(query, sub_id: int, context):
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
         f"➕ <b>Добавить срок к подписке #{sub_id}</b>\n\n"
-        "Введи время в свободной форме:\n"
-        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
+        "<blockquote>Время — в свободной форме:\n"
+        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code></blockquote>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -1092,8 +1093,8 @@ async def handle_paid_sub_reduce(query, sub_id: int, context):
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
         f"➖ <b>Убавить срок у подписки #{sub_id}</b>\n\n"
-        "Введи время в свободной форме:\n"
-        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
+        "<blockquote>Время — в свободной форме:\n"
+        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code></blockquote>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -1110,12 +1111,12 @@ async def handle_paid_bulk_menu(query):
             total = (await cur.fetchone())[0]
     await query.edit_message_text(
         "⚡ <b>Массовые действия</b>\n\n"
-        f"Всего платных подписок: <b>{total}</b>\n\n"
-        "Выбери действие — оно применится ко <b>всем</b> платным подпискам сразу:",
+        f"<blockquote>Всего платных подписок: <b>{total}</b></blockquote>\n\n"
+        "⚠️ <i>Действие применится ко <b>всем</b> платным подпискам сразу.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Добавить срок всем", callback_data="paid_bulk_extend")],
-            [InlineKeyboardButton("➖ Убавить срок всем", callback_data="paid_bulk_reduce")],
+            [InlineKeyboardButton("➕ Добавить срок", callback_data="paid_bulk_extend"),
+             InlineKeyboardButton("➖ Убавить срок", callback_data="paid_bulk_reduce")],
             [InlineKeyboardButton("📱 Лимит IP всем", callback_data="paid_bulk_ip"),
              InlineKeyboardButton("🔑 Лимит HWID всем", callback_data="paid_bulk_hwid")],
             [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
@@ -1128,8 +1129,8 @@ async def handle_paid_bulk_extend(query, context):
     context.user_data["state"] = AWAITING_PAID_BULK_EXTEND
     await query.edit_message_text(
         "➕ <b>Добавить срок всем подпискам</b>\n\n"
-        "Введи время в свободной форме:\n"
-        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
+        "<blockquote>Время — в свободной форме:\n"
+        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code></blockquote>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -1140,8 +1141,8 @@ async def handle_paid_bulk_reduce(query, context):
     context.user_data["state"] = AWAITING_PAID_BULK_REDUCE
     await query.edit_message_text(
         "➖ <b>Убавить срок всем подпискам</b>\n\n"
-        "Введи время в свободной форме:\n"
-        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
+        "<blockquote>Время — в свободной форме:\n"
+        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code></blockquote>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -1697,7 +1698,7 @@ async def handle_paid_sub_edit_ip(query, sub_id: int, context):
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_IP
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
-        f"🌐 <b>Лимит IP подписки #{sub_id}</b>\n\nВведи число (0 = безлимит):",
+        f"🌐 <b>Лимит IP подписки #{sub_id}</b>\n\n<i>Пришли число (0 = безлимит).</i>",
         parse_mode="HTML", reply_markup=back_admin(),
     )
 
@@ -1707,7 +1708,7 @@ async def handle_paid_sub_edit_hwid(query, sub_id: int, context):
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_HWID
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
-        f"🖥 <b>Лимит HWID подписки #{sub_id}</b>\n\nВведи число (0 = безлимит):",
+        f"🖥 <b>Лимит HWID подписки #{sub_id}</b>\n\n<i>Пришли число (0 = безлимит).</i>",
         parse_mode="HTML", reply_markup=back_admin(),
     )
 
@@ -1717,7 +1718,7 @@ async def handle_paid_sub_edit_traffic(query, sub_id: int, context):
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_TRAFFIC
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
-        f"📶 <b>Трафик подписки #{sub_id}</b>\n\nВведи число ГБ или <code>-</code> для безлимита:",
+        f"📶 <b>Трафик подписки #{sub_id}</b>\n\n<i>Пришли число ГБ или <code>-</code> для безлимита.</i>",
         parse_mode="HTML", reply_markup=back_admin(),
     )
 
@@ -1757,7 +1758,7 @@ async def handle_paid_sub_edit_price(query, sub_id: int, context):
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_PRICE
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
-        f"💵 <b>Сумма подписки #{sub_id}</b>\n\nВведи сумму в рублях (число):",
+        f"💵 <b>Сумма подписки #{sub_id}</b>\n\n<i>Пришли сумму в рублях (число).</i>",
         parse_mode="HTML", reply_markup=back_admin(),
     )
 
@@ -1767,7 +1768,7 @@ async def handle_paid_sub_edit_pay_url(query, sub_id: int, context):
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_PAY_URL
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
-        f"🔗 <b>Ссылка на оплату подписки #{sub_id}</b>\n\nВведи URL:",
+        f"🔗 <b>Ссылка на оплату подписки #{sub_id}</b>\n\n<i>Пришли URL.</i>",
         parse_mode="HTML", reply_markup=back_admin(),
     )
 
@@ -2763,27 +2764,29 @@ async def handle_referral_settings(query):
     top_lines = []
     for ref_id, cnt in stats["top_referrers"]:
         u = await get_user_info(ref_id)
-        name = u[1] if u else str(ref_id)
-        uname = f"@{u[2]}" if u and u[2] else f"id{ref_id}"
-        top_lines.append(f"  {name} ({uname}) — <b>{cnt}</b>")
+        name = _esc_name(u[1] if u else None, ref_id)
+        uname = _esc_name(f"@{u[2]}" if u and u[2] else f"id{ref_id}")
+        top_lines.append(f"{len(top_lines) + 1}. {name} ({uname}) — <b>{cnt}</b>")
 
-    lines = [
-        "👥 <b>Реферальная система</b>\n",
-        f"🎁 Бонус пригласившему: <b>{bonus_str}</b>",
-        f"🎁 Бонус приглашённому: <b>{invited_str}</b>",
-        f"👤 Всего рефералов: <b>{stats['total']}</b>",
-        f"✅ С бонусом: <b>{stats['rewarded']}</b>",
-    ]
+    counts = [f"👤 Всего рефералов: <b>{stats['total']}</b>  ·  с бонусом: <b>{stats['rewarded']}</b>"]
     if stats['total_bonus'] > 0:
-        lines.append(f"⏱ Всего начислено: <b>{fmt_duration(stats['total_bonus'])}</b>")
+        counts.append(f"⏱ Всего начислено: <b>{fmt_duration(stats['total_bonus'])}</b>")
+    lines = [
+        "👥 <b>Реферальная система</b>", "",
+        "🎁 <b>Бонусы</b>",
+        f"<blockquote>Пригласившему: <b>{bonus_str}</b>\n"
+        f"Приглашённому: <b>{invited_str}</b></blockquote>", "",
+        "📊 <b>Статистика</b>",
+        "<blockquote>" + "\n".join(counts) + "</blockquote>",
+    ]
     if top_lines:
-        lines.append("\n<b>Топ пригласивших:</b>")
-        lines.extend(top_lines)
+        lines += ["", "🏆 <b>Топ пригласивших</b>",
+                  "<blockquote>" + "\n".join(top_lines) + "</blockquote>"]
 
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎁 Бонус пригласившему", callback_data="set_referral_bonus")],
-        [InlineKeyboardButton("🎁 Бонус приглашённому", callback_data="set_referral_invited_bonus")],
+        [InlineKeyboardButton("🎁 Пригласившему", callback_data="set_referral_bonus"),
+         InlineKeyboardButton("🤝 Приглашённому", callback_data="set_referral_invited_bonus")],
         [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
     ])
 
@@ -2888,14 +2891,14 @@ async def handle_promos_menu(query):
     kb.append([InlineKeyboardButton("➕ Создать общий код", callback_data="promo_create"),
                InlineKeyboardButton("📊 Что принесли", callback_data="promo_income")])
     kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
-    body = (f"Всего кодов: <b>{len(promos)}</b> · из них личных: <b>{personal}</b>"
+    body = (f"Всего кодов: <b>{len(promos)}</b>  ·  личных: <b>{personal}</b>"
             if promos else "Промокодов пока нет.")
     await query.edit_message_text(
         "🎟 <b>Промокоды</b>\n\n"
-        "🌍 — общий код, работает у всех, кто его узнает.\n"
-        "🎯 — личный: привязан к человеку, у чужого не сработает.\n"
-        "Награда — скидка в % на продление или подаренные дни.\n\n"
-        f"{body}",
+        f"<blockquote>{body}</blockquote>\n\n"
+        "<i>🌍 общий — работает у всех, кто его узнает\n"
+        "🎯 личный — привязан к человеку, у чужого не сработает\n"
+        "Награда — скидка в % на продление или подаренные дни.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
     )
@@ -2918,31 +2921,32 @@ async def handle_promo_view(query, promo_id: int):
     used = await promo_use_count(code)
     pays, income = await promo_income(code)
     status = "🟢 активен" if active else "🔴 выключен"
-    exp_line = f"📅 Действует до: <b>{expires_at}</b>\n" if expires_at else "📅 Без срока действия\n"
+    exp_line = f"📅 Действует до: <b>{expires_at}</b>\n" if expires_at else "📅 Без срока\n"
     limit_line = (f"🎯 Применений: <b>{used}</b> из <b>{max_uses}</b>\n" if max_uses
                   else f"👥 Использован: <b>{used}</b> раз\n")
     if owner:
         from database import get_user_info
         u = await get_user_info(owner)
-        owner_line = f"👤 Личный код для: {u[1] if u and u[1] else ''} <code>{owner}</code>\n"
+        owner_line = f"👤 Личный для: {_esc_name(u[1] if u and u[1] else '')} <code>{owner}</code>\n"
     else:
         owner_line = "🌍 Общий код — сработает у любого, кто его узнает\n"
     kb = [[InlineKeyboardButton("🔴 Выключить" if active else "🟢 Включить",
-                                callback_data=f"promo_toggle:{pid}")],
-          [InlineKeyboardButton("🗑 Удалить", callback_data=f"promo_delete:{pid}")]]
+                                callback_data=f"promo_toggle:{pid}"),
+           InlineKeyboardButton("🗑 Удалить", callback_data=f"promo_delete:{pid}")]]
     if owner:
         kb.append([InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{owner}")])
     kb.append([InlineKeyboardButton("◀️ К промокодам", callback_data="promo_menu")])
     await query.edit_message_text(
-        f"🎟 <b>Промокод {code}</b>\n\n"
-        f"🎁 Награда: <b>{reward_text(kind or 'percent', days if kind == 'days' else percent)}</b>\n"
+        f"🎟 <b>Промокод</b> <code>{_esc_name(code)}</code>\n\n"
+        f"<blockquote>🎁 Награда: <b>{reward_text(kind or 'percent', days if kind == 'days' else percent)}</b>\n"
         f"{owner_line}"
-        f"📌 Статус: <b>{status}</b>\n"
+        f"📌 Статус: <b>{status}</b></blockquote>\n\n"
+        "📊 <b>Использование</b>\n<blockquote>"
         f"{exp_line}"
         f"{limit_line}"
         f"💰 Оплат с ним: <b>{pays}</b> на <b>{income} ₽</b>\n"
-        f"🕐 Создан: {created_at[:16] if created_at else '?'}"
-        + (f"\n📝 {note}" if note else ""),
+        f"🕐 Создан: {created_at[:16] if created_at else '?'}</blockquote>"
+        + (f"\n\n📝 <i>{_esc_name(note)}</i>" if note else ""),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
     )
@@ -2954,7 +2958,7 @@ async def handle_promo_create(query, context):
     context.user_data.pop("new_promo", None)
     await query.edit_message_text(
         "🎟 <b>Новый промокод</b>\n\n"
-        "Введи текст промокода (латиница/цифры, напр. <code>SUMMER20</code>):",
+        "<i>Пришли текст кода — латиница и цифры, например <code>SUMMER20</code>.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )

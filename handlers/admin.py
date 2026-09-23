@@ -134,35 +134,37 @@ async def handle_healthcheck(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from xui_api import probe_servers
 
-    await query.edit_message_text("🩺 Проверяю серверы...")
+    await query.edit_message_text("🩺 Проверяю серверы…")
     r = await probe_servers()
     panel, sub, inbounds = r["panel"], r["sub"], r["inbounds"]
 
     back = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Проверить снова", callback_data="healthcheck")],
-        [InlineKeyboardButton("◀️ Назад", callback_data="xui_settings")],
+        [InlineKeyboardButton("🔄 Проверить снова", callback_data="healthcheck"),
+         InlineKeyboardButton("◀️ Назад", callback_data="xui_settings")],
     ])
 
-    lines = ["🩺 <b>Здоровье серверов</b>\n"]
+    lines = ["🩺 <b>Здоровье серверов</b>", ""]
+    core = []
 
     # Панель
     # ошибки панели приходят её же словами и могут содержать HTML-страницу
     from html import escape
     if panel["ok"]:
-        lines.append(f"🟢 <b>Панель</b> — отвечает, {panel['ms']} мс")
+        core.append(f"🟢 <b>Панель</b> — отвечает, {panel['ms']} мс")
     else:
-        lines.append(f"🔴 <b>Панель недоступна</b>\n     <code>{escape(str(panel['error']))}</code>")
+        core.append(f"🔴 <b>Панель недоступна</b>\n<code>{escape(str(panel['error']))}</code>")
 
     # Подписки — отдельный сервис на своём порту, падает независимо от панели
     if sub["ok"]:
         note = "" if sub["status"] < 400 else f" (HTTP {sub['status']})"
-        lines.append(f"🟢 <b>Подписки</b> — отвечают, {sub['ms']} мс{note}")
+        core.append(f"🟢 <b>Подписки</b> — отвечают, {sub['ms']} мс{note}")
     else:
-        lines.append(
+        core.append(
             f"🔴 <b>Подписки не работают</b> — порт {sub.get('port', '?')}\n"
-            f"     <code>{escape(str(sub['error']))}</code>\n"
-            f"     <i>Клиенты не смогут обновить ключ.</i>"
+            f"<code>{escape(str(sub['error']))}</code>\n"
+            f"<i>Клиенты не смогут обновить ключ.</i>"
         )
+    lines.append("<blockquote>" + "\n".join(core) + "</blockquote>")
 
     # Инбаунды
     if panel["ok"]:
@@ -172,7 +174,8 @@ async def handle_healthcheck(query):
             checkable = [i for i in inbounds if i["enabled"] and
                          (i.get("mapped") or i["reachable"])]
             up = sum(1 for i in checkable if i["reachable"])
-            lines.append(f"\n<b>Инбаунды</b> — доступно {up}/{len(checkable)}")
+            lines.append(f"\n📡 <b>Инбаунды</b> — доступно <b>{up} из {len(checkable)}</b>")
+            ib_lines = []
             for i in inbounds:
                 if not i["enabled"]:
                     icon, tail = "⚪️", " · выключен"
@@ -186,13 +189,14 @@ async def handle_healthcheck(query):
                     icon, tail = "⚪️", " · узел не привязан"
                 else:
                     icon, tail = "🔴", f" · {escape(str(i['host']))} · {escape(str(i['error']))}"
-                lines.append(
-                    f"{icon} <b>{i['tag']}</b> ({i['protocol']}:{i['port']}) "
+                ib_lines.append(
+                    f"{icon} <b>{escape(str(i['tag']))}</b> ({i['protocol']}:{i['port']}) "
                     f"· 👤 {i['clients']}{tail}"
                 )
+            lines.append("<blockquote expandable>" + "\n".join(ib_lines) + "</blockquote>")
             if any(i.get("udp") for i in inbounds if i["enabled"]):
                 lines.append(
-                    "\n<i>UDP-инбаунды (hysteria и подобные) на чужие пакеты не отвечают, "
+                    "<i>UDP-инбаунды (hysteria и подобные) на чужие пакеты не отвечают, "
                     "поэтому проверяются мягко: «живым» считается всё, кроме отказа порта.</i>"
                 )
 
@@ -204,20 +208,20 @@ async def handle_healthcheck(query):
     dead = [i["tag"] for i in inbounds
             if i["enabled"] and not i["reachable"] and i.get("mapped")]
     if dead:
-        problems.append("порт не принимает соединения: " + ", ".join(dead[:5]))
+        problems.append("порт не принимает соединения: " + escape(", ".join(dead[:5])))
 
     unmapped = sorted({i["prefix"] for i in inbounds
                        if i["enabled"] and not i["reachable"] and not i.get("mapped")})
     if unmapped:
         problems.append(
-            "не проверены — не задан адрес узла: " + ", ".join(unmapped[:5])
+            "не проверены — не задан адрес узла: " + escape(", ".join(unmapped[:5]))
             + ". Укажи в «🖧 Узлы»"
         )
     if problems:
-        lines.append("\n⚠️ <b>Проблемы:</b>")
-        lines += [f"• {p}" for p in problems]
+        lines.append("\n⚠️ <b>Проблемы</b>")
+        lines.append("<blockquote>" + "\n".join(f"• {p}" for p in problems) + "</blockquote>")
     elif panel["ok"]:
-        lines.append("\n✅ Всё работает.")
+        lines.append("\n✅ <b>Всё работает</b>")
 
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=back,
@@ -232,8 +236,10 @@ async def handle_channel_menu(query):
     channel_line = f"📢 Канал: <code>{channel_url}</code>" if channel_url else "📢 Канал: <i>не задан</i>"
     sub_line = "🔔 Обязательная подписка: <b>включена</b>" if sub_enabled else "🔕 Обязательная подписка: <b>выключена</b>"
     await query.edit_message_text(
-        "📢 <b>Управление каналом</b>\n\n"
-        f"{channel_line}\n{sub_line}",
+        "📢 <b>Канал</b>\n\n"
+        f"<blockquote>{channel_line}\n{sub_line}</blockquote>\n\n"
+        "<i>С обязательной подпиской бот выдаёт пробный период только "
+        "после подписки на канал.</i>",
         parse_mode="HTML",
         reply_markup=channel_keyboard(),
     )
@@ -242,17 +248,25 @@ async def handle_channel_menu(query):
 async def handle_set_channel(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_CHANNEL
     await query.edit_message_text(
-        "📢 <b>Установка канала</b>\n\n"
-        "Отправь ссылку на Telegram-канал (например: <code>https://t.me/mychannel</code>):",
+        "📢 <b>Канал</b>\n\n"
+        "Пришли ссылку на Telegram-канал, например <code>https://t.me/mychannel</code>\n\n"
+        "<i>Чтобы проверять подписку, бот должен быть админом канала.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
 
 
+def _doc_line(label: str, key: str) -> str:
+    """Строка документа: задан или нет."""
+    return f"{label}: {'✅ задана' if load_config().get(key) else '<i>не задана</i>'}"
+
+
 async def handle_documents_menu(query):
     await query.edit_message_text(
         "📄 <b>Документы</b>\n\n"
-        "Здесь можно задать ссылки на юридические документы:",
+        f"<blockquote>{_doc_line('📋 Политика конфиденциальности', 'privacy_url')}\n"
+        f"{_doc_line('📄 Пользовательское соглашение', 'terms_url')}</blockquote>\n\n"
+        "<i>Ссылки видны клиентам в «О сервисе» и на сайте.</i>",
         parse_mode="HTML",
         reply_markup=documents_keyboard(),
     )
@@ -261,7 +275,7 @@ async def handle_documents_menu(query):
 async def handle_set_privacy_url(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_PRIVACY_URL
     await query.edit_message_text(
-        "📋 <b>Политика конфиденциальности</b>\n\nОтправь ссылку на документ:",
+        "📋 <b>Политика конфиденциальности</b>\n\n<i>Пришли ссылку на документ.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -270,14 +284,15 @@ async def handle_set_privacy_url(query, context: ContextTypes.DEFAULT_TYPE):
 async def handle_set_terms_url(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_TERMS_URL
     await query.edit_message_text(
-        "📄 <b>Пользовательское соглашение</b>\n\nОтправь ссылку на документ:",
+        "📄 <b>Пользовательское соглашение</b>\n\n<i>Пришли ссылку на документ.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
 
 
 async def handle_git_update(query):
-    await query.edit_message_text("⏳ Обновляю бота с GitHub...")
+    from html import escape
+    await query.edit_message_text("⏳ Обновляю бота с GitHub…")
     try:
         result = subprocess.run(
             ["git", "-C", INSTALL_DIR, "pull"],
@@ -285,14 +300,17 @@ async def handle_git_update(query):
         )
         if result.returncode != 0:
             await query.edit_message_text(
-                f"❌ Ошибка git pull:\n<code>{result.stderr.strip()}</code>",
+                "❌ <b>Не получилось обновиться</b>\n\n"
+                f"<blockquote><code>{escape(result.stderr.strip()[-1500:])}</code></blockquote>",
                 parse_mode="HTML",
                 reply_markup=back_admin(),
             )
             return
         output = result.stdout.strip()
         await query.edit_message_text(
-            f"✅ Обновление загружено:\n<code>{output}</code>\n\nПерезапускаю бота...",
+            "✅ <b>Обновление загружено</b>\n\n"
+            f"<blockquote expandable><code>{escape(output[-1500:])}</code></blockquote>\n\n"
+            "<i>Перезапускаю бота — через несколько секунд он снова ответит.</i>",
             parse_mode="HTML",
         )
         subprocess.Popen(
@@ -300,9 +318,11 @@ async def handle_git_update(query):
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
-        await query.edit_message_text("❌ Таймаут при обновлении. Попробуй позже.", reply_markup=back_admin())
+        await query.edit_message_text("⌛️ <b>GitHub не ответил вовремя</b>\n\n<i>Попробуй позже.</i>",
+                                      parse_mode="HTML", reply_markup=back_admin())
     except Exception as e:
-        await query.edit_message_text(f"❌ Ошибка: {e}", reply_markup=back_admin())
+        await query.edit_message_text(f"❌ <b>Ошибка</b>\n\n<code>{escape(str(e))}</code>",
+                                      parse_mode="HTML", reply_markup=back_admin())
 
 
 # ── Найти юзера ──────────────────────────────────────────────────────────────
@@ -544,17 +564,16 @@ async def handle_log_channel_settings(query):
     else:
         status_line = "📢 Канал: <i>не задан</i>"
     await query.edit_message_text(
-        f"🧾 <b>Лог-канал</b>\n\n"
-        f"{status_line}\n\n"
-        "Бот будет дублировать ключевые события (оплаты, регистрации, алерты) в этот канал/чат.\n\n"
-        "Отправь ID канала или чата (число, напр. <code>-1001234567890</code>).\n"
-        "Бот должен быть админом в канале.",
+        "🧾 <b>Лог-канал</b>\n\n"
+        f"<blockquote>{status_line}</blockquote>\n\n"
+        "<i>Сюда бот дублирует важные события: оплаты, регистрации, алерты. "
+        "Бот должен быть админом в канале.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📝 Изменить", callback_data="set_log_channel")],
-            *([
-                [InlineKeyboardButton("🗑 Отключить", callback_data="clear_log_channel")],
-            ] if channel_id else []),
+            [InlineKeyboardButton("📝 Изменить" if channel_id else "📝 Указать канал",
+                                  callback_data="set_log_channel")]
+            + ([InlineKeyboardButton("🗑 Отключить", callback_data="clear_log_channel")]
+               if channel_id else []),
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
     )
@@ -564,7 +583,7 @@ async def handle_set_log_channel(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_LOG_CHANNEL
     await query.edit_message_text(
         "🧾 <b>Лог-канал</b>\n\n"
-        "Отправь ID канала или чата (число, напр. <code>-1001234567890</code>):",
+        "Пришли ID канала или чата — число вида <code>-1001234567890</code>.",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -586,24 +605,23 @@ async def handle_remind_settings(query):
     from paidsub.time_parser import fmt_duration
     first = int(cfg.get("remind_first", 3 * 86400) or 0)
     second = int(cfg.get("remind_second", 86400) or 0)
-    status = "ВКЛ ✅" if enabled else "ВЫКЛ ❌"
+    status = "🟢 включены" if enabled else "🔴 выключены"
     await query.edit_message_text(
         "⏰ <b>Напоминания о конце подписки</b>\n\n"
-        f"📌 Статус: <b>{status}</b>\n"
-        f"1️⃣ Первое: за <b>{fmt_duration(first) if first else 'выключено'}</b>\n"
-        f"2️⃣ Второе: за <b>{fmt_duration(second) if second else 'выключено'}</b>\n\n"
-        "Бот пишет заранее, что срок подходит к концу, и зовёт продлить. "
-        "Остаток при оплате не сгорает, поэтому платить заранее людям выгодно.\n"
-        "Каждое напоминание уходит один раз за период; продление сбрасывает счёт.\n"
-        "<i>0 выключает отдельное напоминание.</i>",
+        f"<blockquote>Статус: <b>{status}</b>\n"
+        f"1️⃣ Первое: <b>{'за ' + fmt_duration(first) if first else 'выключено'}</b>\n"
+        f"2️⃣ Второе: <b>{'за ' + fmt_duration(second) if second else 'выключено'}</b></blockquote>\n\n"
+        "<i>Бот заранее пишет, что срок подходит к концу, и зовёт продлить — остаток "
+        "при оплате не сгорает. Каждое напоминание уходит один раз за период, "
+        "продление сбрасывает счёт.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(
                 "🔴 Выключить" if enabled else "🟢 Включить",
                 callback_data="toggle_remind",
             )],
-            [InlineKeyboardButton("1️⃣ Первое напоминание", callback_data="set_remind_first")],
-            [InlineKeyboardButton("2️⃣ Второе напоминание", callback_data="set_remind_second")],
+            [InlineKeyboardButton("1️⃣ Первое", callback_data="set_remind_first"),
+             InlineKeyboardButton("2️⃣ Второе", callback_data="set_remind_second")],
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
     )
@@ -623,8 +641,9 @@ async def handle_set_remind(query, context: ContextTypes.DEFAULT_TYPE, which: st
     num = "Первое" if which == "first" else "Второе"
     await query.edit_message_text(
         f"⏰ <b>{num} напоминание</b>\n\n"
-        "За сколько до конца периода писать?\n"
-        "Примеры: <code>3 дня</code>, <code>12 часов</code>, <code>0</code> — выключить.",
+        "За сколько до конца периода писать?\n\n"
+        "<blockquote>Например: <code>3 дня</code>, <code>12 часов</code>\n"
+        "<code>0</code> — выключить это напоминание</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data="remind_settings")],
@@ -637,22 +656,22 @@ async def handle_winback_settings(query):
     enabled = cfg.get("winback_enabled", False)
     days = cfg.get("winback_days", 3)
     percent = cfg.get("winback_percent", 20)
-    status = "ВКЛ ✅" if enabled else "ВЫКЛ ❌"
+    status = "🟢 включён" if enabled else "🔴 выключен"
     await query.edit_message_text(
         "🎯 <b>Winback — возврат ушедших</b>\n\n"
-        f"📌 Статус: <b>{status}</b>\n"
-        f"📅 Через дней после истечения: <b>{days}</b>\n"
-        f"💯 Скидка: <b>{percent}%</b>\n\n"
-        "Автоматически отправляет спец-предложение со скидкой "
-        "пользователям, чья подписка истекла.",
+        f"<blockquote>Статус: <b>{status}</b>\n"
+        f"📅 Через <b>{days}</b> дн. после окончания подписки\n"
+        f"💯 Скидка: <b>{percent}%</b></blockquote>\n\n"
+        "<i>Бот сам отправляет спецпредложение со скидкой тем, "
+        "у кого подписка закончилась.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(
                 "🔴 Выключить" if enabled else "🟢 Включить",
                 callback_data="toggle_winback",
             )],
-            [InlineKeyboardButton("📅 Дней до отправки", callback_data="set_winback_days")],
-            [InlineKeyboardButton("💯 Размер скидки %", callback_data="set_winback_percent")],
+            [InlineKeyboardButton("📅 Через сколько дней", callback_data="set_winback_days"),
+             InlineKeyboardButton("💯 Скидка", callback_data="set_winback_percent")],
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
     )
@@ -670,9 +689,9 @@ async def handle_set_winback_days(query, context: ContextTypes.DEFAULT_TYPE):
     cfg = load_config()
     current = cfg.get("winback_days", 3)
     await query.edit_message_text(
-        f"📅 <b>Дней до отправки Winback</b>\n\n"
-        f"Сейчас: <b>{current}</b>\n\n"
-        "Введи число дней после истечения подписки:",
+        "📅 <b>Winback · через сколько дней</b>\n\n"
+        f"<blockquote>Сейчас: <b>{current}</b> дн.</blockquote>\n\n"
+        "<i>Пришли число дней после окончания подписки.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -683,9 +702,9 @@ async def handle_set_winback_percent(query, context: ContextTypes.DEFAULT_TYPE):
     cfg = load_config()
     current = cfg.get("winback_percent", 20)
     await query.edit_message_text(
-        f"💯 <b>Скидка Winback</b>\n\n"
-        f"Сейчас: <b>{current}%</b>\n\n"
-        "Введи размер скидки в % (от 1 до 100):",
+        "💯 <b>Winback · скидка</b>\n\n"
+        f"<blockquote>Сейчас: <b>{current}%</b></blockquote>\n\n"
+        "<i>Пришли размер скидки в процентах, от 1 до 100.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -701,8 +720,8 @@ async def handle_dm_user(query, tg_id: int, context: ContextTypes.DEFAULT_TYPE):
     u = await get_user_info(tg_id)
     name = escape(str(u[1] if u else tg_id))
     await query.edit_message_text(
-        f"📌 <b>Сообщение для {name}</b> (<code>{tg_id}</code>)\n\n"
-        "Напиши текст сообщения одним сообщением:",
+        f"📌 <b>Сообщение для {name}</b>  ·  <code>{tg_id}</code>\n\n"
+        "<i>Напиши текст одним сообщением — он придёт от имени Drebol VPN.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К профилю", callback_data=f"user_profile:{tg_id}")],
@@ -720,7 +739,7 @@ async def handle_payment_stats(query, days: int = 30):
 
     if not rows:
         await query.edit_message_text(
-            f"📊 <b>Оплаты за {days} дн.</b>\n\nНет данных.",
+            f"📈 <b>Оплаты за {days} дн.</b>\n\n<blockquote>Пока нет данных.</blockquote>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("◀️ Назад", callback_data="dashboard")],
@@ -732,12 +751,14 @@ async def handle_payment_stats(query, days: int = 30):
     total = sum(r[1] for r in rows)
     bar_width = 12
 
-    lines = [f"📊 <b>Оплаты за {days} дн.</b>\n"]
+    lines = [f"📈 <b>Оплаты за {days} дн.</b>", ""]
+    chart = []
     for date_str, cnt in rows:
         short_date = date_str[5:]  # MM-DD
         filled = int(cnt / max_cnt * bar_width) if max_cnt > 0 else 0
         bar = "▓" * filled + "░" * (bar_width - filled)
-        lines.append(f"<code>{short_date} {bar}</code> {cnt}")
+        chart.append(f"<code>{short_date} {bar}</code> {cnt}")
+    lines.append("<blockquote>" + "\n".join(chart) + "</blockquote>")
 
     revenue = total * price
     lines.append(f"\n💰 Всего: <b>{total}</b> оплат")
@@ -752,7 +773,6 @@ async def handle_payment_stats(query, days: int = 30):
             [InlineKeyboardButton(
                 f"📅 За {toggle_days} дн.",
                 callback_data=f"payment_stats:{toggle_days}",
-            )],
-            [InlineKeyboardButton("◀️ Назад", callback_data="dashboard")],
+            ), InlineKeyboardButton("◀️ Назад", callback_data="dashboard")],
         ]),
     )

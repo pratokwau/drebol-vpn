@@ -527,6 +527,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 3x-UI
     elif data == "xui_settings":
+        # сюда же ведёт «◀️ К серверам» из ввода адреса/токена — ввод отменяем
+        context.user_data.pop("state", None)
         await handle_xui_settings(query)
     elif data == "set_xui_url":
         await handle_set_xui_url(query, context)

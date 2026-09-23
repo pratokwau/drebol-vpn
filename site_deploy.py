@@ -461,17 +461,17 @@ async def handle_site_menu(query):
 
     if not ready:
         await query.edit_message_text(
-            "🌐 <b>Сайт-визитка</b>\n\n"
+            "🌐 <b>Сайт</b>\n\n"
             "Нужна библиотека для SSH. Ставить её надо в тот же Python, "
             "из которого работает бот:\n\n"
-            f"<code>{escape(pip_path())} install paramiko</code>\n"
-            "<code>systemctl restart drebol-vpn</code>\n\n"
+            f"<blockquote><code>{escape(pip_path())} install paramiko</code>\n"
+            "<code>systemctl restart drebol-vpn</code></blockquote>\n\n"
             "<i>Обычный «pip install» ставит в системный Python, "
             "а бот живёт в своём venv — поэтому и не видит библиотеку.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Проверить снова", callback_data="site_menu")],
-                [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+                [InlineKeyboardButton("🔄 Проверить снова", callback_data="site_menu"),
+                 InlineKeyboardButton("◀️ В админку", callback_data="admin_panel")],
             ]),
         )
         return
@@ -479,33 +479,41 @@ async def handle_site_menu(query):
     server = (f"<code>{escape(c['host'])}</code> · {escape(c['user'])}"
               if c["host"] else "не задан")
     domain = f"<code>{escape(c['domain'])}</code>" if c["domain"] else "не задан"
-    state = f"развёрнут {c['deployed_at']}" if c["deployed_at"] else "ещё не разворачивали"
+    state = (f"🟢 развёрнут {c['deployed_at']}" if c["deployed_at"]
+             else "⚪️ ещё не разворачивали")
     url = site_url()
 
-    lines = ["🌐 <b>Сайт-визитка</b>", "",
-             f"🖥 Сервер: {server}",
-             f"🌍 Домен: {domain}",
-             f"🖼 Логотип: {'свой' if has_logo() else 'нарисованный'}",
-             f"🚀 Статус: {state}"]
+    card = [f"🚀 Статус: <b>{state}</b>",
+            f"🖥 Сервер: {server}",
+            f"🌍 Домен: {domain}" + ("  ·  🔒 HTTPS" if c.get("https") else ""),
+            f"🖼 Логотип: {'свой' if has_logo() else 'нарисованный'}"]
     if url and c["deployed_at"]:
-        lines.append(f"🔗 {escape(url)}")
-    lines += ["", "<i>Страница с логотипом, анимацией и кнопкой в Telegram. "
-              "Разворачивается на втором сервере, бота не трогает.</i>"]
+        card.append(f"🔗 {escape(url)}")
+    lines = ["🌐 <b>Сайт</b>", "", "<blockquote>" + "\n".join(card) + "</blockquote>",
+             "", "<i>Лендинг Drebol VPN: разделы, тарифы из бота, кнопка в Telegram. "
+             "Живёт на втором сервере и бота не трогает. Цены и ссылки подставляются "
+             "при каждом обновлении.</i>"]
 
-    kb = [[InlineKeyboardButton("🖥 Данные сервера", callback_data="site_server"),
-           InlineKeyboardButton("🌍 Домен", callback_data="site_domain")],
-          [InlineKeyboardButton("🖼 Логотип", callback_data="site_logo")]]
+    kb = []
     if configured():
+        # главное действие — первым и во всю ширину
         kb.append([InlineKeyboardButton(
             "🔄 Обновить сайт" if c["deployed_at"] else "🚀 Развернуть сайт",
             callback_data="site_deploy")])
+    kb.append([InlineKeyboardButton("🖥 Сервер", callback_data="site_server"),
+               InlineKeyboardButton("🌍 Домен", callback_data="site_domain"),
+               InlineKeyboardButton("🖼 Логотип", callback_data="site_logo")])
+    if configured():
+        extra = []
         if c["domain"] and c["deployed_at"] and not c["https"]:
-            kb.append([InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert")])
+            extra.append(InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert"))
         if c["deployed_at"]:
-            kb.append([InlineKeyboardButton("🩺 Проверить сайт", callback_data="site_check")])
+            extra.append(InlineKeyboardButton("🩺 Проверить", callback_data="site_check"))
+        if extra:
+            kb.append(extra)
         if c["deployed_at"] and url:
-            kb.append([InlineKeyboardButton("🔗 Открыть сайт", url=url)])
-            kb.append([InlineKeyboardButton("🗑 Удалить сайт", callback_data="site_delete")])
+            kb.append([InlineKeyboardButton("🔗 Открыть сайт", url=url),
+                       InlineKeyboardButton("🗑 Удалить", callback_data="site_delete")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
 
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
@@ -518,9 +526,9 @@ async def handle_site_server(query, context):
     from states import AWAITING_SITE_HOST
     context.user_data["state"] = AWAITING_SITE_HOST
     await query.edit_message_text(
-        "🖥 <b>Сервер для сайта</b> · шаг 1 из 3\n\n"
-        "Пришли IP второго сервера.\n"
-        "Если SSH на другом порту — <code>1.2.3.4:2222</code>",
+        "🖥 <b>Сервер для сайта</b>  ·  <i>шаг 1 из 3</i>\n\n"
+        "Пришли IP второго сервера.\n\n"
+        "<i>Если SSH на другом порту — <code>1.2.3.4:2222</code></i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Отмена", callback_data="site_menu")],
@@ -535,10 +543,10 @@ async def handle_site_domain(query, context):
     cur = creds()["domain"]
     await query.edit_message_text(
         "🌍 <b>Домен сайта</b>\n\n"
-        f"Сейчас: <b>{escape(cur) if cur else 'не задан'}</b>\n\n"
-        "Пришли домен без http, например <code>drbl.tech</code>.\n"
-        "A-запись домена должна смотреть на IP этого сервера.\n"
-        "<code>-</code> — убрать домен.",
+        f"<blockquote>Сейчас: <b>{escape(cur) if cur else 'не задан'}</b></blockquote>\n\n"
+        "Пришли домен без http, например <code>drbl.tech</code>.\n\n"
+        "<i>A-запись домена должна смотреть на IP этого сервера. "
+        "<code>-</code> — убрать домен.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
@@ -550,11 +558,11 @@ async def handle_site_logo(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from states import AWAITING_SITE_LOGO
     context.user_data["state"] = AWAITING_SITE_LOGO
-    cur = "сейчас стоит твой файл" if has_logo() else "сейчас нарисованный знак"
+    cur = "стоит твой файл" if has_logo() else "нарисованный знак"
     await query.edit_message_text(
         "🖼 <b>Логотип сайта</b>\n\n"
-        f"{cur}.\n\n"
-        "Пришли картинку — лучше PNG с прозрачным фоном.\n"
+        f"<blockquote>Сейчас: <b>{cur}</b></blockquote>\n\n"
+        "Пришли картинку — лучше PNG с прозрачным фоном. "
         "Тёмную подложку уберу сам, если её видно.\n\n"
         "<i>После замены нажми «Обновить сайт».</i>",
         parse_mode="HTML",
@@ -569,17 +577,18 @@ async def handle_site_deploy(query, context):
     if not configured():
         await query.answer("Сначала данные сервера", show_alert=True)
         return
-    await query.edit_message_text("🚀 Разворачиваю сайт… это займёт до минуты.")
+    await query.edit_message_text("🚀 <b>Разворачиваю сайт…</b>\n\n<i>Это займёт до минуты.</i>",
+                                  parse_mode="HTML")
     me = await context.bot.get_me()
     res = await deploy(me.username)
     if not res.get("ok"):
         await query.edit_message_text(
-            "❌ <b>Не получилось</b>\n\n"
-            f"<code>{escape(str(res.get('error'))[:500])}</code>",
+            "❌ <b>Не получилось развернуть</b>\n\n"
+            f"<blockquote><code>{escape(str(res.get('error'))[:500])}</code></blockquote>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_deploy")],
-                [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
+                [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_deploy"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
             ]),
         )
         return
@@ -587,11 +596,11 @@ async def handle_site_deploy(query, context):
     from log_channel import send_log
     await send_log(context.bot, f"🌐 Сайт развёрнут: {escape(url)}")
     await query.edit_message_text(
-        f"✅ <b>Сайт развёрнут</b>\n\n🔗 {escape(url)}",
+        f"✅ <b>Сайт развёрнут</b>\n\n<blockquote>🔗 {escape(url)}</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔗 Открыть", url=url)],
-            [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
+            [InlineKeyboardButton("🔗 Открыть", url=url),
+             InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
         ]),
         disable_web_page_preview=True,
     )
@@ -604,7 +613,8 @@ async def handle_site_check(query, context):
     res = await diagnose()
     if not res.get("ok"):
         await query.edit_message_text(
-            f"❌ <b>Не проверить</b>\n\n<code>{escape(str(res.get('error'))[:300])}</code>",
+            f"❌ <b>Не получилось проверить</b>\n\n"
+            f"<blockquote><code>{escape(str(res.get('error'))[:300])}</code></blockquote>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")]]),
@@ -632,14 +642,14 @@ async def handle_site_check(query, context):
                   "Задай домен, направь его A-запись на "
                   f"<code>{escape(ip)}</code> и включи HTTPS."]
     else:
-        lines += [f"🌍 Домен: <code>{escape(domain)}</code>",
-                  f"🖥 IP сервера: <code>{escape(ip)}</code>",
-                  f"{mark(dns_ok)} A-запись: <code>{escape(dns or 'не найдена')}</code>",
-                  f"{mark(cert)} Сертификат на сервере",
-                  f"{mark(conf443)} 443 в конфиге nginx",
-                  f"{mark(listen443)} nginx слушает 443",
-                  f"🌐 Ответ по http: <b>{escape(http_code)}</b> · "
-                  f"по https: <b>{escape(https_code)}</b>", ""]
+        lines += [f"🌍 <code>{escape(domain)}</code>  ·  🖥 <code>{escape(ip)}</code>", "",
+                  "<blockquote>"
+                  f"{mark(dns_ok)} A-запись: <code>{escape(dns or 'не найдена')}</code>\n"
+                  f"{mark(cert)} Сертификат на сервере\n"
+                  f"{mark(conf443)} 443 в конфиге nginx\n"
+                  f"{mark(listen443)} nginx слушает 443\n"
+                  f"🌐 Ответ: http <b>{escape(http_code)}</b> · https <b>{escape(https_code)}</b>"
+                  "</blockquote>", ""]
         # первая же невыполненная причина и объясняет всё остальное
         if not dns_ok:
             lines += ["<b>Причина: домен не смотрит на этот сервер.</b>",
@@ -660,8 +670,8 @@ async def handle_site_check(query, context):
                       "Обычно мешает закрытый 443 порт у хостера или фаервол."]
 
     kb = [[InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert")]] if domain else []
-    kb.append([InlineKeyboardButton("🔄 Проверить снова", callback_data="site_check")])
-    kb.append([InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")])
+    kb.append([InlineKeyboardButton("🔄 Проверить снова", callback_data="site_check"),
+               InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
                                   disable_web_page_preview=True)
@@ -669,17 +679,18 @@ async def handle_site_check(query, context):
 
 async def handle_site_cert(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text("🔒 Выпускаю сертификат… до минуты.")
+    await query.edit_message_text("🔒 <b>Выпускаю сертификат…</b>\n\n<i>Это займёт до минуты.</i>",
+                                  parse_mode="HTML")
     res = await issue_cert()
     if not res.get("ok"):
         await query.edit_message_text(
             "❌ <b>Сертификат не выпустился</b>\n\n"
-            f"<code>{escape(str(res.get('error'))[:500])}</code>\n\n"
-            "Обычно причина одна: домен ещё не смотрит на этот сервер.",
+            f"<blockquote><code>{escape(str(res.get('error'))[:500])}</code></blockquote>\n\n"
+            "<i>Обычно причина одна: домен ещё не смотрит на этот сервер.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_cert")],
-                [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
+                [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_cert"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
             ]),
         )
         return
@@ -693,7 +704,8 @@ async def handle_site_delete(query, context):
     res = await remove_site()
     if not res.get("ok"):
         await query.edit_message_text(
-            f"❌ <b>Не получилось</b>\n\n<code>{escape(str(res.get('error'))[:400])}</code>",
+            f"❌ <b>Не получилось удалить</b>\n\n"
+            f"<blockquote><code>{escape(str(res.get('error'))[:400])}</code></blockquote>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],

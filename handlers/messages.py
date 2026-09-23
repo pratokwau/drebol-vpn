@@ -171,7 +171,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         promo, err = await validate_promo(code, user.id)
         if err:
             await update.message.reply_text(
-                f"🎟 <b>Промокод не подошёл</b>\n\n<blockquote>{escape(str(err))}</blockquote>",
+                f"🎟 <b>Промокод не подошёл</b>\n\n<blockquote>{escape(str(err).lstrip('❌ '))}</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🎟 Ввести другой", callback_data="enter_promo"),

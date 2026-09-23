@@ -132,17 +132,17 @@ async def report_pair(context, tg_id: int, other_tg: int, kind: str,
         chat_id=ADMIN_ID,
         text=(
             f"{head}\n\n"
-            f"👤 {a_name} (<code>{tg_id}</code>)\n"
-            f"👤 {b_name} (<code>{other_tg}</code>)\n\n"
-            f"🔎 Совпадение: <code>{value[:40]}</code>\n"
+            f"<blockquote>👤 {a_name} (<code>{tg_id}</code>)\n"
+            f"👤 {b_name} (<code>{other_tg}</code>)\n"
+            f"🔎 Совпадение: <code>{value[:40]}</code></blockquote>\n\n"
             f"<i>{note}</i>"
         ),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("👤 Первый", callback_data=f"user_profile:{tg_id}"),
              InlineKeyboardButton("👤 Второй", callback_data=f"user_profile:{other_tg}")],
-            [InlineKeyboardButton("⛔ В ЧС первого", callback_data=f"bl_add_for:{tg_id}")],
-            [InlineKeyboardButton("🙈 Не фрод", callback_data=f"fraud_ok:{tg_id}:{other_tg}")],
+            [InlineKeyboardButton("⛔ В ЧС первого", callback_data=f"bl_add_for:{tg_id}"),
+             InlineKeyboardButton("🙈 Не фрод", callback_data=f"fraud_ok:{tg_id}:{other_tg}")],
         ]),
     )
     from log_channel import send_log
@@ -159,22 +159,21 @@ async def handle_fraud_menu(query):
     cfg = load_config()
     enabled = cfg.get("fraud_enabled", True)
     st = await fraud_stats()
-    status = "ВКЛ ✅" if enabled else "ВЫКЛ ❌"
+    status = "🟢 включена" if enabled else "🔴 выключена"
     await query.edit_message_text(
         "🕵 <b>Повторные триалы</b>\n\n"
-        f"📌 Статус: <b>{status}</b>\n"
+        f"<blockquote>Слежка: <b>{status}</b>\n"
         f"🔎 Запомнено отпечатков: <b>{st['fingerprints']}</b>\n"
         f"👥 Найдено совпадений: <b>{st['pairs']}</b>"
-        + (f" · отмечено «не фрод»: {st['ignored']}" if st["ignored"] else "") + "\n\n"
-        "Бот по кругу опрашивает панель и запоминает, с каких устройств и "
+        + (f"  ·  «не фрод»: {st['ignored']}" if st["ignored"] else "") + "</blockquote>\n\n"
+        "<i>Бот по кругу опрашивает панель и запоминает, с каких устройств и "
         "адресов работают подписки. Когда устройство всплывает у второго "
-        "аккаунта — присылает находку сюда.\n\n"
-        "<i>Сам он никого не банит: решение за тобой.</i>",
+        "аккаунта — присылает находку сюда. Сам он никого не банит: решение за тобой.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔴 Выключить" if enabled else "🟢 Включить",
-                                  callback_data="fraud_toggle")],
-            [InlineKeyboardButton("🔍 Проверить сейчас", callback_data="fraud_scan")],
+                                  callback_data="fraud_toggle"),
+             InlineKeyboardButton("🔍 Проверить сейчас", callback_data="fraud_scan")],
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
     )
@@ -204,7 +203,8 @@ async def handle_fraud_ok(query, a: int, b: int):
     from database import ignore_fraud_pair
     await ignore_fraud_pair(a, b)
     await query.edit_message_text(
-        f"🙈 Помечено «не фрод»: <code>{a}</code> и <code>{b}</code>.\n"
-        "Об этой паре больше не напомню.",
+        f"🙈 <b>Помечено «не фрод»</b>\n\n"
+        f"<blockquote><code>{a}</code> и <code>{b}</code></blockquote>\n\n"
+        "<i>Об этой паре больше не напомню.</i>",
         parse_mode="HTML",
     )

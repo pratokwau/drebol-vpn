@@ -38,30 +38,28 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
     cur = current_provider()
 
     import platega_api as pg
-    lines = [
-        "💳 <b>Платёжная система</b>\n",
-        f"Сейчас активна: <b>{PROVIDERS[cur]}</b>\n",
-    ]
+    from html import escape
+    lines = ["💳 <b>Платёжная система</b>", ""]
 
     if cur == "cloudpayments":
         pay_url = cfg.get("paid_pay_url") or "не задана"
-        lines.append(
-            "Оплата идёт по ссылке, подтверждает админ вручную "
-            "по кнопке «Я оплатил».\n"
-            f"🔗 Ссылка: <code>{pay_url}</code>"
-        )
+        lines += [
+            f"<blockquote>Активна: <b>{PROVIDERS[cur]}</b>\n"
+            f"🔗 Ссылка: <code>{escape(str(pay_url))}</code></blockquote>", "",
+            "<i>Оплата идёт по ссылке, подтверждает админ вручную по кнопке «Я оплатил».</i>",
+        ]
     else:
         ready = pg.is_configured()
         method_id = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
-        lines.append(
-            "Бот сам выставляет счёт и сам засчитывает оплату — "
-            "подтверждать вручную не нужно.\n"
+        lines += [
+            f"<blockquote>Активна: <b>{PROVIDERS[cur]}</b>\n"
             f"🆔 MerchantId: <code>{_mask(cfg.get('platega_merchant_id'))}</code>\n"
             f"🔑 Ключ: <code>{_mask(cfg.get('platega_secret'))}</code>\n"
-            f"💠 Способ: <b>{pg.PAYMENT_METHODS.get(method_id, method_id)}</b>"
-        )
+            f"💠 Способ: <b>{pg.PAYMENT_METHODS.get(method_id, method_id)}</b></blockquote>", "",
+            "<i>Бот сам выставляет счёт и сам засчитывает оплату — подтверждать вручную не нужно.</i>",
+        ]
         if not ready:
-            lines.append("\n⚠️ Не хватает данных — заполни MerchantId и ключ.")
+            lines.append("\n⚠️ <b>Не хватает данных</b> — заполни MerchantId и ключ.")
 
     rows = []
     for key, label in PROVIDERS.items():
@@ -75,8 +73,8 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
             InlineKeyboardButton("🆔 MerchantId", callback_data="platega_set_merchant"),
             InlineKeyboardButton("🔑 Ключ", callback_data="platega_set_secret"),
         ])
-        rows.append([InlineKeyboardButton("💠 Способ оплаты", callback_data="platega_methods")])
-        rows.append([InlineKeyboardButton("🔌 Проверить подключение", callback_data="platega_test")])
+        rows.append([InlineKeyboardButton("💠 Способ оплаты", callback_data="platega_methods"),
+                     InlineKeyboardButton("🔌 Проверить", callback_data="platega_test")])
     else:
         rows.append([InlineKeyboardButton("🔗 Ссылка на оплату", callback_data="paid_preset_pay_url")])
 
@@ -105,8 +103,7 @@ async def handle_platega_set_merchant(query, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["state"] = AWAITING_PLATEGA_MERCHANT
     await query.edit_message_text(
         "🆔 <b>MerchantId Platega</b>\n\n"
-        "Пришли MerchantId из личного кабинета Platega "
-        "(Настройки) одним сообщением.",
+        "<i>Пришли MerchantId из личного кабинета Platega (Настройки) одним сообщением.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
@@ -118,7 +115,7 @@ async def handle_platega_set_secret(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_PLATEGA_SECRET
     await query.edit_message_text(
         "🔑 <b>API-ключ Platega</b>\n\n"
-        "Пришли ключ (X-Secret) одним сообщением.\n\n"
+        "<i>Пришли ключ (X-Secret) одним сообщением.</i>\n\n"
         "⚠️ Сообщение с ключом лучше потом удалить из чата.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
@@ -141,8 +138,8 @@ async def handle_platega_methods(query, context: ContextTypes.DEFAULT_TYPE):
     rows.append([InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")])
     await query.edit_message_text(
         "💠 <b>Способ оплаты Platega</b>\n\n"
-        "Выбери, какой способ будет предлагаться клиентам.\n"
-        "Доступность способов зависит от подключённых у тебя в Platega.",
+        "Какой способ предлагать клиентам?\n\n"
+        "<i>Доступность зависит от того, что подключено у тебя в Platega.</i>",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
     )
 
@@ -157,20 +154,22 @@ async def handle_platega_method_set(query, context: ContextTypes.DEFAULT_TYPE, c
 
 async def handle_platega_test(query, context: ContextTypes.DEFAULT_TYPE):
     import platega_api as pg
-    await query.edit_message_text("🔌 Проверяю подключение к Platega...")
+    await query.edit_message_text("🔌 Проверяю подключение к Platega…")
     r = await pg.test_connection()
     if r["ok"]:
-        text = "✅ <b>Подключение работает</b>\n\nКлючи приняты Platega."
+        text = "✅ <b>Подключение работает</b>\n\n<blockquote>Ключи приняты Platega.</blockquote>"
     else:
+        from html import escape
         text = (
-            f"❌ <b>Не удалось подключиться</b>\n\n<code>{r['error']}</code>\n\n"
-            "Проверь MerchantId и ключ в личном кабинете Platega."
+            "❌ <b>Не удалось подключиться</b>\n\n"
+            f"<blockquote><code>{escape(str(r['error']))}</code></blockquote>\n\n"
+            "<i>Проверь MerchantId и ключ в личном кабинете Platega.</i>"
         )
     await query.edit_message_text(
         text, parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔁 Ещё раз", callback_data="platega_test")],
-            [InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            [InlineKeyboardButton("🔁 Ещё раз", callback_data="platega_test"),
+             InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
         ]),
     )
 
@@ -181,8 +180,8 @@ async def apply_credential(message, context: ContextTypes.DEFAULT_TYPE,
     value = (raw or "").strip()
     if not value or len(value) > 200:
         await message.reply_text(
-            "❌ Пустое или слишком длинное значение.",
-            reply_markup=back_admin(),
+            "❌ <b>Пустое или слишком длинное значение</b>",
+            parse_mode="HTML", reply_markup=back_admin(),
         )
         return
     cfg = load_config()
@@ -191,10 +190,11 @@ async def apply_credential(message, context: ContextTypes.DEFAULT_TYPE,
 
     label = "MerchantId" if field == "platega_merchant_id" else "API-ключ"
     await message.reply_text(
-        f"✅ {label} сохранён.\n\n"
-        "Рекомендую удалить сообщение с ним из чата.",
+        f"✅ <b>{label} сохранён</b>\n\n"
+        "<i>Рекомендую удалить сообщение с ним из чата.</i>",
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔌 Проверить подключение", callback_data="platega_test")],
-            [InlineKeyboardButton("◀️ К платёжной системе", callback_data="pay_provider_menu")],
+            [InlineKeyboardButton("🔌 Проверить", callback_data="platega_test"),
+             InlineKeyboardButton("◀️ К платёжке", callback_data="pay_provider_menu")],
         ]),
     )

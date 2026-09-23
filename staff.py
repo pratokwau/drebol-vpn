@@ -96,21 +96,20 @@ async def handle_helpers_menu(query, context=None):
         context.user_data.pop("state", None)
     from database import get_user_info
     ids = helper_ids()
-    lines = [
-        "👥 <b>Помощники</b>\n",
-        "Помощник отвечает в поддержке: видит тикеты и карточки юзеров, "
-        "может написать юзеру. Оплаты, возвраты, управление подписками, "
-        "рассылки и настройки ему недоступны.",
-        "Всё, что он делает, видно в 🛰 Контроль → Аудит админки.\n",
-    ]
+    lines = ["👥 <b>Помощники</b>", ""]
     kb = []
-    if not ids:
-        lines.append("Пока никого.")
+    people = []
     for uid in ids:
         u = await get_user_info(uid)
-        lines.append(f"• {_name(u, uid)} · <code>{uid}</code>")
+        people.append(f"🛡 {_name(u, uid)} · <code>{uid}</code>")
         label = (u[1] if u and u[1] else str(uid))[:24]
         kb.append([InlineKeyboardButton(f"🗑 Убрать {label}", callback_data=f"helper_del:{uid}")])
+    lines.append("<blockquote>" + ("\n".join(people) if people else "Пока никого.") + "</blockquote>")
+    lines += ["",
+              "<i>Помощник отвечает в поддержке: видит тикеты и карточки юзеров, "
+              "может написать юзеру. Оплаты, возвраты, управление подписками, "
+              "рассылки и настройки ему недоступны. "
+              "Всё, что он делает, видно в 🛰 Контроль → Аудит админки.</i>"]
     kb.append([InlineKeyboardButton("➕ Добавить помощника", callback_data="helper_add")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
@@ -121,8 +120,8 @@ async def handle_helper_add(query, context):
     context.user_data["state"] = AWAITING_HELPER_ID
     await query.edit_message_text(
         "➕ <b>Новый помощник</b>\n\n"
-        "Пришли его Telegram ID или @username.\n"
-        "Он должен хотя бы раз запустить бота командой /start.",
+        "Пришли его Telegram ID или @username.\n\n"
+        "<i>Он должен хотя бы раз запустить бота командой /start.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("❌ Отмена", callback_data="helpers_menu")],
@@ -138,19 +137,20 @@ async def handle_helper_input(update, context, text: str):
     if not u:
         # ввод не сбрасываем — можно сразу прислать ещё раз
         await update.message.reply_text(
-            "❌ Такого пользователя нет в базе бота. Пусть сначала нажмёт /start, "
-            "потом пришли ID или @username ещё раз.",
-            reply_markup=back,
+            "🔍 <b>Такого пользователя нет в базе бота</b>\n\n"
+            "<i>Пусть сначала нажмёт /start, потом пришли ID или @username ещё раз.</i>",
+            parse_mode="HTML", reply_markup=back,
         )
         return
     uid = u[0]
     if uid == ADMIN_ID:
-        await update.message.reply_text("У тебя и так полный доступ.", reply_markup=back)
+        await update.message.reply_text("😎 <b>У тебя и так полный доступ</b>", parse_mode="HTML",
+                                        reply_markup=back)
         return
     context.user_data.pop("state", None)
     ids = helper_ids()
     if uid in ids:
-        await update.message.reply_text(f"{_name(u, uid)} уже помощник.",
+        await update.message.reply_text(f"ℹ️ <b>{_name(u, uid)}</b> уже помощник.",
                                         parse_mode="HTML", reply_markup=back)
         return
     _save_ids(ids + [uid])
@@ -161,8 +161,9 @@ async def handle_helper_input(update, context, text: str):
             chat_id=uid,
             text=(
                 "🛡 <b>Вам выдан доступ помощника</b>\n\n"
-                "Сюда будут приходить новые обращения в поддержку — отвечать "
-                "можно прямо из уведомления. Панель поддержки есть в главном меню."
+                "<blockquote>Сюда будут приходить новые обращения в поддержку — отвечать "
+                "можно прямо из уведомления.</blockquote>\n\n"
+                "<i>Панель поддержки есть в главном меню.</i>"
             ),
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -170,11 +171,11 @@ async def handle_helper_input(update, context, text: str):
             ]),
         )
     except Exception:
-        note = "\n\n⚠️ Написать ему не удалось — возможно, он заблокировал бота."
+        note = "\n\n⚠️ <i>Написать ему не удалось — возможно, он заблокировал бота.</i>"
 
     from log_channel import send_log
     await send_log(context.bot, f"👥 Новый помощник: {_name(u, uid)} · <code>{uid}</code>")
-    await update.message.reply_text(f"✅ {_name(u, uid)} теперь помощник.{note}",
+    await update.message.reply_text(f"✅ <b>{_name(u, uid)}</b> теперь помощник.{note}",
                                     parse_mode="HTML", reply_markup=back)
 
 
@@ -191,7 +192,8 @@ async def handle_helper_del(query, context, uid: int):
         u = await get_user_info(uid)
         await send_log(context.bot, f"👥 Помощник убран: {_name(u, uid)} · <code>{uid}</code>")
         try:
-            await context.bot.send_message(chat_id=uid, text="Доступ помощника снят.")
+            await context.bot.send_message(chat_id=uid, text="🛡 <b>Доступ помощника снят</b>",
+                                           parse_mode="HTML")
         except Exception:
             pass
     await handle_helpers_menu(query)

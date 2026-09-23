@@ -101,19 +101,20 @@ async def show_feature_off(key: str, query=None, message=None):
 def _menu_text() -> str:
     on = is_maintenance()
     off = [k for k in FEATURES if not feature_enabled(k)]
+    state = "🔴 включены — бот закрыт для пользователей" if on else "🟢 выключены"
     lines = [
-        "🛠 <b>Техработы и функции</b>\n",
-        f"Режим техработ: <b>{'🔴 включён' if on else '🟢 выключен'}</b>",
-        "<i>Пользователи видят сообщение о работах, на админа это не действует. "
-        "Оплаты, сроки подписок и мониторинг продолжают работать.</i>\n",
-        "Текст для пользователей:",
+        "🛠 <b>Техработы и функции</b>", "",
+        f"Техработы: <b>{state}</b>",
+        "<i>На админа это не действует. Оплаты, сроки подписок и мониторинг "
+        "продолжают работать.</i>", "",
+        "👀 <b>Пользователи увидят</b>",
         "┈┈┈┈┈┈┈┈┈┈",
+        # текст сам может содержать цитату — поэтому не заворачиваем его в свою
         maintenance_text(),
-        "┈┈┈┈┈┈┈┈┈┈\n",
-        "<b>Функции</b> — нажми, чтобы выключить или включить.",
+        "┈┈┈┈┈┈┈┈┈┈", "",
+        "⚙️ <b>Функции</b> — нажми, чтобы выключить или включить."
+        + (f"\nСейчас выключено: <b>{len(off)}</b>" if off else ""),
     ]
-    if off:
-        lines.append(f"Сейчас выключено: <b>{len(off)}</b>")
     return "\n".join(lines)
 
 
@@ -123,10 +124,17 @@ def _menu_kb() -> InlineKeyboardMarkup:
         callback_data="mnt_toggle",
     )]]
     rows.append([InlineKeyboardButton("✏️ Текст сообщения", callback_data="mnt_text")])
+    # функции парами — меню короче, а отметка ✅/⏸ всё равно видна сразу
+    pair = []
     for key, (emoji, name, _cbs) in FEATURES.items():
         mark = "✅" if feature_enabled(key) else "⏸"
-        rows.append([InlineKeyboardButton(f"{mark} {emoji} {name}",
-                                          callback_data=f"mnt_feature:{key}")])
+        pair.append(InlineKeyboardButton(f"{mark} {emoji} {name}",
+                                         callback_data=f"mnt_feature:{key}"))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
     rows.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     return InlineKeyboardMarkup(rows)
 
@@ -174,9 +182,8 @@ async def handle_maintenance_text(query, context):
     context.user_data["state"] = AWAITING_MAINTENANCE_TEXT
     await query.edit_message_text(
         "✏️ <b>Текст техработ</b>\n\n"
-        "Пришли сообщение, которое увидят пользователи. "
-        "Форматирование Telegram сохранится.\n\n"
-        "Отправь <code>-</code>, чтобы вернуть стандартный текст.",
+        "Пришли сообщение, которое увидят пользователи.\n\n"
+        "<i>Форматирование Telegram сохранится. <code>-</code> — вернуть стандартный текст.</i>",
         parse_mode="HTML",
         reply_markup=_one_button("◀️ Назад", "mnt_menu"),
     )
@@ -196,15 +203,15 @@ async def apply_maintenance_text(message, context):
     # и сломанный текст не попадёт к пользователям
     try:
         await message.reply_text(
-            f"✅ {'Вернул стандартный текст' if new is None else 'Текст сохранён'}. "
-            f"Так его увидят пользователи:\n\n{new or DEFAULT_TEXT}",
+            f"✅ <b>{'Вернул стандартный текст' if new is None else 'Текст сохранён'}</b>\n"
+            f"<i>Так его увидят пользователи:</i>\n\n{new or DEFAULT_TEXT}",
             parse_mode="HTML",
             reply_markup=_one_button("◀️ К техработам", "mnt_menu"),
             disable_web_page_preview=True,
         )
     except Exception as e:
         await message.reply_text(
-            f"❌ Telegram не принял разметку, текст не сохранён.\n{e}",
+            f"❌ Telegram не принял разметку — текст не сохранён.\n\n{e}",
             reply_markup=_one_button("◀️ К техработам", "mnt_menu"),
         )
         return

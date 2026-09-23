@@ -8,6 +8,10 @@ from states import (
 )
 
 
+def _back_xui() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ К серверам", callback_data="xui_settings")]])
+
+
 # ── Узлы: адреса серверов, на которых живут инбаунды ─────────────────────────
 
 async def handle_nodes_menu(query, context=None):
@@ -29,28 +33,32 @@ async def handle_nodes_menu(query, context=None):
             if p:
                 prefixes.setdefault(p, []).append(tag)
 
+    from html import escape
     lines = [
-        "🖧 <b>Узлы</b>\n",
-        "Инбаунды одного сервера названы с общим префиксом. Укажи адрес "
+        "🖧 <b>Узлы</b>", "",
+        "<i>Инбаунды одного сервера названы с общим префиксом. Укажи адрес "
         "сервера для префикса — и бот будет проверять его порты там, "
-        "а не на панели.\n",
+        "а не на панели.</i>", "",
     ]
     if panel_host:
-        lines.append(f"🏠 Адрес панели: <code>{panel_host}</code>")
-        lines.append("<i>Префиксы без адреса проверяются по нему.</i>\n")
+        lines.append(f"🏠 Адрес панели: <code>{escape(panel_host)}</code> — "
+                     "<i>по нему проверяются префиксы без адреса</i>")
 
     kb = []
+    node_lines = []
     for p in sorted(prefixes):
         host = nodes.get(p)
         mark = "✅" if host else "🏠"
         shown = host or "по адресу панели"
-        lines.append(f"{mark} <b>{p}</b> — {shown} · инбаундов: {len(prefixes[p])}")
+        node_lines.append(f"{mark} <b>{escape(p)}</b> — {escape(shown)} · инбаундов: {len(prefixes[p])}")
         kb.append([InlineKeyboardButton(
             f"{mark} {p} — {shown}", callback_data=f"node_set:{p}"
         )])
+    if node_lines:
+        lines += ["", "<blockquote>" + "\n".join(node_lines) + "</blockquote>"]
 
     if not prefixes:
-        lines.append("⚠️ Не удалось получить инбаунды из панели.")
+        lines += ["", "<blockquote>⚠️ Не удалось получить инбаунды из панели.</blockquote>"]
 
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="xui_settings")])
     await query.edit_message_text(
@@ -63,13 +71,13 @@ async def handle_node_set(query, context, prefix: str):
     context.user_data["node_prefix"] = prefix
     cfg = load_config()
     cur = (cfg.get("node_hosts") or {}).get(prefix)
-    cur_line = f"Сейчас: <code>{cur}</code>\n\n" if cur else ""
+    cur_line = f"<blockquote>Сейчас: <code>{cur}</code></blockquote>\n\n" if cur else ""
     await query.edit_message_text(
         f"🖧 <b>Адрес узла «{prefix}»</b>\n\n{cur_line}"
         "Пришли IP или домен сервера, на котором работают инбаунды "
         f"с префиксом <b>{prefix}</b>.\n\n"
-        "Например: <code>203.0.113.10</code> или <code>n3.example.com</code>\n\n"
-        "Отправь <code>-</code>, чтобы убрать привязку.",
+        "<i>Например <code>203.0.113.10</code> или <code>n3.example.com</code>. "
+        "<code>-</code> — убрать привязку.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К узлам", callback_data="nodes_menu")],
@@ -85,7 +93,8 @@ async def apply_node_host(message, context, raw: str):
     prefix = context.user_data.pop("node_prefix", None)
     context.user_data.pop("state", None)
     if not prefix:
-        await message.reply_text("❌ Узел потерян, начни заново.", reply_markup=back_admin())
+        await message.reply_text("😕 <b>Узел потерялся</b>\n\n<i>Начни заново.</i>",
+                                 parse_mode="HTML", reply_markup=back_admin())
         return
 
     kb = InlineKeyboardMarkup([
@@ -100,7 +109,7 @@ async def apply_node_host(message, context, raw: str):
         cfg["node_hosts"] = nodes
         save_config(cfg)
         await message.reply_text(
-            f"✅ Привязка для <b>{prefix}</b> убрана — проверка пойдёт по адресу панели.",
+            f"✅ <b>Привязка для {prefix} убрана</b>\n\n<i>Проверка пойдёт по адресу панели.</i>",
             parse_mode="HTML", reply_markup=kb,
         )
         return
@@ -115,7 +124,8 @@ async def apply_node_host(message, context, raw: str):
     )
     if not (ok_ip or ok_domain):
         await message.reply_text(
-            "❌ Нужен IP или домен: <code>203.0.113.10</code> или <code>n3.example.com</code>",
+            "❌ <b>Нужен IP или домен</b>\n\n"
+            "<i>Например <code>203.0.113.10</code> или <code>n3.example.com</code></i>",
             parse_mode="HTML", reply_markup=kb,
         )
         return
@@ -135,93 +145,97 @@ async def apply_node_host(message, context, raw: str):
             chk = await check_tcp(value, inb.get("port"))
             icon = "🟢" if chk["ok"] else "🔴"
             detail = f"{chk['ms']} мс" if chk["ok"] else chk["error"]
-            checked.append(f"{icon} {tag} — {detail}")
+            from html import escape
+            checked.append(f"{icon} {escape(str(tag))} — {escape(str(detail))}")
 
-    body = f"✅ Узел <b>{prefix}</b>: <code>{value}</code>"
+    body = f"✅ <b>Узел {prefix}</b>: <code>{value}</code>"
     if checked:
-        body += "\n\n<b>Проверка портов:</b>\n" + "\n".join(checked)
+        body += "\n\n📡 <b>Проверка портов</b>\n<blockquote>" + "\n".join(checked) + "</blockquote>"
     await message.reply_text(body, parse_mode="HTML", reply_markup=kb)
 
 
 async def handle_xui_settings(query):
     cfg = load_config()
+    from html import escape
     url = cfg.get("xui_url") or "не задан"
     token_set = "✅ задан" if cfg.get("xui_token") else "❌ не задан"
     sub_port = cfg.get("xui_sub_port") or "не задан"
     sub_path = cfg.get("xui_sub_path") or "/sub/"
 
     await query.edit_message_text(
-        "<b>🖥 Серверы и 3x-UI</b>\n\n"
-        f"🌐 URL панели: <code>{url}</code>\n"
-        f"🔑 API Токен: {token_set}\n"
-        f"🔌 Порт подписки: <code>{sub_port}</code>\n"
-        f"📂 Путь подписки: <code>{sub_path}</code>\n\n"
-        "ℹ️ ID инбаунда определяется автоматически (первый VLESS).\n\n"
-        "Токен: 3x-UI → Settings → API → Token",
+        "🖥 <b>Серверы и 3x-UI</b>\n\n"
+        f"<blockquote>🌐 Панель: <code>{escape(str(url))}</code>\n"
+        f"🔑 API-токен: {token_set}\n"
+        f"🔌 Порт подписки: <code>{escape(str(sub_port))}</code>\n"
+        f"📂 Путь подписки: <code>{escape(str(sub_path))}</code></blockquote>\n\n"
+        "<i>ID инбаунда определяется сам (первый VLESS). "
+        "Токен: 3x-UI → Settings → API → Token.</i>",
         parse_mode="HTML",
         reply_markup=xui_settings_keyboard(),
     )
 
 
 async def handle_test_xui(query):
-    await query.edit_message_text("⏳ Проверяю соединение...")
+    await query.edit_message_text("📡 Проверяю соединение…")
     from xui_api import test_connection
     result = await test_connection()
     if result["success"]:
         count = result.get("inbounds", "?")
         await query.edit_message_text(
-            f"✅ <b>Соединение с панелью успешно!</b>\n\nИнбаундов найдено: <b>{count}</b>",
+            "✅ <b>Панель на связи</b>\n\n"
+            f"<blockquote>📡 Инбаундов найдено: <b>{count}</b></blockquote>",
             parse_mode="HTML",
-            reply_markup=back_admin(),
+            reply_markup=_back_xui(),
         )
     else:
         # панель в ошибке может вернуть HTML-страницу — без экранирования
         # сообщение не отправится вовсе, и админ не увидит причину
         from html import escape
         await query.edit_message_text(
-            f"❌ <b>Ошибка соединения</b>\n\n"
-            f"URL: <code>{escape(str(result.get('url', 'не задан')))}</code>\n\n"
-            f"Детали:\n<code>{escape(str(result['error']))}</code>",
+            "❌ <b>Панель не отвечает</b>\n\n"
+            f"<blockquote>🌐 <code>{escape(str(result.get('url', 'не задан')))}</code>\n"
+            f"<code>{escape(str(result['error']))}</code></blockquote>\n\n"
+            "<i>Проверь адрес панели и токен.</i>",
             parse_mode="HTML",
-            reply_markup=back_admin(),
+            reply_markup=_back_xui(),
         )
 
 
 async def handle_set_xui_url(query, context):
     context.user_data["state"] = AWAITING_XUI_URL
     await query.edit_message_text(
-        "🌐 <b>URL панели</b>\n\nВведи полный URL вместе с секретным путём:\n"
+        "🌐 <b>Адрес панели</b>\n\n"
+        "Пришли полный адрес вместе с секретным путём:\n"
         "<code>https://example.com:14127/secretpath</code>",
         parse_mode="HTML",
-        reply_markup=back_admin(),
+        reply_markup=_back_xui(),
     )
 
 
 async def handle_set_xui_token(query, context):
     context.user_data["state"] = AWAITING_XUI_TOKEN
     await query.edit_message_text(
-        "🔑 <b>API Токен</b>\n\n"
-        "Найди токен в 3x-UI:\n"
-        "<b>Settings → Security → Secret Token</b>\n\n"
-        "Введи токен:",
+        "🔑 <b>API-токен</b>\n\n"
+        "<blockquote>В 3x-UI: <b>Settings → Security → Secret Token</b></blockquote>\n\n"
+        "<i>Пришли токен одним сообщением.</i>",
         parse_mode="HTML",
-        reply_markup=back_admin(),
+        reply_markup=_back_xui(),
     )
 
 
 async def handle_set_xui_sub_port(query, context):
     context.user_data["state"] = AWAITING_XUI_SUB_PORT
     await query.edit_message_text(
-        "🔌 <b>Порт подписки</b>\n\nВведи порт для ссылок подписки (например: <code>2096</code>):",
+        "🔌 <b>Порт подписки</b>\n\n<i>Пришли порт для ссылок подписки, например <code>2096</code>.</i>",
         parse_mode="HTML",
-        reply_markup=back_admin(),
+        reply_markup=_back_xui(),
     )
 
 
 async def handle_set_xui_sub_path(query, context):
     context.user_data["state"] = AWAITING_XUI_SUB_PATH
     await query.edit_message_text(
-        "📂 <b>Путь подписки</b>\n\nВведи путь (по умолчанию <code>/sub/</code>):",
+        "📂 <b>Путь подписки</b>\n\n<i>Пришли путь. По умолчанию <code>/sub/</code>.</i>",
         parse_mode="HTML",
-        reply_markup=back_admin(),
+        reply_markup=_back_xui(),
     )

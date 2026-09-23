@@ -439,28 +439,31 @@ async def handle_bl_menu(query, context=None, note: str = ""):
     cfg = load_config()
     on = remote_on()
     c = await bl_counts(on)
-    lines = ["⛔ <b>Чёрный список</b>\n"]
+    lines = ["⛔ <b>Чёрный список</b>", ""]
     if note:
-        lines.append(note + "\n")
-    lines.append("Кто в списке, не может взять триал, оплатить или продлить подписку — "
-                 "бот показывает причину и оставляет только поддержку.\n")
+        lines += [note, ""]
     synced = cfg.get("blacklist_synced_at") or "ещё не обновлялся"
-    lines.append(f"🌐 Общий список: <b>{'ВКЛ' if on else 'ВЫКЛ'}</b> · записей: <b>{c['remote']}</b> · "
-                 f"обновлён: {synced}")
+    stats = [
+        f"👥 Твоих пользователей в ЧС: <b>{c['ours']}</b>"
+        + (f"  ·  с подпиской: <b>{c['ours_active']}</b>" if c["ours_active"] else ""),
+        f"✍️ Вручную: <b>{c['manual']}</b>  ·  исключений: <b>{c['allow']}</b>",
+        f"🌐 Общий список: <b>{'вкл' if on else 'выкл'}</b>  ·  записей: <b>{c['remote']}</b>",
+        f"🔄 Обновлён: {synced}",
+    ]
+    lines.append("<blockquote>" + "\n".join(stats) + "</blockquote>")
     if cfg.get("blacklist_last_error"):
-        lines.append(f"⚠️ Последнее обновление не удалось: "
+        lines.append(f"\n⚠️ Последнее обновление не удалось: "
                      f"<code>{html.escape(cfg['blacklist_last_error'])}</code>")
-    lines.append(f"✍️ Добавлено вручную: <b>{c['manual']}</b> · исключений: <b>{c['allow']}</b>")
-    lines.append(f"👥 Твоих пользователей в ЧС: <b>{c['ours']}</b>"
-                 + (f" · с действующей подпиской: <b>{c['ours_active']}</b>" if c["ours_active"] else ""))
+    lines.append("\n<i>Кто в списке, не может взять триал, оплатить или продлить подписку — "
+                 "бот показывает причину и оставляет только поддержку.</i>")
     kb = [
         [InlineKeyboardButton("➕ Внести в ЧС", callback_data="bl_add"),
          InlineKeyboardButton("🔍 Проверить ID", callback_data="bl_check")],
         [InlineKeyboardButton("👥 Твои пользователи в ЧС", callback_data="bl_list:ours:1")],
         [InlineKeyboardButton("✍️ Вручную", callback_data="bl_list:manual:1"),
          InlineKeyboardButton("✅ Исключения", callback_data="bl_list:allow:1")],
-        [InlineKeyboardButton("🔄 Обновить общий список", callback_data="bl_sync")],
-        [InlineKeyboardButton(f"🌐 Общий список: {'ВКЛ ✅' if on else 'ВЫКЛ ❌'}",
+        [InlineKeyboardButton("🔄 Обновить общий", callback_data="bl_sync"),
+         InlineKeyboardButton(f"🌐 Общий · {'вкл ✅' if on else 'выкл'}",
                               callback_data="bl_remote_toggle")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ]
@@ -474,9 +477,9 @@ async def handle_bl_list(query, scope: str, page: int = 1):
         scope = "ours"
     rows, pages = await bl_list(scope, remote_on(), page, PER_PAGE)
     page = min(max(1, page), pages)
-    lines = [f"<b>{LIST_TITLES[scope]}</b> — стр. {page}/{pages}\n"]
+    lines = [f"⛔ <b>{LIST_TITLES[scope]}</b>", f"<i>стр. {page} из {pages} · нажми на человека, чтобы открыть</i>"]
     if not rows:
-        lines.append("Пусто.")
+        lines = [lines[0], "", "<blockquote>Пусто.</blockquote>"]
     kb = []
     for tg_id, fn, _un, reason, src in rows:
         icon = {"manual": "✍️", "remote": "🌐", "allow": "✅"}.get(src, "•")
@@ -509,32 +512,34 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
     sub = await get_paid_sub_by_tg_id(tg_id)
     sub_live = bool(sub) and sub[11] in ("active", "renewal")
 
-    lines = ["⛔ <b>Чёрный список</b>\n"]
+    lines = ["⛔ <b>Чёрный список</b>", ""]
     if note:
-        lines.append(note + "\n")
+        lines += [note, ""]
     lines.append(f"👤 {_who_line(u, tg_id)}")
+    card = []
     if e:
-        lines.append("📌 Статус: <b>в чёрном списке</b>")
-        lines.append(f"📝 Причина: {html.escape(e['reason'] or '—')}")
-        lines.append("🌐 Источник: общий список" if e["source"] == "remote"
-                     else "✍️ Внесён вручную" + (f" {e['since'][:16]}" if e.get("since") else ""))
-        lines.append(f"👁 Человек видит: «{html.escape(public_reason(e['reason']))}»")
+        card.append("📌 Статус: <b>в чёрном списке</b>")
+        card.append(f"📝 Причина: {html.escape(e['reason'] or '—')}")
+        card.append("🌐 Источник: общий список" if e["source"] == "remote"
+                    else "✍️ Внесён вручную" + (f" {e['since'][:16]}" if e.get("since") else ""))
+        card.append(f"👁 Человек видит: «{html.escape(public_reason(e['reason']))}»")
     elif info["allowed"]:
-        lines.append("📌 Статус: <b>исключение</b> — есть в общем списке, но ты разрешил")
-        lines.append(f"📝 Причина в общем списке: {html.escape(info['remote'] or '—')}")
+        card.append("📌 Статус: <b>исключение</b> — есть в общем списке, но ты разрешил")
+        card.append(f"📝 Причина в общем списке: {html.escape(info['remote'] or '—')}")
     elif info["remote_listed"]:
-        lines.append("📌 Статус: есть в общем списке, но он выключен")
+        card.append("📌 Статус: есть в общем списке, но он выключен")
     else:
-        lines.append("📌 Статус: <b>не в чёрном списке</b>")
+        card.append("📌 Статус: <b>не в чёрном списке</b>")
     if "paid" in holds:
-        lines.append(f"💳 Подписка остановлена из-за ЧС · сохранён остаток: <b>{fmt_duration(holds['paid'])}</b>"
-                     if holds["paid"] else "💳 Подписка остановлена из-за ЧС · остатка не было")
+        card.append(f"💳 Подписка остановлена из-за ЧС · сохранён остаток: <b>{fmt_duration(holds['paid'])}</b>"
+                    if holds["paid"] else "💳 Подписка остановлена из-за ЧС · остатка не было")
     elif sub_live:
-        lines.append(f"💳 Подписка действует до <b>{sub[6]}</b>")
+        card.append(f"💳 Подписка действует до <b>{sub[6]}</b>")
     elif sub:
-        lines.append("💳 Подписка закончилась")
+        card.append("💳 Подписка закончилась")
     else:
-        lines.append("💳 Подписки нет")
+        card.append("💳 Подписки нет")
+    lines += ["", "<blockquote>" + "\n".join(card) + "</blockquote>"]
 
     kb = []
     if e:
@@ -546,9 +551,10 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
         kb.append([InlineKeyboardButton("⛔ Вернуть в ЧС", callback_data=f"bl_readd:{tg_id}")])
     else:
         kb.append([InlineKeyboardButton("⛔ Внести в ЧС", callback_data=f"bl_add_for:{tg_id}")])
+    tail = [InlineKeyboardButton("◀️ К списку", callback_data="bl_menu")]
     if u:
-        kb.append([InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{tg_id}")])
-    kb.append([InlineKeyboardButton("◀️ К чёрному списку", callback_data="bl_menu")])
+        tail.insert(0, InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{tg_id}"))
+    kb.append(tail)
     await _send(target, "\n".join(lines), InlineKeyboardMarkup(kb), edit)
 
 
@@ -561,8 +567,8 @@ async def handle_bl_add_start(query, context):
     await query.edit_message_text(
         "➕ <b>Внести в чёрный список</b>\n\n"
         "Пришли ID или @username и через пробел причину:\n"
-        "<code>123456789 Шаринг подписки</code>\n\n"
-        "Причину увидит сам человек — ссылки бот из неё уберёт.",
+        "<blockquote><code>123456789 Шаринг подписки</code></blockquote>\n\n"
+        "<i>Причину увидит сам человек — ссылки бот из неё уберёт.</i>",
         parse_mode="HTML", reply_markup=_cancel(),
     )
 
@@ -572,8 +578,9 @@ async def handle_bl_add_for(query, context, tg_id: int):
     context.user_data["state"] = AWAITING_BL_REASON
     context.user_data["bl_target"] = tg_id
     await query.edit_message_text(
-        f"⛔ <b>Внести в чёрный список</b>\n\n👤 {_who_line(await get_user_info(tg_id), tg_id)}\n\n"
-        "Напиши причину одним сообщением — её увидит сам человек.",
+        f"⛔ <b>Внести в чёрный список</b>\n\n"
+        f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}</blockquote>\n\n"
+        "<i>Напиши причину одним сообщением — её увидит сам человек.</i>",
         parse_mode="HTML", reply_markup=_cancel(f"bl_view:{tg_id}"),
     )
 
@@ -581,7 +588,7 @@ async def handle_bl_add_for(query, context, tg_id: int):
 async def handle_bl_check_start(query, context):
     context.user_data["state"] = AWAITING_BL_CHECK
     await query.edit_message_text(
-        "🔍 <b>Проверить в чёрном списке</b>\n\nПришли ID или @username.",
+        "🔍 <b>Проверить в чёрном списке</b>\n\n<i>Пришли ID или @username.</i>",
         parse_mode="HTML", reply_markup=_cancel(),
     )
 
@@ -604,9 +611,10 @@ async def _add_question(tg_id: int, reason: str) -> str:
                     "и вернётся, если убрать человека из ЧС.")
     else:
         sub_line = "💳 Действующей подписки нет — просто не сможет взять триал и оплатить."
-    return (f"⛔ <b>Внести в чёрный список?</b>\n\n👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
-            f"📝 Причина: {html.escape(reason)}\n{sub_line}\n\n"
-            f"Человек получит сообщение, что доступ закрыт: «{html.escape(public_reason(reason))}».")
+    return (f"⛔ <b>Внести в чёрный список?</b>\n\n"
+            f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
+            f"📝 Причина: {html.escape(reason)}\n{sub_line}</blockquote>\n\n"
+            f"<i>Человек получит сообщение, что доступ закрыт: «{html.escape(public_reason(reason))}».</i>")
 
 
 async def handle_bl_input(update, context, state: str, text: str):
@@ -615,8 +623,8 @@ async def handle_bl_input(update, context, state: str, text: str):
     if state == AWAITING_BL_CHECK:
         tg_id = await _resolve(text.split()[0]) if text.split() else None
         if not tg_id:
-            await msg.reply_text("❌ Не нашёл. Пришли числовой ID или @username пользователя бота.",
-                                 reply_markup=_cancel())
+            await msg.reply_text("🔍 <b>Не нашёл</b>\n\n<i>Пришли числовой ID или @username пользователя бота.</i>",
+                                 parse_mode="HTML", reply_markup=_cancel())
             return
         context.user_data.pop("state", None)
         await handle_bl_view(msg, tg_id, edit=False)
@@ -629,11 +637,12 @@ async def handle_bl_input(update, context, state: str, text: str):
     else:
         tg_id, reason = context.user_data.get("bl_target"), text
     if not tg_id:
-        await msg.reply_text("❌ Не нашёл. Пришли числовой ID или @username пользователя бота "
-                             "и через пробел причину.", reply_markup=_cancel())
+        await msg.reply_text("🔍 <b>Не нашёл</b>\n\n<i>Пришли числовой ID или @username пользователя бота "
+                             "и через пробел причину.</i>", parse_mode="HTML", reply_markup=_cancel())
         return
     if tg_id == ADMIN_ID:
-        await msg.reply_text("Себя в чёрный список внести нельзя.", reply_markup=_cancel())
+        await msg.reply_text("🙃 <b>Себя в чёрный список внести нельзя</b>", parse_mode="HTML",
+                             reply_markup=_cancel())
         return
     reason = reason.strip()[:300] or DEFAULT_REASON
     context.user_data.pop("state", None)
