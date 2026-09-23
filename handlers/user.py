@@ -1328,8 +1328,14 @@ async def ensure_trial(user, context, on_start=None) -> bool:
         _ISSUING.discard(user.id)
 
 
-async def _sub_summary(row, frozen: bool = False, extra: str = "") -> str:
-    """Сводка подписки в три строки: что за план, до когда, ссылка."""
+async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
+    """Карточка подписки для главного экрана — цитатой, чтобы читалась блоком.
+
+    extra — строки с трафиком и устройствами из _sub_facts (могут быть пустыми).
+    Ссылку сюда не кладём: она идёт отдельным блоком под карточкой.
+    Возвращает (карточка, работает_ли_доступ) — у закончившейся ссылку
+    не показываем, там одна дорога: продлить.
+    """
     from datetime import datetime
     from paidsub.storage import get_paid_sub, parse_sub_date
     from paidsub.time_parser import fmt_duration_precise
@@ -1343,7 +1349,8 @@ async def _sub_summary(row, frozen: bool = False, extra: str = "") -> str:
     left = int((end - datetime.now()).total_seconds()) if end else 0
 
     if status == "expired" or (left <= 0 and status != "renewal"):
-        return f"{plan} · 🔴 Закончилась\nПродлите — доступ вернётся сразу."
+        return (f"<blockquote>{plan}  ·  🔴 Закончилась\n"
+                "Продлите — доступ вернётся сразу.</blockquote>"), False
 
     if frozen:
         mark = "❄️ Заморожена"
@@ -1351,34 +1358,44 @@ async def _sub_summary(row, frozen: bool = False, extra: str = "") -> str:
         mark = "🟡 Ждёт оплаты"
     else:
         mark = "🟢 Активна"
-    until = end.strftime("%d.%m %H:%M") if end else row[6]
-    return (f"{plan} · {mark}\n"
-            f"⏳ {fmt_duration_precise(max(left, 0))} · до {until}\n"
-            + (f"{extra}\n" if extra else "")
-            + f"\n🔗 <code>{escape(row[5])}</code>")
+    until = end.strftime("%d.%m.%Y, %H:%M") if end else escape(str(row[6]))
+    lines = [f"{plan}  ·  {mark}", "",
+             f"⏳ Осталось: <b>{fmt_duration_precise(max(left, 0))}</b>",
+             f"📅 Действует до: <b>{until}</b>"]
+    lines += extra or []
+    return "<blockquote>" + "\n".join(lines) + "</blockquote>", True
 
 
-async def _sub_facts(row) -> str:
+async def _sub_facts(row) -> list:
     """Трафик и устройства — то, что человек хочет видеть сразу.
 
     Панель может не ответить: тогда просто не показываем строку,
     а не пугаем ошибкой на главном экране.
     """
     email, limit_hwid, total_gb = row[2], int(row[8] or 0), int(row[9] or 0)
-    parts = []
+    lines = []
     try:
         from xui_api import get_client_traffic
         t = await get_client_traffic(email)
         if t.get("success"):
             used = t.get("up", 0) + t.get("down", 0)
-            parts.append(f"📊 {_fmt_bytes_user(used)}"
-                         + (f" из {total_gb} ГБ" if total_gb > 0 else ""))
+            if total_gb > 0:
+                lines.append(f"📊 Трафик: <b>{_fmt_bytes_user(used)}</b> из {total_gb} ГБ")
+                lines.append(f"<code>{_progress_bar(used / 1024 ** 3, total_gb)}</code>")
+            else:
+                lines.append(f"📊 Трафик: <b>{_fmt_bytes_user(used)}</b> · без лимита")
     except Exception:
         pass
     if limit_hwid:
-        from paidsub.time_parser import _plural
-        parts.append("📱 " + _plural(limit_hwid, ("устройство", "устройства", "устройств")))
-    return " · ".join(parts)
+        lines.append(f"📱 Устройства: <b>до {limit_hwid}</b>")
+    return lines
+
+
+def _link_block(sub_url) -> str:
+    """Ссылка подписки отдельным блоком: нажатие по <code> копирует её."""
+    return ("🔑 <b>Ссылка для подключения</b>\n"
+            f"<code>{escape(str(sub_url))}</code>\n"
+            "<i>Нажмите на ссылку — она скопируется.</i>")
 
 
 async def start_screen(user, fresh: bool = False):
@@ -1390,8 +1407,8 @@ async def start_screen(user, fresh: bool = False):
     has_sub = bool(await get_sub_by_tg_id(user.id))
     row = await get_paid_sub_by_tg_id(user.id)
     paid_status = (row[11] if len(row) > 11 else "active") if row else ""
+    name = escape(str(user.first_name or user.id))
 
-    head = f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>"
     if row:
         enabled = True
         try:
@@ -1400,13 +1417,28 @@ async def start_screen(user, fresh: bool = False):
             enabled = info.get("enabled", True) if info.get("success") else True
         except Exception:
             pass
-        body = await _sub_summary(row, frozen=not enabled, extra=await _sub_facts(row))
+        card, alive = await _sub_summary(row, frozen=not enabled, extra=await _sub_facts(row))
         if fresh:
-            body = ("🎉 <b>Пробный период активирован!</b>\n\n" + body
-                    + "\n\n<i>Нажмите на ссылку и вставьте её в INCY.</i>")
+            text = (f"🎉 <b>{name}, пробный период активирован!</b>\n"
+                    "Остался один шаг — подключиться.\n\n"
+                    f"{card}\n\n"
+                    f"{_link_block(row[5])}\n\n"
+                    "<b>Как подключиться</b>\n"
+                    "1️⃣ Скопируйте ссылку выше\n"
+                    "2️⃣ Откройте приложение INCY и вставьте её\n"
+                    "3️⃣ Включите VPN — готово ✅")
+        else:
+            text = (f"👋 Привет, {name}!\n"
+                    "Ваша подписка <b>Drebol VPN</b>:\n\n"
+                    f"{card}"
+                    + (f"\n\n{_link_block(row[5])}" if alive else ""))
     else:
-        body = "Быстрый VPN без логов 🔒"
-    text = f"{head}\n\n{body}"
+        text = (f"👋 Привет, {name}!\n"
+                "Это <b>Drebol VPN</b> — быстрый VPN без логов 🔒\n\n"
+                "<blockquote>⚡ Подключение за минуту\n"
+                "📱 iOS · Android · Windows · macOS\n"
+                "💬 Поддержка прямо в боте</blockquote>\n\n"
+                "Выберите, что сделать 👇")
     return text, main_keyboard(is_admin, has_sub, paid_status, is_helper(user.id))
 
 

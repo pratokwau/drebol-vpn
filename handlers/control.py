@@ -43,6 +43,7 @@ CB_LABELS = {
     "site_menu": "🌐 Сайт",
     "site_logo": "🖼 Логотип сайта",
     "site_deploy": "🚀 Разворачивает сайт",
+    "site_check": "🩺 Проверка сайта",
     "site_delete": "🗑 Удаляет сайт",
     "fraud_scan": "🕵 Ручная проверка",
     "fraud_ok": "🙈 Пара не фрод",
