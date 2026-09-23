@@ -393,8 +393,12 @@ async def site_tariffs(cfg: dict) -> list:
         return []
 
 
-async def deploy(bot_username: str) -> dict:
-    """Собирает страницу и раскатывает её на сервер."""
+async def build_current(bot_username: str) -> tuple:
+    """Страница по текущим данным бота и файлы, которые едут вместе с ней.
+
+    Одна сборка на всех: и кнопка «Обновить», и автообновление смотрят
+    ровно на то, что окажется на сервере.
+    """
     from site_page import build_page
     cfg = load_config()
     og_bytes = _asset("og.webp")
@@ -408,10 +412,65 @@ async def deploy(bot_username: str) -> dict:
         tariffs=await site_tariffs(cfg),
         poster_file="og.webp" if og_bytes else "",
     )
+    return page, og_bytes, logo_bytes
+
+
+def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes) -> str:
+    """Отпечаток того, что должно лежать на сервере.
+
+    По нему автообновление понимает, поменялось ли хоть что-нибудь: цена
+    тарифа, ссылка на канал, документы, логотип. Не поменялось — не трогаем.
+    """
+    import hashlib
+    h = hashlib.sha256()
+    h.update(page.encode("utf-8"))
+    h.update(og_bytes)
+    h.update(logo_bytes)
+    return h.hexdigest()
+
+
+async def deploy(bot_username: str) -> dict:
+    """Собирает страницу и раскатывает её на сервер."""
+    page, og_bytes, logo_bytes = await build_current(bot_username)
     res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes)
     if res.get("ok"):
-        save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"))
+        save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
+                   site_page_hash=page_hash(page, og_bytes, logo_bytes))
     return res
+
+
+async def site_sync_tick(context):
+    """Сам обновляет сайт, когда в боте что-то поменялось.
+
+    Поменял цену тарифа, ссылку на канал или логотип — через пару минут это
+    же окажется на сайте, нажимать «Обновить» не нужно.
+    """
+    cfg = load_config()
+    if not cfg.get("site_auto", True) or not configured():
+        return
+    # сайт ещё ни разу не разворачивали — сами этого не делаем
+    if not cfg.get("site_deployed_at"):
+        return
+    try:
+        me = await context.bot.get_me()
+        page, og_bytes, logo_bytes = await build_current(me.username)
+    except Exception:
+        return
+    fresh = page_hash(page, og_bytes, logo_bytes)
+    if fresh == cfg.get("site_page_hash"):
+        return
+
+    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes)
+    from log_channel import send_log
+    if res.get("ok"):
+        save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
+                   site_page_hash=fresh)
+        await send_log(context.bot, "🌐 Сайт обновлён автоматически: данные изменились")
+    else:
+        # молчать нельзя: на сайте остались старые цены
+        await send_log(context.bot,
+            "⚠️ Сайт не обновился автоматически\n"
+            f"<code>{escape(str(res.get('error'))[:300])}</code>")
 
 
 async def issue_cert() -> dict:
@@ -486,7 +545,9 @@ async def handle_site_menu(query):
     card = [f"🚀 Статус: <b>{state}</b>",
             f"🖥 Сервер: {server}",
             f"🌍 Домен: {domain}" + ("  ·  🔒 HTTPS" if c.get("https") else ""),
-            f"🖼 Логотип: {'свой' if has_logo() else 'нарисованный'}"]
+            f"🖼 Логотип: {'свой' if has_logo() else 'нарисованный'}",
+            "⚡ Автообновление: "
+            + ("вкл" if load_config().get("site_auto", True) else "выкл")]
     if url and c["deployed_at"]:
         card.append(f"🔗 {escape(url)}")
     lines = ["🌐 <b>Сайт</b>", "", "<blockquote>" + "\n".join(card) + "</blockquote>",
@@ -509,6 +570,9 @@ async def handle_site_menu(query):
             extra.append(InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert"))
         if c["deployed_at"]:
             extra.append(InlineKeyboardButton("🩺 Проверить", callback_data="site_check"))
+            extra.append(InlineKeyboardButton(
+                "⚡ Авто: вкл" if load_config().get("site_auto", True) else "💤 Авто: выкл",
+                callback_data="site_auto"))
         if extra:
             kb.append(extra)
         if c["deployed_at"] and url:
@@ -604,6 +668,15 @@ async def handle_site_deploy(query, context):
         ]),
         disable_web_page_preview=True,
     )
+
+
+async def handle_site_auto(query, context):
+    cfg = load_config()
+    cfg["site_auto"] = not cfg.get("site_auto", True)
+    save_config(cfg)
+    await query.answer("Сайт будет обновляться сам" if cfg["site_auto"]
+                       else "Теперь только вручную")
+    await handle_site_menu(query)
 
 
 async def handle_site_check(query, context):

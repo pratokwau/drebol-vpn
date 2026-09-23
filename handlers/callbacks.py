@@ -30,7 +30,7 @@ from fraud import (
 from site_deploy import (
     handle_site_menu, handle_site_server, handle_site_domain,
     handle_site_deploy, handle_site_cert, handle_site_delete, handle_site_logo,
-    handle_site_check,
+    handle_site_check, handle_site_auto,
 )
 from handlers.support import (
     open_support, handle_support_files, show_topics, show_topic_hint,
@@ -448,6 +448,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_site_cert(query, context)
     elif data == "site_check":
         await handle_site_check(query, context)
+    elif data == "site_auto":
+        await handle_site_auto(query, context)
     elif data == "site_delete":
         await handle_site_delete(query, context)
     elif data == "fraud_menu":

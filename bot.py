@@ -278,6 +278,10 @@ async def post_init(app: Application):
         app.job_queue.run_repeating(purge_tick, interval=24 * 3600, first=3600)
         app.job_queue.run_repeating(connect_help_tick, interval=1800, first=240)
 
+        # сайт сам подхватывает новые цены и настройки
+        from site_deploy import site_sync_tick
+        app.job_queue.run_repeating(site_sync_tick, interval=120, first=300)
+
         from fraud import fraud_tick
         app.job_queue.run_repeating(fraud_tick, interval=1800, first=420)
 
