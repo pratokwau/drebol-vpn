@@ -27,10 +27,27 @@ async def is_subscribed(bot: Bot, user_id: int) -> bool:
         return True  # бот не админ канала или другая ошибка — пропускаем
 
 
+def subscribe_text(first_name, retry: bool = False) -> str:
+    """Экран «подпишитесь на канал» — один на /start и на все кнопки.
+
+    retry=True — человек нажал «Я подписался», а подписки ещё не видно.
+    """
+    from html import escape
+    name = escape(str(first_name or ""))
+    head = (f"👋 Привет, {name}!\n" if name else "👋 Привет!\n") + \
+        "Это <b>Drebol VPN</b> — быстрый VPN без логов 🔒\n\n"
+    if retry:
+        return (head + "<blockquote>🤔 Пока не видим вашу подписку на канал.</blockquote>\n\n"
+                "<i>Подпишитесь по кнопке ниже и нажмите «✅ Я подписался» ещё раз.</i>")
+    return (head + "<blockquote>🎁 Пробный период выдадим сразу — остался один шаг: "
+            "подпишитесь на наш канал.</blockquote>\n\n"
+            "<i>После подписки нажмите «✅ Я подписался».</i>")
+
+
 def subscribe_keyboard() -> InlineKeyboardMarkup:
     cfg = load_config()
     channel_url = cfg.get("channel_url", "https://t.me/")
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Подписаться на канал", url=channel_url)],
+        [InlineKeyboardButton("📢 Перейти в канал", url=channel_url)],
         [InlineKeyboardButton("✅ Я подписался", callback_data="check_sub")],
     ])

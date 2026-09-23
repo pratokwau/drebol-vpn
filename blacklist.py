@@ -111,10 +111,11 @@ def user_may(data: str) -> bool:
 
 def blocked_view(reason: str | None):
     import maintenance as mnt
-    text = f"⛔ <b>Доступ к сервису закрыт</b>\n\nПричина: {html.escape(public_reason(reason))}"
+    text = ("⛔ <b>Доступ к сервису закрыт</b>\n\n"
+            f"<blockquote>Причина: {html.escape(public_reason(reason))}</blockquote>")
     if not mnt.feature_enabled("support"):
         return text, None
-    return (text + "\n\nЕсли это ошибка — напишите в поддержку.",
+    return (text + "\n\n<i>Если это ошибка — напишите в поддержку.</i>",
             InlineKeyboardMarkup([[InlineKeyboardButton("💬 Поддержка", callback_data="support_open")]]))
 
 
@@ -142,9 +143,10 @@ async def _notify_restored(bot, tg_id: int, res: dict):
     from database import get_user_info
     if not await get_user_info(tg_id):
         return  # ботом не пользовался — сообщать некому
-    text = "✅ <b>Доступ к сервису восстановлен.</b>"
+    text = "✅ <b>Доступ восстановлен</b>"
     if res.get("paid_until"):
-        text += f"\n\nПодписка снова работает до <b>{res['paid_until']}</b>."
+        text += (f"\n\n<blockquote>📅 Подписка снова работает до "
+                 f"<b>{res['paid_until']}</b></blockquote>")
     await _tell(bot, tg_id, text)
 
 

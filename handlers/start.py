@@ -4,7 +4,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID
 from database import upsert_user
-from subscription import is_subscribed, subscribe_keyboard
+from subscription import is_subscribed, subscribe_keyboard, subscribe_text
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -49,7 +49,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     from database import is_banned
     if user.id != ADMIN_ID and await is_banned(user.id):
-        await update.message.reply_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
+        await update.message.reply_text(
+            "🚫 <b>Аккаунт заблокирован</b>\n\n"
+            "<i>Если это ошибка — свяжитесь с администратором.</i>", parse_mode="HTML")
         return
 
     # Чёрный список: вместо меню — причина и кнопка поддержки
@@ -62,8 +64,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not helper and not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(
-            f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
-            "Подпишитесь на наш канал, чтобы продолжить 👇",
+            subscribe_text(user.first_name),
             parse_mode="HTML",
             reply_markup=subscribe_keyboard(),
         )

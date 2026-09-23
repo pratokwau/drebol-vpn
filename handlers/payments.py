@@ -62,31 +62,32 @@ async def handle_payments_menu(query, context: ContextTypes.DEFAULT_TYPE = None,
     s = await payments_summary()
     rows, total_pages = await list_payments(page, status)
 
-    lines = ["💰 <b>Оплаты</b>\n"]
-    lines.append(f"📅 Сегодня: <b>{s['today'][0]}</b> · <b>{s['today'][1]} ₽</b>")
-    lines.append(f"📆 7 дней: <b>{s['week'][0]}</b> · <b>{s['week'][1]} ₽</b>")
-    lines.append(f"🗓 30 дней: <b>{s['month'][0]}</b> · <b>{s['month'][1]} ₽</b>")
-    lines.append(f"💵 Всего: <b>{s['total_count']}</b> · <b>{s['total_sum']} ₽</b>")
-    lines.append(f"🧾 Средний чек: <b>{s['avg']} ₽</b> · платящих: <b>{s['payers']}</b>")
-
+    money = [
+        f"📅 Сегодня: <b>{s['today'][1]} ₽</b>  ·  {s['today'][0]} шт.",
+        f"📆 7 дней: <b>{s['week'][1]} ₽</b>  ·  {s['week'][0]} шт.",
+        f"🗓 30 дней: <b>{s['month'][1]} ₽</b>  ·  {s['month'][0]} шт.",
+        f"💵 Всего: <b>{s['total_sum']} ₽</b>  ·  {s['total_count']} шт.",
+        f"🧾 Средний чек: <b>{s['avg']} ₽</b>  ·  платящих: <b>{s['payers']}</b>",
+    ]
     if s["by_provider"]:
         parts = [f"{PROVIDER_LABELS.get(p, p)} {c} ({sm} ₽)"
                  for p, c, sm in s["by_provider"]]
-        lines.append(f"💳 {' · '.join(parts)}")
+        money.append(f"💳 {' · '.join(parts)}")
+    lines = ["💰 <b>Оплаты</b>", "", "<blockquote>" + "\n".join(money) + "</blockquote>"]
 
+    issues = []
     if s["pending_count"]:
-        lines.append(
-            f"\n⏳ Ожидают оплаты: <b>{s['pending_count']}</b> "
-            f"на <b>{s['pending_sum']} ₽</b>"
-        )
+        issues.append(f"⏳ Ожидают оплаты: <b>{s['pending_count']}</b> на <b>{s['pending_sum']} ₽</b>")
     if s["failed_count"]:
-        lines.append(f"❌ Неуспешных: <b>{s['failed_count']}</b>")
+        issues.append(f"❌ Неуспешных: <b>{s['failed_count']}</b>")
     if s.get("refund_count"):
-        lines.append(f"↩️ Возвратов: <b>{s['refund_count']}</b> на <b>{s['refund_sum']} ₽</b>")
+        issues.append(f"↩️ Возвратов: <b>{s['refund_count']}</b> на <b>{s['refund_sum']} ₽</b>")
+    if issues:
+        lines += [""] + issues
 
-    lines.append(f"\n<b>{FILTERS.get(status, '')}</b> — стр. {page}/{total_pages}")
+    lines.append(f"\n<b>{FILTERS.get(status, '')}</b>  ·  <i>стр. {page} из {total_pages}</i>")
     if not rows:
-        lines.append("\nЗдесь пока пусто.")
+        lines.append("<blockquote>Здесь пока пусто.</blockquote>")
 
     kb = []
     for (p_id, tg_id, provider, amount, st, ts,
@@ -115,8 +116,8 @@ async def handle_payments_menu(query, context: ContextTypes.DEFAULT_TYPE = None,
     kb.append(switch[:2])
     kb.append(switch[2:])
 
-    kb.append([InlineKeyboardButton("📊 По дням", callback_data="payment_stats:30")])
-    kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
+    kb.append([InlineKeyboardButton("📈 По дням", callback_data="payment_stats:30"),
+               InlineKeyboardButton("◀️ В админку", callback_data="admin_panel")])
 
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",

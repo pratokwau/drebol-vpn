@@ -94,7 +94,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, total_pages = await get_support_messages(user.id)
         has_files = (await count_support_files(user.id)) > 0
         await update.message.reply_text(
-            "✅ <b>Отправлено</b> — ответ придёт сюда.",
+            "✅ <b>Сообщение отправлено</b>\n\n"
+            "<i>Ответим здесь, в боте — уведомление придёт само.</i>",
             parse_mode="HTML",
             reply_markup=support_keyboard(total_pages, total_pages, has_files),
         )
@@ -117,11 +118,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=chat_id,
                     text=(
                         f"📩 <b>Новое обращение</b>\n\n"
-                        f'👤 <a href="tg://user?id={user.id}">{who}</a> ({uname})\n'
-                        f"🆔 <code>{user.id}</code>\n"
-                        f"📌 Тема: <b>{topic_label(topic or 'other')}</b>\n"
-                        f"🔴 Открытых тикетов: <b>{unread}</b>\n\n"
-                        f"💬 {preview}"
+                        f'👤 <a href="tg://user?id={user.id}">{who}</a> ({uname}) · <code>{user.id}</code>\n'
+                        f"📌 {topic_label(topic or 'other')}  ·  🔴 открытых: <b>{unread}</b>\n\n"
+                        f"<blockquote>{preview}</blockquote>"
                     ),
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup([
@@ -152,6 +151,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Юзер вводит промокод ─────────────────────────────────────────────────
     if state == AWAITING_PROMO_CODE:
+        from html import escape
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         from paidsub.handlers import validate_promo
         from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field
@@ -160,7 +160,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         row = await get_paid_sub_by_tg_id(user.id)
         if not row:
             await update.message.reply_text(
-                "❌ У вас нет активной подписки для применения промокода.",
+                "🎟 <b>Промокод не применён</b>\n\n"
+                "<blockquote>Сначала нужна подписка — промокод действует на её оплату.</blockquote>",
+                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
                 ]),
@@ -169,10 +171,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         promo, err = await validate_promo(code, user.id)
         if err:
             await update.message.reply_text(
-                err,
+                f"🎟 <b>Промокод не подошёл</b>\n\n<blockquote>{escape(str(err))}</blockquote>",
+                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎟 Ещё раз", callback_data="enter_promo")],
-                    [InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")],
+                    [InlineKeyboardButton("🎟 Ввести другой", callback_data="enter_promo"),
+                     InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")],
                 ]),
             )
             return
@@ -185,7 +188,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             res = await apply_days(user.id, days)
             if not res.get("ok"):
                 await update.message.reply_text(
-                    "❌ Не удалось начислить дни — напишите в поддержку.",
+                    "😕 <b>Не получилось начислить дни</b>\n\n"
+                    "<i>Промокод не сгорел — напишите в поддержку, начислим вручную.</i>",
+                    parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")]
                     ]),
@@ -193,20 +198,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             await record_promo_use(promo[1], user.id)
             await update.message.reply_text(
-                f"🎁 <b>Начислено {days} дней!</b>\n\n"
-                f"Подписка действует до <b>{res['until']}</b>.",
+                "🎁 <b>Подарок получен!</b>\n\n"
+                f"<blockquote>➕ Начислено дней: <b>{days}</b>\n"
+                f"📅 Подписка до: <b>{res['until']}</b></blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")]
+                    [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
                 ]),
             )
             return
         await update_paid_sub_field(row[0], "pending_promo", promo[1])
         await update.message.reply_text(
-            f"✅ Промокод <b>{promo[1]}</b> применён — скидка <b>−{promo[2]}%</b>!",
+            "✅ <b>Промокод применён</b>\n\n"
+            f"<blockquote>🎟 {escape(str(promo[1]))}  ·  скидка <b>−{promo[2]}%</b></blockquote>\n\n"
+            "<i>Скидка уже учтена в цене — выберите тариф.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")]
+                [InlineKeyboardButton("💳 К оплате", callback_data="renew_sub")]
             ]),
         )
         return
@@ -290,8 +298,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=reply_to,
-                text=f"🛡 <b>Ответ поддержки:</b>\n\n{text}",
+                text=f"🛡 <b>Поддержка ответила</b>\n\n<blockquote>{text}</blockquote>",
                 parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                    "💬 Открыть переписку", callback_data="support_open")]]),
             )
         except Exception:
             delivered = False
@@ -1327,7 +1337,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(
                     chat_id=dm_target,
-                    text=f"📌 <b>Сообщение от администратора:</b>\n\n{text}",
+                    text=f"📌 <b>Сообщение от Drebol VPN</b>\n\n<blockquote>{text}</blockquote>",
                     parse_mode="HTML",
                 )
                 from html import escape
@@ -1454,7 +1464,9 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, total_pages = await get_support_messages(user.id)
         has_files = (await count_support_files(user.id)) > 0
         await msg.reply_text(
-            "✅ Файл отправлен — ответ придёт сюда.",
+            "✅ <b>Файл отправлен</b>\n\n"
+            "<i>Ответим здесь, в боте — уведомление придёт само.</i>",
+            parse_mode="HTML",
             reply_markup=support_keyboard(total_pages, total_pages, has_files),
         )
         from html import escape
@@ -1467,11 +1479,10 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uname = escape(f"@{user.username}" if user.username else f"id{user.id}")
         unread = await get_unread_tickets_count()
         notice = (
-            f"📩 <b>Файл от пользователя</b>\n\n"
-            f'👤 <a href="tg://user?id={user.id}">{who}</a> ({uname})\n'
-            f"🆔 <code>{user.id}</code>\n"
-            f"🔴 Непрочитанных: <b>{unread}</b>"
-            + (f"\n\n💬 {escape(caption)}" if caption else "")
+            f"📩 <b>Файл в поддержку</b>\n\n"
+            f'👤 <a href="tg://user?id={user.id}">{who}</a> ({uname}) · <code>{user.id}</code>\n'
+            f"🔴 Открытых: <b>{unread}</b>"
+            + (f"\n\n<blockquote>{escape(caption)}</blockquote>" if caption else "")
         )
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user.id}")],
@@ -1511,15 +1522,19 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_photo(
                     chat_id=reply_to,
                     photo=file_id,
-                    caption=f"🛡 <b>Ответ поддержки:</b>" + (f"\n\n{caption}" if caption else ""),
+                    caption="🛡 <b>Поддержка ответила</b>" + (f"\n\n<blockquote>{caption}</blockquote>" if caption else ""),
                     parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                    "💬 Открыть переписку", callback_data="support_open")]]),
                 )
             else:
                 await context.bot.send_document(
                     chat_id=reply_to,
                     document=file_id,
-                    caption=f"🛡 <b>Ответ поддержки:</b>" + (f"\n\n{caption}" if caption else ""),
+                    caption="🛡 <b>Поддержка ответила</b>" + (f"\n\n<blockquote>{caption}</blockquote>" if caption else ""),
                     parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                    "💬 Открыть переписку", callback_data="support_open")]]),
                 )
         except Exception:
             delivered = False

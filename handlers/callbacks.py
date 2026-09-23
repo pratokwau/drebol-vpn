@@ -4,7 +4,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
-from subscription import is_subscribed, subscribe_keyboard
+from subscription import is_subscribed, subscribe_keyboard, subscribe_text
 from handlers.user import (
     handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub,
     handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
@@ -176,7 +176,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not adm and data != "check_sub":
         from database import is_banned
         if await is_banned(update.effective_user.id):
-            await query.edit_message_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
+            await query.edit_message_text(
+                "🚫 <b>Аккаунт заблокирован</b>\n\n"
+                "<i>Если это ошибка — свяжитесь с администратором.</i>", parse_mode="HTML")
             return
 
     # Чёрный список: остаётся только поддержка — чтобы можно было оспорить
@@ -194,8 +196,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await is_subscribed(context.bot, update.effective_user.id):
             user = update.effective_user
             await query.edit_message_text(
-                f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
-                "Подпишитесь на наш канал, чтобы продолжить 👇",
+                subscribe_text(user.first_name),
                 parse_mode="HTML",
                 reply_markup=subscribe_keyboard(),
             )
@@ -205,9 +206,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         if not await is_subscribed(context.bot, user.id):
             await query.edit_message_text(
-                f"👋 {escape(str(user.first_name or user.id))}, добро пожаловать в <b>Drebol VPN</b>\n\n"
-                "❌ Подписки на канал пока не видно.\n"
-                "Подпишитесь и нажмите ещё раз 👇",
+                subscribe_text(user.first_name, retry=True),
                 parse_mode="HTML",
                 reply_markup=subscribe_keyboard(),
             )

@@ -259,36 +259,40 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
     online = await get_online_emails()
     cfg = load_config()
 
-    lines = ["🛰 <b>Контроль</b>\n"]
-    lines.append(f"🟢 Заходили в бот сегодня: <b>{s['active_today']}</b> · "
-                 f"за 7 дней: <b>{s['active_week']}</b>")
-    lines.append(f"🖱 Действий сегодня: <b>{s['events_today']}</b>")
+    now = [f"🟢 Заходили в бот: <b>{s['active_today']}</b> сегодня  ·  "
+           f"<b>{s['active_week']}</b> за 7 дней",
+           f"🖱 Действий сегодня: <b>{s['events_today']}</b>"]
     if online.get("ok"):
-        lines.append(f"🔌 Онлайн на VPN сейчас: <b>{len(online['emails'])}</b>")
+        now.append(f"🔌 Онлайн на VPN сейчас: <b>{len(online['emails'])}</b>")
     else:
-        lines.append("🔌 Онлайн на VPN: <i>панель не ответила</i>")
+        now.append("🔌 Онлайн на VPN: <i>панель не ответила</i>")
+    lines = ["🛰 <b>Контроль</b>", "", "<blockquote>" + "\n".join(now) + "</blockquote>"]
 
     if s["top_today"]:
-        lines.append("\n<b>Чаще всего сегодня:</b>")
-        lines += [f"  {action_label(a, None)} — {c}" for a, c in s["top_today"]]
+        lines.append("\n🔥 <b>Чаще всего сегодня</b>")
+        lines.append("<blockquote>" + "\n".join(
+            f"{action_label(a, None)} — {c}" for a, c in s["top_today"]) + "</blockquote>")
 
     if s["recent_events"]:
-        lines.append("\n<b>Последние события:</b>")
-        for tg_id, action, details, ts, fn, un in s["recent_events"]:
-            lines.append(f"  <code>{_short_ts(ts)}</code> {_who(fn, un, tg_id)} · "
-                         f"{action_label(action, details)}")
+        lines.append("\n🕐 <b>Последние события</b>")
+        ev = [f"<code>{_short_ts(ts)}</code> {_who(fn, un, tg_id)} · {action_label(action, details)}"
+              for tg_id, action, details, ts, fn, un in s["recent_events"]]
+        lines.append("<blockquote expandable>" + "\n".join(ev) + "</blockquote>")
 
     digest_on = cfg.get("digest_enabled", True)
     hour = int(cfg.get("digest_hour", 9))
-    lines.append(f"\n📨 Сводка в личку: <b>{f'каждый день в {hour}:00' if digest_on else 'выключена'}</b>")
     ch_label = (f"через {int(cfg.get('connect_help_hours', 3))} ч"
                 if cfg.get("connect_help_enabled", True) else "выключена")
-    lines.append(f"🆘 Помощь с подключением: <b>{ch_label}</b>")
-    lines.append(f"🗄 Журнал хранится {int(cfg.get('activity_retention_days', 90))} дней")
+    lines.append("\n⚙️ <b>Автоматика</b>")
+    lines.append("<blockquote>"
+                 f"📨 Сводка в личку: <b>{f'каждый день в {hour}:00' if digest_on else 'выключена'}</b>\n"
+                 f"🆘 Помощь с подключением: <b>{ch_label}</b>\n"
+                 f"🗄 Журнал хранится <b>{int(cfg.get('activity_retention_days', 90))}</b> дней"
+                 "</blockquote>")
 
     kb = [
-        [InlineKeyboardButton("📜 Лента действий", callback_data="act_feed:all:1")],
-        [InlineKeyboardButton("⭐ Важные события", callback_data="act_feed:important:1")],
+        [InlineKeyboardButton("📜 Лента действий", callback_data="act_feed:all:1"),
+         InlineKeyboardButton("⭐ Важное", callback_data="act_feed:important:1")],
         [InlineKeyboardButton("⚙️ Аудит админки", callback_data="act_feed:admin:1")],
         [
             InlineKeyboardButton("🔌 Кто онлайн", callback_data="ctl_online"),
@@ -296,7 +300,7 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
         ],
         [InlineKeyboardButton("🆘 Помощь с подключением", callback_data="ctl_ch_menu")],
         [InlineKeyboardButton(
-            "📨 Сводка: ВКЛ ✅" if digest_on else "📨 Сводка: ВЫКЛ ❌",
+            "📨 Сводка · вкл ✅" if digest_on else "📨 Сводка · выкл",
             callback_data="ctl_digest_toggle",
         )],
         [

@@ -93,7 +93,8 @@ def _bubble(row) -> str:
     body = escape(text or "")
     if not body and file_id:
         body = "<i>файл</i>"
-    return f"{who} · <i>{_fmt_time(created_at)}</i>{mark}\n{body}"
+    # каждое сообщение — своей цитатой: переписка читается как чат
+    return f"{who} · <i>{_fmt_time(created_at)}</i>{mark}\n<blockquote>{body}</blockquote>"
 
 
 async def open_support(query, user_id: int, page: int | None = None):
@@ -110,10 +111,10 @@ async def open_support(query, user_id: int, page: int | None = None):
     has_files = (await count_support_files(user_id)) > 0
     ticket = await get_ticket(user_id)
 
-    head = (f"💬 <b>Поддержка</b> · {_status_line(ticket)}\n"
-            f"📌 {topic_label(ticket['topic'])}")
+    head = ("💬 <b>Поддержка</b>\n"
+            f"📌 {topic_label(ticket['topic'])}  ·  {_status_line(ticket)}")
     body = "\n\n".join(_bubble(r) for r in msgs)
-    text = f"{head}\n\n{body}\n\n<i>✍️ Пишите сюда</i>"
+    text = f"{head}\n\n{body}\n\n<i>✍️ Напишите сообщение — оно придёт в этот чат.</i>"
 
     await query.edit_message_text(
         text,
@@ -126,7 +127,8 @@ async def open_support(query, user_id: int, page: int | None = None):
 async def show_topics(query):
     """Первый экран: с чем помочь."""
     await query.edit_message_text(
-        "💬 <b>С чем помочь?</b>",
+        "💬 <b>Поддержка</b>\n\n"
+        "С чем помочь? Выберите тему — по частым вопросам подскажем сразу.",
         parse_mode="HTML",
         reply_markup=support_topics_keyboard(TOPICS),
     )
@@ -140,9 +142,11 @@ async def show_topic_hint(query, context, topic: str):
             for label, data in t["buttons"]]
     rows.append([InlineKeyboardButton("✍️ Написать нам",
                                       callback_data=f"support_write:{topic}")])
-    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="support_open")])
+    rows.append([InlineKeyboardButton("◀️ К темам", callback_data="support_open")])
     await query.edit_message_text(
-        f"{t['emoji']} <b>{t['name']}</b>\n\n{t['hint']}",
+        f"{t['emoji']} <b>{t['name']}</b>\n\n"
+        f"<blockquote>💡 {t['hint']}</blockquote>\n\n"
+        "<i>Не помогло? Напишите нам — ответим здесь же, в боте.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(rows),
     )
@@ -155,8 +159,9 @@ async def start_writing(query, context, topic: str):
     context.user_data["state"] = AWAITING_SUPPORT_MSG
     context.user_data["support_topic"] = topic
     await query.edit_message_text(
-        "✍️ <b>Опишите вопрос</b>\n"
-        "<i>Можно приложить скриншот.</i>",
+        "✍️ <b>Опишите вопрос</b>\n\n"
+        f"<blockquote>Тема: {topic_label(topic)}</blockquote>\n\n"
+        "<i>Одним сообщением. Можно приложить скриншот — так разберёмся быстрее.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data=f"support_topic:{topic}")],
@@ -169,11 +174,12 @@ async def handle_support_close(query, user_id: int):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     await ticket_closed(user_id)
     await query.edit_message_text(
-        "✅ <b>Вопрос закрыт</b>\n\nСпасибо! Если что — пишите снова.",
+        "✅ <b>Вопрос закрыт</b>\n\n"
+        "<blockquote>Спасибо, что написали! Если что-то ещё — мы на связи.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Открыть поддержку", callback_data="support_open")],
-            [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
+            [InlineKeyboardButton("💬 Новый вопрос", callback_data="support_open"),
+             InlineKeyboardButton("◀️ Меню", callback_data="back_start")],
         ]),
     )
 

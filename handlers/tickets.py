@@ -9,6 +9,7 @@
 from datetime import datetime
 from html import escape
 
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from config import load_config, save_config
 from database import (
@@ -74,22 +75,22 @@ async def handle_ticket_list(query, page: int = 1, status: str = "open"):
     counts = await ticket_counts()
 
     title = ("🎫 <b>Тикеты</b>\n"
-             f"🔴 Открытых: <b>{counts['open']}</b> · "
-             f"✅ Отвеченных: <b>{counts['answered']}</b> · "
-             f"🗂 Закрытых: <b>{counts['closed']}</b>")
+             f"🔴 <b>{counts['open']}</b> открытых  ·  "
+             f"✅ <b>{counts['answered']}</b> отвеченных  ·  "
+             f"🗂 <b>{counts['closed']}</b> закрытых")
 
     if not rows:
         empty = {"open": "Открытых обращений нет — всё разобрано.",
                  "answered": "Отвеченных переписок пока нет.",
                  "closed": "Закрытых переписок пока нет."}.get(status, "Обращений пока нет.")
         await query.edit_message_text(
-            f"{title}\n\n{empty}",
+            f"{title}\n\n<blockquote>{empty}</blockquote>",
             parse_mode="HTML",
             reply_markup=ticket_list_keyboard([], 1, 1, status),
         )
         return
 
-    lines = [title, "", SEP, ""]
+    lines = [title, ""]
     for i, row in enumerate(rows, 1):
         (user_id, first_name, username, _total, unread, last_time,
          last_text, last_from_admin, t_status, topic, waiting) = row
@@ -102,16 +103,15 @@ async def handle_ticket_list(query, page: int = 1, status: str = "open"):
         if unread:
             head += f" · <b>+{unread}</b>"
         lines.append(head)
-        meta = f"   📌 {topic_label(topic)}"
+        meta = f"📌 {topic_label(topic)}"
         if wait and t_status == "open":
-            meta += f" · ⏳ ждёт <b>{wait}</b>"
+            meta += f"  ·  ⏳ ждёт <b>{wait}</b>"
         else:
-            meta += f" · 🕐 {_fmt_time(last_time)}"
-        lines.append(meta)
-        lines.append(f"   {who} <i>{preview}</i>")
+            meta += f"  ·  🕐 {_fmt_time(last_time)}"
+        # карточка обращения: тема и последняя реплика одной цитатой
+        lines.append(f"<blockquote>{meta}\n{who} <i>{preview}</i></blockquote>")
         lines.append("")
 
-    lines.append(SEP)
     lines.append("<i>Дольше всех ждущие — сверху.</i>")
 
     await query.edit_message_text(
@@ -142,7 +142,8 @@ async def _user_context(user_id: int) -> str:
             secs = int((end - datetime.now()).total_seconds())
             left = (f" · осталось {fmt_duration_precise(secs)}" if secs > 0
                     else " · срок вышел")
-        lines.append(f"{plan} · {mark} {status}{left}")
+        word = {"active": "активна", "renewal": "ждёт оплаты", "expired": "истекла"}.get(status, status)
+        lines.append(f"{plan} · {mark} {word}{left}")
         lines.append(f"📅 До: {row[6]}")
         dev = f"🖥 Устройств: {limit_hwid or 'без лимита'}"
         if extra:
@@ -176,9 +177,8 @@ async def handle_ticket_view(query, user_id: int, page: int = 1):
         status_line += f" · ⏳ <b>{wait}</b>"
 
     head = (
-        f"🎫 <b>{first_name}</b>{username}\n"
-        f"🆔 <code>{user_id}</code>\n"
-        f"📌 {topic_label(ticket['topic'])} · {status_line}"
+        f"🎫 <b>{first_name}</b>{username}  ·  <code>{user_id}</code>\n"
+        f"📌 {topic_label(ticket['topic'])}  ·  {status_line}"
     )
 
     bubbles = []
@@ -191,9 +191,9 @@ async def handle_ticket_view(query, user_id: int, page: int = 1):
         if file_id:
             mark = " 🖼" if file_type == "photo" else " 📎"
         body = escape(text or "") or "<i>файл</i>"
-        bubbles.append(f"{who} · <i>{_fmt_time(created_at)}</i>{mark}\n{body}")
+        bubbles.append(f"{who} · <i>{_fmt_time(created_at)}</i>{mark}\n<blockquote>{body}</blockquote>")
 
-    text = (f"{head}\n\n{SEP}\n\n{context_block}\n\n{SEP}\n\n"
+    text = (f"{head}\n\n👤 <b>Кто пишет</b>\n<blockquote expandable>{context_block}</blockquote>\n\n"
             + "\n\n".join(bubbles))
     if total_pages > 1:
         text += f"\n\n<i>Страница {page} из {total_pages}</i>"
@@ -252,8 +252,10 @@ async def handle_ticket_send_quick(query, user_id: int, index: int, context):
     try:
         await context.bot.send_message(
             chat_id=user_id,
-            text=f"🛡 <b>Ответ поддержки</b>\n\n{escape(text)}",
+            text=f"🛡 <b>Поддержка ответила</b>\n\n<blockquote>{escape(text)}</blockquote>",
             parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                    "💬 Открыть переписку", callback_data="support_open")]]),
         )
         await query.answer("Отправлено")
     except Exception:

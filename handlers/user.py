@@ -65,7 +65,8 @@ async def handle_my_paid_sub(query):
     row = await get_paid_sub_by_tg_id(user_id)
     if not row:
         await query.edit_message_text(
-            "⚙️ <b>Действия с подпиской</b>\n\nПодписки пока нет.",
+            "⚙️ <b>Моя подписка</b>\n\n"
+            "<blockquote>Подписки пока нет.</blockquote>",
             parse_mode="HTML",
             reply_markup=back_main(),
         )
@@ -102,20 +103,26 @@ async def handle_my_paid_sub(query):
         copy_btn = InlineKeyboardButton("📋 Скопировать ссылку", copy_text=CopyTextButton(text=sub_url))
     except (ImportError, TypeError):
         copy_btn = InlineKeyboardButton("📋 Скопировать ссылку", callback_data="copy_sub")
-    kb_rows.append([copy_btn, InlineKeyboardButton("📱 QR-код", callback_data="qr_code")])
-    if limit_hwid and _on("subscription"):
-        kb_rows.append([InlineKeyboardButton("📱 Мои устройства", callback_data="my_devices")])
+    kb_rows.append([copy_btn, InlineKeyboardButton("🔳 QR-код", callback_data="qr_code")])
     # продлевать можно в любой момент: остаток срока при оплате не сгорает
     if _on("payments"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
+    # устройства и перевыпуск — второстепенное, кладём парой в один ряд
+    pair = []
+    if limit_hwid and _on("subscription"):
+        pair.append(InlineKeyboardButton("📱 Устройства", callback_data="my_devices"))
     # во время окна оплаты доступ ещё работает — перевыпуск должен быть доступен,
     # иначе при утечке ключа человеку нечего сделать до продления
     if status in ("active", "renewal") and enabled and _on("reissue"):
-        kb_rows.append([InlineKeyboardButton("🔁 Перевыпуск ключа", callback_data="reissue_key")])
+        pair.append(InlineKeyboardButton("🔁 Новый ключ", callback_data="reissue_key"))
+    if pair:
+        kb_rows.append(pair)
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
-        f"⚙️ <b>Действия с подпиской</b>\n\n{plan} · {mark}",
+        "⚙️ <b>Моя подписка</b>\n\n"
+        f"<blockquote>{plan}  ·  {mark}</blockquote>\n\n"
+        "<i>Скопируйте ссылку, продлите подписку или управляйте устройствами.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb_rows),
         disable_web_page_preview=True,
@@ -170,7 +177,7 @@ async def handle_renew_sub(query):
     from paidsub.storage import get_pending_promo, update_paid_sub_field
     from paidsub.handlers import validate_promo, apply_discount
     promo_line = ""
-    price_line = f"💵 Сумма: <b>{price} ₽</b>\n"
+    price_line = f"💵 Сумма: <b>{price} ₽</b>"
     promo_btn_row = [InlineKeyboardButton("🎟 Ввести промокод", callback_data="enter_promo")]
     pending = await get_pending_promo(user.id)
     if pending:
@@ -178,8 +185,8 @@ async def handle_renew_sub(query):
         if promo:
             percent = promo[2]
             final_price = apply_discount(price, percent)
-            price_line = f"💵 Сумма: <s>{price} ₽</s> → <b>{final_price} ₽</b>\n"
-            promo_line = f"🎟 Промокод <b>{promo[1]}</b>: скидка <b>−{percent}%</b>\n"
+            price_line = f"💵 Сумма: <s>{price} ₽</s> → <b>{final_price} ₽</b>"
+            promo_line = f"🎟 Промокод <b>{escape(str(promo[1]))}</b> · скидка <b>−{percent}%</b>"
             promo_btn_row = [InlineKeyboardButton("❌ Убрать промокод", callback_data="remove_promo")]
         else:
             # промокод стал невалидным — снимаем
@@ -207,7 +214,7 @@ async def handle_renew_sub(query):
                 kb = []
                 for t_id, name, t_period, t_price, _a, _s in tariffs:
                     final = apply_discount(t_price, discount) if discount else t_price
-                    label = f"{name} — {final} ₽"
+                    label = f"{name}  ·  {final} ₽"
                     if discount:
                         label += f" (−{discount}%)"
                     kb.append([InlineKeyboardButton(
@@ -216,9 +223,11 @@ async def handle_renew_sub(query):
                 kb.append(promo_btn_row)
                 kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
 
-                extra = (promo_line + await _left_line(row)).strip()
+                notes = [x for x in (promo_line, await _left_line(row)) if x]
                 await query.edit_message_text(
-                    "💳 <b>Выберите тариф</b>" + (f"\n\n{extra}" if extra else ""),
+                    "💳 <b>Продление подписки</b>\n\n"
+                    "Выберите срок — оплата пройдёт прямо здесь, в боте."
+                    + ("\n\n" + "\n".join(notes) if notes else ""),
                     parse_mode="HTML",
                     reply_markup=InlineKeyboardMarkup(kb),
                 )
@@ -239,12 +248,13 @@ async def handle_renew_sub(query):
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
 
     await query.edit_message_text(
-        f"💳 <b>Продление · {period_str}</b>\n\n"
+        "💳 <b>Продление подписки</b>\n\n"
+        f"<blockquote>⏱ Срок: <b>{period_str}</b>\n"
         f"{price_line}"
-        f"{promo_line}\n"
-        "В комментарии к оплате укажите:\n"
+        + (f"\n{promo_line}" if promo_line else "") + "</blockquote>\n\n"
+        "<b>В комментарии к оплате укажите:</b>\n"
         f"<code>{hint_text}</code>\n\n"
-        "Потом нажмите «✅ Я оплатил».",
+        "<i>После оплаты нажмите «✅ Я оплатил» — мы проверим и продлим подписку.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
     )
@@ -303,7 +313,7 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
     # Промокод действует на срок, устройства считаются отдельно —
     # иначе скидка растекается на разовую покупку слотов
     discount = None
-    promo_btn = [InlineKeyboardButton("🎟 Промокод", callback_data="enter_promo")]
+    promo_btn = [InlineKeyboardButton("🎟 Есть промокод", callback_data="enter_promo")]
     pending = await get_pending_promo(user.id)
     if pending:
         promo, _err = await validate_promo(pending, user.id)
@@ -328,20 +338,22 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
     end, _left = await _sub_end(row)
     new_end = end + timedelta(seconds=pay_seconds)
 
-    price_line = (f"💵 <s>{price}</s> <b>{period_price} ₽</b>" if discount
-                  else f"💵 <b>{price} ₽</b>")
-    lines = [
-        f"💳 <b>{escape(str(name))}</b> · {fmt_duration(pay_seconds)}",
+    price_line = (f"💵 Цена: <s>{price} ₽</s> <b>{period_price} ₽</b>  (−{discount}%)"
+                  if discount else f"💵 Цена: <b>{price} ₽</b>")
+    card = [
+        f"⏱ Срок: <b>{fmt_duration(pay_seconds)}</b>",
         price_line,
-        f"📅 Продлится до <b>{new_end.strftime('%d.%m.%Y')}</b>",
+        f"📅 Продлится до: <b>{new_end.strftime('%d.%m.%Y')}</b>",
     ]
+    lines = []
 
     kb = []
     if dev_price:
         dev_line = f"📱 Устройств: <b>{own_limit + devices}</b>"
         if devices:
-            dev_line += f" (+{devices} · {dev_sum} ₽)"
-        lines += ["", dev_line]
+            dev_line += f"  (+{devices} · {dev_sum} ₽)"
+        card.append(dev_line)
+        lines += ["<i>Нужно больше устройств? Добавьте места кнопками ниже.</i>"]
         row_btns = [InlineKeyboardButton(
             "✅ Без доп." if devices == 0 else "Без доп.",
             callback_data=f"tariff_pick:{tariff_id}:0")]
@@ -355,12 +367,15 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
         if row_btns:
             kb.append(row_btns)
 
-    lines += ["", f"💰 <b>К оплате: {total} ₽</b>"]
+    lines = ([f"💳 <b>Тариф «{escape(str(name))}»</b>", "",
+              "<blockquote>" + "\n".join(card) + "</blockquote>", ""]
+             + lines + ([""] if lines else [])
+             + [f"💰 К оплате: <b>{total} ₽</b>"])
 
     kb.append(promo_btn)
     kb.append([InlineKeyboardButton(f"💳 Оплатить {total} ₽",
                                     callback_data=f"pay_invoice:{tariff_id}:{devices}")])
-    kb.append([InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")])
+    kb.append([InlineKeyboardButton("◀️ К тарифам", callback_data="renew_sub")])
 
     await query.edit_message_text(
         "\n".join(lines),
@@ -429,7 +444,7 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
         await _send_invoice(query, existing[8], price, tariff_name, pay_seconds, devices)
         return
 
-    await query.edit_message_text("⏳ Создаю счёт...")
+    await query.edit_message_text("⏳ Готовлю счёт…")
     desc = f"Подписка Drebol VPN"
     if tariff_name:
         desc += f" · {tariff_name}"
@@ -443,14 +458,15 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
     )
     if not result["ok"]:
         await query.edit_message_text(
-            "❌ <b>Не удалось создать счёт</b>\n\n"
-            "Попробуйте ещё раз или напишите в поддержку.",
+            "😕 <b>Не получилось создать счёт</b>\n\n"
+            "<blockquote>Платёжная система не ответила. Деньги не списаны.</blockquote>\n\n"
+            "<i>Попробуйте ещё раз через минуту или напишите нам.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Ещё раз",
+                [InlineKeyboardButton("🔁 Попробовать ещё раз",
                                       callback_data=f"pay_invoice:{tariff_id or 0}:{devices}")],
-                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
-                [InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")],
+                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")],
             ]),
         )
         from config import ADMIN_ID
@@ -488,19 +504,22 @@ async def _send_invoice(query, url: str, price: int,
     parts = []
     if tariff_name:
         parts.append(_esc(str(tariff_name)))
-    if period_seconds:
+    # срок дописываем, только если название тарифа его не называет («3 месяца»)
+    if period_seconds and not any(ch.isdigit() for ch in str(tariff_name or "")):
         parts.append(fmt_duration(period_seconds))
     if devices:
         parts.append(f"+{devices} устр.")
-    what = " · ".join(parts)
+    what = "  ·  ".join(parts)
 
     await query.edit_message_text(
-        f"💳 <b>Счёт на {price} ₽</b>\n"
-        + (f"{what}\n" if what else "")
-        + "\nОплатите — подписка продлится сама.",
+        "🧾 <b>Счёт готов</b>\n\n"
+        f"<blockquote>💰 Сумма: <b>{price} ₽</b>"
+        + (f"\n📦 {what}" if what else "") + "</blockquote>\n\n"
+        "<i>Оплатите по кнопке ниже — подписка продлится сама, "
+        "как только платёж пройдёт.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 Перейти к оплате", url=url)],
+            [InlineKeyboardButton(f"💳 Оплатить {price} ₽", url=url)],
             [InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")],
         ]),
         disable_web_page_preview=True,
@@ -512,7 +531,8 @@ async def handle_enter_promo(query, context):
     from states import AWAITING_PROMO_CODE
     context.user_data["state"] = AWAITING_PROMO_CODE
     await query.edit_message_text(
-        "🎟 <b>Введите промокод</b>",
+        "🎟 <b>Промокод</b>\n\n"
+        "Отправьте код одним сообщением — скидка сразу применится к оплате.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")]
@@ -546,8 +566,9 @@ async def handle_i_paid(query, context):
                 continue
         if muted_dt and datetime.now() < muted_dt:
             await query.edit_message_text(
-                f"🔇 Запросы заблокированы до <b>{muted}</b>.\n"
-                "Обратитесь к администратору.",
+                "🔇 <b>Заявки временно недоступны</b>\n\n"
+                f"<blockquote>Можно будет отправить после <b>{muted}</b>.</blockquote>\n\n"
+                "<i>Если это ошибка — напишите в поддержку.</i>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
@@ -557,9 +578,9 @@ async def handle_i_paid(query, context):
 
     if await is_payment_pending(user.id):
         await query.edit_message_text(
-            "⏳ <b>Заявка уже отправлена</b>\n\n"
-            "Ваша заявка на оплату уже на рассмотрении.\n"
-            "Ожидайте ответа администратора.",
+            "⏳ <b>Заявка уже у нас</b>\n\n"
+            "<blockquote>Мы проверяем оплату. Как только всё подтвердится — "
+            "подписка продлится, а вам придёт уведомление.</blockquote>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
@@ -574,9 +595,9 @@ async def handle_i_paid(query, context):
     uname = f"@{user.username}" if user.username else f"id{user.id}"
 
     await query.edit_message_text(
-        "✅ <b>Заявка отправлена!</b>\n\n"
-        "Администратор проверит оплату и активирует вашу подписку.\n"
-        "Вам придёт уведомление.",
+        "✅ <b>Заявка отправлена</b>\n\n"
+        "<blockquote>Мы проверим оплату и продлим подписку. "
+        "Уведомление придёт сюда, в бот.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
@@ -587,7 +608,7 @@ async def handle_i_paid(query, context):
     row = await get_paid_sub_by_tg_id(user.id)
     sub_info = ""
     if row:
-        sub_info = f"\n📧 Email: <code>{row[2]}</code>\n📅 До: <b>{row[6]}</b>"
+        sub_info = f"📧 <code>{row[2]}</code>\n📅 Подписка до: <b>{row[6]}</b>\n"
 
     cfg = load_config()
     # цена по условиям самой подписки, дальше применится промокод
@@ -604,11 +625,11 @@ async def handle_i_paid(query, context):
             percent = promo[2]
             final_price = apply_discount(price, percent)
             promo_admin_line = (
-                f"🎟 Промокод: <b>{promo[1]}</b> (−{percent}%)\n"
-                f"💵 К оплате: <s>{price} ₽</s> → <b>{final_price} ₽</b>\n"
+                f"🎟 Промокод: <b>{escape(str(promo[1]))}</b> (−{percent}%)\n"
+                f"💵 К оплате: <s>{price} ₽</s> → <b>{final_price} ₽</b>"
             )
     if not promo_admin_line:
-        promo_admin_line = f"💵 Сумма: <b>{price} ₽</b>\n"
+        promo_admin_line = f"💵 К оплате: <b>{price} ₽</b>"
 
     if user.username:
         link_line = f'⛓‍💥 <a href="https://t.me/{user.username}">Написать</a>'
@@ -623,11 +644,10 @@ async def handle_i_paid(query, context):
         text=(
             f"💰 <b>Заявка на оплату</b>\n\n"
             f'👤 <a href="tg://user?id={user.id}">{escape(str(user.first_name or user.id))}</a> '
-            f"({escape(str(uname))})\n"
-            f"🆔 TG ID: <code>{user.id}</code>"
-            f"{sub_info}\n"
-            f"{promo_admin_line}\n"
-            f"{link_line}"
+            f"({escape(str(uname))})  ·  <code>{user.id}</code>\n"
+            f"{link_line}\n\n"
+            f"<blockquote>{sub_info}{promo_admin_line}</blockquote>\n\n"
+            "<i>Проверьте поступление и подтвердите или отклоните.</i>"
         ),
         parse_mode="HTML",
         reply_markup=kb,
@@ -637,7 +657,8 @@ async def handle_i_paid(query, context):
 
 async def handle_news(query):
     await query.edit_message_text(
-        "📰 <b>Новости</b>\n\nНовостей пока нет. Следите за обновлениями!",
+        "📰 <b>Новости</b>\n\n"
+        "<blockquote>Новостей пока нет — загляните позже.</blockquote>",
         parse_mode="HTML",
         reply_markup=back_main(),
     )
@@ -645,24 +666,28 @@ async def handle_news(query):
 
 async def handle_how_to(query):
     await query.edit_message_text(
-        "❓ <b>Как подключиться</b>\n\n"
-        "<b>1️⃣ Установите приложение INCY</b> — рекомендуем\n"
-        "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">iOS</a>\n"
-        "• <a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Android</a>\n"
-        "• <a href=\"https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe\">Windows</a>\n"
-        "• <a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">macOS</a>\n\n"
+        "❓ <b>Как подключиться</b>\n"
+        "Четыре шага, пара минут.\n\n"
+        "<b>1️⃣ Установите INCY</b>  <i>— рекомендуем</i>\n"
+        "<blockquote>"
+        "<a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">iOS</a>  ·  "
+        "<a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Android</a>  ·  "
+        "<a href=\"https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe\">Windows</a>  ·  "
+        "<a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">macOS</a>"
+        "</blockquote>\n\n"
         "<b>2️⃣ Скопируйте ссылку подписки</b>\n"
-        "Откройте «👤 Моя подписка» и нажмите на ссылку — она скопируется.\n\n"
-        "<b>3️⃣ Вставьте ссылку в приложение</b>\n"
+        "На главном экране нажмите на ссылку — она скопируется.\n\n"
+        "<b>3️⃣ Вставьте её в приложение</b>\n"
         "Серверы подтянутся сами.\n\n"
-        "<b>4️⃣ Выберите сервер и подключайтесь</b>\n\n"
-        "━━━━━━━━━━━━━━\n\n"
-        "🔄 <b>Запасной вариант — Happ</b>\n"
-        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>\n"
-        "• <a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Android</a>\n"
-        "• <a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>\n"
-        "• <a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">macOS</a>\n"
-        "Дальше всё так же: скопируйте ссылку и вставьте её в Happ.",
+        "<b>4️⃣ Выберите сервер и включите VPN</b> ✅\n\n"
+        "🔄 <b>Если INCY не подошёл — Happ</b>\n"
+        "<blockquote>"
+        "<a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>  ·  "
+        "<a href=\"https://play.google.com/store/apps/details?id=com.happproxy\">Android</a>  ·  "
+        "<a href=\"https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe\">Windows</a>  ·  "
+        "<a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">macOS</a>"
+        "</blockquote>\n"
+        "<i>Дальше всё так же: скопируйте ссылку и вставьте её в Happ.</i>",
         parse_mode="HTML",
         reply_markup=back_info(),
         disable_web_page_preview=True,
@@ -671,7 +696,7 @@ async def handle_how_to(query):
 
 async def handle_buy(query):
     await query.edit_message_text(
-        "🛒 <b>Покупка VPN</b>\n\nРаздел в разработке.",
+        "🛒 <b>Покупка VPN</b>\n\n<blockquote>Раздел скоро появится.</blockquote>",
         parse_mode="HTML",
         reply_markup=back_main(),
     )
@@ -683,21 +708,22 @@ async def handle_about(query):
     terms_url = cfg.get("terms_url", "")
 
     lines = [
-        "ℹ️ <b>О сервисе</b>", "",
-        "🖥 <b>Любая платформа</b>",
-        "iOS, Android, Windows и macOS", "",
-        "🛡 <b>Без логов</b>",
-        "Не храним данные о вашей активности", "",
-        "💳 <b>Честные платежи</b>",
-        "Без скрытых списаний и автопродления",
+        "📕 <b>О сервисе</b>",
+        "<b>Drebol VPN</b> — быстрый VPN без логов, который живёт в Telegram.", "",
+        "<blockquote>🖥 <b>Любая платформа</b>\n"
+        "iOS, Android, Windows и macOS\n\n"
+        "🛡 <b>Без логов</b>\n"
+        "Не храним данные о вашей активности\n\n"
+        "💳 <b>Честные платежи</b>\n"
+        "Без скрытых списаний и автопродления</blockquote>",
     ]
     docs = []
     if privacy_url:
-        docs.append(f'• <a href="{privacy_url}">Политика конфиденциальности</a>')
+        docs.append(f'<a href="{privacy_url}">Политика конфиденциальности</a>')
     if terms_url:
-        docs.append(f'• <a href="{terms_url}">Пользовательское соглашение</a>')
+        docs.append(f'<a href="{terms_url}">Пользовательское соглашение</a>')
     if docs:
-        lines += ["", "━━━━━━━━━━━━━━", "", "📕 <b>Документы</b>"] + docs
+        lines += ["", "📄 " + "  ·  ".join(docs)]
 
     await query.edit_message_text(
         "\n".join(lines),
@@ -722,8 +748,7 @@ async def handle_prices(query):
 
     lines = ["💰 <b>Цены</b>", ""]
     if trial_period:
-        lines += ["🆓 <b>Пробный период</b>",
-                  f"{fmt_duration(trial_period)} — бесплатно", ""]
+        lines += [f"🆓 <b>Пробный период</b> — {fmt_duration(trial_period)} бесплатно", ""]
 
     # Тарифы — то же, что человек увидит при продлении.
     # Пока их нет, показываем одну цену из общих настроек.
@@ -731,33 +756,35 @@ async def handle_prices(query):
     tariffs = await list_tariffs(only_active=True)
     if tariffs:
         lines.append("💳 <b>Тарифы</b>")
+        rows = []
         base = None
         for _id, name, t_period, t_price, _a, _s in tariffs:
             per_month = t_price / (t_period / 2592000) if t_period else None
             note = ""
             # выгода длинных тарифов относительно самого короткого
             if base and per_month and per_month < base * 0.97:
-                note = f" · выгода {round((1 - per_month / base) * 100)}%"
+                note = f"  <i>выгода {round((1 - per_month / base) * 100)}%</i>"
             if base is None and per_month:
                 base = per_month
-            lines.append(f"• {escape(str(name))} — <b>{t_price} ₽</b>{note}")
+            rows.append(f"{escape(str(name))} — <b>{t_price} ₽</b>{note}")
+        lines.append("<blockquote>" + "\n".join(rows) + "</blockquote>")
     elif price:
         lines.append("💳 <b>Подписка</b>")
-        period = f" · {fmt_duration(pay_period)}" if pay_period else ""
-        lines.append(f"<b>{price} ₽</b>{period}")
+        period = f" за {fmt_duration(pay_period)}" if pay_period else ""
+        lines.append(f"<blockquote><b>{price} ₽</b>{period}</blockquote>")
 
     if devices > 0:
         word = "устройства" if devices % 10 == 1 and devices % 100 != 11 else "устройств"
         dev_line = f"📱 До {devices} {word} одновременно"
     else:
         dev_line = "📱 Без ограничения устройств"
-    lines += ["", "━━━━━━━━━━━━━━", "",
-              "✨ <b>Что входит</b>",
-              dev_line,
-              "📶 Безлимитный трафик" if traffic <= 0 else f"📶 {traffic} ГБ трафика",
-              "🖥 iOS, Android, Windows, macOS"]
+    perks = [dev_line,
+             "📶 Безлимитный трафик" if traffic <= 0 else f"📶 {traffic} ГБ трафика",
+             "🖥 iOS, Android, Windows, macOS"]
     if devices > 0 and device_price > 0:
-        lines.append(f"➕ Доп. устройство — {device_price} ₽")
+        perks.append(f"➕ Доп. устройство — {device_price} ₽")
+    lines += ["", "✨ <b>В каждом тарифе</b>",
+              "<blockquote>" + "\n".join(perks) + "</blockquote>"]
 
     await query.edit_message_text(
         "\n".join(lines),
@@ -802,7 +829,8 @@ async def handle_qr_code(query, context):
         await context.bot.send_photo(
             chat_id=user_id,
             photo=buf,
-            caption="📱 <b>QR-код подписки</b>\n\nОтсканируйте в приложении INCY или Happ.",
+            caption="🔳 <b>QR-код подписки</b>\n\n"
+                    "<i>Отсканируйте его в INCY или Happ — подписка добавится сама.</i>",
             parse_mode="HTML",
         )
         await query.answer()
@@ -820,11 +848,13 @@ async def handle_reissue_key(query, context):
         return
     await query.edit_message_text(
         "🔁 <b>Перевыпустить ключ?</b>\n\n"
-        "Старая ссылка перестанет работать на всех устройствах.",
+        "<blockquote>⚠️ Старая ссылка перестанет работать на всех устройствах. "
+        "Новую нужно будет заново вставить в приложение.</blockquote>\n\n"
+        "<i>Пригодится, если ссылка попала в чужие руки.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Да, перевыпустить", callback_data="reissue_do")],
-            [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+            [InlineKeyboardButton("🔁 Да, перевыпустить", callback_data="reissue_do")],
+            [InlineKeyboardButton("◀️ Отмена", callback_data="my_paid_sub")],
         ]),
     )
 
@@ -842,7 +872,7 @@ async def handle_reissue_do(query, context):
         return
     sub_id, email = row[0], row[2]
 
-    await query.edit_message_text("⏳ Перевыпускаю ключ...")
+    await query.edit_message_text("⏳ Перевыпускаю ключ…")
 
     from xui_api import reissue_subscription
     result = await reissue_subscription(email)
@@ -852,12 +882,13 @@ async def handle_reissue_do(query, context):
             f"⚠️ Перевыпуск не удался: <code>{user_id}</code>\n"
             f"<code>{escape(str(result['error']))}</code>")
         await query.edit_message_text(
-            "❌ <b>Не получилось</b>\n\n"
-            "Старая ссылка продолжает работать. Попробуйте позже.",
+            "😕 <b>Не получилось</b>\n\n"
+            "<blockquote>Ничего не сломалось — старая ссылка продолжает работать.</blockquote>\n\n"
+            "<i>Попробуйте чуть позже или напишите в поддержку.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
-                [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
             ]),
         )
         return
@@ -886,12 +917,13 @@ async def handle_reissue_do(query, context):
 
     await query.edit_message_text(
         "✅ <b>Ключ перевыпущен</b>\n\n"
+        "🔑 <b>Новая ссылка</b>\n"
         f"<code>{escape(new_url)}</code>\n\n"
-        "Замените подписку в приложении на новую.",
+        "<i>Удалите старую подписку в приложении и вставьте эту.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [copy_btn, InlineKeyboardButton("📱 QR-код", callback_data="qr_code")],
-            [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")],
+            [copy_btn, InlineKeyboardButton("🔳 QR-код", callback_data="qr_code")],
+            [InlineKeyboardButton("◀️ К подписке", callback_data="my_paid_sub")],
         ]),
         disable_web_page_preview=True,
     )
@@ -911,54 +943,54 @@ async def handle_referral(query, context):
     cfg = load_config()
     bonus = cfg.get("referral_bonus")
     invited_bonus = cfg.get("referral_invited_bonus")
-    sep = "━" * 14
-
-    head = ["👥 <b>Drebol VPN · Реферальная программа</b>", "",
-            "🎁 <b>Приглашай друзей — получай дни к подписке!</b>", ""]
+    head = ["👥 <b>Приглашайте друзей</b>",
+            "И получайте дни к подписке за каждого."]
+    gifts = []
     if bonus:
-        head.append(f"Тебе: <b>+{fmt_duration(bonus)}</b> за каждого друга")
+        gifts.append(f"🎁 Вам: <b>+{fmt_duration(bonus)}</b> за каждого друга")
     if invited_bonus:
-        head.append(f"Другу: <b>+{fmt_duration(invited_bonus)}</b> за регистрацию")
+        gifts.append(f"🤝 Другу: <b>+{fmt_duration(invited_bonus)}</b> при регистрации")
+    if gifts:
+        head += ["", "<blockquote>" + "\n".join(gifts) + "</blockquote>"]
 
-    body = [f"📊 <b>Ваша статистика</b>", "",
-            f"👤 Приглашено: <b>{stats['total']}</b>",
-            f"🎁 Получили бонус: <b>{stats['rewarded']}</b>"]
+    stat = [f"👤 Приглашено: <b>{stats['total']}</b>",
+            f"✅ Получили бонус: <b>{stats['rewarded']}</b>"]
     if stats["total_bonus"] > 0:
-        body.append(f"⏱ Начислено: <b>+{fmt_duration(stats['total_bonus'])}</b>")
+        stat.append(f"⏱ Вам начислено: <b>+{fmt_duration(stats['total_bonus'])}</b>")
+    body = ["📊 <b>Ваша статистика</b>",
+            "<blockquote>" + "\n".join(stat) + "</blockquote>"]
 
-    link = ["🔗 <b>Ваша реферальная ссылка</b>",
-            f"<code>{ref_link}</code>", "",
-            "💡 <i>Поделитесь ссылкой с другом — после регистрации",
-            "вы оба получите бонусные дни.</i>"]
+    link = ["🔗 <b>Ваша ссылка</b>",
+            f"<code>{ref_link}</code>",
+            "<i>Нажмите, чтобы скопировать, или поделитесь кнопкой ниже.</i>"]
 
     blocks = ["\n".join(head), "\n".join(body), "\n".join(link)]
 
     if ref_rows:
-        invited = ["👥 <b>Приглашённые</b>", ""]
+        invited = []
         for tg_id, rewarded, bonus_sec, created_at in ref_rows[:10]:
             u_info = await get_user_info(tg_id)
             name = escape(str(u_info[1] if u_info and u_info[1] else tg_id))
             when = _ref_date(created_at)
             mark = "✅" if rewarded else "⏳"
-            gift = (f"🎁 +{fmt_duration(bonus_sec)}" if rewarded and bonus_sec
-                    else "🎁 бонус после оплаты")
-            invited.append(f"{mark} <b>{name}</b>")
-            invited.append(f"📅 {when} · {gift}")
-            invited.append("")
-        blocks.append("\n".join(invited).rstrip("\n"))
+            gift = (f"+{fmt_duration(bonus_sec)}" if rewarded and bonus_sec
+                    else "бонус после оплаты")
+            invited.append(f"{mark} <b>{name}</b> · {when} · {gift}")
         if len(ref_rows) > 10:
-            blocks[-1] += f"\n\n<i>…и ещё {len(ref_rows) - 10}</i>"
+            invited.append(f"<i>…и ещё {len(ref_rows) - 10}</i>")
+        blocks.append("👥 <b>Приглашённые</b>\n<blockquote expandable>"
+                      + "\n".join(invited) + "</blockquote>")
 
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     share_text = "Попробуй Drebol VPN — быстрый и безопасный VPN!"
     share_url = f"https://t.me/share/url?url={ref_link}&text={share_text}"
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 Поделиться ссылкой", url=share_url)],
-        [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
+        [InlineKeyboardButton("📤 Поделиться с другом", url=share_url)],
+        [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
     ])
 
     await query.edit_message_text(
-        f"\n\n{sep}\n\n".join(blocks),
+        "\n\n".join(blocks),
         parse_mode="HTML",
         reply_markup=kb,
         disable_web_page_preview=True,
@@ -979,12 +1011,13 @@ async def handle_info(query):
     """Раздел «Инфо»: как подключиться, цены, документы."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     await query.edit_message_text(
-        "ℹ️ <b>Инфо</b>",
+        "ℹ️ <b>Информация</b>\n\n"
+        "<i>Как подключиться, сколько стоит и кто мы.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("❓ Как подключиться?", callback_data="how_to")],
-            [InlineKeyboardButton("💰 Цены", callback_data="prices")],
-            [InlineKeyboardButton("📕 О сервисе", callback_data="about")],
+            [InlineKeyboardButton("❓ Как подключиться", callback_data="how_to")],
+            [InlineKeyboardButton("💰 Цены", callback_data="prices"),
+             InlineKeyboardButton("📕 О сервисе", callback_data="about")],
             [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
         ]),
     )
@@ -1072,13 +1105,16 @@ async def handle_my_devices(query, context=None):
 
     kb = []
     if not limit:
-        lines = ["📱 <b>Устройства</b>", "", "Без ограничений."]
+        lines = ["📱 <b>Устройства</b>", "",
+                 "<blockquote>Без ограничений — подключайте сколько нужно.</blockquote>"]
     elif not r.get("ok"):
-        lines = [f"📱 <b>Устройств: до {limit}</b>", "",
-                 "<i>Список сейчас недоступен.</i>"]
+        lines = ["📱 <b>Устройства</b>", "",
+                 f"<blockquote>Можно подключить: <b>до {limit}</b></blockquote>", "",
+                 "<i>Список сейчас недоступен — загляните чуть позже.</i>"]
     else:
         items = r["items"]
-        lines = [f"📱 <b>Устройства: {len(items)} из {limit}</b>", ""]
+        lines = ["📱 <b>Устройства</b>",
+                 f"Подключено <b>{len(items)} из {limit}</b>", ""]
         for i, d in enumerate(items[:10], 1):
             title = _device_title(d)
             app = _device_app(d)
@@ -1088,7 +1124,7 @@ async def handle_my_devices(query, context=None):
             tail = " · ".join(x for x in (f"📲 {escape(app)}" if app else "",
                                           f"был {when}" if when else "") if x)
             if tail:
-                lines.append(f"    {tail}")
+                lines.append(f"      <i>{tail}</i>")
             # на кнопке только модель: длинный хвост с системой всё равно обрежется
             short = title.split(" · ")[0]
             if len(short) > 16:
@@ -1096,14 +1132,15 @@ async def handle_my_devices(query, context=None):
             kb.append([InlineKeyboardButton(f"🗑 Отключить {i} · {short}",
                                             callback_data=f"dev_del:{d.get('id')}")])
         if not items:
-            lines.append("Пока ни одного — подключитесь в приложении.")
+            lines.append("<blockquote>Пока ни одного — подключитесь в приложении.</blockquote>")
         else:
+            if len(items) >= limit:
+                lines += ["", "<blockquote>⚠️ Все места заняты — отключите лишнее "
+                          "или добавьте ещё.</blockquote>"]
             lines += ["", "<i>Не узнали устройство? Отключите его "
                       "и перевыпустите ключ.</i>"]
-            if len(items) >= limit:
-                lines.insert(-1, "⚠️ Мест нет — отключите лишнее или добавьте.")
     if limit and price > 0 and bought < max_extra:
-        kb.append([InlineKeyboardButton(f"➕ Добавить · {price} ₽",
+        kb.append([InlineKeyboardButton(f"➕ Добавить место · {price} ₽",
                                         callback_data="dev_buy_menu")])
     kb.append([InlineKeyboardButton("◀️ К подписке", callback_data="my_paid_sub")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
@@ -1177,8 +1214,10 @@ async def handle_dev_buy_menu(query, context):
           for n in range(1, min(3, left) + 1)]
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_devices")])
     await query.edit_message_text(
-        "➕ <b>Сколько добавить?</b>\n"
-        "<i>До конца оплаченного срока.</i>",
+        "➕ <b>Добавить устройства</b>\n\n"
+        f"<blockquote>Одно место — <b>{price} ₽</b>\n"
+        "Действует до конца оплаченного срока.</blockquote>\n\n"
+        "<i>Сколько мест добавить?</i>",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb),
     )
 
@@ -1205,7 +1244,7 @@ async def handle_dev_buy(query, context, count: int):
     if not pg.is_configured():
         await query.edit_message_text(
             "➕ <b>Оплата сейчас недоступна</b>\n\n"
-            "Напишите в поддержку — добавим вручную.",
+            "<blockquote>Напишите в поддержку — добавим устройства вручную.</blockquote>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
@@ -1215,17 +1254,18 @@ async def handle_dev_buy(query, context, count: int):
         return
 
     amount = count * price
-    await query.edit_message_text("⏳ Создаю счёт...")
+    await query.edit_message_text("⏳ Готовлю счёт…")
     result = await pg.create_payment(
         amount=amount, description=f"Устройства Drebol VPN · +{count} · {user.id}",
         tg_id=user.id, username=user.username,
     )
     if not result["ok"]:
         await query.edit_message_text(
-            "❌ <b>Не удалось создать счёт</b>\n\nПопробуйте ещё раз или напишите в поддержку.",
+            "😕 <b>Не получилось создать счёт</b>\n\n"
+            "<blockquote>Платёжная система не ответила. Деньги не списаны.</blockquote>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Ещё раз", callback_data="dev_buy_menu")],
+                [InlineKeyboardButton("🔁 Попробовать ещё раз", callback_data="dev_buy_menu")],
                 [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
             ]),
         )
@@ -1236,12 +1276,13 @@ async def handle_dev_buy(query, context, count: int):
         kind="devices", extra=count,
     )
     await query.edit_message_text(
-        f"💳 <b>Счёт на {amount} ₽</b>\n"
-        f"+{count} устр.\n\n"
-        "Оплатите — устройства добавятся сами.",
+        "🧾 <b>Счёт готов</b>\n\n"
+        f"<blockquote>💰 Сумма: <b>{amount} ₽</b>\n"
+        f"📱 Устройств: <b>+{count}</b></blockquote>\n\n"
+        "<i>Оплатите по кнопке ниже — места добавятся сами.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 Оплатить", url=result["url"])],
+            [InlineKeyboardButton(f"💳 Оплатить {amount} ₽", url=result["url"])],
             [InlineKeyboardButton("📱 Мои устройства", callback_data="my_devices")],
         ]),
     )

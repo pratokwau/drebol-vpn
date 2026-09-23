@@ -120,10 +120,11 @@ async def handle_paid_subs_menu(query, page: int = 1):
     rows, total_pages = await list_paid_subs(page)
     cfg = load_config()
     ready = _paid_presets_ready(cfg)
-    header = "💳 <b>Платные подписки</b>\n"
-    body = "\n\nПодписок пока нет." if not rows else f"\n\nСтр. {page}/{total_pages}"
+    header = "💳 <b>Платные подписки</b>"
+    body = ("\n\n<blockquote>Подписок пока нет.</blockquote>" if not rows
+            else f"\n<i>Страница {page} из {total_pages} · нажми на подписку, чтобы открыть</i>")
     if not ready:
-        body += "\n\n⚠️ Задай настройки, чтобы создавать подписки."
+        body += "\n\n⚠️ <i>Задай настройки, чтобы создавать подписки.</i>"
     await query.edit_message_text(
         header + body,
         parse_mode="HTML",
@@ -495,9 +496,11 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
     )
 
     user_text = (
-        f"🎉 <b>Подписка готова</b> · до {result['expire'][:16]}\n\n"
+        "🎉 <b>Подписка готова!</b>\n\n"
+        f"<blockquote>📅 Действует до: <b>{result['expire'][:16]}</b></blockquote>\n\n"
+        "🔑 <b>Ссылка для подключения</b>\n"
         f"<code>{result['sub_url']}</code>\n\n"
-        "<i>Нажмите на ссылку и вставьте её в INCY.</i>"
+        "<i>Нажмите на ссылку — она скопируется — и вставьте её в INCY.</i>"
     )
 
     if for_user:
@@ -529,7 +532,9 @@ async def handle_request_sub(query, context):
     cfg = load_config()
     if not _paid_presets_ready(cfg):
         await query.edit_message_text(
-            "👤 <b>Моя подписка</b>\n\nПодписки пока недоступны. Попробуйте позже.",
+            "⚙️ <b>Моя подписка</b>\n\n"
+            "<blockquote>Оформление подписок временно недоступно.</blockquote>\n\n"
+            "<i>Загляните чуть позже.</i>",
             parse_mode="HTML",
             reply_markup=back_main(),
         )
@@ -546,9 +551,9 @@ async def handle_request_sub(query, context):
                 continue
         if muted_dt and datetime.now() < muted_dt:
             await query.edit_message_text(
-                "👤 <b>Моя подписка</b>\n\n"
-                f"🔇 Запросы заблокированы до <b>{muted}</b>.\n"
-                "Обратитесь к администратору.",
+                "⚙️ <b>Моя подписка</b>\n\n"
+                f"<blockquote>🔇 Запросы недоступны до <b>{muted}</b></blockquote>\n\n"
+                "<i>Если это ошибка — напишите в поддержку.</i>",
                 parse_mode="HTML",
                 reply_markup=back_main(),
             )
@@ -557,8 +562,8 @@ async def handle_request_sub(query, context):
     pending = await get_pending_request(user.id)
     if pending:
         await query.edit_message_text(
-            "👤 <b>Моя подписка</b>\n\n"
-            "⏳ Вы уже отправили запрос. Ожидайте ответа администратора.",
+            "⚙️ <b>Моя подписка</b>\n\n"
+            "<blockquote>⏳ Запрос уже у нас — пришлём уведомление, как только одобрим.</blockquote>",
             parse_mode="HTML",
             reply_markup=back_main(),
         )
@@ -623,7 +628,8 @@ async def handle_request_sub(query, context):
     )
 
     await query.edit_message_text(
-        "📨 <b>Запрос отправлен</b>\n\nПришлём уведомление, когда одобрим.",
+        "📨 <b>Запрос отправлен</b>\n\n"
+        "<blockquote>Пришлём уведомление сюда, как только одобрим.</blockquote>",
         parse_mode="HTML",
         reply_markup=back_main(),
     )
@@ -679,10 +685,10 @@ async def _process_referral_bonus(invited_tg_id: int, context):
 
                 if bot:
                     await _notify_user(bot, referrer_id,
-                        f"🎉 <b>Реферальный бонус!</b>\n\n"
-                        f"Ваш друг активировал подписку.\n"
-                        f"➕ Вам начислено: <b>{fmt_duration(bonus_seconds)}</b>\n"
-                        f"📅 Подписка до: <b>{new_expire_str}</b>"
+                        f"🎁 <b>Бонус за друга!</b>\n\n"
+                        f"Ваш друг активировал подписку — спасибо, что рассказали о нас.\n\n"
+                        f"<blockquote>➕ Начислено: <b>{fmt_duration(bonus_seconds)}</b>\n"
+                        f"📅 Подписка до: <b>{new_expire_str[:16]}</b></blockquote>"
                     )
 
     await mark_referral_rewarded(invited_tg_id, bonus_seconds or 0)
@@ -722,10 +728,10 @@ async def _process_referral_bonus(invited_tg_id: int, context):
 
                 if bot:
                     await _notify_user(bot, invited_tg_id,
-                        f"🎉 <b>Приветственный бонус!</b>\n\n"
-                        f"Вы зарегистрировались по реферальной ссылке.\n"
-                        f"➕ Вам начислено: <b>{fmt_duration(invited_bonus)}</b>\n"
-                        f"📅 Подписка до: <b>{new_inv_str}</b>"
+                        f"🎁 <b>Приветственный бонус!</b>\n\n"
+                        f"Вы пришли по приглашению друга — держите подарок.\n\n"
+                        f"<blockquote>➕ Начислено: <b>{fmt_duration(invited_bonus)}</b>\n"
+                        f"📅 Подписка до: <b>{new_inv_str[:16]}</b></blockquote>"
                     )
 
 
@@ -767,7 +773,8 @@ async def handle_reject(query, tg_id: int, context):
         parse_mode="HTML",
     )
     await _notify_user(context.bot, tg_id,
-        "❌ Ваш запрос на подписку был <b>отклонён</b> администратором."
+        "😕 <b>Запрос на подписку отклонён</b>\n\n"
+        "<i>Если это ошибка — напишите в поддержку, разберёмся.</i>"
     )
 
 
@@ -806,7 +813,8 @@ async def handle_paid_sub_view(query, sub_id: int):
         up = t.get("up", 0)
         down = t.get("down", 0)
         total_used = up + down
-        traffic_line = f"📶 Трафик: <b>{traffic_limit}</b> — ⬆ {_fmt_bytes(up)} ⬇ {_fmt_bytes(down)} (всего {_fmt_bytes(total_used)})"
+        traffic_line = (f"📶 Трафик: <b>{_fmt_bytes(total_used)}</b> из {traffic_limit}  "
+                        f"(⬆ {_fmt_bytes(up)} · ⬇ {_fmt_bytes(down)})")
     else:
         traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>"
 
@@ -835,18 +843,19 @@ async def handle_paid_sub_view(query, sub_id: int):
     uname = user_info[2] if user_info and user_info[2] else None
     first_name = user_info[1] if user_info and user_info[1] else None
 
+    # имя человек задаёт сам — без экранирования «<» в имени ломает карточку
+    shown = _esc_name(first_name, tg_id)
     if tg_id and uname:
-        tg_line = f'👤 <a href="tg://user?id={tg_id}">{first_name or tg_id}</a> (@{uname})\n'
-        link_line = f'⛓‍💥 <a href="https://t.me/{uname}">Написать</a>'
+        tg_line = (f'👤 <a href="tg://user?id={tg_id}">{shown}</a>  ·  '
+                   f'<a href="https://t.me/{uname}">@{_esc_name(uname)}</a>')
     elif tg_id:
-        tg_line = f'👤 <a href="tg://user?id={tg_id}">{first_name or tg_id}</a>\n'
-        link_line = f'⛓‍💥 <a href="tg://user?id={tg_id}">Написать</a>'
+        tg_line = f'👤 <a href="tg://user?id={tg_id}">{shown}</a>'
     else:
         tg_line = ""
-        link_line = ""
+    link_line = ""
 
     if tg_id:
-        tg_line += f"🆔 TG ID: <code>{tg_id}</code>\n"
+        tg_line += f"  ·  <code>{tg_id}</code>\n"
 
     # Мьют
     mute_line = ""
@@ -878,7 +887,8 @@ async def handle_paid_sub_view(query, sub_id: int):
         ind_lines.append(f"🔗 Ссылка оплаты: <b>{ind_pay_url}</b>")
     ind_block = ""
     if ind_lines:
-        ind_block = "\n<b>Условия подписки:</b>\n" + "\n".join(ind_lines) + "\n"
+        ind_block = ("\n⚙️ <b>Свои условия</b>\n<blockquote>"
+                     + "\n".join(ind_lines) + "</blockquote>\n")
 
     # Реферал
     referral_line = ""
@@ -887,7 +897,8 @@ async def handle_paid_sub_view(query, sub_id: int):
         if referrer_id:
             ref_info = await get_user_info(referrer_id)
             ref_name = ref_info[1] if ref_info else str(referrer_id)
-            referral_line = f"👥 Приглашён: <b>{ref_name}</b> (<code>{referrer_id}</code>)\n"
+            referral_line = (f"👥 Пришёл от: <b>{_esc_name(ref_name, referrer_id)}</b> "
+                             f"(<code>{referrer_id}</code>)\n")
 
     # Оставшееся время
     # Конец периода и окно оплаты — это разные даты. Показываем обе:
@@ -926,25 +937,28 @@ async def handle_paid_sub_view(query, sub_id: int):
     else:
         time_left_line = f"📅 До: <b>{expire}</b>\n⏱ <b>Истекла</b>\n"
 
+    extra_lines = (mute_line + referral_line).strip()
     await query.edit_message_text(
-        f"📄 <b>Подписка #{sub_id}</b> {status_icon}\n\n"
+        f"📄 <b>Подписка #{sub_id}</b>  {status_icon}\n"
         + tg_line
-        + f"📧 Email: <code>{email}</code>\n"
-        f"🆔 UUID: <code>{uuid_val}</code>\n"
-        f"📋 Sub ID: <code>{sub_id_str}</code>\n\n"
-        f"📌 Статус: <b>{status_label}</b>\n"
-        f"🏷 Тип: <b>{sub_type}</b> (продлений: {times_renewed})\n"
+        + "\n📌 <b>Срок</b>\n<blockquote>"
+        f"Статус: <b>{status_label}</b>  ·  {sub_type} (продлений: {times_renewed})\n"
         + payment_line
-        + time_left_line
-        + f"🌐 Лимит IP: <b>{limit_ip}</b>\n"
-        f"🖥 Лимит HWID: <b>{limit_hwid}</b>\n"
+        + time_left_line.rstrip("\n")
+        + "</blockquote>\n\n"
+        "📊 <b>Лимиты</b>\n<blockquote>"
+        f"🌐 IP: <b>{limit_ip}</b>  ·  🖥 HWID: <b>{limit_hwid}</b>\n"
         f"{traffic_line}\n"
-        f"🕐 Создано: {created_at}\n"
-        + mute_line
-        + referral_line
+        f"🕐 Создана: {created_at}"
+        "</blockquote>\n"
+        + (f"\n{extra_lines}\n" if extra_lines else "")
         + ind_block
-        + (f"\n{link_line}\n" if link_line else "")
-        + f"\n🔗 Ссылка:\n<code>{sub_url}</code>",
+        + "\n🔧 <b>Технические данные</b>\n<blockquote expandable>"
+        f"📧 Email: <code>{email}</code>\n"
+        f"🆔 UUID: <code>{uuid_val}</code>\n"
+        f"📋 Sub ID: <code>{sub_id_str}</code>"
+        "</blockquote>\n\n"
+        f"🔗 <b>Ссылка</b>\n<code>{sub_url}</code>",
         parse_mode="HTML",
         reply_markup=paid_sub_view_keyboard(sub_id, enabled),
         disable_web_page_preview=True,
@@ -976,8 +990,12 @@ async def handle_paid_sub_toggle(query, sub_id: int, context=None):
         return
 
     if context and tg_id:
-        status_text = "✅ включена" if new_state else "⏸ приостановлена"
-        await _notify_user(context.bot, tg_id, f"ℹ️ Ваша подписка <b>{status_text}</b>.")
+        if new_state:
+            note = "✅ <b>Подписка снова включена</b>\n\n<i>VPN работает — можно подключаться.</i>"
+        else:
+            note = ("⏸ <b>Подписка приостановлена</b>\n\n"
+                    "<i>Вопросы — в поддержку, ответим в боте.</i>")
+        await _notify_user(context.bot, tg_id, note)
 
     await add_history(
         tg_id, "sub_enabled" if new_state else "sub_disabled",
@@ -1008,7 +1026,9 @@ async def handle_paid_sub_delete(query, sub_id: int, context=None):
         await add_history(tg_id, "sub_deleted", f"Подписка #{sub_id} ({email}) · {panel_status}")
 
     if context and tg_id:
-        await _notify_user(context.bot, tg_id, "🗑 Ваша подписка была <b>удалена</b>.")
+        await _notify_user(context.bot, tg_id,
+            "🗑 <b>Подписка удалена</b>\n\n"
+            "<i>Чтобы оформить новую, откройте /start.</i>")
 
     await query.edit_message_text(
         f"🗑 Подписка удалена из базы.\n{panel_status}",
@@ -1042,7 +1062,8 @@ async def handle_paid_sub_freeze(query, sub_id: int, context=None):
 
     if context and tg_id:
         await _notify_user(context.bot, tg_id,
-            "🧊 Ваша подписка <b>заморожена</b>. Время действия приостановлено."
+            "❄️ <b>Подписка заморожена</b>\n\n"
+            "<blockquote>Срок на паузе — оставшиеся дни никуда не денутся.</blockquote>"
         )
 
     await add_history(tg_id, "sub_frozen", f"Подписка #{sub_id} ({email})")
@@ -1198,11 +1219,13 @@ async def apply_devices_payment(tg_id: int, count: int, context, amount: int = 0
     bot = context.bot if hasattr(context, "bot") else None
     if bot and added > 0:
         await _notify_user(bot, tg_id,
-            f"✅ <b>Устройств теперь: {new_limit}</b>"
+            "✅ <b>Устройства добавлены</b>\n\n"
+            f"<blockquote>📱 Теперь можно подключить: <b>{new_limit}</b></blockquote>"
         )
     elif bot and added < 0:
         await _notify_user(bot, tg_id,
-            f"📱 <b>Доп. устройства отключены</b>\nУстройств теперь: {new_limit}"
+            "📱 <b>Дополнительные устройства отключены</b>\n\n"
+            f"<blockquote>Теперь можно подключить: <b>{new_limit}</b></blockquote>"
         )
     return {"ok": True, "limit": new_limit, "changed": True,
             "panel": res.get("success", False)}
@@ -1331,8 +1354,9 @@ async def handle_paid_hwid_clear(query, context, sub_id: int):
         if row[1]:
             await add_history(row[1], "settings_changed", "Очищены все устройства (HWID)")
             await _notify_user(context.bot, row[1],
-                "ℹ️ <b>Список устройств сброшен</b>\n\n"
-                "Подключите VPN заново на тех устройствах, которыми пользуетесь."
+                "📱 <b>Список устройств сброшен</b>\n\n"
+                "<i>Просто включите VPN на тех устройствах, которыми пользуетесь, — "
+                "они добавятся заново.</i>"
             )
     else:
         await query.answer(f"Панель не приняла: {res.get('error', '?')}"[:190], show_alert=True)
@@ -1503,9 +1527,9 @@ async def bulk_set_limits(kind: str, value: int, context) -> dict:
     if bot:
         for tg_id, target in tightened:
             await _notify_user(bot, tg_id,
-                f"ℹ️ <b>Изменён лимит устройств</b>\n\n"
-                f"Теперь на подписку разрешено <b>{target}</b> — "
-                f"лишние устройства перестанут подключаться."
+                f"📱 <b>Изменён лимит устройств</b>\n\n"
+                f"<blockquote>Теперь можно подключить: <b>{target}</b></blockquote>\n\n"
+                f"<i>Лишние устройства перестанут подключаться.</i>"
             )
     return {"updated": updated, "panel_fail": panel_fail,
             "skipped": skipped, "tightened": len(tightened)}
@@ -1575,15 +1599,15 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
                 if bot:
                     if direction > 0:
                         await _notify_user(bot, tg_id,
-                            f"🎉 <b>Ваша подписка продлена!</b>\n\n"
-                            f"➕ Добавлено: <b>{fmt_duration(seconds)}</b>\n"
-                            f"📅 Действует до: <b>{new_expire_str}</b>"
+                            f"🎉 <b>Подписка продлена!</b>\n\n"
+                            f"<blockquote>➕ Добавлено: <b>{fmt_duration(seconds)}</b>\n"
+                            f"📅 Действует до: <b>{new_expire_str[:16]}</b></blockquote>"
                         )
                     else:
                         await _notify_user(bot, tg_id,
-                            f"ℹ️ <b>Срок вашей подписки изменён.</b>\n\n"
-                            f"➖ Убавлено: <b>{fmt_duration(seconds)}</b>\n"
-                            f"📅 Действует до: <b>{new_expire_str}</b>"
+                            f"ℹ️ <b>Срок подписки изменён</b>\n\n"
+                            f"<blockquote>➖ Убавлено: <b>{fmt_duration(seconds)}</b>\n"
+                            f"📅 Действует до: <b>{new_expire_str[:16]}</b></blockquote>"
                         )
                 # запись в историю
                 await add_history(
@@ -1927,8 +1951,9 @@ async def expiry_reminder_tick(context):
             await context.bot.send_message(
                 chat_id=tg_id,
                 text=(
-                    f"⏳ <b>{what} закончится через {fmt_duration_precise(left)}</b>\n"
-                    "Продлите сейчас — дни не сгорят."
+                    f"⏳ <b>{what} скоро закончится</b>\n\n"
+                    f"<blockquote>Осталось: <b>{fmt_duration_precise(left)}</b></blockquote>\n\n"
+                    "<i>Продлите сейчас — оставшиеся дни не сгорят, а прибавятся.</i>"
                 ),
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
@@ -2043,8 +2068,10 @@ async def check_expired_subs(context):
                         await context.bot.send_message(
                             chat_id=tg_id,
                             text=(
-                                f"⚠️ <b>{period_text}</b>\n"
-                                f"Доступ сохранится ещё {fmt_duration_precise(window)} — продлите."
+                                f"⚠️ <b>{period_text}</b>\n\n"
+                                f"<blockquote>VPN проработает ещё "
+                                f"<b>{fmt_duration_precise(window)}</b> — "
+                                f"успейте продлить.</blockquote>"
                             ),
                             parse_mode="HTML",
                             reply_markup=kb,
@@ -2081,9 +2108,11 @@ async def check_expired_subs(context):
                             # окна не было: период кончился — доступ выключился сразу
                             head = ("Пробный период закончился"
                                     if times_renewed == 0 else "Подписка закончилась")
-                            body = f"🔴 <b>{head}</b>\nПродлите — доступ вернётся сразу."
+                            body = (f"🔴 <b>{head}</b>\n\n"
+                                    "<i>Продлите — VPN включится сразу после оплаты.</i>")
                         else:
-                            body = "🔴 <b>Подписка отключена</b>\nПродлите — доступ вернётся сразу."
+                            body = ("🔴 <b>Подписка отключена</b>\n\n"
+                                    "<i>Продлите — VPN включится сразу после оплаты.</i>")
                         await context.bot.send_message(
                             chat_id=tg_id, text=body,
                             parse_mode="HTML", reply_markup=kb,
@@ -2255,8 +2284,9 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     )
 
     await _notify_user(context.bot, tg_id,
-        f"✅ <b>Оплачено · +{fmt_duration(pay_seconds)}</b>\n"
-        f"Подписка до {new_expire_str[:16]}"
+        "✅ <b>Оплата прошла — спасибо!</b>\n\n"
+        f"<blockquote>➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
+        f"📅 Подписка до: <b>{new_expire_str[:16]}</b></blockquote>"
     )
 
     from config import ADMIN_ID
@@ -2388,8 +2418,9 @@ async def handle_confirm_payment(query, tg_id: int, context):
     )
 
     await _notify_user(context.bot, tg_id,
-        f"✅ <b>Оплачено · +{fmt_duration(pay_seconds)}</b>\n"
-        f"Подписка до {new_expire_str[:16]}"
+        "✅ <b>Оплата прошла — спасибо!</b>\n\n"
+        f"<blockquote>➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
+        f"📅 Подписка до: <b>{new_expire_str[:16]}</b></blockquote>"
     )
 
 
@@ -2404,8 +2435,9 @@ async def handle_reject_payment(query, tg_id: int, context):
         parse_mode="HTML",
     )
     await _notify_user(context.bot, tg_id,
-        "❌ Ваша заявка на оплату <b>отклонена</b> администратором.\n"
-        "Если вы считаете это ошибкой, обратитесь в поддержку."
+        "😕 <b>Оплата не подтверждена</b>\n\n"
+        "<blockquote>Мы не нашли ваш платёж.</blockquote>\n\n"
+        "<i>Если вы точно оплатили — напишите в поддержку и приложите чек.</i>"
     )
 
 

@@ -17,7 +17,9 @@ from config import load_config, save_config
 
 DEFAULT_TEXT = (
     "🛠 <b>Идут технические работы</b>\n\n"
-    "Бот временно недоступен. Скоро вернёмся — спасибо за терпение!"
+    "<blockquote>Бот ненадолго на обслуживании. Уже оплаченные подписки "
+    "продолжают работать.</blockquote>\n\n"
+    "<i>Скоро вернёмся — спасибо за терпение!</i>"
 )
 
 # ключ → (эмодзи, название, callback-и, которые функция закрывает).
@@ -87,7 +89,9 @@ async def show_maintenance(query=None, message=None):
 
 async def show_feature_off(key: str, query=None, message=None):
     name = FEATURES.get(key, ("", "Эта функция", ()))[1]
-    text = f"⏸ Функция «{name}» временно отключена.\n\nПопробуйте немного позже."
+    text = (f"⏸ <b>{name}</b>\n\n"
+            "<blockquote>Раздел временно недоступен.</blockquote>\n\n"
+            "<i>Попробуйте чуть позже.</i>")
     await _deliver(text, _one_button("◀️ Главное меню", "back_start"),
                    query=query, message=message)
 

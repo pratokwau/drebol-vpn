@@ -24,22 +24,27 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
     rows = []
     # у кого подписка есть — заходит в действия с ней, у кого нет — оформляет
     rows.append([InlineKeyboardButton(
-        "⚙️ Действия с подпиской" if paid_sub_status else "🆓 Получить подписку",
+        "⚙️ Моя подписка" if paid_sub_status else "🆓 Получить подписку",
         callback_data="my_paid_sub")])
+    # вторым рядом — то, за чем приходят чаще всего; парой, чтобы меню было короче
+    pair = []
     # продлить можно в любой момент — остаток не сгорает
     if paid_sub_status and on("payments"):
-        rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
+        pair.append(InlineKeyboardButton("💳 Продлить", callback_data="renew_sub"))
+    if paid_sub_status and on("referral"):
+        pair.append(InlineKeyboardButton("👥 Пригласить друга", callback_data="referral"))
+    if pair:
+        rows.append(pair)
     if has_sub:
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
-    if paid_sub_status and on("referral"):
-        rows.append([InlineKeyboardButton("👥 Пригласить друга", callback_data="referral")])
     if on("support"):
-        rows.append([news_btn, InlineKeyboardButton("💬 Поддержка", callback_data="support_open")])
+        rows.append([InlineKeyboardButton("💬 Поддержка", callback_data="support_open"),
+                     InlineKeyboardButton("ℹ️ Инфо", callback_data="info")])
     else:
-        rows.append([news_btn])
-    rows.append([InlineKeyboardButton("ℹ️ Инфо", callback_data="info")])
+        rows.append([InlineKeyboardButton("ℹ️ Инфо", callback_data="info")])
+    rows.append([news_btn])
     if is_admin:
-        rows.append([InlineKeyboardButton("⚙️ Админка", callback_data="admin_panel")])
+        rows.append([InlineKeyboardButton("🛠 Админка", callback_data="admin_panel")])
     elif is_helper:
         rows.append([InlineKeyboardButton("🛡 Панель поддержки", callback_data="admin_panel")])
     return InlineKeyboardMarkup(rows)
@@ -48,34 +53,34 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
 # ── Админка ───────────────────────────────────────────────────────────────────
 
 def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
-    tickets_label = f"🎫 Тикеты 🔴{unread_tickets}" if unread_tickets else "🎫 Тикеты"
+    tickets_label = f"🎫 Тикеты · 🔴 {unread_tickets}" if unread_tickets else "🎫 Тикеты"
     # включённые техработы должны бросаться в глаза, чтобы про них не забыли
     import maintenance as mnt
-    mnt_label = "🛠 Техработы: ВКЛЮЧЕНЫ 🔴" if mnt.is_maintenance() else "🛠 Техработы и функции"
+    mnt_label = "🔴 Техработы ВКЛЮЧЕНЫ" if mnt.is_maintenance() else "🛠 Техработы и функции"
+
+    def b(text, cb):
+        return InlineKeyboardButton(text, callback_data=cb)
+
+    # Кнопки сгруппированы по смыслу и стоят парами — так вся админка
+    # помещается на один экран телефона без прокрутки
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Статистика", callback_data="dashboard")],
-        [InlineKeyboardButton("💰 Оплаты", callback_data="payments:paid:1")],
-        [InlineKeyboardButton("🛰 Контроль", callback_data="ctl_menu")],
-        [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs")],
-        [InlineKeyboardButton("📋 Админские подписки", callback_data="admin_subs")],
-        [InlineKeyboardButton("🔍 Найти юзера", callback_data="find_user")],
-        [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
-        [InlineKeyboardButton(tickets_label, callback_data="ticket_list:1")],
-        [InlineKeyboardButton("👥 Помощники", callback_data="helpers_menu")],
-        [InlineKeyboardButton("⛔ Чёрный список", callback_data="bl_menu")],
-        [InlineKeyboardButton("🕵 Повторные триалы", callback_data="fraud_menu")],
-        [InlineKeyboardButton("🎯 Winback", callback_data="winback_settings")],
-        [InlineKeyboardButton("⏰ Напоминания", callback_data="remind_settings")],
-        [InlineKeyboardButton("🖥 Серверы и 3x-UI", callback_data="xui_settings")],
-        [InlineKeyboardButton("🌐 Сайт", callback_data="site_menu")],
-        [InlineKeyboardButton(mnt_label, callback_data="mnt_menu")],
-        [InlineKeyboardButton("🔄 Обновиться с GitHub", callback_data="git_update")],
-        [InlineKeyboardButton("📢 Управление каналом", callback_data="channel_menu")],
-        [
-            InlineKeyboardButton("📄 Документы", callback_data="documents_menu"),
-            InlineKeyboardButton("🧾 Лог-канал", callback_data="log_channel_settings"),
-        ],
-        [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
+        # сводка и деньги
+        [b("📊 Статистика", "dashboard"), b("💰 Оплаты", "payments:paid:1")],
+        # люди и подписки
+        [b("🔍 Найти юзера", "find_user"), b("🛰 Контроль", "ctl_menu")],
+        [b("💳 Платные подписки", "paid_subs"), b("📋 Админские", "admin_subs")],
+        # общение
+        [b(tickets_label, "ticket_list:1"), b("📣 Рассылка", "broadcast")],
+        [b("👥 Помощники", "helpers_menu"), b("📢 Канал", "channel_menu")],
+        # удержание и защита
+        [b("🎯 Winback", "winback_settings"), b("⏰ Напоминания", "remind_settings")],
+        [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
+        # инфраструктура
+        [b("🖥 Серверы и 3x-UI", "xui_settings"), b("🌐 Сайт", "site_menu")],
+        [b("📄 Документы", "documents_menu"), b("🧾 Лог-канал", "log_channel_settings")],
+        [b(mnt_label, "mnt_menu")],
+        [b("🔄 Обновиться с GitHub", "git_update")],
+        [b("◀️ Главное меню", "back_start")],
     ])
 
 
@@ -83,7 +88,7 @@ def channel_keyboard() -> InlineKeyboardMarkup:
     cfg = load_config()
     channel_label = "📢 Изменить канал" if cfg.get("channel_url") else "📢 Установить канал"
     sub_enabled = cfg.get("force_subscribe", False)
-    sub_label = "🔔 Обязательная подписка: ВКЛ" if sub_enabled else "🔕 Обязательная подписка: ВЫКЛ"
+    sub_label = "🔔 Обязательная подписка · вкл" if sub_enabled else "🔕 Обязательная подписка · выкл"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(channel_label, callback_data="set_channel")],
         [InlineKeyboardButton(sub_label, callback_data="toggle_force_sub")],
@@ -118,9 +123,9 @@ def support_keyboard(page: int, total_pages: int, has_files: bool = False,
     extra = [InlineKeyboardButton("🔄 Обновить", callback_data=f"support_page:{page}")]
     if has_files:
         extra.insert(0, InlineKeyboardButton("📎 Файлы", callback_data="support_files"))
-    rows.append(extra)
     if can_close:
-        rows.append([InlineKeyboardButton("✅ Вопрос решён", callback_data="support_close")])
+        extra.append(InlineKeyboardButton("✅ Вопрос решён", callback_data="support_close"))
+    rows.append(extra)
     rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
     return InlineKeyboardMarkup(rows)
 
@@ -204,10 +209,9 @@ def ticket_view_keyboard(user_id: int, page: int, total_pages: int,
     second = [InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{user_id}")]
     if has_files:
         second.insert(0, InlineKeyboardButton("📎 Файлы", callback_data=f"ticket_files:{user_id}"))
-    rows.append(second)
     if not closed:
-        rows.append([InlineKeyboardButton("✅ Закрыть вопрос",
-                                          callback_data=f"ticket_close:{user_id}")])
+        second.append(InlineKeyboardButton("✅ Закрыть", callback_data=f"ticket_close:{user_id}"))
+    rows.append(second)
     rows.append([InlineKeyboardButton("◀️ К тикетам", callback_data="ticket_list:1")])
     return InlineKeyboardMarkup(rows)
 
@@ -216,13 +220,13 @@ def ticket_view_keyboard(user_id: int, page: int, total_pages: int,
 
 def xui_settings_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🌐 URL панели", callback_data="set_xui_url")],
-        [InlineKeyboardButton("🔑 API Токен", callback_data="set_xui_token")],
-        [InlineKeyboardButton("🔌 Порт подписки", callback_data="set_xui_sub_port")],
-        [InlineKeyboardButton("📂 Путь подписки", callback_data="set_xui_sub_path")],
-        [InlineKeyboardButton("🩺 Здоровье серверов", callback_data="healthcheck")],
-        [InlineKeyboardButton("🖧 Узлы", callback_data="nodes_menu")],
-        [InlineKeyboardButton("🔌 Тест соединения", callback_data="test_xui")],
+        [InlineKeyboardButton("🩺 Здоровье серверов", callback_data="healthcheck"),
+         InlineKeyboardButton("🖧 Узлы", callback_data="nodes_menu")],
+        [InlineKeyboardButton("🌐 URL панели", callback_data="set_xui_url"),
+         InlineKeyboardButton("🔑 API-токен", callback_data="set_xui_token")],
+        [InlineKeyboardButton("🔌 Порт подписки", callback_data="set_xui_sub_port"),
+         InlineKeyboardButton("📂 Путь подписки", callback_data="set_xui_sub_path")],
+        [InlineKeyboardButton("📡 Проверить соединение", callback_data="test_xui")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
 

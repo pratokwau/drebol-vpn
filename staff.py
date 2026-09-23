@@ -73,17 +73,18 @@ def _name(u, uid) -> str:
 async def handle_helper_panel(query):
     from database import get_unread_tickets_count
     unread = await get_unread_tickets_count()
-    tickets = f"🎫 Тикеты 🔴{unread}" if unread else "🎫 Тикеты"
+    tickets = f"🎫 Тикеты · 🔴 {unread}" if unread else "🎫 Тикеты"
     await query.edit_message_text(
         "🛡 <b>Панель поддержки</b>\n\n"
-        "Тикеты и карточки пользователей. Оплаты, подписки и настройки — "
-        "у администратора."
-        + (f"\n\n🔴 Непрочитанных тикетов: <b>{unread}</b>" if unread else ""),
+        + (f"<blockquote>🔴 Открытых тикетов: <b>{unread}</b></blockquote>\n\n" if unread
+           else "<blockquote>✅ Все обращения разобраны</blockquote>\n\n")
+        + "<i>Тикеты и карточки пользователей. Оплаты, подписки и настройки — "
+          "у администратора.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(tickets, callback_data="ticket_list:1")],
-            [InlineKeyboardButton("🔍 Найти юзера", callback_data="find_user")],
-            [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
+            [InlineKeyboardButton(tickets, callback_data="ticket_list:1"),
+             InlineKeyboardButton("🔍 Найти юзера", callback_data="find_user")],
+            [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
         ]),
     )
 

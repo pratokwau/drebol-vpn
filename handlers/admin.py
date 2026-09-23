@@ -14,9 +14,32 @@ from states import (
 async def handle_admin_panel(query):
     from database import get_unread_tickets_count
     unread = await get_unread_tickets_count()
-    badge = f"\n\n🔴 Непрочитанных тикетов: <b>{unread}</b>" if unread else ""
+    # короткая сводка дня прямо на входе — чтобы не ходить в статистику ради цифр
+    summary = ""
+    try:
+        from database import get_dashboard_stats
+        s = await get_dashboard_stats()
+        todo = []
+        if s["payment_pending"]:
+            todo.append(f"💰 заявок на оплату: <b>{s['payment_pending']}</b>")
+        if s["requests_pending"]:
+            todo.append(f"🆕 запросов на триал: <b>{s['requests_pending']}</b>")
+        if unread:
+            todo.append(f"🎫 открытых тикетов: <b>{unread}</b>")
+        summary = (
+            "\n\n<blockquote>"
+            f"👥 Пользователей: <b>{s['users_total']}</b>  ·  сегодня <b>+{s['users_today']}</b>\n"
+            f"💳 Активных подписок: <b>{s['paid_active']}</b>  ·  платящих <b>{s['paying_active']}</b>\n"
+            f"💵 Сегодня: <b>{s['revenue_today']} ₽</b>  ·  оплат <b>{s['payments_today']}</b>"
+            "</blockquote>"
+        )
+        if todo:
+            summary += "\n\n⏳ <b>Ждут вас</b>\n" + "\n".join(todo)
+    except Exception:
+        if unread:
+            summary = f"\n\n🔴 Открытых тикетов: <b>{unread}</b>"
     await query.edit_message_text(
-        "⚙️ <b>Панель администратора</b>\n\nВыбери действие:" + badge,
+        "🛠 <b>Админка</b>" + summary,
         parse_mode="HTML",
         reply_markup=admin_keyboard(unread),
     )
@@ -52,52 +75,56 @@ async def handle_dashboard(query):
                 f"прочих {p_other} vs {db_admin}"
             )
         panel_block = (
-            "<b>🖥 Панель 3x-UI</b>\n"
-            f"Клиентов в панели: <b>{p_total}</b> (платных {p_paid} · прочих {p_other})\n"
-            f"Записей в базе: <b>{db_all}</b> (платных {db_paid} · админских {db_admin})\n"
-            f"{sync_line}\n\n"
+            "🖥 <b>Панель 3x-UI</b>\n<blockquote>"
+            f"Клиентов в панели: <b>{p_total}</b>  (платных {p_paid} · прочих {p_other})\n"
+            f"Записей в базе: <b>{db_all}</b>  (платных {db_paid} · админских {db_admin})\n"
+            f"{sync_line}</blockquote>\n\n"
         )
     else:
         panel_block = (
-            "<b>🖥 Панель 3x-UI</b>\n"
+            "🖥 <b>Панель 3x-UI</b>\n<blockquote>"
             f"🔴 Панель недоступна — сверка не выполнена\n"
-            f"Записей в базе: <b>{db_all}</b> (платных {db_paid} · админских {db_admin})\n\n"
+            f"Записей в базе: <b>{db_all}</b>  (платных {db_paid} · админских {db_admin})"
+            "</blockquote>\n\n"
         )
 
     other_line = f" · прочие: <b>{s['paid_other']}</b>" if s["paid_other"] else ""
 
     text = (
         "📊 <b>Статистика</b>\n\n"
-        "<b>👥 Пользователи</b>\n"
+        "💰 <b>Деньги</b>\n<blockquote>"
+        f"Выручка всего: <b>{revenue} ₽</b>{revenue_note}\n"
+        f"Сегодня: <b>{s['revenue_today']} ₽</b>  ·  оплат <b>{s['payments_today']}</b>\n"
+        f"Подтверждено оплат: <b>{s['payments_confirmed']}</b>  ·  триалов выдано <b>{s['trials_issued']}</b>"
+        "</blockquote>\n\n"
+        "👥 <b>Пользователи</b>\n<blockquote>"
         f"Всего: <b>{s['users_total']}</b>\n"
-        f"Сегодня: <b>+{s['users_today']}</b> · за неделю: <b>+{s['users_week']}</b>\n\n"
-        "<b>💳 Платные подписки</b>\n"
-        f"Активные: <b>{s['paid_active']}</b> · истёкшие: <b>{s['paid_expired']}</b>{other_line}\n"
-        f"Из активных: триал <b>{s['trial_active']}</b> · платящих <b>{s['paying_active']}</b>\n"
-        f"Оплачивали хоть раз: <b>{s['paying_total']}</b>\n"
-        f"Всего записей: <b>{s['paid_total']}</b>\n\n"
+        f"Сегодня: <b>+{s['users_today']}</b>  ·  за неделю: <b>+{s['users_week']}</b>"
+        "</blockquote>\n\n"
+        "💳 <b>Подписки</b>\n<blockquote>"
+        f"Активные: <b>{s['paid_active']}</b>  ·  истёкшие: <b>{s['paid_expired']}</b>{other_line}\n"
+        f"Из активных: триал <b>{s['trial_active']}</b>  ·  платящих <b>{s['paying_active']}</b>\n"
+        f"Оплачивали хоть раз: <b>{s['paying_total']}</b>  ·  всего записей <b>{s['paid_total']}</b>"
+        "</blockquote>\n\n"
         f"{panel_block}"
-        "<b>⏳ Ожидают действия</b>\n"
+        "⏳ <b>Ждут действия</b>\n<blockquote>"
         f"Заявок на оплату: <b>{s['payment_pending']}</b>\n"
         f"Запросов на триал: <b>{s['requests_pending']}</b>\n"
-        f"Непрочитанных тикетов: <b>{s['unread_tickets']}</b>\n\n"
-        "<b>💰 Оплаты</b>\n"
-        f"Подтверждено всего: <b>{s['payments_confirmed']}</b> · сегодня: <b>{s['payments_today']}</b>\n"
-        f"Выдано триалов: <b>{s['trials_issued']}</b>\n"
-        f"Выручка: <b>{revenue} ₽</b>{revenue_note}\n"
-        f"Сегодня: <b>{s['revenue_today']} ₽</b>\n\n"
-        "<b>🎁 Прочее</b>\n"
-        f"Рефералов: <b>{s['ref_total']}</b> (с бонусом: {s['ref_rewarded']})\n"
-        f"Промокодов активно: <b>{s['promos_active']}</b> · активаций: <b>{s['promo_uses']}</b>\n"
+        f"Открытых тикетов: <b>{s['unread_tickets']}</b>"
+        "</blockquote>\n\n"
+        "🎁 <b>Прочее</b>\n<blockquote>"
+        f"Рефералов: <b>{s['ref_total']}</b>  (с бонусом {s['ref_rewarded']})\n"
+        f"Промокодов активно: <b>{s['promos_active']}</b>  ·  активаций <b>{s['promo_uses']}</b>\n"
         f"Админских подписок: <b>{s['admin_subs']}</b>"
+        "</blockquote>"
     )
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     await query.edit_message_text(
         text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📊 Оплаты по дням", callback_data="payment_stats:30")],
-            [InlineKeyboardButton("🔄 Обновить", callback_data="dashboard")],
+            [InlineKeyboardButton("📈 Оплаты по дням", callback_data="payment_stats:30"),
+             InlineKeyboardButton("🔄 Обновить", callback_data="dashboard")],
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
     )
@@ -284,7 +311,7 @@ async def handle_find_user(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_FIND_USER
     await query.edit_message_text(
         "🔍 <b>Найти пользователя</b>\n\n"
-        "Введи Telegram ID пользователя:",
+        "<i>Пришли Telegram ID пользователя одним сообщением.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -320,36 +347,42 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     limited = bool(viewer) and is_helper(viewer.id)
 
     lines = [
-        f"👤 <b>Профиль пользователя</b>\n",
-        f'📛 <a href="tg://user?id={tg_id}">{first_name}</a> ({uname})',
-        f"🆔 TG ID: <code>{tg_id}</code>",
+        f'👤 <b><a href="tg://user?id={tg_id}">{first_name}</a></b>',
+        f"{uname}  ·  <code>{tg_id}</code>",
     ]
 
     if banned:
-        lines.append("🚫 <b>ЗАБАНЕН</b>")
+        lines.append("\n🚫 <b>Забанен</b>")
     from blacklist import entry as bl_entry, public_reason
     ble = await bl_entry(tg_id)
     if ble:
         from html import escape
         src = "вручную" if ble["source"] == "manual" else "общий список"
-        lines.append(f"⛔ <b>В чёрном списке</b> ({src}): {escape(public_reason(ble['reason']))}")
+        lines.append(f"\n⛔ <b>В чёрном списке</b> ({src})\n"
+                     f"<blockquote>{escape(public_reason(ble['reason']))}</blockquote>")
 
     # Подписка
     sub = await get_paid_sub_by_tg_id(tg_id)
     if sub:
         status = sub[11] if len(sub) > 11 else "active"
-        status_labels = {"active": "🟢 активна", "renewal": "🟡 ожидает продления", "expired": "🔴 истекла"}
-        lines.append(f"\n💳 Подписка: <b>{status_labels.get(status, status)}</b>")
-        lines.append(f"📅 До: <b>{sub[6]}</b>")
+        status_labels = {"active": "🟢 активна", "renewal": "🟡 ждёт продления", "expired": "🔴 истекла"}
         times = sub[12] if len(sub) > 12 else 0
-        lines.append(f"🏷 Тип: {'оплаченная' if times > 0 else 'пробная'} (продлений: {times})")
         from xui_api import get_last_online
         from handlers.control import last_seen_text
         lo = await get_last_online(timeout=5)
-        lines.append("🔌 VPN: " + (last_seen_text(lo["last"].get(sub[2])) if lo.get("ok")
-                                   else "<i>панель не ответила</i>"))
+        vpn = (last_seen_text(lo["last"].get(sub[2])) if lo.get("ok")
+               else "<i>панель не ответила</i>")
+        lines += [
+            "", "💳 <b>Подписка</b>",
+            "<blockquote>"
+            f"Статус: <b>{status_labels.get(status, status)}</b>\n"
+            f"📅 До: <b>{sub[6]}</b>\n"
+            f"🏷 {'Оплаченная' if times > 0 else 'Пробная'}  ·  продлений: <b>{times}</b>\n"
+            f"🔌 VPN: {vpn}"
+            "</blockquote>",
+        ]
     else:
-        lines.append("\n💳 Подписка: <b>нет</b>")
+        lines += ["", "💳 Подписки <b>нет</b>"]
 
     # Мьют
     muted = await get_muted_until(tg_id)
@@ -390,11 +423,12 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     kb_rows = []
     if sub and not limited:
         kb_rows.append([InlineKeyboardButton("💳 К подписке", callback_data=f"paid_sub_view:{sub[0]}")])
-    kb_rows.append([InlineKeyboardButton("📜 Действия в боте", callback_data=f"user_activity:{tg_id}:1")])
+    info_btns = [InlineKeyboardButton("📜 Действия", callback_data=f"user_activity:{tg_id}:1")]
     if ticket_count > 0:
-        kb_rows.append([InlineKeyboardButton("🎫 Переписка", callback_data=f"ticket_view:{tg_id}:1")])
+        info_btns.append(InlineKeyboardButton("🎫 Переписка", callback_data=f"ticket_view:{tg_id}:1"))
     if history_count > 0:
-        kb_rows.append([InlineKeyboardButton("🕐 История", callback_data=f"user_history:{tg_id}:1")])
+        info_btns.append(InlineKeyboardButton("🕐 История", callback_data=f"user_history:{tg_id}:1"))
+    kb_rows.append(info_btns)
     if limited:
         kb_rows.append([InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}")])
         kb_rows.append([InlineKeyboardButton("◀️ В панель поддержки", callback_data="admin_panel")])
