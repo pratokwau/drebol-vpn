@@ -299,6 +299,29 @@ async def check_connection() -> dict:
     return await asyncio.to_thread(_check_sync)
 
 
+async def site_tariffs(cfg: dict) -> list:
+    """Тарифы для раздела «Тарифы» на сайте — те же, что видит клиент в боте.
+
+    Активные тарифы из базы; если их нет — одна цена из общих настроек.
+    Ничего не нашлось или база недоступна — пустой список, и раздел
+    на сайте просто не показывается.
+    """
+    try:
+        from database import list_tariffs
+        from paidsub.time_parser import fmt_duration
+        rows = await list_tariffs()
+        tariffs = [{"name": name, "price": price, "period": fmt_duration(period)}
+                   for _, name, period, price, is_active, _ in rows if is_active]
+        if not tariffs:
+            price = cfg.get("paid_price", 0)
+            period = cfg.get("paid_pay_period")
+            if price and period:
+                tariffs = [{"name": fmt_duration(period), "price": price}]
+        return tariffs
+    except Exception:
+        return []
+
+
 async def deploy(bot_username: str) -> dict:
     """Собирает страницу и раскатывает её на сервер."""
     from site_page import build_page
@@ -311,6 +334,8 @@ async def deploy(bot_username: str) -> dict:
         terms_url=cfg.get("terms_url", "") or "",
         channel_url=cfg.get("channel_url", "") or "",
         logo_file=LOGO_NAME if logo_bytes else "",
+        tariffs=await site_tariffs(cfg),
+        poster_file="og.webp" if og_bytes else "",
     )
     res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes)
     if res.get("ok"):
