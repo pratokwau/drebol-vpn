@@ -61,6 +61,12 @@ def renew_label(sec) -> str:
     return fmt_duration(sec) if sec else "выключено"
 
 
+def _price_label() -> str:
+    """У Platega сумма — запасная, когда тарифов нет; у CloudTips она основная."""
+    from handlers.payprovider import uses_pay_link
+    return "💵 Сумма" if uses_pay_link() else "💵 Сумма без тарифов"
+
+
 def _fmt_presets(cfg: dict, inbound_names=None) -> str:
     trial = cfg.get("paid_trial_period")
     trial_str = fmt_duration(trial) if trial else "не задан"
@@ -73,7 +79,7 @@ def _fmt_presets(cfg: dict, inbound_names=None) -> str:
     price = cfg.get("paid_price")
     price_str = f"{price} ₽" if price is not None else "не задана"
 
-    pay_url = cfg.get("paid_pay_url") or "не задана"
+    from handlers.payprovider import provider_line
 
     ip = cfg.get("paid_preset_ip", "не задан")
     hwid = cfg.get("paid_preset_hwid", "не задан")
@@ -105,8 +111,10 @@ def _fmt_presets(cfg: dict, inbound_names=None) -> str:
         "⏱ <b>Сроки</b>\n<blockquote>"
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
         f"💰 Период оплаты: <b>{pay_str}</b>\n"
-        f"⏳ Время на продление: <b>{renew_str}</b>\n"
-        f"🔗 Ссылка на оплату: <b>{_esc_name(pay_url)}</b></blockquote>\n\n"
+        f"⏳ Время на продление: <b>{renew_str}</b></blockquote>\n\n"
+        "💳 <b>Оплата</b>\n<blockquote>"
+        f"{provider_line()}\n"
+        f"{_price_label()}: <b>{price_str}</b></blockquote>\n\n"
         "📊 <b>Лимиты</b>\n<blockquote>"
         f"🌐 IP: <b>{ip}</b>  ·  🖥 HWID: <b>{hwid}</b>\n"
         f"📶 Трафик: <b>{traf}</b></blockquote>\n\n"
@@ -853,7 +861,6 @@ async def handle_paid_sub_view(query, sub_id: int):
         tg_line = f'👤 <a href="tg://user?id={tg_id}">{shown}</a>'
     else:
         tg_line = ""
-    link_line = ""
 
     if tg_id:
         tg_line += f"  ·  <code>{tg_id}</code>\n"
@@ -884,8 +891,9 @@ async def handle_paid_sub_view(query, sub_id: int):
         ind_lines.append(f"⏳ На продление: <b>{fmt_duration(ind_renew)}</b>")
     if ind_price is not None:
         ind_lines.append(f"💵 Сумма: <b>{ind_price} ₽</b>")
-    if ind_pay_url:
-        ind_lines.append(f"🔗 Ссылка оплаты: <b>{ind_pay_url}</b>")
+    from handlers.payprovider import uses_pay_link
+    if ind_pay_url and uses_pay_link():
+        ind_lines.append(f"🔗 Ссылка оплаты: <b>{_esc_name(ind_pay_url)}</b>")
     ind_block = ""
     if ind_lines:
         ind_block = ("\n⚙️ <b>Свои условия</b>\n<blockquote>"
@@ -1661,7 +1669,10 @@ async def handle_paid_sub_settings(query, sub_id: int):
     pay_str = fmt_duration(eff["pay_period"])
     renew_str = renew_label(eff["renew_time"])
     price_str = f"{eff['price']} ₽"
-    pay_url_str = eff["pay_url"] or "не задана"
+    from handlers.payprovider import uses_pay_link, provider_label
+    pay_line = (f"🔗 Ссылка на оплату: <b>{_esc_name(eff['pay_url'] or 'не задана')}</b>\n"
+                if uses_pay_link() else
+                f"💳 Оплата: <b>{provider_label()}</b> — счёт выставляет бот\n")
 
     await query.edit_message_text(
         f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
@@ -1673,10 +1684,11 @@ async def handle_paid_sub_settings(query, sub_id: int):
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
         f"💰 Период оплаты: <b>{pay_str}</b>\n"
         f"⏳ На продление: <b>{renew_str}</b>\n"
-        f"🔗 Ссылка на оплату: <b>{pay_url_str}</b>\n\n"
+        f"💵 Сумма: <b>{price_str}</b>\n"
+        f"{pay_line}\n"
         "Выбери параметр для изменения:",
         parse_mode="HTML",
-        reply_markup=paid_sub_settings_keyboard(sub_id),
+        reply_markup=paid_sub_settings_keyboard(sub_id, with_pay_url=uses_pay_link()),
     )
 
 

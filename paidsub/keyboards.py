@@ -40,6 +40,30 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
     return InlineKeyboardMarkup(kb)
 
 
+def _money_rows(b) -> list:
+    """Денежные кнопки под активную платёжку.
+
+    Тарифы и автосчета умеет только Platega; у CloudTips вместо них одна
+    ссылка на оплату и фиксированная сумма.
+    """
+    from handlers.payprovider import uses_pay_link
+    if uses_pay_link():
+        return [[b("💵 Сумма", "paid_preset_price"),
+                 b("🔗 Ссылка на оплату", "paid_preset_pay_url")],
+                [b("💳 Платёжка", "pay_provider_menu")]]
+    return [[b("🏷 Тарифы", "tariffs_menu"), b("💵 Сумма", "paid_preset_price")],
+            [b("💳 Платёжка", "pay_provider_menu")]]
+
+
+def _devices_rows(b) -> list:
+    """Докуп устройств продаётся счётом, поэтому он только у Platega."""
+    from handlers.payprovider import uses_pay_link
+    if uses_pay_link():
+        return []
+    return [[b("📱 Цена устройства", "paid_device_price"),
+             b("📱 Максимум докупа", "paid_device_max")]]
+
+
 def paid_presets_keyboard() -> InlineKeyboardMarkup:
     from config import load_config
     cfg = load_config()
@@ -54,11 +78,11 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         # сроки
         [b("🆓 Пробный период", "paid_preset_trial"), b("💰 Период оплаты", "paid_preset_pay_period")],
         [b("⏳ Время на продление", "paid_preset_renew")],
-        # деньги
-        [b("🏷 Тарифы", "tariffs_menu"), b("💳 Платёжка", "pay_provider_menu")],
+        # деньги — показываем то, что умеет активная платёжка
+        *_money_rows(b),
         # лимиты
         [b("🌐 Лимит IP", "paid_preset_ip"), b("🖥 Лимит HWID", "paid_preset_hwid")],
-        [b("📱 Цена устройства", "paid_device_price"), b("📱 Максимум докупа", "paid_device_max")],
+        *_devices_rows(b),
         [b("📶 Трафик (ГБ)", "paid_preset_traffic")],
         # панель
         [b("📡 Инбаунды создания", "paid_inbounds_menu"), b("📡 Инбаунды окончания", "paid_inbounds_expire_menu")],
@@ -104,16 +128,24 @@ def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardM
     ])
 
 
-def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
+def paid_sub_settings_keyboard(sub_id: int, with_pay_url: bool = True) -> InlineKeyboardMarkup:
+    """Кнопки правки подписки.
+
+    Ссылку на оплату показываем только там, где она нужна: у Platega счёт
+    выставляет бот, и эта кнопка сбивала бы с толку.
+    """
     def b(text, action):
         return InlineKeyboardButton(text, callback_data=f"{action}:{sub_id}")
 
+    money = [b("💵 Сумма", "paid_sub_edit_price")]
+    if with_pay_url:
+        money.append(b("🔗 Ссылка на оплату", "paid_sub_edit_pay_url"))
     return InlineKeyboardMarkup([
         [b("📅 Дата окончания", "paid_sub_edit_expire")],
         [b("🌐 Лимит IP", "paid_sub_edit_ip"), b("🖥 Лимит HWID", "paid_sub_edit_hwid")],
         [b("📶 Трафик (ГБ)", "paid_sub_edit_traffic"), b("🆓 Пробный период", "paid_sub_edit_trial")],
         [b("💰 Период оплаты", "paid_sub_edit_pay_period"), b("⏳ На продление", "paid_sub_edit_renew")],
-        [b("💵 Сумма", "paid_sub_edit_price"), b("🔗 Ссылка на оплату", "paid_sub_edit_pay_url")],
+        money,
         [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"paid_sub_view:{sub_id}")],
     ])
 

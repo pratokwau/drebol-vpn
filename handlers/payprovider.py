@@ -11,8 +11,10 @@ from config import load_config, save_config
 from keyboards import back_admin
 from states import AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET
 
+# Ключ «cloudpayments» остался с первых версий — в конфиге у людей уже лежит он,
+# поэтому меняем только подпись
 PROVIDERS = {
-    "cloudpayments": "CloudPayments",
+    "cloudpayments": "CloudTips",
     "platega": "Platega",
 }
 DEFAULT_PROVIDER = "cloudpayments"
@@ -21,6 +23,34 @@ DEFAULT_PROVIDER = "cloudpayments"
 def current_provider() -> str:
     p = (load_config().get("pay_provider") or DEFAULT_PROVIDER).lower()
     return p if p in PROVIDERS else DEFAULT_PROVIDER
+
+
+def provider_label() -> str:
+    return PROVIDERS[current_provider()]
+
+
+def uses_pay_link() -> bool:
+    """Нужна ли ссылка на оплату.
+
+    У CloudTips человек платит по ссылке и админ подтверждает вручную.
+    Platega выставляет счёт сама, и ссылка из настроек там ни при чём —
+    показывать её в подписках значит путать саму себя.
+    """
+    return current_provider() == "cloudpayments"
+
+
+def provider_line() -> str:
+    """Строка о платёжке для админских экранов — по активной системе."""
+    from html import escape
+    cfg = load_config()
+    if uses_pay_link():
+        url = cfg.get("paid_pay_url") or "не задана"
+        return f"💳 CloudTips  ·  🔗 <b>{escape(str(url))}</b>"
+    import platega_api as pg
+    if not pg.is_configured():
+        return "💳 Platega  ·  ⚠️ <b>ключи не заданы</b>"
+    method = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
+    return f"💳 Platega  ·  <b>{pg.PAYMENT_METHODS.get(method, method)}</b>"
 
 
 def _mask(value: str) -> str:
@@ -46,7 +76,8 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
         lines += [
             f"<blockquote>Активна: <b>{PROVIDERS[cur]}</b>\n"
             f"🔗 Ссылка: <code>{escape(str(pay_url))}</code></blockquote>", "",
-            "<i>Оплата идёт по ссылке, подтверждает админ вручную по кнопке «Я оплатил».</i>",
+            "<i>Человек платит по ссылке и жмёт «Я оплатил» — ты подтверждаешь вручную. "
+            "Тарифы и автосчета в этом режиме не работают.</i>",
         ]
     else:
         ready = pg.is_configured()
