@@ -57,22 +57,6 @@ async def delete_sub(sub_id: int):
         await db.commit()
 
 
-async def get_all_subs_with_tg() -> list:
-    """Возвращает все подписки с tg_id для проверки ников."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT id, tg_id, email, uuid, sub_id, expire_date, limit_ip, limit_hwid, total_gb
-            FROM admin_subs WHERE tg_id IS NOT NULL
-        """) as cur:
-            return await cur.fetchall()
-
-
-async def update_sub_email(sub_id: int, new_email: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE admin_subs SET email = ? WHERE id = ?", (new_email, sub_id))
-        await db.commit()
-
-
 async def update_sub_field(sub_id: int, field: str, value):
     allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb"}
     if field not in allowed:

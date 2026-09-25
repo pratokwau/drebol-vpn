@@ -10,11 +10,9 @@ from states import (
     AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
-    AWAITING_XUI_URL, AWAITING_XUI_TOKEN,
-    AWAITING_XUI_SUB_PORT, AWAITING_XUI_SUB_PATH,
     AWAITING_PRESET_EXPIRE, AWAITING_PRESET_IP,
     AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC,
-    AWAITING_SUB_TG_ID, AWAITING_AUTO_UPDATE_DAYS,
+    AWAITING_SUB_TG_ID,
     AWAITING_SUB_EDIT_EXPIRE, AWAITING_SUB_EDIT_IP,
     AWAITING_SUB_EDIT_HWID, AWAITING_SUB_EDIT_TRAFFIC,
     AWAITING_PAID_SUB_TG_ID,
@@ -28,7 +26,6 @@ from states import (
     AWAITING_PAID_SUB_EDIT_TRIAL, AWAITING_PAID_SUB_EDIT_PAY_PERIOD,
     AWAITING_PAID_SUB_EDIT_RENEW_TIME, AWAITING_PAID_SUB_EDIT_PRICE,
     AWAITING_PAID_SUB_EDIT_PAY_URL, AWAITING_PAID_MUTE_USER,
-    AWAITING_PAID_AUTO_UPDATE_DAYS,
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE, AWAITING_PAID_FIX_RENEW,
@@ -46,7 +43,7 @@ from states import (
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
-    AWAITING_NODE_HOST, AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
+    AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
     AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK,
     AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
 )
@@ -355,49 +352,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🔌 Проверить", callback_data="rw_test"),
                  InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
         )
-        return
-
-    # ── 3x-UI ─────────────────────────────────────────────────────────────────
-    if state == AWAITING_XUI_URL:
-        if not text.startswith("http"):
-            await update.message.reply_text("❌ URL должен начинаться с http.", reply_markup=back_admin())
-            return
-        _save("xui_url", text.rstrip("/"))
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ URL сохранён: <code>{text}</code>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_XUI_TOKEN:
-        _save("xui_token", text)
-        context.user_data.pop("state", None)
-        await update.message.reply_text("✅ Токен сохранён.", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_XUI_SUB_PORT:
-        if not text.isdigit():
-            await update.message.reply_text("❌ Порт — только число.", reply_markup=back_admin())
-            return
-        _save("xui_sub_port", text)
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Порт: <code>{text}</code>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_XUI_SUB_PATH:
-        path = text if text.startswith("/") else f"/{text}"
-        path = path if path.endswith("/") else f"{path}/"
-        _save("xui_sub_path", path)
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Путь: <code>{path}</code>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    # ── Авто-обновление: интервал дней ───────────────────────────────────────────
-    if state == AWAITING_AUTO_UPDATE_DAYS:
-        if not text.isdigit() or int(text) < 1:
-            await update.message.reply_text("❌ Введи целое число дней (минимум 1):", reply_markup=back_admin())
-            return
-        _save("auto_update_days", int(text))
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Интервал: <b>{text} дн.</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Создание подписки: TG ID ─────────────────────────────────────────────────
@@ -767,15 +721,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from paidsub.storage import set_expire_date
                 await set_expire_date(sub_id, new_expire_str)
                 await update_paid_sub_field(sub_id, "status", "active")
-                from panel import update_client_expire, toggle_client, get_client_info, move_client_inbound
+                from panel import update_client_expire, toggle_client, get_client_info
                 await update_client_expire(row[2], new_expire_str)
                 info = await get_client_info(row[2])
                 if info.get("success") and not info.get("enabled", True):
                     await toggle_client(row[2], True)
-                cfg = load_config()
-                create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
-                if create_inbound_ids:
-                    await move_client_inbound(row[2], create_inbound_ids)
                 from paidsub.time_parser import fmt_duration as fmt_dur
                 await update.message.reply_text(
                     f"✅ Срок продлён на <b>{fmt_dur(seconds)}</b>\n"
@@ -1159,16 +1109,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Ссылка на оплату сохранена.", reply_markup=back_admin())
         return
 
-    # ── Платные подписки: авто-обновление ников ──────────────────────────────────
-    if state == AWAITING_PAID_AUTO_UPDATE_DAYS:
-        if not text.isdigit() or int(text) < 1:
-            await update.message.reply_text("❌ Введи целое число дней (минимум 1):", reply_markup=back_admin())
-            return
-        _save("paid_auto_update_days", int(text))
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Интервал: <b>{text} дн.</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
     # ── Реферальный бонус ───────────────────────────────────────────────────────
     if state == AWAITING_REFERRAL_BONUS:
         seconds = parse_duration(text)
@@ -1345,11 +1285,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == AWAITING_MAINTENANCE_TEXT:
         from maintenance import apply_maintenance_text
         await apply_maintenance_text(update.message, context)
-        return
-
-    if state == AWAITING_NODE_HOST:
-        from handlers.xui_settings import apply_node_host
-        await apply_node_host(update.message, context, text)
         return
 
     # ── Тарифы ───────────────────────────────────────────────────────────────

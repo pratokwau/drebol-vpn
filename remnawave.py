@@ -1,8 +1,7 @@
-"""Remnawave: подключение к панели и перенос существующих клиентов.
+"""Remnawave: подключение к панели и заведение клиентов пачкой.
 
-Пока это второй дом для подписок: 3x-UI продолжает работать, а здесь мы
-заводим тех же людей и забираем новые ссылки. Переключение бота на Remnawave —
-отдельный шаг, после того как перенос проверен.
+Здесь живут настройки панели, выбор сквадов, разовое заведение всех живых
+подписок из базы и рассылка ссылок людям.
 
 Пути и поля взяты из контракта API панели: всё под /api, ответы завёрнуты
 в {"response": ...}. Пользователь опознаётся по username — его мы генерируем
@@ -259,7 +258,7 @@ def build_payload(row, squads: list) -> dict:
         "trafficLimitBytes": int(total_gb or 0) * 1024 ** 3,
         "hwidDeviceLimit": int(limit_hwid or 0),
         "telegramId": int(tg_id),
-        "description": "Перенос из 3x-UI",
+        "description": "Заведено ботом Drebol VPN",
         "tag": "MIGRATED",
     }
     if squads:
@@ -268,11 +267,11 @@ def build_payload(row, squads: list) -> dict:
 
 
 async def migrate_subs(progress=None) -> dict:
-    """Переносит живые подписки в панель.
+    """Заводит в панели все живые подписки из базы.
 
-    Уже заведённых не создаём заново, а приводим к нашим данным: так перенос
-    можно повторять сколько угодно раз, ничего не ломая. Ссылки складываем
-    отдельно — рассылка клиентам идёт потом, отдельной кнопкой.
+    Уже заведённых не создаём заново, а приводим к нашим данным: так можно
+    повторять сколько угодно раз, ничего не ломая. Пригодится после чистой
+    установки панели или восстановления базы из бэкапа.
     """
     from paidsub.storage import subs_for_migration, update_paid_sub_field
     s = settings()
@@ -339,21 +338,16 @@ async def handle_rw_menu(query, context=None):
     token = "задан" if s["token"] else "не задан"
     squads = f"выбрано <b>{len(s['squads'])}</b>" if s["squads"] else "не выбраны"
     state = (f"{s['migrated_at']} · {s['migrated_count']} подписок"
-             if s["migrated_at"] else "ещё не переносили")
-    from panel import provider_label, on_remnawave
-    active = provider_label()
+             if s["migrated_at"] else "ещё не заводили пачкой")
 
-    lines = ["🆕 <b>Remnawave</b>", "",
+    lines = ["🖥 <b>Панель Remnawave</b>", "",
              "<blockquote>"
-             f"🌐 Панель: {url}\n"
+             f"🌐 Адрес: {url}\n"
              f"🔑 Токен: <b>{token}</b>\n"
              f"👥 Сквады: {squads}\n"
-             f"🚚 Перенос: {state}\n"
-             f"⚙️ Подписки обслуживает: <b>{active}</b></blockquote>", "",
-             ("<i>Бот работает через Remnawave: выдача, продление, лимиты "
-              "и устройства идут в неё.</i>" if on_remnawave() else
-              "<i>Пока подписки обслуживает 3x-UI. Перенеси клиентов, проверь "
-              "пару ссылок и переключай — вернуться можно одной кнопкой.</i>")]
+             f"🚚 Заводили клиентов: {state}</blockquote>", "",
+             "<i>Через неё идут выдача, продление, лимиты устройств, "
+             "перевыпуск ключа и заморозка.</i>"]
 
     kb = [[InlineKeyboardButton("🌐 Адрес панели", callback_data="rw_url"),
            InlineKeyboardButton("🔑 Токен", callback_data="rw_token")]]
@@ -361,53 +355,14 @@ async def handle_rw_menu(query, context=None):
         kb.append([InlineKeyboardButton("👥 Сквады", callback_data="rw_squads"),
                    InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
-        kb.append([InlineKeyboardButton("🚚 Перенести клиентов", callback_data="rw_migrate")])
-        if on_remnawave():
-            kb.append([InlineKeyboardButton("📨 Разослать новые ссылки",
-                                            callback_data="rw_notify")])
-        kb.append([InlineKeyboardButton(
-            "↩️ Вернуть подписки на 3x-UI" if on_remnawave()
-            else "🔀 Перевести подписки на Remnawave",
-            callback_data="rw_switch")])
+        kb.append([InlineKeyboardButton("🚚 Завести клиентов в панели",
+                                        callback_data="rw_migrate")])
+        kb.append([InlineKeyboardButton("📨 Разослать ссылки клиентам",
+                                        callback_data="rw_notify")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
                                   disable_web_page_preview=True)
-
-
-async def handle_rw_switch(query, context):
-    """Меняет панель, которая обслуживает подписки."""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import on_remnawave, REMNAWAVE, XUI
-    to_rw = not on_remnawave()
-
-    if to_rw:
-        if not is_configured():
-            await query.answer("Сначала адрес панели и токен", show_alert=True)
-            return
-        check = await test_connection()
-        if not check["ok"]:
-            await query.answer("Панель не отвечает — переключать опасно", show_alert=True)
-            return
-
-    cfg = load_config()
-    cfg["panel_provider"] = REMNAWAVE if to_rw else XUI
-    save_config(cfg)
-
-    from log_channel import send_log
-    where = "Remnawave" if to_rw else "3x-UI"
-    await send_log(context.bot, f"⚙️ Подписки переключены на {where}")
-    await query.edit_message_text(
-        f"⚙️ <b>Подписки обслуживает {where}</b>\n\n"
-        + ("<blockquote>Новые подписки, продление, лимиты устройств, "
-           "перевыпуск и заморозка теперь идут в Remnawave.</blockquote>\n\n"
-           "<i>3x-UI не тронут: там всё осталось как было, и вернуться "
-           "можно этой же кнопкой.</i>" if to_rw else
-           "<blockquote>Вернулись на старую панель.</blockquote>"),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
-    )
 
 
 async def handle_rw_url(query, context):
@@ -493,28 +448,28 @@ async def handle_rw_squad_toggle(query, context, uuid: str):
 
 
 async def handle_rw_migrate(query, context):
-    """Показывает план переноса и спрашивает подтверждение."""
+    """Показывает, кого заведём в панели, и спрашивает подтверждение."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import subs_for_migration
     rows = await subs_for_migration()
     s = settings()
     if not rows:
-        await query.answer("Переносить нечего: живых подписок нет", show_alert=True)
+        await query.answer("Заводить некого: живых подписок нет", show_alert=True)
         return
 
     warn = ("\n⚠️ <b>Сквады не выбраны</b> — люди заведутся без доступа.\n"
             if not s["squads"] else "")
     await query.edit_message_text(
-        "🚚 <b>Перенос клиентов</b>\n\n"
-        f"<blockquote>Подписок к переносу: <b>{len(rows)}</b>\n"
+        "🚚 <b>Завести клиентов в панели</b>\n\n"
+        f"<blockquote>Живых подписок: <b>{len(rows)}</b>\n"
         f"Сквадов: <b>{len(s['squads'])}</b></blockquote>\n"
         f"{warn}\n"
-        "Срок, лимит устройств и трафик перенесу как есть. Уже заведённых "
+        "Срок, лимит устройств и трафик возьму из базы. Кто уже есть в панели — "
         "обновлю, а не продублирую.\n\n"
-        "<i>Ссылки в боте обновятся сразу, клиентам разошлём потом отдельно.</i>",
+        "<i>Ссылки в боте обновятся сразу, клиентам разошлём отдельной кнопкой.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚚 Перенести", callback_data="rw_migrate_go")],
+            [InlineKeyboardButton("🚚 Завести", callback_data="rw_migrate_go")],
             [InlineKeyboardButton("◀️ Отмена", callback_data="rw_menu")],
         ]),
     )
@@ -522,18 +477,18 @@ async def handle_rw_migrate(query, context):
 
 async def handle_rw_migrate_go(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text("🚚 Переношу…")
+    await query.edit_message_text("🚚 Завожу…")
 
     async def progress(done, total):
         try:
-            await query.edit_message_text(f"🚚 Переношу… <b>{done}</b> из <b>{total}</b>",
+            await query.edit_message_text(f"🚚 Завожу… <b>{done}</b> из <b>{total}</b>",
                                           parse_mode="HTML")
         except Exception:
             pass
 
     res = await migrate_subs(progress)
     errors = res.get("errors") or []
-    lines = ["✅ <b>Перенос завершён</b>", "",
+    lines = ["✅ <b>Готово</b>", "",
              "<blockquote>"
              f"Всего подписок: <b>{res['total']}</b>\n"
              f"Создано: <b>{res['created']}</b>\n"
@@ -541,15 +496,14 @@ async def handle_rw_migrate_go(query, context):
              f"С ошибкой: <b>{len(errors)}</b></blockquote>"]
     if errors:
         shown = "\n".join(escape(e[:120]) for e in errors[:5])
-        lines += ["", "⚠️ <b>Не перенеслись</b>", f"<blockquote>{shown}</blockquote>"]
+        lines += ["", "⚠️ <b>Не получилось</b>", f"<blockquote>{shown}</blockquote>"]
         if len(errors) > 5:
             lines.append(f"<i>…и ещё {len(errors) - 5}</i>")
-    lines += ["", "<i>Проверь пару клиентов в панели и открой ссылку — "
-              "потом разошлём новые ссылки людям.</i>"]
+    lines += ["", "<i>Открой пару ссылок из панели — и можно рассылать их людям.</i>"]
 
     from log_channel import send_log
     await send_log(context.bot,
-        f"🚚 Перенос в Remnawave: создано {res['created']}, "
+        f"🚚 Клиенты в Remnawave: создано {res['created']}, "
         f"обновлено {res['updated']}, ошибок {len(errors)}")
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",

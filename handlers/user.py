@@ -899,13 +899,9 @@ async def handle_reissue_do(query, context):
     await update_paid_sub_field(sub_id, "sub_url", new_url)
     await add_history(user_id, "key_reissued", f"Новая ссылка: {new_url}")
 
-    # Часть инбаундов могла не принять правку: там останется старый доступ,
-    # и человек этого не увидит — зовём админа
-    missed = result.get("failed_inbounds") or []
     await send_log(context.bot,
         f"🔁 Перевыпуск ключа: <code>{user_id}</code>\n"
         f"🔗 {escape(new_url)}"
-        + (f"\n⚠️ Не приняли инбаунды: <code>{missed}</code>" if missed else "")
     )
 
     try:

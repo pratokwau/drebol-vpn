@@ -1,41 +1,71 @@
-"""Одна дверь к панели: бот зовёт отсюда, а мы решаем, куда идти.
+"""Одна дверь к панели: бот зовёт отсюда, а внутри — API Remnawave.
 
-Раньше весь бот звал 3x-UI напрямую. Теперь панелей две, и переключение —
-это одна настройка, а не правка двух десятков мест. Имена функций и формат
-ответов остались прежними, поэтому вызывающий код не знает, с какой панелью
-работает.
+Раньше здесь жили две панели и переключатель между ними. 3x-UI из бота убран,
+остался один дом для подписок, поэтому лишний слой ни к чему: функции те же,
+что бот звал всегда, а внутри — запросы к Remnawave.
 
-3x-UI пока никуда не делся: пока переключатель стоит на нём, всё идёт
-по-старому. Переводим на Remnawave — те же вызовы уходят в её API.
+Формат ответов сохранён (`success`, `ok`, `items`), чтобы экраны не переписывать.
 """
 
+import asyncio
+import re
+import time
 from datetime import datetime
-
-from config import load_config
-
-# Чисто 3x-UI-шные вещи: инбаунды, проверка портов, разбор ссылок.
-# У Remnawave аналогов нет, поэтому берём как есть из старого модуля.
-from xui_api import (  # noqa: F401
-    build_email, strip_default_port, node_prefix, check_tcp,
-    get_inbounds, test_connection,
-)
-
-XUI = "xui"
-REMNAWAVE = "remnawave"
+from urllib.parse import urlparse
 
 
-def provider() -> str:
-    """Какая панель обслуживает подписки прямо сейчас."""
-    p = (load_config().get("panel_provider") or XUI).lower()
-    return REMNAWAVE if p == REMNAWAVE else XUI
+def build_email(tg_id: int, username=None, prefix: str = "") -> str:
+    """Имя подписки: по нему бот и панель говорят об одном и том же клиенте."""
+    suffix = username.strip().lower() if username else "nousername"
+    raw = f"{prefix}{tg_id}_{suffix}"
+    return "".join(c for c in raw if c.isalnum() or c in ("_", "-", "."))[:50]
 
 
-def provider_label() -> str:
-    return "Remnawave" if provider() == REMNAWAVE else "3x-UI"
+def strip_default_port(sub_url: str) -> str:
+    """Убирает :443 и :80 из ссылки — они там ничего не значат."""
+    if not sub_url:
+        return sub_url
+    sub_url = re.sub(r'^(https://[^/:]+):443(/)', r'\1\2', sub_url)
+    sub_url = re.sub(r'^(http://[^/:]+):80(/)', r'\1\2', sub_url)
+    return sub_url
 
 
-def on_remnawave() -> bool:
-    return provider() == REMNAWAVE
+async def check_tcp(host: str, port, timeout: float = 4.0) -> dict:
+    """Реально ли порт принимает соединения (а не что о нём написано в конфиге)."""
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "некорректный порт"}
+    if not host or not (0 < port < 65536):
+        return {"ok": False, "error": "нет адреса"}
+
+    start = time.monotonic()
+    writer = None
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
+        return {"ok": True, "ms": int((time.monotonic() - start) * 1000)}
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": "таймаут"}
+    except ConnectionRefusedError:
+        return {"ok": False, "error": "порт закрыт"}
+    except OSError as e:
+        return {"ok": False, "error": (e.strerror or str(e))[:50]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:50]}
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+
+def is_configured() -> bool:
+    """Заданы ли адрес панели и токен."""
+    import remnawave as rw
+    return rw.is_configured()
 
 
 def _fail(error: str) -> dict:
@@ -48,9 +78,9 @@ def _iso(expire_date: str) -> str:
 
 
 def _name(email: str) -> str:
-    """Имя клиента в Remnawave. У панели свои правила для имён, и у части
-    подписок в базе email им не отвечает (длинные ники обрезаются). Правило
-    одно и то же на выдаче и на переносе, поэтому имя всегда получается тем же.
+    """Имя клиента в панели. У неё свои правила для имён, и у части подписок
+    в базе email им не отвечает (длинные ники обрезаются). Правило одно и то же
+    на выдаче и на переносе, поэтому имя всегда получается тем же.
     """
     from remnawave import make_username
     return make_username(email or "", 0)
@@ -59,12 +89,9 @@ def _name(email: str) -> str:
 # ── Подписки ──────────────────────────────────────────────────────────────────
 
 async def create_client(expire_date: str, limit_ip: int, limit_hwid: int,
-                        total_gb: int, email=None, preset_inbound_ids_override=None) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.create_client(expire_date, limit_ip, limit_hwid, total_gb,
-                                           email, preset_inbound_ids_override)
-
+                        total_gb: int, email=None, tg_id=None, note: str = "") -> dict:
+    """Заводит клиента. TG ID и ник кладём в панель: по ним видно, кто это,
+    без сверки с базой бота — раньше для этого переименовывали клиента."""
     import remnawave as rw
     username = _name(email)
     payload = {
@@ -73,8 +100,10 @@ async def create_client(expire_date: str, limit_ip: int, limit_hwid: int,
         "expireAt": _iso(expire_date),
         "trafficLimitBytes": int(total_gb or 0) * 1024 ** 3,
         "hwidDeviceLimit": int(limit_hwid or 0),
-        "description": "Создано ботом Drebol VPN",
+        "description": f"Drebol VPN · {note}" if note else "Создано ботом Drebol VPN",
     }
+    if tg_id:
+        payload["telegramId"] = int(tg_id)
     squads = rw.settings()["squads"]
     if squads:
         payload["activeInternalSquads"] = list(squads)
@@ -102,18 +131,11 @@ async def create_client(expire_date: str, limit_ip: int, limit_hwid: int,
         "email": username,
         "sub_id": data.get("shortUuid", ""),
         "expire": expire_date,
-        "inbound_id": None,
-        "inbound_ids": [],
-        "missed_inbounds": [],
     }
 
 
 async def update_client_expire(email: str, new_expire_str: str,
                                limit_hwid: int = None) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.update_client_expire(email, new_expire_str, limit_hwid)
-
     import remnawave as rw
     r = await rw.patch(_name(email), expireAt=_iso(new_expire_str),
                        hwidDeviceLimit=None if limit_hwid is None else int(limit_hwid))
@@ -122,9 +144,6 @@ async def update_client_expire(email: str, new_expire_str: str,
 
 async def update_client_limits(email: str, limit_ip: int = None,
                                limit_hwid: int = None) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.update_client_limits(email, limit_ip, limit_hwid)
     if limit_hwid is None:
         # лимита по IP в Remnawave нет, ограничение только по устройствам
         return {"success": True}
@@ -135,34 +154,22 @@ async def update_client_limits(email: str, limit_ip: int = None,
 
 
 async def toggle_client(email: str, enable: bool) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.toggle_client(email, enable)
-
     import remnawave as rw
     r = await rw.action(_name(email), "enable" if enable else "disable")
     return {"success": True} if r["ok"] else _fail(str(r.get("error")))
 
 
 async def get_client_info(email: str) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.get_client_info(email)
-
     import remnawave as rw
     r = await rw.user_by_name(_name(email))
     if not r["ok"]:
         return {"success": False}
     data = r["data"] or {}
     return {"success": True, "enabled": (data.get("status") == "ACTIVE"),
-            "uuid": data.get("vlessUuid", ""), "inbound_id": None}
+            "uuid": data.get("vlessUuid", "")}
 
 
 async def get_client_traffic(email: str) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.get_client_traffic(email)
-
     import remnawave as rw
     r = await rw.user_by_name(_name(email))
     if not r["ok"]:
@@ -173,43 +180,12 @@ async def get_client_traffic(email: str) -> dict:
 
 
 async def delete_client(email: str) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.delete_client(email)
-
     import remnawave as rw
     r = await rw.delete_by_name(_name(email))
     return {"success": True} if r["ok"] else _fail(str(r.get("error")))
 
 
-async def update_client_email(old_email: str, new_email: str, client_uuid: str,
-                              sub_id: str, expire_date: str, limit_ip: int,
-                              limit_hwid: int, total_gb: int) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.update_client_email(old_email, new_email, client_uuid,
-                                                 sub_id, expire_date, limit_ip,
-                                                 limit_hwid, total_gb)
-    # Переименование в Remnawave сломало бы ссылку подписки, поэтому имя
-    # в панели остаётся тем, с которым клиента завели.
-    return {"success": True, "skipped": "переименование не нужно"}
-
-
-async def move_client_inbound(email: str, target_inbound_ids: list,
-                              limit_hwid: int = None) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.move_client_inbound(email, target_inbound_ids, limit_hwid)
-    # В Remnawave доступ определяется сквадами, а окончание срока панель
-    # обрабатывает сама — переносить клиента никуда не нужно.
-    return {"success": True, "moved": False}
-
-
 async def reissue_subscription(email: str, limit_hwid: int = None) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.reissue_subscription(email, limit_hwid)
-
     import remnawave as rw
     r = await rw.action(_name(email), "revoke")
     if not r["ok"]:
@@ -217,16 +193,12 @@ async def reissue_subscription(email: str, limit_hwid: int = None) -> dict:
     data = r["data"] or {}
     return {"success": True, "new_uuid": data.get("vlessUuid", ""),
             "sub_id": data.get("shortUuid", ""),
-            "sub_url": data.get("subscriptionUrl", ""), "failed_inbounds": []}
+            "sub_url": data.get("subscriptionUrl", "")}
 
 
 # ── Устройства и адреса ───────────────────────────────────────────────────────
 
 async def get_client_hwids(email: str) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.get_client_hwids(email)
-
     import remnawave as rw
     r = await rw.devices(_name(email))
     if not r["ok"]:
@@ -253,10 +225,9 @@ async def get_client_hwids(email: str) -> dict:
 async def resolve_hwid(email: str, ref: str):
     """Находит устройство по метке из кнопки.
 
-    У 3x-UI устройство помечено числом, у Remnawave — длинной строкой hwid,
-    которая в кнопку целиком не влезает: там лежит её начало. Кнопка в чате
-    живёт дольше самого устройства, поэтому если по метке никто не нашёлся —
-    возвращаем «нет», а не соседнее устройство.
+    Устройство помечено строкой hwid, которая в кнопку целиком не влезает:
+    там лежит её начало. Кнопка в чате живёт дольше самого устройства, поэтому
+    если по метке никто не нашёлся — возвращаем «нет», а не соседнее устройство.
     """
     mark = str(ref).split(":")[-1]
     got = await get_client_hwids(email)
@@ -269,47 +240,26 @@ async def resolve_hwid(email: str, ref: str):
 
 
 async def delete_client_hwid(email: str, hwid_id) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.delete_client_hwid(email, hwid_id)
-
     import remnawave as rw
     r = await rw.delete_device(_name(email), hwid_id)
     return {"success": True} if r["ok"] else _fail(str(r.get("error")))
 
 
 async def clear_client_hwids(email: str) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.clear_client_hwids(email)
-
     import remnawave as rw
     r = await rw.delete_all_devices(_name(email))
     return {"success": True} if r["ok"] else _fail(str(r.get("error")))
 
 
 async def get_client_ips(email: str) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.get_client_ips(email)
-
-    # Отдельного журнала адресов в Remnawave нет, но у каждого устройства
-    # записан адрес последнего обращения — этого хватает, чтобы понять,
-    # откуда человек подключается.
+    """Откуда человек подключается. Отдельного журнала адресов в панели нет,
+    но у каждого устройства записан адрес последнего обращения."""
     devices = await get_client_hwids(email)
     if not devices.get("ok"):
         return {"ok": False, "error": devices.get("error", ""), "items": []}
     items = [{"ip": d["requestIp"], "ts": d.get("lastSeen"), "node": d.get("deviceModel")}
              for d in devices["items"] if d.get("requestIp")]
     return {"ok": True, "items": items}
-
-
-async def clear_client_ips(email: str) -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.clear_client_ips(email)
-    return _fail("в Remnawave адреса живут вместе с устройствами — "
-                 "очисти список устройств")
 
 
 # ── Сводки по панели ──────────────────────────────────────────────────────────
@@ -335,10 +285,6 @@ def _used_bytes(user: dict) -> int:
 
 
 async def count_panel_clients() -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.count_panel_clients()
-
     import remnawave as rw
     users = await rw.all_users()
     names = {u.get("username") for u in users if u.get("username")}
@@ -348,12 +294,8 @@ async def count_panel_clients() -> dict:
 
 
 async def get_online_emails(window_seconds: int = 180) -> dict:
-    """Кто сейчас на VPN. У Remnawave есть только отметка последнего
-    обращения, поэтому «сейчас» — это последние минуты."""
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.get_online_emails()
-
+    """Кто сейчас на VPN. У панели есть только отметка последнего обращения,
+    поэтому «сейчас» — это последние минуты."""
     import remnawave as rw
     from datetime import timezone, timedelta
     users = await rw.all_users()
@@ -367,10 +309,6 @@ async def get_online_emails(window_seconds: int = 180) -> dict:
 
 async def get_last_online(timeout: float = 15) -> dict:
     """Когда клиент последний раз был в сети, в миллисекундах. 0 — ни разу."""
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.get_last_online(timeout)
-
     import remnawave as rw
     users = await rw.all_users()
     last = {}
@@ -384,10 +322,6 @@ async def get_last_online(timeout: float = 15) -> dict:
 
 
 async def get_traffic_snapshot() -> dict:
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.get_traffic_snapshot()
-
     import remnawave as rw
     users = await rw.all_users()
     clients = {}
@@ -401,52 +335,27 @@ async def get_traffic_snapshot() -> dict:
 
 # ── Проверка живости ──────────────────────────────────────────────────────────
 
-def is_configured() -> bool:
-    """Заданы ли параметры той панели, что сейчас обслуживает подписки."""
-    if on_remnawave():
-        import remnawave as rw
-        return rw.is_configured()
-    cfg = load_config()
-    return bool(cfg.get("xui_url") and cfg.get("xui_token"))
-
-
-def node_word(plural: bool = True) -> str:
-    """Как называть точки входа в текстах: у 3x-UI это инбаунды, у Remnawave — узлы."""
-    if on_remnawave():
-        return "Узлы" if plural else "Узел"
-    return "Инбаунды" if plural else "Инбаунд"
-
-
 async def probe_servers() -> dict:
-    """Панель, страница подписок и точки входа — живы или нет.
+    """Панель, выдача подписок и узлы — живы или нет.
 
-    Формат ответа один на обе панели, чтобы экран «Здоровье серверов» и
-    ночная проверка не знали, с какой панелью работают. У Remnawave точки
-    входа — это узлы, и об их состоянии рассказывает сама панель.
+    Состояние узлов рассказывает сама панель, простукивать их порты не нужно.
     """
-    if not on_remnawave():
-        import xui_api
-        return await xui_api.probe_servers()
-
-    import time
-    from urllib.parse import urlparse
     import remnawave as rw
 
     s = rw.settings()
-    host = urlparse(s["url"]).hostname if s["url"] else None
-    scheme = urlparse(s["url"]).scheme or "https"
+    parsed = urlparse(s["url"])
+    host, scheme = parsed.hostname, (parsed.scheme or "https")
 
     start = time.monotonic()
     check = await rw.test_connection()
     panel = {"ok": bool(check.get("ok")), "ms": int((time.monotonic() - start) * 1000),
              "error": check.get("error"), "host": host}
 
-    # Ссылки подписок Remnawave отдаёт со своего же адреса.
-    port = 443 if scheme == "https" else 80
+    # Ссылки подписок панель отдаёт со своего же адреса.
+    port = parsed.port or (443 if scheme == "https" else 80)
     tcp = await check_tcp(host, port, timeout=4.0)
-    sub = {"ok": bool(tcp.get("ok")), "ms": tcp.get("ms"), "status": 200,
-           "port": port, "error": tcp.get("error"),
-           "url": f"{scheme}://{host}" if host else ""}
+    sub = {"ok": bool(tcp.get("ok")), "ms": tcp.get("ms"), "port": port,
+           "error": tcp.get("error"), "url": f"{scheme}://{host}" if host else ""}
 
     nodes = []
     if panel["ok"]:
@@ -462,16 +371,12 @@ async def probe_servers() -> dict:
                 trouble = "панель не видит узел"
             nodes.append({
                 "tag": name,
-                "prefix": name,
                 "host": n.get("address"),
-                "mapped": True,
-                "protocol": n.get("xrayVersion") or "xray",
-                "udp": False,
+                "xray": n.get("xrayVersion") or "",
                 "port": n.get("port") or "",
                 "enabled": not n.get("isDisabled"),
                 "clients": int(n.get("usersOnline") or 0),
                 "reachable": alive,
-                "ms": None,
                 "error": trouble,
             })
-    return {"panel": panel, "sub": sub, "inbounds": nodes}
+    return {"panel": panel, "sub": sub, "nodes": nodes}

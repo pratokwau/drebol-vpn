@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from config import ADMIN_ID, load_config
+from config import ADMIN_ID
 from states import AWAITING_PROMO_CUSTOM, AWAITING_PROMO_GIVE_USER
 
 DATE_FMT = "%d.%m.%Y %H:%M:%S"
@@ -111,7 +111,7 @@ async def apply_days(tg_id: int, days: int, bot=None) -> dict:
     from paidsub.storage import (
         add_history, get_paid_sub_by_tg_id, parse_sub_date, set_expire_date, update_paid_sub_field,
     )
-    from panel import get_client_info, move_client_inbound, toggle_client, update_client_expire
+    from panel import get_client_info, toggle_client, update_client_expire
 
     row = await get_paid_sub_by_tg_id(tg_id)
     if not row:
@@ -127,9 +127,6 @@ async def apply_days(tg_id: int, days: int, bot=None) -> dict:
     info = await get_client_info(email)
     if info.get("success") and not info.get("enabled", True):
         await toggle_client(email, True)
-    inbound_ids = load_config().get("paid_preset_inbound_ids") or []
-    if inbound_ids:
-        await move_client_inbound(email, inbound_ids)
     await add_history(tg_id, "promo_days", f"Начислено {days} дней\nДо: {until}")
     return {"ok": True, "until": until}
 

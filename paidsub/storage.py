@@ -180,15 +180,6 @@ async def delete_paid_sub(sub_id: int):
         await db.commit()
 
 
-async def get_all_paid_subs_with_tg() -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT id, tg_id, email, uuid, sub_id, expire_date, limit_ip, limit_hwid, total_gb
-            FROM paid_subs WHERE tg_id IS NOT NULL
-        """) as cur:
-            return await cur.fetchall()
-
-
 async def subs_for_migration() -> list:
     """Всё, что нужно, чтобы завести подписку в другой панели.
 
@@ -225,12 +216,6 @@ async def get_expired_paid_subs() -> list:
             FROM paid_subs
         """) as cur:
             return await cur.fetchall()
-
-
-async def update_paid_sub_email(sub_id: int, new_email: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE paid_subs SET email = ? WHERE id = ?", (new_email, sub_id))
-        await db.commit()
 
 
 # ── Запросы на подписку ──────────────────────────────────────────────────────

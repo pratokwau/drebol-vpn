@@ -28,49 +28,19 @@ def subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bool) -
 
 
 def presets_keyboard() -> InlineKeyboardMarkup:
-    from panel import on_remnawave
-    # доступ к серверам в Remnawave задают сквады, инбаундов там нет
-    access = ([InlineKeyboardButton("👥 Сквады Remnawave", callback_data="rw_squads")]
-              if on_remnawave() else
-              [InlineKeyboardButton("📡 Инбаунды подписки", callback_data="inbounds_menu")])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📅 Дата окончания", callback_data="preset_expire")],
         [InlineKeyboardButton("🌐 Лимит IP", callback_data="preset_ip")],
         [InlineKeyboardButton("🖥 Лимит HWID", callback_data="preset_hwid")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="preset_traffic")],
-        access,
-        [InlineKeyboardButton("⏰ Авто-обновление ников", callback_data="auto_update_settings")],
+        # доступ к серверам задают сквады панели
+        [InlineKeyboardButton("👥 Сквады Remnawave", callback_data="rw_squads")],
         [InlineKeyboardButton("◀️ Назад к подпискам", callback_data="admin_subs")],
     ])
 
 
-def auto_update_keyboard(enabled: bool, days: int) -> InlineKeyboardMarkup:
-    toggle_label = "🔔 Выключить" if enabled else "🔕 Включить"
-    status = f"{'ВКЛ ✅' if enabled else 'ВЫКЛ ❌'} · каждые {days} дн."
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"Статус: {status}", callback_data="noop")],
-        [InlineKeyboardButton(toggle_label, callback_data="toggle_auto_update")],
-        [InlineKeyboardButton("📝 Изменить интервал (дней)", callback_data="set_auto_update_days")],
-        [InlineKeyboardButton("🔄 Обновить сейчас", callback_data="run_sync_now")],
-        [InlineKeyboardButton("◀️ Назад к настройкам", callback_data="sub_presets")],
-    ])
 
 
-def inbounds_keyboard(inbounds: list, selected_ids: list) -> InlineKeyboardMarkup:
-    kb = []
-    selected_set = set(int(i) for i in selected_ids)
-    for inb in inbounds:
-        ib_id = inb.get("id")
-        protocol = inb.get("protocol", "?")
-        tag = inb.get("tag") or inb.get("remark") or f"#{ib_id}"
-        port = inb.get("port", "")
-        mark = "✅" if ib_id in selected_set else "🔘"
-        kb.append([InlineKeyboardButton(
-            f"{mark} {tag} ({protocol}:{port})",
-            callback_data=f"toggle_inbound:{ib_id}",
-        )])
-    kb.append([InlineKeyboardButton("◀️ Назад к настройкам", callback_data="sub_presets")])
-    return InlineKeyboardMarkup(kb)
 
 
 def sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardMarkup:

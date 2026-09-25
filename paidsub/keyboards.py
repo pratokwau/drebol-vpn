@@ -64,16 +64,6 @@ def _devices_rows(b) -> list:
              b("📱 Максимум докупа", "paid_device_max")]]
 
 
-def _panel_rows(b) -> list:
-    """Точки входа настраиваются там, где живут: инбаунды — в 3x-UI,
-    сквады — в Remnawave."""
-    from panel import on_remnawave
-    if on_remnawave():
-        return [[b("👥 Сквады Remnawave", "rw_squads")]]
-    return [[b("📡 Инбаунды создания", "paid_inbounds_menu"),
-             b("📡 Инбаунды окончания", "paid_inbounds_expire_menu")]]
-
-
 def paid_presets_keyboard() -> InlineKeyboardMarkup:
     from config import load_config
     cfg = load_config()
@@ -95,28 +85,11 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         *_devices_rows(b),
         [b("📶 Трафик (ГБ)", "paid_preset_traffic")],
         # панель
-        *_panel_rows(b),
-        [b("⏰ Авто-обновление ников", "paid_auto_update_settings")],
+        [b("👥 Сквады Remnawave", "rw_squads")],
         [b("◀️ Назад к подпискам", "paid_subs")],
     ])
 
 
-def paid_inbounds_keyboard(inbounds: list, selected_ids: list, mode: str = "create") -> InlineKeyboardMarkup:
-    kb = []
-    selected_set = set(int(i) for i in selected_ids)
-    prefix = "paid_toggle_inbound" if mode == "create" else "paid_toggle_inbound_expire"
-    for inb in inbounds:
-        ib_id = inb.get("id")
-        protocol = inb.get("protocol", "?")
-        tag = inb.get("tag") or inb.get("remark") or f"#{ib_id}"
-        port = inb.get("port", "")
-        mark = "✅" if ib_id in selected_set else "🔘"
-        kb.append([InlineKeyboardButton(
-            f"{mark} {tag} ({protocol}:{port})",
-            callback_data=f"{prefix}:{ib_id}",
-        )])
-    kb.append([InlineKeyboardButton("◀️ Назад к настройкам", callback_data="paid_sub_presets")])
-    return InlineKeyboardMarkup(kb)
 
 
 def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardMarkup:
@@ -190,16 +163,6 @@ def payment_approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def paid_auto_update_keyboard(enabled: bool, days: int) -> InlineKeyboardMarkup:
-    toggle_label = "🔔 Выключить" if enabled else "🔕 Включить"
-    status = f"{'ВКЛ ✅' if enabled else 'ВЫКЛ ❌'} · каждые {days} дн."
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"Статус: {status}", callback_data="noop")],
-        [InlineKeyboardButton(toggle_label, callback_data="paid_toggle_auto_update")],
-        [InlineKeyboardButton("📝 Изменить интервал (дней)", callback_data="paid_set_auto_update_days")],
-        [InlineKeyboardButton("🔄 Обновить сейчас", callback_data="paid_run_sync_now")],
-        [InlineKeyboardButton("◀️ Назад к настройкам", callback_data="paid_sub_presets")],
-    ])
 
 
 def muted_list_keyboard(muted_rows: list) -> InlineKeyboardMarkup:

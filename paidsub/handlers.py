@@ -19,7 +19,7 @@ from paidsub.storage import (
 )
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
-    paid_inbounds_keyboard, approve_keyboard, paid_sub_settings_keyboard,
+    approve_keyboard, paid_sub_settings_keyboard,
     paid_history_keyboard, payment_approve_keyboard, muted_list_keyboard,
 )
 from paidsub.time_parser import fmt_duration, fmt_duration_precise
@@ -67,7 +67,7 @@ def _price_label() -> str:
     return "💵 Сумма" if uses_pay_link() else "💵 Сумма без тарифов"
 
 
-def _fmt_presets(cfg: dict, inbound_names=None) -> str:
+def _fmt_presets(cfg: dict, squad_names=None) -> str:
     trial = cfg.get("paid_trial_period")
     trial_str = fmt_duration(trial) if trial else "не задан"
 
@@ -91,40 +91,16 @@ def _fmt_presets(cfg: dict, inbound_names=None) -> str:
     else:
         traf = f"{traf_raw} ГБ"
 
-    from panel import on_remnawave
-    if on_remnawave():
-        # В Remnawave доступ к серверам даёт сквад, а окончание срока
-        # панель обрабатывает сама — инбаунды тут ни при чём.
-        names = inbound_names or {}
-        chosen = [names.get(u, u) for u in (cfg.get("rw_squads") or [])]
-        panel_block = (
-            "👥 <b>Сквады Remnawave</b>\n<blockquote>"
-            + (f"Выдаём: <b>{_esc_name(', '.join(chosen))}</b>"
-               if chosen else "Не выбраны — панель решит сама")
-            + "</blockquote>"
-        )
-        return _presets_text(trial_str, pay_str, renew_str, provider_line(),
-                             price_str, ip, hwid, traf, panel_block)
-
-    create_ids = cfg.get("paid_preset_inbound_ids") or []
-    if create_ids and inbound_names:
-        create_label = ", ".join(inbound_names.get(i, f"#{i}") for i in create_ids)
-    elif create_ids:
-        create_label = ", ".join(str(i) for i in create_ids)
-    else:
-        create_label = "авто (первый VLESS)"
-
-    expire_ids = cfg.get("paid_expire_inbound_ids") or []
-    if expire_ids and inbound_names:
-        expire_label = ", ".join(inbound_names.get(i, f"#{i}") for i in expire_ids)
-    elif expire_ids:
-        expire_label = ", ".join(str(i) for i in expire_ids)
-    else:
-        expire_label = "не заданы"
-
-    panel_block = ("📡 <b>Инбаунды</b>\n<blockquote>"
-                   f"Создания: <b>{_esc_name(create_label)}</b>\n"
-                   f"Окончания: <b>{_esc_name(expire_label)}</b></blockquote>")
+    # Доступ к серверам в Remnawave даёт сквад, а окончание срока панель
+    # обрабатывает сама.
+    names = squad_names or {}
+    chosen = [names.get(u, u) for u in (cfg.get("rw_squads") or [])]
+    panel_block = (
+        "👥 <b>Сквады Remnawave</b>\n<blockquote>"
+        + (f"Выдаём: <b>{_esc_name(', '.join(chosen))}</b>"
+           if chosen else "Не выбраны — панель решит сама")
+        + "</blockquote>"
+    )
     return _presets_text(trial_str, pay_str, renew_str, provider_line(),
                          price_str, ip, hwid, traf, panel_block)
 
@@ -169,26 +145,16 @@ async def handle_paid_subs_menu(query, page: int = 1):
 
 async def handle_paid_presets_menu(query):
     cfg = load_config()
-    from panel import on_remnawave
-    inbound_names = {}
-    if on_remnawave():
-        if cfg.get("rw_squads"):
-            import remnawave as rw
-            got = await rw.list_squads()
-            if got.get("ok"):
-                for sq in got["squads"]:
-                    inbound_names[sq["uuid"]] = sq["name"]
-    else:
-        all_ids = list(cfg.get("paid_preset_inbound_ids") or []) + list(cfg.get("paid_expire_inbound_ids") or [])
-        if all_ids:
-            from panel import get_inbounds
-            result = await get_inbounds()
-            if result["success"]:
-                for inb in result["inbounds"]:
-                    inbound_names[inb.get("id")] = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
+    squad_names = {}
+    if cfg.get("rw_squads"):
+        import remnawave as rw
+        got = await rw.list_squads()
+        if got.get("ok"):
+            for sq in got["squads"]:
+                squad_names[sq["uuid"]] = sq["name"]
     await query.edit_message_text(
         "⚙️ <b>Настройки подписок</b>\n\n"
-        + _fmt_presets(cfg, inbound_names)
+        + _fmt_presets(cfg, squad_names)
         + "\n\n<i>Применяются только к новым подпискам. У выданных условия "
           "зафиксированы при создании — меняются в самой подписке.</i>",
         parse_mode="HTML",
@@ -300,104 +266,6 @@ async def handle_paid_preset_traffic(query, context):
     )
 
 
-# ── Инбаунды создания ────────────────────────────────────────────────────────
-
-async def handle_paid_inbounds_menu(query):
-    from panel import get_inbounds
-    await query.edit_message_text("⏳ Загружаю инбаунды из панели...")
-    result = await get_inbounds()
-    if not result["success"]:
-        await query.edit_message_text(
-            f"❌ Не удалось загрузить инбаунды:\n<code>{result['error']}</code>",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-    if not result["inbounds"]:
-        await query.edit_message_text("❌ На панели нет инбаундов.", reply_markup=back_admin())
-        return
-    cfg = load_config()
-    selected = cfg.get("paid_preset_inbound_ids") or []
-    await query.edit_message_text(
-        "📡 <b>Инбаунды создания</b>\n\n"
-        "Эти инбаунды будут использоваться при создании подписки.\n"
-        "✅ — выбран, 🔘 — не выбран",
-        parse_mode="HTML",
-        reply_markup=paid_inbounds_keyboard(result["inbounds"], selected, "create"),
-    )
-
-
-async def handle_paid_toggle_inbound(query, inbound_id: int):
-    from panel import get_inbounds
-    cfg = load_config()
-    selected = list(cfg.get("paid_preset_inbound_ids") or [])
-    if inbound_id in selected:
-        selected.remove(inbound_id)
-    else:
-        selected.append(inbound_id)
-    cfg["paid_preset_inbound_ids"] = selected
-    save_config(cfg)
-    result = await get_inbounds()
-    if not result["success"]:
-        await query.answer("Не удалось обновить", show_alert=True)
-        return
-    await query.edit_message_text(
-        "📡 <b>Инбаунды создания</b>\n\n"
-        "Эти инбаунды будут использоваться при создании подписки.\n"
-        "✅ — выбран, 🔘 — не выбран",
-        parse_mode="HTML",
-        reply_markup=paid_inbounds_keyboard(result["inbounds"], selected, "create"),
-    )
-
-
-# ── Инбаунды окончания ───────────────────────────────────────────────────────
-
-async def handle_paid_inbounds_expire_menu(query):
-    from panel import get_inbounds
-    await query.edit_message_text("⏳ Загружаю инбаунды из панели...")
-    result = await get_inbounds()
-    if not result["success"]:
-        await query.edit_message_text(
-            f"❌ Не удалось загрузить инбаунды:\n<code>{result['error']}</code>",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-    if not result["inbounds"]:
-        await query.edit_message_text("❌ На панели нет инбаундов.", reply_markup=back_admin())
-        return
-    cfg = load_config()
-    selected = cfg.get("paid_expire_inbound_ids") or []
-    await query.edit_message_text(
-        "📡 <b>Инбаунды окончания</b>\n\n"
-        "Бот переключит подписку на эти инбаунды если не продлили.\n"
-        "✅ — выбран, 🔘 — не выбран",
-        parse_mode="HTML",
-        reply_markup=paid_inbounds_keyboard(result["inbounds"], selected, "expire"),
-    )
-
-
-async def handle_paid_toggle_inbound_expire(query, inbound_id: int):
-    from panel import get_inbounds
-    cfg = load_config()
-    selected = list(cfg.get("paid_expire_inbound_ids") or [])
-    if inbound_id in selected:
-        selected.remove(inbound_id)
-    else:
-        selected.append(inbound_id)
-    cfg["paid_expire_inbound_ids"] = selected
-    save_config(cfg)
-    result = await get_inbounds()
-    if not result["success"]:
-        await query.answer("Не удалось обновить", show_alert=True)
-        return
-    await query.edit_message_text(
-        "📡 <b>Инбаунды окончания</b>\n\n"
-        "Бот переключит подписку на эти инбаунды если не продлили.\n"
-        "✅ — выбран, 🔘 — не выбран",
-        parse_mode="HTML",
-        reply_markup=paid_inbounds_keyboard(result["inbounds"], selected, "expire"),
-    )
-
-
 # ── Ручное создание подписки (админ) ─────────────────────────────────────────
 
 async def handle_paid_create_sub(query, context):
@@ -480,14 +348,14 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
     expire_date = expire_dt.strftime("%d.%m.%Y %H:%M:%S")
     period_end_str = period_end_dt.strftime("%d.%m.%Y %H:%M:%S")
 
-    paid_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
     result = await create_client(
         expire_date=expire_date,
         limit_ip=int(cfg.get("paid_preset_ip", 0)),
         limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
         total_gb=int(cfg.get("paid_preset_traffic", 0)),
         email=email,
-        preset_inbound_ids_override=paid_inbound_ids if paid_inbound_ids else None,
+        tg_id=tg_id,
+        note=f"@{username}" if username else "",
     )
 
     if not result["success"]:
@@ -508,16 +376,6 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
         limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
         total_gb=int(cfg.get("paid_preset_traffic", 0)),
     )
-
-    # Клиент должен попасть во все выбранные инбаунды. Если часть не приняла —
-    # человек получит рабочую ссылку, но без части серверов, и молчать нельзя.
-    missed = result.get("missed_inbounds") or []
-    if missed:
-        from log_channel import send_log
-        await send_log(context.bot,
-            f"⚠️ Клиент <code>{result['email']}</code> добавлен не во все инбаунды.\n"
-            f"Не приняли: <code>{missed}</code>"
-        )
 
     # Фиксируем действующие условия за подпиской: последующая правка общих
     # настроек не должна менять условия уже выданной подписки
@@ -1273,7 +1131,7 @@ async def apply_devices_payment(tg_id: int, count: int, context, amount: int = 0
 
 
 def _when(value) -> str:
-    """Время из панели: 3x-UI отдаёт миллисекунды, Remnawave — строку с датой."""
+    """Время из панели: строка с датой, реже — число секунд или миллисекунд."""
     if value in (None, "", 0, "0"):
         return "—"
     try:
@@ -1346,7 +1204,7 @@ async def handle_paid_ips(query, sub_id: int):
     """С каких адресов подключалась подписка."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import get_client_ips, on_remnawave
+    from panel import get_client_ips
     row = await get_paid_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -1371,13 +1229,8 @@ async def handle_paid_ips(query, sub_id: int):
             lines.append(f"{i}. <code>{escape(str(d['ip']))}</code>{tail}{node}")
         if len(items) > 15:
             lines.append(f"…и ещё {len(items) - 15}")
-        # в Remnawave адрес — часть записи об устройстве, отдельного журнала нет
-        if items and not on_remnawave():
-            kb.append([InlineKeyboardButton("🧹 Сбросить список адресов",
-                                            callback_data=f"paid_ips_clear:{sub_id}")])
-    lines.append("\n<i>Список ведёт панель, бот его не хранит.</i>"
-                 if not on_remnawave() else
-                 "\n<i>Адреса Remnawave держит вместе с устройствами: "
+    # адрес — часть записи об устройстве, отдельного журнала адресов в панели нет
+    lines.append("\n<i>Адреса панель держит вместе с устройствами: "
                  "чтобы забыть адрес, убери устройство.</i>")
     kb.append([InlineKeyboardButton("📱 Устройства", callback_data=f"paid_devices:{sub_id}"),
                InlineKeyboardButton("🔄 Обновить", callback_data=f"paid_ips:{sub_id}")])
@@ -1428,25 +1281,6 @@ async def handle_paid_hwid_clear(query, context, sub_id: int):
     await handle_paid_devices(query, sub_id)
 
 
-async def handle_paid_ips_clear(query, context, sub_id: int):
-    from panel import clear_client_ips
-    row = await get_paid_sub(sub_id)
-    if not row:
-        await query.answer("Подписка не найдена", show_alert=True)
-        return
-    res = await clear_client_ips(row[2])
-    if res.get("success"):
-        await query.answer("Список адресов сброшен")
-        if row[1]:
-            await add_history(row[1], "settings_changed", "Сброшен список IP")
-    else:
-        await query.answer(f"Панель не приняла: {res.get('error', '?')}"[:190], show_alert=True)
-    await handle_paid_ips(query, sub_id)
-
-
-LIMIT_KINDS = {"ip": ("📱", "IP", "limit_ip"), "hwid": ("🔑", "HWID", "limit_hwid")}
-
-
 async def handle_paid_device_price(query, context):
     from states import AWAITING_DEVICE_PRICE
     context.user_data["state"] = AWAITING_DEVICE_PRICE
@@ -1492,6 +1326,10 @@ async def handle_paid_bulk_hwid(query, context):
         "Введи число, <code>0</code> — без ограничения.",
         parse_mode="HTML", reply_markup=back_admin(),
     )
+
+
+# что именно правим оптом: подпись для экрана и колонка в базе
+LIMIT_KINDS = {"ip": ("📱", "IP", "limit_ip"), "hwid": ("🔑", "HWID", "limit_hwid")}
 
 
 async def preview_bulk_limits(message, context, kind: str, value: int):
@@ -1603,7 +1441,7 @@ async def bulk_set_limits(kind: str, value: int, context) -> dict:
 async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
     """Сдвигает дату окончания у всех платных подписок.
     direction = +1 (добавить) или -1 (убавить). Возвращает отчёт."""
-    from panel import update_client_expire, get_client_info, toggle_client, move_client_inbound
+    from panel import update_client_expire, get_client_info, toggle_client
     import aiosqlite
     from database import DB_PATH
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1611,7 +1449,6 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
             all_ids = [r[0] for r in await cur.fetchall()]
 
     cfg = load_config()
-    create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
     updated = 0
     errors = 0
     # подписки людей из ЧС не трогаем: добавление срока включило бы их обратно
@@ -1649,13 +1486,11 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
             await set_expire_date(sid, new_expire_str)
             await update_client_expire(email, new_expire_str)
             if direction > 0:
-                # при добавлении — активируем и возвращаем инбаунды
+                # при добавлении срока подписку возвращаем в строй
                 await update_paid_sub_field(sid, "status", "active")
                 info = await get_client_info(email)
                 if info.get("success") and not info.get("enabled", True):
                     await toggle_client(email, True)
-                if create_inbound_ids:
-                    await move_client_inbound(email, create_inbound_ids)
             updated += 1
 
             # уведомление пользователю
@@ -2040,10 +1875,8 @@ async def expiry_reminder_tick(context):
 async def check_expired_subs(context):
     """Проверяет подписки: уведомляет при смене статуса и закрывает доступ."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import on_remnawave
     cfg = load_config()
     global_renew_seconds = cfg.get("paid_renew_time", 86400)
-    expire_inbound_ids = cfg.get("paid_expire_inbound_ids") or []
 
     subs = await get_expired_paid_subs()
     now = datetime.now()
@@ -2151,7 +1984,7 @@ async def check_expired_subs(context):
         else:
             # Время на оплату вышло
             if status != "expired":
-                # Переход → expired: одноразовое уведомление + отключение + смена инбаунда
+                # Переход → expired: одноразовое уведомление и отключение в панели
                 # Без окна на продление период и доступ кончаются в один момент,
                 # поэтому «конец периода» фиксируем здесь же — статистика его ждёт
                 was_active = status == "active"
@@ -2190,25 +2023,6 @@ async def check_expired_subs(context):
                     except Exception:
                         pass
 
-                # Переносим в инбаунд окончания — это только про 3x-UI.
-                # Там нет операции «перенести»: клиент удаляется и создаётся
-                # заново, поэтому счётчик трафика обнуляется — осознанный размен.
-                # Remnawave доступ снимает сама, ей достаточно отключения выше.
-                if expire_inbound_ids and not on_remnawave():
-                    from panel import move_client_inbound
-                    move = await move_client_inbound(email, expire_inbound_ids)
-                    if move.get("success"):
-                        if move.get("moved") and tg_id:
-                            await add_history(
-                                tg_id, "sub_expired",
-                                f"Перенесён в инбаунд окончания {expire_inbound_ids}",
-                            )
-                    else:
-                        from log_channel import send_log
-                        await send_log(context.bot,
-                            f"⚠️ Не удалось перенести в инбаунд окончания: "
-                            f"<code>{email}</code> — {move.get('error', '?')}"
-                        )
 
 
 async def revoke_paid_period(tg_id: int, period_seconds: int | None, context,
@@ -2259,7 +2073,6 @@ def _renew_base(full_row) -> tuple:
     if end and end > now:
         return end, int((end - now).total_seconds())
     return now, 0
-
 
 
 async def apply_paid_payment(tg_id: int, amount: int, context,
@@ -2316,17 +2129,6 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     if info.get("success") and not info.get("enabled", True):
         await toggle_client(email, True)
     await update_client_expire(email, new_expire_str)
-
-    create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
-    if create_inbound_ids:
-        from panel import move_client_inbound
-        mv = await move_client_inbound(email, create_inbound_ids)
-        if not mv.get("success"):
-            from log_channel import send_log
-            await send_log(context.bot,
-                f"⚠️ Возврат на инбаунды подписки не удался: <code>{email}</code>\n"
-                f"<code>{mv.get('error', '?')}</code>"
-            )
 
     promo_line = ""
     pending_promo = promo_code or await get_pending_promo(tg_id)
@@ -2422,18 +2224,6 @@ async def handle_confirm_payment(query, tg_id: int, context):
 
     # Обновляем срок в панели
     await update_client_expire(email, new_expire_str)
-
-    # Возвращаем на основные инбаунды если были переключены
-    create_inbound_ids = cfg.get("paid_preset_inbound_ids") or []
-    if create_inbound_ids:
-        from panel import move_client_inbound
-        mv = await move_client_inbound(email, create_inbound_ids)
-        if not mv.get("success"):
-            from log_channel import send_log
-            await send_log(context.bot,
-                f"⚠️ Возврат на инбаунды подписки не удался: <code>{email}</code>\n"
-                f"<code>{mv.get('error', '?')}</code>"
-            )
 
     # Промокод: списываем использование и снимаем pending
     promo_line = ""
@@ -2714,128 +2504,6 @@ def _is_mute_active(muted_until: str) -> bool:
 
 
 # ── Авто-обновление ников ────────────────────────────────────────────────────
-
-async def handle_paid_auto_update_settings(query):
-    cfg = load_config()
-    enabled = cfg.get("paid_auto_update_usernames", False)
-    days = cfg.get("paid_auto_update_days", 2)
-    last_run = cfg.get("paid_auto_update_last_run")
-    last_line = f"\n🕐 Последний запуск: {last_run}" if last_run else ""
-    from paidsub.keyboards import paid_auto_update_keyboard
-    from panel import on_remnawave
-    await query.edit_message_text(
-        "⏰ <b>Авто-обновление ников (платные)</b>\n\n"
-        "Бот проверяет, изменился ли юзернейм у пользователей с платными подписками, "
-        "и обновляет email в панели.\n"
-        + last_line
-        + ("\n\n⚠️ <i>На Remnawave не работает: имя клиента там вшито "
-           "в ссылку подписки, переименование сломало бы её.</i>"
-           if on_remnawave() else ""),
-        parse_mode="HTML",
-        reply_markup=paid_auto_update_keyboard(enabled, days),
-    )
-
-
-async def handle_paid_toggle_auto_update(query):
-    cfg = load_config()
-    cfg["paid_auto_update_usernames"] = not cfg.get("paid_auto_update_usernames", False)
-    save_config(cfg)
-    await handle_paid_auto_update_settings(query)
-
-
-async def handle_paid_set_auto_update_days(query, context):
-    from states import AWAITING_PAID_AUTO_UPDATE_DAYS
-    context.user_data["state"] = AWAITING_PAID_AUTO_UPDATE_DAYS
-    cfg = load_config()
-    current = cfg.get("paid_auto_update_days", 2)
-    await query.edit_message_text(
-        f"📝 <b>Интервал проверки (платные)</b>\n\n"
-        f"Сейчас: <b>{current} дн.</b>\n\n"
-        "Введи новое значение (целое число дней, минимум 1):",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
-
-
-async def handle_paid_run_sync_now(query):
-    await query.edit_message_text("⏳ Запускаю синхронизацию ников...")
-    result = await paid_sync_usernames()
-    if result.get("off"):
-        await query.edit_message_text(
-            "🔄 <b>Синхронизация ников не нужна</b>\n\n"
-            "<blockquote>Подписки обслуживает Remnawave: имя клиента там вшито "
-            "в ссылку подписки, и переименование сломало бы её у человека.</blockquote>",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-    lines = [f"🔄 <b>Синхронизация завершена</b>\n"]
-    lines.append(f"📊 Всего подписок с TG ID: <b>{result['total']}</b>")
-    lines.append(f"🔍 Нужно обновить: <b>{result['need_update']}</b>")
-    lines.append(f"✅ Успешно обновлено: <b>{result['updated']}</b>")
-    if result["errors"]:
-        lines.append(f"❌ Ошибки: <b>{len(result['errors'])}</b>")
-        for err in result["errors"][:5]:
-            lines.append(f"  • <code>{err}</code>")
-    if result["skipped"]:
-        lines.append(f"⏭ Юзер не в базе: <b>{result['skipped']}</b>")
-    await query.edit_message_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
-
-
-async def paid_sync_usernames(context=None) -> dict:
-    from panel import update_client_email, build_email
-    from database import get_user_info
-    from paidsub.storage import get_all_paid_subs_with_tg, update_paid_sub_email
-
-    subs = await get_all_paid_subs_with_tg()
-    # В Remnawave имя клиента вшито в ссылку подписки: переименуешь — ссылка
-    # у человека умрёт. Поэтому там ники не синхронизируем вовсе.
-    from panel import on_remnawave
-    if on_remnawave():
-        return {"total": len(subs), "need_update": 0, "updated": 0,
-                "skipped": len(subs), "errors": [], "off": True}
-
-    updated = 0
-    need_update = 0
-    skipped = 0
-    errors = []
-
-    for row in subs:
-        sub_id, tg_id, old_email, uuid_val, sub_id_str, expire_date, limit_ip, limit_hwid, total_gb = row
-        user_row = await get_user_info(tg_id)
-        if not user_row:
-            skipped += 1
-            continue
-        username = user_row[2]
-        new_email = build_email(tg_id, username, prefix="paid_")
-        if new_email == old_email:
-            continue
-        need_update += 1
-        result = await update_client_email(
-            old_email=old_email,
-            new_email=new_email,
-            client_uuid=uuid_val,
-            sub_id=sub_id_str,
-            expire_date=expire_date,
-            limit_ip=limit_ip,
-            limit_hwid=limit_hwid,
-            total_gb=total_gb,
-        )
-        if result["success"]:
-            await update_paid_sub_email(sub_id, new_email)
-            updated += 1
-        else:
-            errors.append(f"{old_email} → {new_email}: {result['error'][:100]}")
-
-    cfg = load_config()
-    cfg["paid_auto_update_last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
-    save_config(cfg)
-    if updated:
-        print(f"[paid_sync_usernames] обновлено {updated} email(ов)")
-    return {"total": len(subs), "need_update": need_update, "updated": updated, "skipped": skipped, "errors": errors}
 
 
 # ── Реферальная система (админ) ──────────────────────────────────────────────

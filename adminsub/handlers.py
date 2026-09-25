@@ -13,15 +13,16 @@ async def _notify_user(bot: Bot, tg_id: int | None, text: str):
         await bot.send_message(chat_id=tg_id, text=text, parse_mode="HTML")
     except Exception:
         pass
-from adminsub.storage import list_subs, add_sub, get_sub, delete_sub, get_all_subs_with_tg, update_sub_email, update_sub_field
-from adminsub.keyboards import subs_list_keyboard, presets_keyboard, sub_view_keyboard, sub_settings_keyboard, inbounds_keyboard, auto_update_keyboard
+from adminsub.storage import list_subs, add_sub, get_sub, delete_sub
+from adminsub.keyboards import (subs_list_keyboard, presets_keyboard, sub_view_keyboard,
+                               sub_settings_keyboard)
 
 
 def _presets_ready(cfg: dict) -> bool:
     return all(cfg.get(k) is not None for k in ("preset_expire", "preset_ip", "preset_hwid", "preset_traffic"))
 
 
-def _fmt_presets(cfg: dict, inbound_names: dict | None = None) -> str:
+def _fmt_presets(cfg: dict, squad_names: dict | None = None) -> str:
     exp = cfg.get("preset_expire", "не задан")
     ip = cfg.get("preset_ip", "не задан")
     hwid = cfg.get("preset_hwid", "не задан")
@@ -32,26 +33,14 @@ def _fmt_presets(cfg: dict, inbound_names: dict | None = None) -> str:
         traf = "безлимит"
     else:
         traf = f"{traf_raw} ГБ"
-    from panel import on_remnawave
     head = (f"📅 Дата окончания: <b>{exp}</b>\n"
             f"🌐 Лимит IP: <b>{ip}</b>\n"
             f"🖥 Лимит HWID: <b>{hwid}</b>\n"
             f"📶 Трафик: <b>{traf}</b>\n")
-    if on_remnawave():
-        names = inbound_names or {}
-        chosen = [names.get(u, u) for u in (cfg.get("rw_squads") or [])]
-        return head + ("👥 Сквады: <b>{}</b>".format(", ".join(chosen)) if chosen
-                       else "👥 Сквады: <b>не выбраны</b>")
-
-    inbound_ids = cfg.get("preset_inbound_ids") or []
-    if inbound_ids and inbound_names:
-        names = [inbound_names.get(i, f"#{i}") for i in inbound_ids]
-        inb_label = ", ".join(names)
-    elif inbound_ids:
-        inb_label = ", ".join(str(i) for i in inbound_ids)
-    else:
-        inb_label = "авто (первый VLESS)"
-    return head + f"📡 Инбаунды: <b>{inb_label}</b>"
+    names = squad_names or {}
+    chosen = [names.get(u, u) for u in (cfg.get("rw_squads") or [])]
+    return head + ("👥 Сквады: <b>{}</b>".format(", ".join(chosen)) if chosen
+                   else "👥 Сквады: <b>не выбраны</b>")
 
 
 async def handle_admin_subs_menu(query, page: int = 1):
@@ -71,154 +60,20 @@ async def handle_admin_subs_menu(query, page: int = 1):
 
 async def handle_presets_menu(query):
     cfg = load_config()
-    from panel import on_remnawave
-    inbound_names = {}
-    if on_remnawave():
-        if cfg.get("rw_squads"):
-            import remnawave as rw
-            got = await rw.list_squads()
-            if got.get("ok"):
-                for sq in got["squads"]:
-                    inbound_names[sq["uuid"]] = sq["name"]
-    else:
-        inbound_ids = cfg.get("preset_inbound_ids") or []
-        if inbound_ids:
-            from panel import get_inbounds
-            result = await get_inbounds()
-            if result["success"]:
-                for inb in result["inbounds"]:
-                    name = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
-                    inbound_names[inb.get("id")] = name
+    squad_names = {}
+    if cfg.get("rw_squads"):
+        import remnawave as rw
+        got = await rw.list_squads()
+        if got.get("ok"):
+            for sq in got["squads"]:
+                squad_names[sq["uuid"]] = sq["name"]
     await query.edit_message_text(
         "⚙️ <b>Настройки подписки (по умолчанию)</b>\n\n"
-        + _fmt_presets(cfg, inbound_names)
+        + _fmt_presets(cfg, squad_names)
         + "\n\nВыбери параметр для изменения:",
         parse_mode="HTML",
         reply_markup=presets_keyboard(),
     )
-
-
-async def handle_auto_update_settings(query):
-    cfg = load_config()
-    enabled = cfg.get("auto_update_usernames", False)
-    days = cfg.get("auto_update_days", 2)
-    last_run = cfg.get("auto_update_last_run")
-    last_line = f"\n🕐 Последний запуск: {last_run}" if last_run else ""
-    from panel import on_remnawave
-    await query.edit_message_text(
-        "⏰ <b>Авто-обновление ников</b>\n\n"
-        "Бот проверяет, изменился ли юзернейм у пользователей с подписками, "
-        "и обновляет email в панели.\n"
-        + last_line
-        + ("\n\n⚠️ <i>На Remnawave не работает: имя клиента там вшито "
-           "в ссылку подписки, переименование сломало бы её.</i>"
-           if on_remnawave() else ""),
-        parse_mode="HTML",
-        reply_markup=auto_update_keyboard(enabled, days),
-    )
-
-
-async def handle_toggle_auto_update(query):
-    cfg = load_config()
-    cfg["auto_update_usernames"] = not cfg.get("auto_update_usernames", False)
-    save_config(cfg)
-    await handle_auto_update_settings(query)
-
-
-async def handle_set_auto_update_days(query, context):
-    from states import AWAITING_AUTO_UPDATE_DAYS
-    context.user_data["state"] = AWAITING_AUTO_UPDATE_DAYS
-    cfg = load_config()
-    current = cfg.get("auto_update_days", 2)
-    await query.edit_message_text(
-        f"📝 <b>Интервал проверки</b>\n\n"
-        f"Сейчас: <b>{current} дн.</b>\n\n"
-        "Введи новое значение (целое число дней, минимум 1):",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
-
-
-async def handle_run_sync_now(query):
-    await query.edit_message_text("⏳ Запускаю синхронизацию ников...")
-    result = await sync_usernames()
-    if result.get("off"):
-        await query.edit_message_text(
-            "🔄 <b>Синхронизация ников не нужна</b>\n\n"
-            "<blockquote>Подписки обслуживает Remnawave: имя клиента там вшито "
-            "в ссылку подписки, и переименование сломало бы её у человека.</blockquote>",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-    lines = [f"🔄 <b>Синхронизация завершена</b>\n"]
-    lines.append(f"📊 Всего подписок с TG ID: <b>{result['total']}</b>")
-    lines.append(f"🔍 Нужно обновить: <b>{result['need_update']}</b>")
-    lines.append(f"✅ Успешно обновлено: <b>{result['updated']}</b>")
-    if result["errors"]:
-        lines.append(f"❌ Ошибки: <b>{len(result['errors'])}</b>")
-        for err in result["errors"][:5]:
-            lines.append(f"  • <code>{err}</code>")
-    if result["skipped"]:
-        lines.append(f"⏭ Юзер не в базе: <b>{result['skipped']}</b>")
-    await query.edit_message_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
-
-
-async def sync_usernames(context=None) -> dict:
-    """Обновляет email в панели если юзернейм изменился. Возвращает отчёт."""
-    from panel import update_client_email, build_email
-    from database import get_user_info
-    from datetime import datetime
-
-    subs = await get_all_subs_with_tg()
-    # В Remnawave имя клиента вшито в ссылку подписки: переименуешь — ссылка
-    # у человека умрёт. Поэтому там ники не синхронизируем вовсе.
-    from panel import on_remnawave
-    if on_remnawave():
-        return {"total": len(subs), "need_update": 0, "updated": 0,
-                "skipped": len(subs), "errors": [], "off": True}
-
-    updated = 0
-    need_update = 0
-    skipped = 0
-    errors = []
-
-    for row in subs:
-        sub_id, tg_id, old_email, uuid_val, sub_id_str, expire_date, limit_ip, limit_hwid, total_gb = row
-        user_row = await get_user_info(tg_id)
-        if not user_row:
-            skipped += 1
-            continue
-        username = user_row[2]
-        new_email = build_email(tg_id, username)
-        if new_email == old_email:
-            continue
-        need_update += 1
-        result = await update_client_email(
-            old_email=old_email,
-            new_email=new_email,
-            client_uuid=uuid_val,
-            sub_id=sub_id_str,
-            expire_date=expire_date,
-            limit_ip=limit_ip,
-            limit_hwid=limit_hwid,
-            total_gb=total_gb,
-        )
-        if result["success"]:
-            await update_sub_email(sub_id, new_email)
-            updated += 1
-        else:
-            errors.append(f"{old_email} → {new_email}: {result['error'][:100]}")
-
-    cfg = load_config()
-    cfg["auto_update_last_run"] = datetime.now().strftime("%d.%m.%Y %H:%M")
-    save_config(cfg)
-    if updated:
-        print(f"[sync_usernames] обновлено {updated} email(ов)")
-    return {"total": len(subs), "need_update": need_update, "updated": updated, "skipped": skipped, "errors": errors}
 
 
 async def handle_preset_expire(query, context: ContextTypes.DEFAULT_TYPE):
@@ -261,63 +116,6 @@ async def handle_preset_traffic(query, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def handle_inbounds_menu(query):
-    from panel import get_inbounds
-    await query.edit_message_text("⏳ Загружаю инбаунды из панели...")
-    result = await get_inbounds()
-    if not result["success"]:
-        await query.edit_message_text(
-            f"❌ Не удалось загрузить инбаунды:\n<code>{result['error']}</code>",
-            parse_mode="HTML",
-            reply_markup=back_admin(),
-        )
-        return
-    inbounds = result["inbounds"]
-    if not inbounds:
-        await query.edit_message_text(
-            "❌ На панели нет инбаундов.",
-            reply_markup=back_admin(),
-        )
-        return
-    cfg = load_config()
-    selected = cfg.get("preset_inbound_ids") or []
-    await query.edit_message_text(
-        "📡 <b>Инбаунды подписки</b>\n\n"
-        "Нажми на инбаунд чтобы выбрать/снять.\n"
-        "✅ — выбран, 🔘 — не выбран\n\n"
-        "Если ничего не выбрано — автоматически берётся первый VLESS.",
-        parse_mode="HTML",
-        reply_markup=inbounds_keyboard(inbounds, selected),
-    )
-
-
-async def handle_toggle_inbound(query, inbound_id: int):
-    from panel import get_inbounds
-    cfg = load_config()
-    selected = list(cfg.get("preset_inbound_ids") or [])
-    if inbound_id in selected:
-        selected.remove(inbound_id)
-    else:
-        selected.append(inbound_id)
-    cfg["preset_inbound_ids"] = selected
-    save_config(cfg)
-
-    # перезагрузить список
-    result = await get_inbounds()
-    if not result["success"]:
-        await query.answer("Список инбаундов обновить не удалось", show_alert=True)
-        return
-    inbounds = result["inbounds"]
-    await query.edit_message_text(
-        "📡 <b>Инбаунды подписки</b>\n\n"
-        "Нажми на инбаунд чтобы выбрать/снять.\n"
-        "✅ — выбран, 🔘 — не выбран\n\n"
-        "Если ничего не выбрано — автоматически берётся первый VLESS.",
-        parse_mode="HTML",
-        reply_markup=inbounds_keyboard(inbounds, selected),
-    )
-
-
 async def handle_create_sub(query, context: ContextTypes.DEFAULT_TYPE):
     cfg = load_config()
     if not _presets_ready(cfg):
@@ -354,6 +152,8 @@ async def do_create_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_
         limit_hwid=int(cfg["preset_hwid"]),
         total_gb=int(cfg["preset_traffic"]),
         email=email,
+        tg_id=tg_id,
+        note=f"@{username}" if username else "",
     )
 
     if not result["success"]:

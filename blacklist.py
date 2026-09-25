@@ -210,7 +210,7 @@ async def restore_subs(tg_id: int) -> dict:
     from database import bl_hold_take
     from paidsub.storage import add_history, get_paid_sub, set_expire_date, update_paid_sub_field
     from paidsub.time_parser import fmt_duration
-    from panel import get_client_info, move_client_inbound, toggle_client, update_client_expire
+    from panel import get_client_info, toggle_client, update_client_expire
 
     out = {"paid_until": None, "admin": False, "errors": []}
     for kind, sub_id, remaining in await bl_hold_take(tg_id):
@@ -232,10 +232,6 @@ async def restore_subs(tg_id: int) -> dict:
             r = await toggle_client(row[2], True)
             if not r.get("success"):
                 out["errors"].append(str(r.get("error") or "?"))
-        # как при оплате: вернуть на основные инбаунды, если клиента переносили
-        inbound_ids = load_config().get("paid_preset_inbound_ids") or []
-        if inbound_ids:
-            await move_client_inbound(row[2], inbound_ids)
         await add_history(tg_id, "unblacklisted", f"Возвращён остаток {fmt_duration(remaining)}\nДо: {until}")
         out["paid_until"] = until
     if not out["paid_until"]:

@@ -30,7 +30,7 @@ from fraud import (
 from remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
     handle_rw_squads, handle_rw_squad_toggle, handle_rw_migrate,
-    handle_rw_migrate_go, handle_rw_switch, handle_rw_notify, handle_rw_notify_go,
+    handle_rw_migrate_go, handle_rw_notify, handle_rw_notify_go,
 )
 from backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
@@ -94,18 +94,10 @@ from handlers.tickets import (
     handle_ticket_files, handle_ticket_quick, handle_ticket_send_quick,
     handle_ticket_close, handle_quick_menu, handle_quick_add, handle_quick_del,
 )
-from handlers.xui_settings import (
-    handle_xui_settings, handle_set_xui_url, handle_set_xui_token,
-    handle_set_xui_sub_port, handle_set_xui_sub_path,
-    handle_test_xui, handle_nodes_menu, handle_node_set,
-)
 from adminsub.handlers import (
     handle_admin_subs_menu, handle_presets_menu,
     handle_preset_expire, handle_preset_ip, handle_preset_hwid, handle_preset_traffic,
     handle_create_sub, handle_sub_view, handle_sub_delete, handle_sub_toggle,
-    handle_inbounds_menu, handle_toggle_inbound,
-    handle_auto_update_settings, handle_toggle_auto_update,
-    handle_set_auto_update_days, handle_run_sync_now,
     handle_sub_settings, handle_sub_edit_expire, handle_sub_edit_ip,
     handle_sub_edit_hwid, handle_sub_edit_traffic,
 )
@@ -116,15 +108,13 @@ from paidsub.handlers import (
     handle_paid_preset_price, handle_paid_preset_pay_url,
     handle_paid_create_sub, handle_paid_create_type,
     handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
-    handle_paid_inbounds_menu, handle_paid_toggle_inbound,
-    handle_paid_inbounds_expire_menu, handle_paid_toggle_inbound_expire,
     handle_approve, handle_reject, handle_request_sub,
     handle_paid_sub_freeze, handle_paid_sub_extend, handle_paid_sub_reduce,
     handle_paid_bulk_menu, handle_paid_bulk_extend, handle_paid_bulk_reduce,
     handle_paid_bulk_ip, handle_paid_bulk_hwid, handle_paid_bulk_limits_apply,
     handle_paid_device_price, handle_paid_device_max,
     handle_paid_devices, handle_paid_ips, handle_paid_hwid_del,
-    handle_paid_hwid_clear, handle_paid_ips_clear,
+    handle_paid_hwid_clear,
     handle_paid_fix_renew, handle_paid_fix_renew_apply,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_ip, handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
@@ -133,8 +123,6 @@ from paidsub.handlers import (
     handle_confirm_payment, handle_reject_payment,
     handle_paid_history, handle_paid_history_view, handle_mute_user, handle_unmute_user, handle_muted_list,
     handle_paid_requests,
-    handle_paid_auto_update_settings, handle_paid_toggle_auto_update,
-    handle_paid_set_auto_update_days, handle_paid_run_sync_now,
     handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
     handle_promos_menu, handle_promo_view, handle_promo_create,
     handle_promo_toggle, handle_promo_delete,
@@ -458,8 +446,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_rw_migrate(query, context)
     elif data == "rw_migrate_go":
         await handle_rw_migrate_go(query, context)
-    elif data == "rw_switch":
-        await handle_rw_switch(query, context)
     elif data == "rw_notify":
         await handle_rw_notify(query, context)
     elif data == "rw_notify_go":
@@ -566,26 +552,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("ticket_reply:"):
         await handle_ticket_reply_start(query, int(data.split(":")[1]), context)
 
-    # 3x-UI
-    elif data == "xui_settings":
-        # сюда же ведёт «◀️ К серверам» из ввода адреса/токена — ввод отменяем
-        context.user_data.pop("state", None)
-        await handle_xui_settings(query)
-    elif data == "set_xui_url":
-        await handle_set_xui_url(query, context)
-    elif data == "set_xui_token":
-        await handle_set_xui_token(query, context)
-    elif data == "set_xui_sub_port":
-        await handle_set_xui_sub_port(query, context)
-    elif data == "set_xui_sub_path":
-        await handle_set_xui_sub_path(query, context)
-    elif data == "test_xui":
-        await handle_test_xui(query)
-    elif data == "nodes_menu":
-        await handle_nodes_menu(query, context)
-    elif data.startswith("node_set:"):
-        await handle_node_set(query, context, data.split(":", 1)[1])
-
     # Админские подписки
     elif data == "admin_subs":
         await handle_admin_subs_menu(query)
@@ -619,18 +585,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_sub_edit_hwid(query, int(data.split(":")[1]), context)
     elif data.startswith("sub_edit_traffic:"):
         await handle_sub_edit_traffic(query, int(data.split(":")[1]), context)
-    elif data == "inbounds_menu":
-        await handle_inbounds_menu(query)
-    elif data.startswith("toggle_inbound:"):
-        await handle_toggle_inbound(query, int(data.split(":")[1]))
-    elif data == "auto_update_settings":
-        await handle_auto_update_settings(query)
-    elif data == "toggle_auto_update":
-        await handle_toggle_auto_update(query)
-    elif data == "set_auto_update_days":
-        await handle_set_auto_update_days(query, context)
-    elif data == "run_sync_now":
-        await handle_run_sync_now(query)
 
     # Платные подписки
     elif data == "paid_subs":
@@ -702,20 +656,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_hwid_del(query, context, int(sid), ref)
     elif data.startswith("paid_hwid_clear:"):
         await handle_paid_hwid_clear(query, context, int(data.split(":")[1]))
-    elif data.startswith("paid_ips_clear:"):
-        await handle_paid_ips_clear(query, context, int(data.split(":")[1]))
     elif data.startswith("paid_sub_toggle:"):
         await handle_paid_sub_toggle(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_delete:"):
         await handle_paid_sub_delete(query, int(data.split(":")[1]), context)
-    elif data == "paid_inbounds_menu":
-        await handle_paid_inbounds_menu(query)
-    elif data.startswith("paid_toggle_inbound:"):
-        await handle_paid_toggle_inbound(query, int(data.split(":")[1]))
-    elif data == "paid_inbounds_expire_menu":
-        await handle_paid_inbounds_expire_menu(query)
-    elif data.startswith("paid_toggle_inbound_expire:"):
-        await handle_paid_toggle_inbound_expire(query, int(data.split(":")[1]))
     elif data.startswith("paid_sub_freeze:"):
         await handle_paid_sub_freeze(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_extend:"):
@@ -809,14 +753,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_promo_toggle(query, int(data.split(":")[1]))
     elif data.startswith("promo_delete:"):
         await handle_promo_delete(query, int(data.split(":")[1]))
-    elif data == "paid_auto_update_settings":
-        await handle_paid_auto_update_settings(query)
-    elif data == "paid_toggle_auto_update":
-        await handle_paid_toggle_auto_update(query)
-    elif data == "paid_set_auto_update_days":
-        await handle_paid_set_auto_update_days(query, context)
-    elif data == "paid_run_sync_now":
-        await handle_paid_run_sync_now(query)
     elif data == "paid_requests":
         await handle_paid_requests(query)
     elif data == "paid_muted_list":

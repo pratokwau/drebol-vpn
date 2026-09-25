@@ -47,7 +47,7 @@ async def handle_admin_panel(query):
 
 async def handle_dashboard(query):
     from database import get_dashboard_stats
-    from panel import count_panel_clients, provider_label
+    from panel import count_panel_clients
     s = await get_dashboard_stats()
     cfg = load_config()
     price = cfg.get("paid_price", 0) or 0
@@ -61,7 +61,6 @@ async def handle_dashboard(query):
         revenue_note = ""
 
     # Сверка базы с панелью, которая обслуживает подписки
-    panel_name = provider_label()
     db_paid = s["paid_total"]
     db_admin = s["admin_subs"]
     db_all = db_paid + db_admin
@@ -76,14 +75,14 @@ async def handle_dashboard(query):
                 f"прочих {p_other} vs {db_admin}"
             )
         panel_block = (
-            f"🖥 <b>Панель {panel_name}</b>\n<blockquote>"
+            "🖥 <b>Панель</b>\n<blockquote>"
             f"Клиентов в панели: <b>{p_total}</b>  (платных {p_paid} · прочих {p_other})\n"
             f"Записей в базе: <b>{db_all}</b>  (платных {db_paid} · админских {db_admin})\n"
             f"{sync_line}</blockquote>\n\n"
         )
     else:
         panel_block = (
-            f"🖥 <b>Панель {panel_name}</b>\n<blockquote>"
+            "🖥 <b>Панель</b>\n<blockquote>"
             f"🔴 Панель недоступна — сверка не выполнена\n"
             f"Записей в базе: <b>{db_all}</b>  (платных {db_paid} · админских {db_admin})"
             "</blockquote>\n\n"
@@ -132,95 +131,74 @@ async def handle_dashboard(query):
 
 
 async def handle_healthcheck(query):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import probe_servers, node_word, on_remnawave
+    """Панель, выдача подписок и узлы — одним экраном.
 
-    await query.edit_message_text("🩺 Проверяю серверы…")
+    Состояние узлов рассказывает сама панель: она держит с ними связь,
+    поэтому простукивать порты снаружи не нужно.
+    """
+    from html import escape
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from panel import probe_servers
+
+    await query.edit_message_text("🩺 Проверяю панель и узлы…")
     r = await probe_servers()
-    panel, sub, inbounds = r["panel"], r["sub"], r["inbounds"]
-    points = node_word()                  # «Инбаунды» у 3x-UI, «Узлы» у Remnawave
-    point_one = node_word(False).lower()
+    panel, sub, nodes = r["panel"], r["sub"], r["nodes"]
 
     back = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Проверить снова", callback_data="healthcheck"),
-         InlineKeyboardButton("◀️ Назад",
-                              callback_data="rw_menu" if on_remnawave() else "xui_settings")],
+         InlineKeyboardButton("◀️ Назад", callback_data="rw_menu")],
     ])
 
     lines = ["🩺 <b>Здоровье серверов</b>", ""]
     core = []
-
-    # Панель
     # ошибки панели приходят её же словами и могут содержать HTML-страницу
-    from html import escape
     if panel["ok"]:
         core.append(f"🟢 <b>Панель</b> — отвечает, {panel['ms']} мс")
     else:
         core.append(f"🔴 <b>Панель недоступна</b>\n<code>{escape(str(panel['error']))}</code>")
 
-    # Подписки — отдельный сервис на своём порту, падает независимо от панели
     if sub["ok"]:
-        note = "" if sub["status"] < 400 else f" (HTTP {sub['status']})"
-        core.append(f"🟢 <b>Подписки</b> — отвечают, {sub['ms']} мс{note}")
+        core.append(f"🟢 <b>Ссылки подписок</b> — отдаются, {sub['ms']} мс")
     else:
         core.append(
-            f"🔴 <b>Подписки не работают</b> — порт {sub.get('port', '?')}\n"
+            f"🔴 <b>Ссылки подписок не отдаются</b> — порт {sub.get('port', '?')}\n"
             f"<code>{escape(str(sub['error']))}</code>\n"
-            f"<i>Клиенты не смогут обновить ключ.</i>"
+            "<i>Клиенты не смогут обновить ключ.</i>"
         )
     lines.append("<blockquote>" + "\n".join(core) + "</blockquote>")
 
-    # Инбаунды
     if panel["ok"]:
-        if not inbounds:
-            lines.append(f"\n⚪️ {points} не заданы.")
+        if not nodes:
+            lines.append("\n⚪️ Узлов в панели нет — подключать людей некуда.")
         else:
-            checkable = [i for i in inbounds if i["enabled"] and
-                         (i.get("mapped") or i["reachable"])]
-            up = sum(1 for i in checkable if i["reachable"])
-            lines.append(f"\n📡 <b>{points}</b> — доступно <b>{up} из {len(checkable)}</b>")
-            ib_lines = []
-            for i in inbounds:
-                if not i["enabled"]:
-                    icon, tail = "⚪️", " · выключен"
-                elif i["reachable"]:
-                    where = "" if not i.get("mapped") else f" · {i['host']}"
+            working = [n for n in nodes if n["enabled"]]
+            up = sum(1 for n in working if n["reachable"])
+            lines.append(f"\n🖧 <b>Узлы</b> — в строю <b>{up} из {len(working)}</b>")
+            rows = []
+            for n in nodes:
+                if not n["enabled"]:
+                    icon, tail = "⚪️", " · выключен в панели"
+                elif n["reachable"]:
                     icon = "🟢"
-                    tail = f"{where} · UDP, отказа нет" if i.get("udp") else f"{where} · {i['ms']} мс"
-                elif not i.get("mapped"):
-                    # проверяли по адресу панели, а точка входа может жить на узле —
-                    # это не авария, а незаданная привязка
-                    icon, tail = "⚪️", " · узел не привязан"
+                    tail = f" · {escape(str(n['host']))}"
+                    if n.get("xray"):
+                        tail += f" · xray {escape(str(n['xray']))}"
                 else:
-                    icon, tail = "🔴", f" · {escape(str(i['host']))} · {escape(str(i['error']))}"
-                ib_lines.append(
-                    f"{icon} <b>{escape(str(i['tag']))}</b> ({i['protocol']}:{i['port']}) "
-                    f"· 👤 {i['clients']}{tail}"
-                )
-            lines.append("<blockquote expandable>" + "\n".join(ib_lines) + "</blockquote>")
-            if any(i.get("udp") for i in inbounds if i["enabled"]):
-                lines.append(
-                    "<i>UDP-инбаунды (hysteria и подобные) на чужие пакеты не отвечают, "
-                    "поэтому проверяются мягко: «живым» считается всё, кроме отказа порта.</i>"
-                )
+                    icon, tail = "🔴", f" · {escape(str(n['error']))}"
+                rows.append(f"{icon} <b>{escape(str(n['tag']))}</b> · 👤 {n['clients']}{tail}")
+            lines.append("<blockquote expandable>" + "\n".join(rows) + "</blockquote>")
+            lines.append("<i>Сколько человек на узле — по данным панели.</i>")
 
     problems = []
     if not panel["ok"]:
         problems.append("панель не отвечает — бот не сможет выдавать и продлевать ключи")
     if not sub["ok"]:
-        problems.append("выдача подписок лежит — выданные ключи не обновятся у клиентов")
-    dead = [i["tag"] for i in inbounds
-            if i["enabled"] and not i["reachable"] and i.get("mapped")]
+        problems.append("ссылки подписок не отдаются — выданные ключи не обновятся у клиентов")
+    dead = [n["tag"] for n in nodes if n["enabled"] and not n["reachable"]]
     if dead:
-        problems.append(f"не работает {point_one}: " + escape(", ".join(dead[:5])))
-
-    unmapped = sorted({i["prefix"] for i in inbounds
-                       if i["enabled"] and not i["reachable"] and not i.get("mapped")})
-    if unmapped:
-        problems.append(
-            "не проверены — не задан адрес узла: " + escape(", ".join(unmapped[:5]))
-            + ". Укажи в «🖧 Узлы»"
-        )
+        problems.append("узел не в строю: " + escape(", ".join(dead[:5])))
+    if panel["ok"] and not nodes:
+        problems.append("в панели нет узлов")
     if problems:
         lines.append("\n⚠️ <b>Проблемы</b>")
         lines.append("<blockquote>" + "\n".join(f"• {p}" for p in problems) + "</blockquote>")

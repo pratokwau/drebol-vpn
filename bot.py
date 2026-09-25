@@ -13,65 +13,44 @@ from handlers.control import log_update
 
 async def post_init(app: Application):
     await init_db()
-    from adminsub.handlers import sync_usernames
     from config import load_config
 
-    async def _sync_job(ctx):
-        from datetime import datetime
-        cfg = load_config()
-        if not cfg.get("auto_update_usernames", False):
-            return
-        days = int(cfg.get("auto_update_days", 2))
-        last_run_str = cfg.get("auto_update_last_run")
-        if last_run_str:
-            try:
-                last_run = datetime.strptime(last_run_str, "%d.%m.%Y %H:%M")
-                if (datetime.now() - last_run).days < days:
-                    return
-            except Exception:
-                pass
-        await sync_usernames(ctx)
-
     if app.job_queue:
-        app.job_queue.run_repeating(_sync_job, interval=24 * 3600, first=300)
-
-        from paidsub.handlers import check_expired_subs, paid_sync_usernames
+        from paidsub.handlers import check_expired_subs
         app.job_queue.run_repeating(check_expired_subs, interval=10, first=10)
 
         from paidsub.handlers import expiry_reminder_tick
         app.job_queue.run_repeating(expiry_reminder_tick, interval=1800, first=180)
 
         async def _healthcheck_job(ctx):
-            """Следит за панелью, выдачей подписок и точками входа.
+            """Следит за панелью, выдачей подписок и узлами.
 
             Уведомляет только при смене состояния, чтобы не спамить каждые 5 минут.
             """
             from config import ADMIN_ID, load_config, save_config
-            from panel import probe_servers, is_configured, provider_label, node_word
+            from panel import probe_servers, is_configured
             from log_channel import send_log
 
             cfg = load_config()
             if not is_configured():
                 return
-            panel_name = provider_label()
-            points = node_word().lower()
 
             r = await probe_servers()
             panel_ok = r["panel"]["ok"]
             sub_ok = r["sub"]["ok"]
             dead = sorted(
-                i["tag"] for i in r["inbounds"] if i["enabled"] and not i["reachable"]
+                n["tag"] for n in r["nodes"] if n["enabled"] and not n["reachable"]
             )
 
             alerts = []
             changed = False
 
-            if panel_ok != cfg.get("xui_healthy", True):
-                cfg["xui_healthy"] = panel_ok
+            if panel_ok != cfg.get("panel_healthy", True):
+                cfg["panel_healthy"] = panel_ok
                 changed = True
                 alerts.append(
-                    f"🟢 <b>Панель {panel_name} снова доступна.</b>" if panel_ok else
-                    f"🔴 <b>Панель {panel_name} недоступна!</b>\n"
+                    "🟢 <b>Панель снова доступна.</b>" if panel_ok else
+                    "🔴 <b>Панель недоступна!</b>\n"
                     f"<code>{r['panel'].get('error', '?')}</code>"
                 )
 
@@ -86,17 +65,17 @@ async def post_init(app: Application):
                     f"Клиенты не смогут обновить ключ."
                 )
 
-            if panel_ok and dead != (cfg.get("dead_inbounds") or []):
-                prev = cfg.get("dead_inbounds") or []
-                cfg["dead_inbounds"] = dead
+            if panel_ok and dead != (cfg.get("dead_nodes") or []):
+                prev = cfg.get("dead_nodes") or []
+                cfg["dead_nodes"] = dead
                 changed = True
                 if dead:
                     alerts.append(
-                        f"🔴 <b>Не работают {points}:</b>\n" +
+                        "🔴 <b>Не работают узлы:</b>\n" +
                         "\n".join(f"• {t}" for t in dead)
                     )
                 elif prev:
-                    alerts.append(f"🟢 <b>Все {points} снова доступны.</b>")
+                    alerts.append("🟢 <b>Все узлы снова доступны.</b>")
 
             if changed:
                 save_config(cfg)
@@ -291,24 +270,6 @@ async def post_init(app: Application):
         from blacklist import blacklist_sync_tick
         bl_hours = int(load_config().get("blacklist_sync_hours", 6) or 6)
         app.job_queue.run_repeating(blacklist_sync_tick, interval=bl_hours * 3600, first=120)
-
-        async def _paid_sync_job(ctx):
-            from datetime import datetime
-            cfg = load_config()
-            if not cfg.get("paid_auto_update_usernames", False):
-                return
-            days = int(cfg.get("paid_auto_update_days", 2))
-            last_run_str = cfg.get("paid_auto_update_last_run")
-            if last_run_str:
-                try:
-                    last_run = datetime.strptime(last_run_str, "%d.%m.%Y %H:%M")
-                    if (datetime.now() - last_run).days < days:
-                        return
-                except Exception:
-                    pass
-            await paid_sync_usernames(ctx)
-
-        app.job_queue.run_repeating(_paid_sync_job, interval=24 * 3600, first=300)
 
         async def _winback_job(ctx):
             from config import load_config

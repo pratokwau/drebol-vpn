@@ -8,15 +8,8 @@ AWAITING_ADMIN_REPLY = "awaiting_admin_reply"
 AWAITING_PRIVACY_URL = "awaiting_privacy_url"
 AWAITING_TERMS_URL = "awaiting_terms_url"
 
-# Параметры 3x-UI
-AWAITING_XUI_URL = "awaiting_xui_url"
-AWAITING_XUI_TOKEN = "awaiting_xui_token"
-AWAITING_XUI_SUB_PORT = "awaiting_xui_sub_port"
-AWAITING_XUI_SUB_PATH = "awaiting_xui_sub_path"
-
 # Создание подписки
 AWAITING_SUB_TG_ID = "awaiting_sub_tg_id"
-AWAITING_AUTO_UPDATE_DAYS = "awaiting_auto_update_days"
 
 # Настройки-пресеты для админских подписок
 AWAITING_PRESET_EXPIRE = "awaiting_preset_expire"
@@ -52,7 +45,6 @@ AWAITING_PAID_SUB_EDIT_PRICE = "awaiting_paid_sub_edit_price"
 AWAITING_PAID_SUB_EDIT_PAY_URL = "awaiting_paid_sub_edit_pay_url"
 AWAITING_PAID_SUB_MUTE = "awaiting_paid_sub_mute"
 AWAITING_PAID_MUTE_USER = "awaiting_paid_mute_user"
-AWAITING_PAID_AUTO_UPDATE_DAYS = "awaiting_paid_auto_update_days"
 AWAITING_REFERRAL_BONUS = "awaiting_referral_bonus"
 AWAITING_REFERRAL_INVITED_BONUS = "awaiting_referral_invited_bonus"
 AWAITING_PAID_SUB_REDUCE = "awaiting_paid_sub_reduce"
@@ -90,9 +82,6 @@ AWAITING_REMIND_FIRST = "awaiting_remind_first"
 AWAITING_REMIND_SECOND = "awaiting_remind_second"
 AWAITING_WINBACK_DAYS = "awaiting_winback_days"
 AWAITING_WINBACK_PERCENT = "awaiting_winback_percent"
-
-# Узлы
-AWAITING_NODE_HOST = "awaiting_node_host"
 
 # Техработы
 AWAITING_MAINTENANCE_TEXT = "awaiting_maintenance_text"
