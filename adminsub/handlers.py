@@ -32,6 +32,17 @@ def _fmt_presets(cfg: dict, inbound_names: dict | None = None) -> str:
         traf = "безлимит"
     else:
         traf = f"{traf_raw} ГБ"
+    from panel import on_remnawave
+    head = (f"📅 Дата окончания: <b>{exp}</b>\n"
+            f"🌐 Лимит IP: <b>{ip}</b>\n"
+            f"🖥 Лимит HWID: <b>{hwid}</b>\n"
+            f"📶 Трафик: <b>{traf}</b>\n")
+    if on_remnawave():
+        names = inbound_names or {}
+        chosen = [names.get(u, u) for u in (cfg.get("rw_squads") or [])]
+        return head + ("👥 Сквады: <b>{}</b>".format(", ".join(chosen)) if chosen
+                       else "👥 Сквады: <b>не выбраны</b>")
+
     inbound_ids = cfg.get("preset_inbound_ids") or []
     if inbound_ids and inbound_names:
         names = [inbound_names.get(i, f"#{i}") for i in inbound_ids]
@@ -40,13 +51,7 @@ def _fmt_presets(cfg: dict, inbound_names: dict | None = None) -> str:
         inb_label = ", ".join(str(i) for i in inbound_ids)
     else:
         inb_label = "авто (первый VLESS)"
-    return (
-        f"📅 Дата окончания: <b>{exp}</b>\n"
-        f"🌐 Лимит IP: <b>{ip}</b>\n"
-        f"🖥 Лимит HWID: <b>{hwid}</b>\n"
-        f"📶 Трафик: <b>{traf}</b>\n"
-        f"📡 Инбаунды: <b>{inb_label}</b>"
-    )
+    return head + f"📡 Инбаунды: <b>{inb_label}</b>"
 
 
 async def handle_admin_subs_menu(query, page: int = 1):
@@ -66,15 +71,24 @@ async def handle_admin_subs_menu(query, page: int = 1):
 
 async def handle_presets_menu(query):
     cfg = load_config()
+    from panel import on_remnawave
     inbound_names = {}
-    inbound_ids = cfg.get("preset_inbound_ids") or []
-    if inbound_ids:
-        from xui_api import get_inbounds
-        result = await get_inbounds()
-        if result["success"]:
-            for inb in result["inbounds"]:
-                name = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
-                inbound_names[inb.get("id")] = name
+    if on_remnawave():
+        if cfg.get("rw_squads"):
+            import remnawave as rw
+            got = await rw.list_squads()
+            if got.get("ok"):
+                for sq in got["squads"]:
+                    inbound_names[sq["uuid"]] = sq["name"]
+    else:
+        inbound_ids = cfg.get("preset_inbound_ids") or []
+        if inbound_ids:
+            from panel import get_inbounds
+            result = await get_inbounds()
+            if result["success"]:
+                for inb in result["inbounds"]:
+                    name = inb.get("tag") or inb.get("remark") or f"#{inb.get('id')}"
+                    inbound_names[inb.get("id")] = name
     await query.edit_message_text(
         "⚙️ <b>Настройки подписки (по умолчанию)</b>\n\n"
         + _fmt_presets(cfg, inbound_names)
@@ -90,11 +104,15 @@ async def handle_auto_update_settings(query):
     days = cfg.get("auto_update_days", 2)
     last_run = cfg.get("auto_update_last_run")
     last_line = f"\n🕐 Последний запуск: {last_run}" if last_run else ""
+    from panel import on_remnawave
     await query.edit_message_text(
         "⏰ <b>Авто-обновление ников</b>\n\n"
         "Бот проверяет, изменился ли юзернейм у пользователей с подписками, "
         "и обновляет email в панели.\n"
-        + last_line,
+        + last_line
+        + ("\n\n⚠️ <i>На Remnawave не работает: имя клиента там вшито "
+           "в ссылку подписки, переименование сломало бы её.</i>"
+           if on_remnawave() else ""),
         parse_mode="HTML",
         reply_markup=auto_update_keyboard(enabled, days),
     )
@@ -124,6 +142,14 @@ async def handle_set_auto_update_days(query, context):
 async def handle_run_sync_now(query):
     await query.edit_message_text("⏳ Запускаю синхронизацию ников...")
     result = await sync_usernames()
+    if result.get("off"):
+        await query.edit_message_text(
+            "🔄 <b>Синхронизация ников не нужна</b>\n\n"
+            "<blockquote>Подписки обслуживает Remnawave: имя клиента там вшито "
+            "в ссылку подписки, и переименование сломало бы её у человека.</blockquote>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
     lines = [f"🔄 <b>Синхронизация завершена</b>\n"]
     lines.append(f"📊 Всего подписок с TG ID: <b>{result['total']}</b>")
     lines.append(f"🔍 Нужно обновить: <b>{result['need_update']}</b>")
@@ -143,11 +169,18 @@ async def handle_run_sync_now(query):
 
 async def sync_usernames(context=None) -> dict:
     """Обновляет email в панели если юзернейм изменился. Возвращает отчёт."""
-    from xui_api import update_client_email, build_email
+    from panel import update_client_email, build_email
     from database import get_user_info
     from datetime import datetime
 
     subs = await get_all_subs_with_tg()
+    # В Remnawave имя клиента вшито в ссылку подписки: переименуешь — ссылка
+    # у человека умрёт. Поэтому там ники не синхронизируем вовсе.
+    from panel import on_remnawave
+    if on_remnawave():
+        return {"total": len(subs), "need_update": 0, "updated": 0,
+                "skipped": len(subs), "errors": [], "off": True}
+
     updated = 0
     need_update = 0
     skipped = 0
@@ -229,7 +262,7 @@ async def handle_preset_traffic(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_inbounds_menu(query):
-    from xui_api import get_inbounds
+    from panel import get_inbounds
     await query.edit_message_text("⏳ Загружаю инбаунды из панели...")
     result = await get_inbounds()
     if not result["success"]:
@@ -259,7 +292,7 @@ async def handle_inbounds_menu(query):
 
 
 async def handle_toggle_inbound(query, inbound_id: int):
-    from xui_api import get_inbounds
+    from panel import get_inbounds
     cfg = load_config()
     selected = list(cfg.get("preset_inbound_ids") or [])
     if inbound_id in selected:
@@ -307,9 +340,9 @@ async def handle_create_sub(query, context: ContextTypes.DEFAULT_TYPE):
 
 async def do_create_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_TYPE, reply_func):
     cfg = load_config()
-    await reply_func("⏳ Создаю подписку в 3x-UI...")
+    await reply_func("⏳ Создаю подписку…")
 
-    from xui_api import create_client, build_email
+    from panel import create_client, build_email
     from database import get_user_info
     user_row = await get_user_info(tg_id)
     username = user_row[2] if user_row else None
@@ -382,7 +415,7 @@ async def handle_sub_view(query, sub_id: int):
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
     # Получаем реальный трафик и статус из панели
-    from xui_api import get_client_traffic, get_client_info
+    from panel import get_client_traffic, get_client_info
     t = await get_client_traffic(email)
     if t["success"]:
         up = t.get("up", 0)
@@ -432,7 +465,7 @@ async def handle_sub_toggle(query, sub_id: int, context=None):
         return
     tg_id = row[1]
     email = row[2]
-    from xui_api import get_client_info, toggle_client
+    from panel import get_client_info, toggle_client
     info = await get_client_info(email)
     if not info.get("success"):
         await query.answer("❌ Клиент не найден в панели", show_alert=True)
@@ -463,7 +496,7 @@ async def handle_sub_delete(query, sub_id: int, context=None):
     email = row[2] if row else None
 
     if email:
-        from xui_api import delete_client
+        from panel import delete_client
         await query.edit_message_text("⏳ Удаляю из панели...")
         panel_result = await delete_client(email)
         panel_status = "✅ удалена из панели" if panel_result["success"] else f"⚠️ панель: {panel_result.get('error', '?')}"

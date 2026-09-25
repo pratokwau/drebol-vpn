@@ -58,6 +58,16 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
     import maintenance as mnt
     mnt_label = "🔴 Техработы ВКЛЮЧЕНЫ" if mnt.is_maintenance() else "🛠 Техработы и функции"
 
+    # Главная кнопка панели ведёт туда, где сейчас живут подписки,
+    # а вторая оставляет дорогу к панели, с которой уходим
+    from panel import on_remnawave
+    if on_remnawave():
+        panel_btn = ("🖥 Серверы и Remnawave", "rw_menu")
+        old_panel_btn = ("🗄 Старая 3x-UI", "xui_settings")
+    else:
+        panel_btn = ("🖥 Серверы и 3x-UI", "xui_settings")
+        old_panel_btn = ("🆕 Remnawave", "rw_menu")
+
     def b(text, cb):
         return InlineKeyboardButton(text, callback_data=cb)
 
@@ -76,8 +86,8 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b("🎯 Winback", "winback_settings"), b("⏰ Напоминания", "remind_settings")],
         [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
         # инфраструктура
-        [b("🖥 Серверы и 3x-UI", "xui_settings"), b("🌐 Сайт", "site_menu")],
-        [b("💾 Бэкап и перенос", "backup_menu"), b("🆕 Remnawave", "rw_menu")],
+        [b(*panel_btn), b("🌐 Сайт", "site_menu")],
+        [b("💾 Бэкап и перенос", "backup_menu"), b(*old_panel_btn)],
         [b("📄 Документы", "documents_menu"), b("🧾 Лог-канал", "log_channel_settings")],
         [b(mnt_label, "mnt_menu")],
         [b("🔄 Обновиться с GitHub", "git_update")],

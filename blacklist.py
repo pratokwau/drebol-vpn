@@ -169,7 +169,7 @@ async def stop_subs(tg_id: int, reason: str) -> dict:
         add_history, get_paid_sub_by_tg_id, parse_sub_date, set_expire_date, update_paid_sub_field,
     )
     from paidsub.time_parser import fmt_duration
-    from xui_api import get_client_info, toggle_client, update_client_expire
+    from panel import get_client_info, toggle_client, update_client_expire
 
     out = {"paid": None, "admin": False, "errors": []}
     now = datetime.now()
@@ -210,7 +210,7 @@ async def restore_subs(tg_id: int) -> dict:
     from database import bl_hold_take
     from paidsub.storage import add_history, get_paid_sub, set_expire_date, update_paid_sub_field
     from paidsub.time_parser import fmt_duration
-    from xui_api import get_client_info, move_client_inbound, toggle_client, update_client_expire
+    from panel import get_client_info, move_client_inbound, toggle_client, update_client_expire
 
     out = {"paid_until": None, "admin": False, "errors": []}
     for kind, sub_id, remaining in await bl_hold_take(tg_id):

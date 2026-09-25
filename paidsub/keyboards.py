@@ -64,6 +64,16 @@ def _devices_rows(b) -> list:
              b("📱 Максимум докупа", "paid_device_max")]]
 
 
+def _panel_rows(b) -> list:
+    """Точки входа настраиваются там, где живут: инбаунды — в 3x-UI,
+    сквады — в Remnawave."""
+    from panel import on_remnawave
+    if on_remnawave():
+        return [[b("👥 Сквады Remnawave", "rw_squads")]]
+    return [[b("📡 Инбаунды создания", "paid_inbounds_menu"),
+             b("📡 Инбаунды окончания", "paid_inbounds_expire_menu")]]
+
+
 def paid_presets_keyboard() -> InlineKeyboardMarkup:
     from config import load_config
     cfg = load_config()
@@ -85,7 +95,7 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         *_devices_rows(b),
         [b("📶 Трафик (ГБ)", "paid_preset_traffic")],
         # панель
-        [b("📡 Инбаунды создания", "paid_inbounds_menu"), b("📡 Инбаунды окончания", "paid_inbounds_expire_menu")],
+        *_panel_rows(b),
         [b("⏰ Авто-обновление ников", "paid_auto_update_settings")],
         [b("◀️ Назад к подпискам", "paid_subs")],
     ])

@@ -65,7 +65,8 @@ async def fraud_tick(context):
     cfg = load_config()
     if not cfg.get("fraud_enabled", True):
         return
-    if not cfg.get("xui_url") or not cfg.get("xui_token"):
+    from panel import is_configured
+    if not is_configured():
         return
     batch = await _subs_slice(int(cfg.get("fraud_batch", 8) or 8))
     for _sub_id, tg_id, email, times_renewed in batch:
@@ -75,7 +76,7 @@ async def fraud_tick(context):
 async def scan_sub(context, tg_id: int, email: str, paid: bool) -> list:
     """Запоминает отпечатки одной подписки и проверяет их на пересечения."""
     from database import remember_fingerprints, fingerprint_owners
-    from xui_api import get_client_hwids, get_client_ips
+    from panel import get_client_hwids, get_client_ips
 
     found = []
     hw = await get_client_hwids(email)

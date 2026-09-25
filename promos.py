@@ -111,7 +111,7 @@ async def apply_days(tg_id: int, days: int, bot=None) -> dict:
     from paidsub.storage import (
         add_history, get_paid_sub_by_tg_id, parse_sub_date, set_expire_date, update_paid_sub_field,
     )
-    from xui_api import get_client_info, move_client_inbound, toggle_client, update_client_expire
+    from panel import get_client_info, move_client_inbound, toggle_client, update_client_expire
 
     row = await get_paid_sub_by_tg_id(tg_id)
     if not row:

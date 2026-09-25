@@ -45,6 +45,8 @@ CB_LABELS = {
     "rw_menu": "🆕 Remnawave",
     "rw_test": "🔌 Проверка Remnawave",
     "rw_migrate_go": "🚚 Перенос клиентов",
+    "rw_switch": "⚙️ Смена панели",
+    "rw_notify_go": "📨 Рассылка новых ссылок",
     "backup_export": "📤 Выгрузка базы",
     "backup_apply": "♻️ Восстановление из бэкапа",
     "site_logo": "🖼 Логотип сайта",
@@ -260,7 +262,7 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
     if context:
         context.user_data.pop("state", None)
     from database import activity_summary
-    from xui_api import get_online_emails
+    from panel import get_online_emails
 
     s = await activity_summary()
     online = await get_online_emails()
@@ -388,7 +390,7 @@ async def handle_user_activity(query, tg_id: int, page: int = 1):
 
 
 async def handle_online(query):
-    from xui_api import get_online_emails
+    from panel import get_online_emails
     from database import users_by_emails
     await query.edit_message_text("🔌 Спрашиваю панель...")
     r = await get_online_emails()
@@ -420,7 +422,7 @@ async def handle_online(query):
 
 
 async def handle_traffic(query):
-    from xui_api import get_traffic_snapshot
+    from panel import get_traffic_snapshot
     from database import users_by_emails
     await query.edit_message_text("📊 Считаю трафик...")
     r = await get_traffic_snapshot()
@@ -455,7 +457,7 @@ async def handle_traffic(query):
 
 async def build_digest(day_offset: int = 1) -> str:
     from database import digest_stats
-    from xui_api import get_online_emails
+    from panel import get_online_emails
     d = await digest_stats(day_offset)
     online = await get_online_emails()
 
@@ -584,7 +586,7 @@ async def handle_connect_help_menu(query, context=None):
         "подключился, бот один раз пишет ему: как подключиться и кнопка в поддержку.\n\n"
         f"📌 Статус: <b>{'ВКЛ ✅' if on else 'ВЫКЛ ❌'}</b>\n"
         f"📨 Отправлено за 7 дней: <b>{st['week']}</b> · всего: <b>{st['total']}</b>\n\n"
-        "<i>Подключение бот узнаёт у панели 3x-UI. Хранит только отметку "
+        "<i>Подключение бот узнаёт у панели. Хранит только отметку "
         "«подключался хоть раз» — без времени и адресов.</i>"
     )
     rows = [
@@ -629,7 +631,7 @@ async def connect_help_tick(context):
         recent_subs_for_connect_help, mark_connect_help, log_activity, is_banned,
     )
     from blacklist import is_blacklisted
-    from xui_api import get_last_online
+    from panel import get_last_online
 
     cfg = load_config()
     if not cfg.get("connect_help_enabled", True) or mnt.is_maintenance():

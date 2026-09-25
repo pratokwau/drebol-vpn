@@ -60,7 +60,7 @@ async def _who(tg_id) -> str:
 
 async def _panel_enabled(email) -> bool | None:
     """Включён ли клиент в панели; None — панель не ответила."""
-    from xui_api import get_client_info
+    from panel import get_client_info
     try:
         info = await get_client_info(email)
     except Exception:
@@ -75,7 +75,7 @@ async def _paid_sub_delete(arg):
     row = await get_paid_sub(int(arg))
     who = await _who(row[1]) if row else "?"
     return (f"🗑 <b>Удалить подписку #{arg}?</b>\n\n👤 {who}\n📅 До: {row[6] if row else '?'}\n\n"
-            "Клиент удалится из панели 3x-UI, ключ перестанет работать. Отменить это нельзя.",
+            "Клиент удалится из панели, ключ перестанет работать. Отменить это нельзя.",
             "🗑 Да, удалить", f"paid_sub_view:{arg}", "paid_subs")
 
 
@@ -84,7 +84,7 @@ async def _sub_delete(arg):
     row = await get_sub(int(arg))
     who = await _who(row[1]) if row else "?"
     return (f"🗑 <b>Удалить админскую подписку #{arg}?</b>\n\n👤 {who}\n📅 До: {row[6] if row else '?'}\n\n"
-            "Клиент удалится из панели 3x-UI, ключ перестанет работать. Отменить это нельзя.",
+            "Клиент удалится из панели, ключ перестанет работать. Отменить это нельзя.",
             "🗑 Да, удалить", f"sub_view:{arg}", "admin_subs")
 
 

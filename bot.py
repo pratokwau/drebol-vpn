@@ -42,17 +42,19 @@ async def post_init(app: Application):
         app.job_queue.run_repeating(expiry_reminder_tick, interval=1800, first=180)
 
         async def _healthcheck_job(ctx):
-            """Следит за панелью, сервисом подписок и портами инбаундов.
+            """Следит за панелью, выдачей подписок и точками входа.
 
             Уведомляет только при смене состояния, чтобы не спамить каждые 5 минут.
             """
             from config import ADMIN_ID, load_config, save_config
-            from xui_api import probe_servers
+            from panel import probe_servers, is_configured, provider_label, node_word
             from log_channel import send_log
 
             cfg = load_config()
-            if not cfg.get("xui_url") or not cfg.get("xui_token"):
+            if not is_configured():
                 return
+            panel_name = provider_label()
+            points = node_word().lower()
 
             r = await probe_servers()
             panel_ok = r["panel"]["ok"]
@@ -68,8 +70,9 @@ async def post_init(app: Application):
                 cfg["xui_healthy"] = panel_ok
                 changed = True
                 alerts.append(
-                    "🟢 <b>Панель 3x-UI снова доступна.</b>" if panel_ok else
-                    f"🔴 <b>Панель 3x-UI недоступна!</b>\n<code>{r['panel'].get('error', '?')}</code>"
+                    f"🟢 <b>Панель {panel_name} снова доступна.</b>" if panel_ok else
+                    f"🔴 <b>Панель {panel_name} недоступна!</b>\n"
+                    f"<code>{r['panel'].get('error', '?')}</code>"
                 )
 
             # панель может отвечать, пока выдача подписок лежит — следим отдельно
@@ -89,11 +92,11 @@ async def post_init(app: Application):
                 changed = True
                 if dead:
                     alerts.append(
-                        "🔴 <b>Инбаунд не принимает соединения:</b>\n" +
+                        f"🔴 <b>Не работают {points}:</b>\n" +
                         "\n".join(f"• {t}" for t in dead)
                     )
                 elif prev:
-                    alerts.append("🟢 <b>Все инбаунды снова доступны.</b>")
+                    alerts.append(f"🟢 <b>Все {points} снова доступны.</b>")
 
             if changed:
                 save_config(cfg)

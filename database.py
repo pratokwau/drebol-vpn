@@ -416,7 +416,7 @@ async def init_db():
             )
         """)
         # убираем :443/:80 из существующих sub_url
-        from xui_api import strip_default_port
+        from panel import strip_default_port
         async with db.execute("SELECT id, sub_url FROM admin_subs") as cur:
             rows = await cur.fetchall()
         for row_id, old_url in rows:

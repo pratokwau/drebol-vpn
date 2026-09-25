@@ -47,7 +47,7 @@ async def handle_admin_panel(query):
 
 async def handle_dashboard(query):
     from database import get_dashboard_stats
-    from xui_api import count_panel_clients
+    from panel import count_panel_clients, provider_label
     s = await get_dashboard_stats()
     cfg = load_config()
     price = cfg.get("paid_price", 0) or 0
@@ -60,7 +60,8 @@ async def handle_dashboard(query):
     else:
         revenue_note = ""
 
-    # Сверка базы с панелью 3x-UI
+    # Сверка базы с панелью, которая обслуживает подписки
+    panel_name = provider_label()
     db_paid = s["paid_total"]
     db_admin = s["admin_subs"]
     db_all = db_paid + db_admin
@@ -75,14 +76,14 @@ async def handle_dashboard(query):
                 f"прочих {p_other} vs {db_admin}"
             )
         panel_block = (
-            "🖥 <b>Панель 3x-UI</b>\n<blockquote>"
+            f"🖥 <b>Панель {panel_name}</b>\n<blockquote>"
             f"Клиентов в панели: <b>{p_total}</b>  (платных {p_paid} · прочих {p_other})\n"
             f"Записей в базе: <b>{db_all}</b>  (платных {db_paid} · админских {db_admin})\n"
             f"{sync_line}</blockquote>\n\n"
         )
     else:
         panel_block = (
-            "🖥 <b>Панель 3x-UI</b>\n<blockquote>"
+            f"🖥 <b>Панель {panel_name}</b>\n<blockquote>"
             f"🔴 Панель недоступна — сверка не выполнена\n"
             f"Записей в базе: <b>{db_all}</b>  (платных {db_paid} · админских {db_admin})"
             "</blockquote>\n\n"
@@ -132,15 +133,18 @@ async def handle_dashboard(query):
 
 async def handle_healthcheck(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from xui_api import probe_servers
+    from panel import probe_servers, node_word, on_remnawave
 
     await query.edit_message_text("🩺 Проверяю серверы…")
     r = await probe_servers()
     panel, sub, inbounds = r["panel"], r["sub"], r["inbounds"]
+    points = node_word()                  # «Инбаунды» у 3x-UI, «Узлы» у Remnawave
+    point_one = node_word(False).lower()
 
     back = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Проверить снова", callback_data="healthcheck"),
-         InlineKeyboardButton("◀️ Назад", callback_data="xui_settings")],
+         InlineKeyboardButton("◀️ Назад",
+                              callback_data="rw_menu" if on_remnawave() else "xui_settings")],
     ])
 
     lines = ["🩺 <b>Здоровье серверов</b>", ""]
@@ -169,12 +173,12 @@ async def handle_healthcheck(query):
     # Инбаунды
     if panel["ok"]:
         if not inbounds:
-            lines.append("\n⚪️ Инбаундов нет.")
+            lines.append(f"\n⚪️ {points} не заданы.")
         else:
             checkable = [i for i in inbounds if i["enabled"] and
                          (i.get("mapped") or i["reachable"])]
             up = sum(1 for i in checkable if i["reachable"])
-            lines.append(f"\n📡 <b>Инбаунды</b> — доступно <b>{up} из {len(checkable)}</b>")
+            lines.append(f"\n📡 <b>{points}</b> — доступно <b>{up} из {len(checkable)}</b>")
             ib_lines = []
             for i in inbounds:
                 if not i["enabled"]:
@@ -184,7 +188,7 @@ async def handle_healthcheck(query):
                     icon = "🟢"
                     tail = f"{where} · UDP, отказа нет" if i.get("udp") else f"{where} · {i['ms']} мс"
                 elif not i.get("mapped"):
-                    # проверяли по адресу панели, а инбаунд может жить на узле —
+                    # проверяли по адресу панели, а точка входа может жить на узле —
                     # это не авария, а незаданная привязка
                     icon, tail = "⚪️", " · узел не привязан"
                 else:
@@ -204,11 +208,11 @@ async def handle_healthcheck(query):
     if not panel["ok"]:
         problems.append("панель не отвечает — бот не сможет выдавать и продлевать ключи")
     if not sub["ok"]:
-        problems.append("сервис подписок лежит — выданные ключи не обновятся у клиентов")
+        problems.append("выдача подписок лежит — выданные ключи не обновятся у клиентов")
     dead = [i["tag"] for i in inbounds
             if i["enabled"] and not i["reachable"] and i.get("mapped")]
     if dead:
-        problems.append("порт не принимает соединения: " + escape(", ".join(dead[:5])))
+        problems.append(f"не работает {point_one}: " + escape(", ".join(dead[:5])))
 
     unmapped = sorted({i["prefix"] for i in inbounds
                        if i["enabled"] and not i["reachable"] and not i.get("mapped")})
@@ -387,7 +391,7 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         status = sub[11] if len(sub) > 11 else "active"
         status_labels = {"active": "🟢 активна", "renewal": "🟡 ждёт продления", "expired": "🔴 истекла"}
         times = sub[12] if len(sub) > 12 else 0
-        from xui_api import get_last_online
+        from panel import get_last_online
         from handlers.control import last_seen_text
         lo = await get_last_online(timeout=5)
         vpn = (last_seen_text(lo["last"].get(sub[2])) if lo.get("ok")

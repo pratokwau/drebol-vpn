@@ -18,7 +18,7 @@ async def handle_my_sub(query):
     _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
-    from xui_api import get_client_info
+    from panel import get_client_info
     info = await get_client_info(email)
     if info.get("success"):
         enabled = info.get("enabled", True)
@@ -75,7 +75,7 @@ async def handle_my_paid_sub(query):
     status = row[11] if len(row) > 11 else "active"
     renewed = row[12] if len(row) > 12 else 0
 
-    from xui_api import get_client_info
+    from panel import get_client_info
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
 
@@ -874,7 +874,7 @@ async def handle_reissue_do(query, context):
 
     await query.edit_message_text("⏳ Перевыпускаю ключ…")
 
-    from xui_api import reissue_subscription
+    from panel import reissue_subscription
     result = await reissue_subscription(email)
     if not result["success"]:
         # техническая причина нужна админу, человеку — что делать дальше
@@ -1089,7 +1089,7 @@ async def handle_my_devices(query, context=None):
     """Устройства клиента: что подключено, откуда и чем — и что можно отключить."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import get_paid_sub_by_tg_id
-    from xui_api import get_client_hwids
+    from panel import get_client_hwids
     user = query.from_user
     row = await get_paid_sub_by_tg_id(user.id)
     if not row:
@@ -1129,8 +1129,9 @@ async def handle_my_devices(query, context=None):
             short = title.split(" · ")[0]
             if len(short) > 16:
                 short = short[:15].rstrip() + "…"
-            kb.append([InlineKeyboardButton(f"🗑 Отключить {i} · {short}",
-                                            callback_data=f"dev_del:{d.get('id')}")])
+            kb.append([InlineKeyboardButton(
+                f"🗑 Отключить {i} · {short}",
+                callback_data=f"dev_del:{str(d.get('id'))[:20]}")])
         if not items:
             lines.append("<blockquote>Пока ни одного — подключитесь в приложении.</blockquote>")
         else:
@@ -1181,13 +1182,18 @@ def _when_ms(value) -> str:
     return dt.strftime("%d.%m в %H:%M")
 
 
-async def handle_dev_del(query, context, hwid_id: int):
+async def handle_dev_del(query, context, ref: str):
     """Клиент сам отключает своё устройство и освобождает слот."""
     from paidsub.storage import get_paid_sub_by_tg_id
-    from xui_api import delete_client_hwid
+    from panel import delete_client_hwid, resolve_hwid
     row = await get_paid_sub_by_tg_id(query.from_user.id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
+        return
+    hwid_id = await resolve_hwid(row[2], ref)
+    if hwid_id is None:
+        await query.answer("Это устройство уже отключено", show_alert=True)
+        await handle_my_devices(query, context)
         return
     res = await delete_client_hwid(row[2], hwid_id)
     await query.answer("Устройство отключено" if res.get("success")
@@ -1416,7 +1422,7 @@ async def _sub_facts(row) -> list:
     email, limit_hwid, total_gb = row[2], int(row[8] or 0), int(row[9] or 0)
     lines = []
     try:
-        from xui_api import get_client_traffic
+        from panel import get_client_traffic
         t = await get_client_traffic(email)
         if t.get("success"):
             used = t.get("up", 0) + t.get("down", 0)
@@ -1453,7 +1459,7 @@ async def start_screen(user, fresh: bool = False):
     if row:
         enabled = True
         try:
-            from xui_api import get_client_info
+            from panel import get_client_info
             info = await get_client_info(row[2])
             enabled = info.get("enabled", True) if info.get("success") else True
         except Exception:

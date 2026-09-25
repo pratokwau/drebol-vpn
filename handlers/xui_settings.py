@@ -162,14 +162,22 @@ async def handle_xui_settings(query):
     sub_port = cfg.get("xui_sub_port") or "не задан"
     sub_path = cfg.get("xui_sub_path") or "/sub/"
 
+    from panel import on_remnawave
+    # Подписки могут уже жить в Remnawave — тогда здесь просто старая панель,
+    # и менять её параметры смысла нет: важно, чтобы это было видно сразу.
+    note = ("⚠️ <i>Подписки обслуживает Remnawave — эти параметры ни на что "
+            "не влияют. Панель оставлена на случай возврата.</i>"
+            if on_remnawave() else
+            "<i>ID инбаунда определяется сам (первый VLESS). "
+            "Токен: 3x-UI → Settings → API → Token.</i>")
+
     await query.edit_message_text(
         "🖥 <b>Серверы и 3x-UI</b>\n\n"
         f"<blockquote>🌐 Панель: <code>{escape(str(url))}</code>\n"
         f"🔑 API-токен: {token_set}\n"
         f"🔌 Порт подписки: <code>{escape(str(sub_port))}</code>\n"
         f"📂 Путь подписки: <code>{escape(str(sub_path))}</code></blockquote>\n\n"
-        "<i>ID инбаунда определяется сам (первый VLESS). "
-        "Токен: 3x-UI → Settings → API → Token.</i>",
+        + note,
         parse_mode="HTML",
         reply_markup=xui_settings_keyboard(),
     )

@@ -28,12 +28,17 @@ def subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bool) -
 
 
 def presets_keyboard() -> InlineKeyboardMarkup:
+    from panel import on_remnawave
+    # доступ к серверам в Remnawave задают сквады, инбаундов там нет
+    access = ([InlineKeyboardButton("👥 Сквады Remnawave", callback_data="rw_squads")]
+              if on_remnawave() else
+              [InlineKeyboardButton("📡 Инбаунды подписки", callback_data="inbounds_menu")])
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📅 Дата окончания", callback_data="preset_expire")],
         [InlineKeyboardButton("🌐 Лимит IP", callback_data="preset_ip")],
         [InlineKeyboardButton("🖥 Лимит HWID", callback_data="preset_hwid")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="preset_traffic")],
-        [InlineKeyboardButton("📡 Инбаунды подписки", callback_data="inbounds_menu")],
+        access,
         [InlineKeyboardButton("⏰ Авто-обновление ников", callback_data="auto_update_settings")],
         [InlineKeyboardButton("◀️ Назад к подпискам", callback_data="admin_subs")],
     ])

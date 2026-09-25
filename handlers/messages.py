@@ -767,7 +767,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from paidsub.storage import set_expire_date
                 await set_expire_date(sub_id, new_expire_str)
                 await update_paid_sub_field(sub_id, "status", "active")
-                from xui_api import update_client_expire, toggle_client, get_client_info, move_client_inbound
+                from panel import update_client_expire, toggle_client, get_client_info, move_client_inbound
                 await update_client_expire(row[2], new_expire_str)
                 info = await get_client_info(row[2])
                 if info.get("success") and not info.get("enabled", True):
@@ -834,7 +834,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
                 from paidsub.storage import set_expire_date
                 await set_expire_date(sub_id, new_expire_str)
-                from xui_api import update_client_expire
+                from panel import update_client_expire
                 await update_client_expire(row[2], new_expire_str)
                 from paidsub.time_parser import fmt_duration as fmt_dur
                 await update.message.reply_text(
@@ -938,7 +938,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update_paid_sub_field(sub_id, "status", "active")
             r = await get_paid_sub(sub_id)
             if r:
-                from xui_api import update_client_expire
+                from panel import update_client_expire
                 await update_client_expire(r[2], text)
                 from paidsub.storage import add_history
                 await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: дата окончания → {text}")
@@ -983,7 +983,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         panel_note = ""
         if sub_id:
             from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
-            from xui_api import update_client_limits
+            from panel import update_client_limits
             await update_paid_sub_field(sub_id, "limit_ip", int(text))
             r = await get_paid_sub(sub_id)
             if r:
@@ -1006,7 +1006,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sub_id:
             from paidsub.storage import (update_paid_sub_field, get_paid_sub,
                                          add_history, get_paid_sub_by_tg_id)
-            from xui_api import update_client_limits
+            from panel import update_client_limits
             r = await get_paid_sub(sub_id)
             # оплаченные устройства идут сверх лимита, который ставит админ
             extra = 0
@@ -1115,7 +1115,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     new_expire = period_end + timedelta(seconds=seconds)
                     new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
                     await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
-                    from xui_api import update_client_expire
+                    from panel import update_client_expire
                     await update_client_expire(row[2], new_expire_str)
                     note = (
                         f"\n📅 Период заканчивается: <b>{period_end.strftime('%d.%m.%Y %H:%M:%S')}</b>\n"

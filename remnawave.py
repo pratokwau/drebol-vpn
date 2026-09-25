@@ -128,6 +128,108 @@ async def update_user(payload: dict) -> dict:
     return await _request("PATCH", USERS, payload)
 
 
+# ── Операции с подпиской ──────────────────────────────────────────────────────
+
+# Панель адресует пользователя числовым id, а бот знает только email подписки.
+# Держим соответствие в памяти: имена не меняются, а лишний запрос на каждое
+# действие — это лишняя задержка для человека.
+_IDS: dict = {}
+
+
+def forget(username: str):
+    _IDS.pop(username, None)
+
+
+async def user_by_name(username: str) -> dict:
+    """Пользователь панели по имени. Заодно запоминаем его числовой id."""
+    r = await get_user(username)
+    if r["ok"] and isinstance(r.get("data"), dict):
+        uid = r["data"].get("id")
+        if uid is not None:
+            _IDS[username] = uid
+    return r
+
+
+async def user_id(username: str):
+    if username in _IDS:
+        return _IDS[username]
+    r = await user_by_name(username)
+    return _IDS.get(username) if r["ok"] else None
+
+
+async def patch(username: str, **fields) -> dict:
+    """Точечная правка пользователя: меняем только переданное."""
+    body = {"username": username}
+    body.update({k: v for k, v in fields.items() if v is not None})
+    return await update_user(body)
+
+
+async def action(username: str, name: str, payload=None) -> dict:
+    """Действие панели над пользователем: enable, disable, revoke."""
+    uid = await user_id(username)
+    if uid is None:
+        return {"ok": False, "error": "пользователь не найден в панели"}
+    return await _request("POST", f"{USERS}/{uid}/actions/{name}", payload or {})
+
+
+async def devices(username: str) -> dict:
+    uid = await user_id(username)
+    if uid is None:
+        return {"ok": False, "error": "пользователь не найден в панели"}
+    return await _request("GET", f"{API_ROOT}/hwid/devices/{uid}")
+
+
+async def delete_device(username: str, hwid: str) -> dict:
+    uid = await user_id(username)
+    if uid is None:
+        return {"ok": False, "error": "пользователь не найден в панели"}
+    return await _request("POST", f"{API_ROOT}/hwid/devices/delete",
+                          {"userId": uid, "hwid": str(hwid)})
+
+
+async def delete_all_devices(username: str) -> dict:
+    uid = await user_id(username)
+    if uid is None:
+        return {"ok": False, "error": "пользователь не найден в панели"}
+    return await _request("POST", f"{API_ROOT}/hwid/devices/delete-all", {"userId": uid})
+
+
+async def delete_by_name(username: str) -> dict:
+    uid = await user_id(username)
+    if uid is None:
+        return {"ok": True}          # нет — значит и удалять нечего
+    r = await _request("DELETE", f"{USERS}/{uid}")
+    forget(username)
+    return r
+
+
+async def nodes() -> dict:
+    """Узлы панели: их состояние она знает сама, проверять порты не нужно."""
+    return await _request("GET", f"{API_ROOT}/nodes")
+
+
+async def users_page(start: int = 0, size: int = 500) -> dict:
+    """Страница пользователей. Больше 1000 за раз панель не отдаёт."""
+    return await _request("GET", f"{USERS}?start={int(start)}&size={min(int(size), 1000)}")
+
+
+async def all_users(limit: int = 5000) -> list:
+    """Все пользователи панели — для статистики и списка онлайна."""
+    out, start = [], 0
+    while start < limit:
+        r = await users_page(start, 500)
+        if not r["ok"]:
+            break
+        data = r["data"] or {}
+        chunk = data.get("users") or []
+        out += chunk
+        total = int(data.get("total") or 0)
+        start += len(chunk)
+        if not chunk or start >= total:
+            break
+    return out
+
+
 # ── Подготовка данных подписки ────────────────────────────────────────────────
 
 def make_username(email: str, tg_id: int) -> str:
@@ -238,27 +340,74 @@ async def handle_rw_menu(query, context=None):
     squads = f"выбрано <b>{len(s['squads'])}</b>" if s["squads"] else "не выбраны"
     state = (f"{s['migrated_at']} · {s['migrated_count']} подписок"
              if s["migrated_at"] else "ещё не переносили")
+    from panel import provider_label, on_remnawave
+    active = provider_label()
 
     lines = ["🆕 <b>Remnawave</b>", "",
              "<blockquote>"
              f"🌐 Панель: {url}\n"
              f"🔑 Токен: <b>{token}</b>\n"
              f"👥 Сквады: {squads}\n"
-             f"🚚 Перенос: {state}</blockquote>", "",
-             "<i>3x-UI продолжает работать: перенос только заводит тех же "
-             "людей в новой панели и забирает новые ссылки. Клиентам их "
-             "разошлём отдельной кнопкой, когда всё проверишь.</i>"]
+             f"🚚 Перенос: {state}\n"
+             f"⚙️ Подписки обслуживает: <b>{active}</b></blockquote>", "",
+             ("<i>Бот работает через Remnawave: выдача, продление, лимиты "
+              "и устройства идут в неё.</i>" if on_remnawave() else
+              "<i>Пока подписки обслуживает 3x-UI. Перенеси клиентов, проверь "
+              "пару ссылок и переключай — вернуться можно одной кнопкой.</i>")]
 
     kb = [[InlineKeyboardButton("🌐 Адрес панели", callback_data="rw_url"),
            InlineKeyboardButton("🔑 Токен", callback_data="rw_token")]]
     if is_configured():
         kb.append([InlineKeyboardButton("👥 Сквады", callback_data="rw_squads"),
                    InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
+        kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("🚚 Перенести клиентов", callback_data="rw_migrate")])
+        if on_remnawave():
+            kb.append([InlineKeyboardButton("📨 Разослать новые ссылки",
+                                            callback_data="rw_notify")])
+        kb.append([InlineKeyboardButton(
+            "↩️ Вернуть подписки на 3x-UI" if on_remnawave()
+            else "🔀 Перевести подписки на Remnawave",
+            callback_data="rw_switch")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
                                   disable_web_page_preview=True)
+
+
+async def handle_rw_switch(query, context):
+    """Меняет панель, которая обслуживает подписки."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from panel import on_remnawave, REMNAWAVE, XUI
+    to_rw = not on_remnawave()
+
+    if to_rw:
+        if not is_configured():
+            await query.answer("Сначала адрес панели и токен", show_alert=True)
+            return
+        check = await test_connection()
+        if not check["ok"]:
+            await query.answer("Панель не отвечает — переключать опасно", show_alert=True)
+            return
+
+    cfg = load_config()
+    cfg["panel_provider"] = REMNAWAVE if to_rw else XUI
+    save_config(cfg)
+
+    from log_channel import send_log
+    where = "Remnawave" if to_rw else "3x-UI"
+    await send_log(context.bot, f"⚙️ Подписки переключены на {where}")
+    await query.edit_message_text(
+        f"⚙️ <b>Подписки обслуживает {where}</b>\n\n"
+        + ("<blockquote>Новые подписки, продление, лимиты устройств, "
+           "перевыпуск и заморозка теперь идут в Remnawave.</blockquote>\n\n"
+           "<i>3x-UI не тронут: там всё осталось как было, и вернуться "
+           "можно этой же кнопкой.</i>" if to_rw else
+           "<blockquote>Вернулись на старую панель.</blockquote>"),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
+    )
 
 
 async def handle_rw_url(query, context):
@@ -407,4 +556,84 @@ async def handle_rw_migrate_go(query, context):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
         disable_web_page_preview=True,
+    )
+
+
+# ── Рассылка новых ссылок ─────────────────────────────────────────────────────
+
+async def handle_rw_notify(query, context):
+    """Спрашивает подтверждение: ссылки уходят живым людям, молча нельзя."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import subs_for_migration
+    rows = await subs_for_migration()
+    with_link = [r for r in rows if r[10]]
+    if not with_link:
+        await query.answer("Некому: ссылок в базе нет", show_alert=True)
+        return
+
+    await query.edit_message_text(
+        "📨 <b>Новые ссылки клиентам</b>\n\n"
+        f"<blockquote>Получат сообщение: <b>{len(with_link)}</b></blockquote>\n\n"
+        "Каждому уйдёт его новая ссылка подписки и просьба заменить старую "
+        "в приложении.\n\n"
+        "<i>Сначала убедись, что ссылка из панели работает: после рассылки "
+        "отменить сообщения нельзя.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📨 Разослать", callback_data="rw_notify_go")],
+            [InlineKeyboardButton("◀️ Отмена", callback_data="rw_menu")],
+        ]),
+    )
+
+
+async def handle_rw_notify_go(query, context):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton
+    from paidsub.storage import subs_for_migration
+    rows = [r for r in await subs_for_migration() if r[10]]
+    await query.edit_message_text("📨 Рассылаю…")
+
+    sent = failed = 0
+    for i, row in enumerate(rows, 1):
+        tg_id, link = row[1], row[10]
+        if not tg_id:
+            continue
+        try:
+            await context.bot.send_message(
+                chat_id=tg_id,
+                text=("🔄 <b>Мы обновили серверы</b>\n\n"
+                      "<blockquote>Вот твоя новая ссылка подписки:\n"
+                      f"<code>{escape(str(link))}</code></blockquote>\n\n"
+                      "Замени её в приложении — старая больше не обновляется. "
+                      "Срок подписки и устройства остались как были."),
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📋 Скопировать ссылку",
+                                          copy_text=CopyTextButton(text=str(link)))],
+                    [InlineKeyboardButton("📖 Как подключиться", callback_data="how_to")],
+                ]),
+                disable_web_page_preview=True,
+            )
+            sent += 1
+        except Exception:
+            failed += 1
+        # телеграм не любит спешку на больших рассылках
+        await asyncio.sleep(0.08)
+        if i % 25 == 0:
+            try:
+                await query.edit_message_text(
+                    f"📨 Рассылаю… <b>{i}</b> из <b>{len(rows)}</b>", parse_mode="HTML")
+            except Exception:
+                pass
+
+    from log_channel import send_log
+    await send_log(context.bot,
+                   f"📨 Новые ссылки Remnawave: доставлено {sent}, не дошло {failed}")
+    await query.edit_message_text(
+        "✅ <b>Рассылка закончена</b>\n\n"
+        f"<blockquote>Доставлено: <b>{sent}</b>\n"
+        f"Не дошло: <b>{failed}</b></blockquote>\n\n"
+        "<i>Не дошло — чаще всего бот заблокирован у человека.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
     )
