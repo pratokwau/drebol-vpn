@@ -46,7 +46,6 @@ CB_LABELS = {
     "rw_test": "🔌 Проверка Remnawave",
     "rw_migrate_go": "🚚 Перенос клиентов",
     "rw_notify_go": "📨 Рассылка новых ссылок",
-    "rw_marks_go": "🧹 Снял метки переезда",
     "backup_export": "📤 Выгрузка базы",
     "backup_apply": "♻️ Восстановление из бэкапа",
     "site_logo": "🖼 Логотип сайта",

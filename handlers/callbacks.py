@@ -31,7 +31,6 @@ from remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
     handle_rw_squads, handle_rw_squad_toggle, handle_rw_migrate,
     handle_rw_migrate_go, handle_rw_notify, handle_rw_notify_go,
-    handle_rw_marks, handle_rw_marks_go,
 )
 from backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
@@ -441,16 +440,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_rw_test(query, context)
     elif data == "rw_squads":
         await handle_rw_squads(query, context)
-    elif data == "rw_squads_expire":
-        await handle_rw_squads(query, context, "expire")
     elif data.startswith("rw_squad:"):
         await handle_rw_squad_toggle(query, context, data.split(":", 1)[1])
-    elif data.startswith("rw_squad_exp:"):
-        await handle_rw_squad_toggle(query, context, data.split(":", 1)[1], "expire")
-    elif data == "rw_marks":
-        await handle_rw_marks(query, context)
-    elif data == "rw_marks_go":
-        await handle_rw_marks_go(query, context)
     elif data == "rw_migrate":
         await handle_rw_migrate(query, context)
     elif data == "rw_migrate_go":

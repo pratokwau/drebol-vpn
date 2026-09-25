@@ -721,13 +721,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from paidsub.storage import set_expire_date
                 await set_expire_date(sub_id, new_expire_str)
                 await update_paid_sub_field(sub_id, "status", "active")
-                from panel import (update_client_expire, toggle_client, get_client_info,
-                                   restore_squads)
+                from panel import update_client_expire, toggle_client, get_client_info
                 await update_client_expire(row[2], new_expire_str)
                 info = await get_client_info(row[2])
                 if info.get("success") and not info.get("enabled", True):
                     await toggle_client(row[2], True)
-                await restore_squads(row[2])
                 from paidsub.time_parser import fmt_duration as fmt_dur
                 await update.message.reply_text(
                     f"✅ Срок продлён на <b>{fmt_dur(seconds)}</b>\n"

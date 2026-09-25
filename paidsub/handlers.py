@@ -91,18 +91,14 @@ def _fmt_presets(cfg: dict, squad_names=None) -> str:
     else:
         traf = f"{traf_raw} ГБ"
 
-    # Доступ к серверам в Remnawave даёт сквад: одни выдаём при подписке,
-    # в другие уводим, когда срок кончился.
+    # Доступ к серверам в Remnawave даёт сквад, а с истёкшими подписками
+    # панель разбирается сама.
     names = squad_names or {}
     chosen = [names.get(u, u) for u in (cfg.get("rw_squads") or [])]
-    expired = [names.get(u, u) for u in (cfg.get("rw_expire_squads") or [])]
     panel_block = (
         "👥 <b>Сквады Remnawave</b>\n<blockquote>"
         + ("Выдаём: <b>{}</b>".format(_esc_name(", ".join(chosen)))
            if chosen else "Выдаём: <b>не выбраны</b>")
-        + "\n"
-        + ("После окончания: <b>{}</b>".format(_esc_name(", ".join(expired)))
-           if expired else "После окончания: <b>просто отключаем</b>")
         + "</blockquote>"
     )
     return _presets_text(trial_str, pay_str, renew_str, provider_line(),
@@ -150,7 +146,7 @@ async def handle_paid_subs_menu(query, page: int = 1):
 async def handle_paid_presets_menu(query):
     cfg = load_config()
     squad_names = {}
-    if cfg.get("rw_squads") or cfg.get("rw_expire_squads"):
+    if cfg.get("rw_squads"):
         import remnawave as rw
         got = await rw.list_squads()
         if got.get("ok"):
@@ -1445,8 +1441,7 @@ async def bulk_set_limits(kind: str, value: int, context) -> dict:
 async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
     """Сдвигает дату окончания у всех платных подписок.
     direction = +1 (добавить) или -1 (убавить). Возвращает отчёт."""
-    from panel import (update_client_expire, get_client_info, toggle_client,
-                       restore_squads)
+    from panel import update_client_expire, get_client_info, toggle_client
     import aiosqlite
     from database import DB_PATH
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1496,7 +1491,6 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
                 info = await get_client_info(email)
                 if info.get("success") and not info.get("enabled", True):
                     await toggle_client(email, True)
-                await restore_squads(email)
             updated += 1
 
             # уведомление пользователю
@@ -2002,22 +1996,13 @@ async def check_expired_subs(context):
                                            "триал" if times_renewed == 0 else "оплаченный")
                     await log_activity(tg_id, "ev:expired")
 
-                from panel import get_client_info, toggle_client, move_to_expire_squads
+                # доступ просто закрываем: что делать с истёкшими дальше,
+                # решает сама панель — у неё это уже встроено
+                from panel import get_client_info, toggle_client
                 info = await get_client_info(email)
                 enabled = info.get("enabled", True) if info.get("success") else False
                 if enabled:
                     await toggle_client(email, False)
-
-                # если заданы сквады окончания — переводим туда, чтобы в рабочих
-                # оставались только платящие
-                moved = await move_to_expire_squads(email)
-                if not moved.get("success"):
-                    from log_channel import send_log
-                    await send_log(context.bot,
-                        f"⚠️ Не удалось перевести в сквады окончания: "
-                        f"<code>{email}</code> — {moved.get('error', '?')}")
-                elif moved.get("moved") and tg_id:
-                    await add_history(tg_id, "sub_expired", "Переведён в сквады окончания")
 
                 if tg_id:
                     kb = InlineKeyboardMarkup([
@@ -2141,13 +2126,10 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     cur_renewed = row[12] if len(row) > 12 else 0
     await update_paid_sub_field(sub_id, "times_renewed", cur_renewed + 1)
 
-    from panel import (get_client_info, toggle_client, update_client_expire,
-                       restore_squads)
+    from panel import get_client_info, toggle_client, update_client_expire
     info = await get_client_info(email)
     if info.get("success") and not info.get("enabled", True):
         await toggle_client(email, True)
-    # если уводили в сквады окончания — возвращаем в рабочие
-    await restore_squads(email)
     await update_client_expire(email, new_expire_str)
 
     promo_line = ""
@@ -2237,13 +2219,10 @@ async def handle_confirm_payment(query, tg_id: int, context):
     cur_renewed = row[12] if len(row) > 12 else 0
     await update_paid_sub_field(sub_id, "times_renewed", cur_renewed + 1)
 
-    from panel import (get_client_info, toggle_client, update_client_expire,
-                       restore_squads)
+    from panel import get_client_info, toggle_client, update_client_expire
     info = await get_client_info(email)
     if info.get("success") and not info.get("enabled", True):
         await toggle_client(email, True)
-    # если уводили в сквады окончания — возвращаем в рабочие
-    await restore_squads(email)
 
     # Обновляем срок в панели
     await update_client_expire(email, new_expire_str)

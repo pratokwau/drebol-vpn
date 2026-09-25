@@ -85,8 +85,7 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         *_devices_rows(b),
         [b("📶 Трафик (ГБ)", "paid_preset_traffic")],
         # панель
-        [b("👥 Сквады выдачи", "rw_squads"),
-         b("🏁 Сквады окончания", "rw_squads_expire")],
+        [b("👥 Сквады Remnawave", "rw_squads")],
         [b("◀️ Назад к подпискам", "paid_subs")],
     ])
 

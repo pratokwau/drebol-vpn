@@ -111,7 +111,7 @@ async def apply_days(tg_id: int, days: int, bot=None) -> dict:
     from paidsub.storage import (
         add_history, get_paid_sub_by_tg_id, parse_sub_date, set_expire_date, update_paid_sub_field,
     )
-    from panel import get_client_info, restore_squads, toggle_client, update_client_expire
+    from panel import get_client_info, toggle_client, update_client_expire
 
     row = await get_paid_sub_by_tg_id(tg_id)
     if not row:
@@ -127,7 +127,6 @@ async def apply_days(tg_id: int, days: int, bot=None) -> dict:
     info = await get_client_info(email)
     if info.get("success") and not info.get("enabled", True):
         await toggle_client(email, True)
-    await restore_squads(email)
     await add_history(tg_id, "promo_days", f"Начислено {days} дней\nДо: {until}")
     return {"ok": True, "until": until}
 
