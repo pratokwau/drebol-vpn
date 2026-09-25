@@ -27,6 +27,11 @@ from handlers.admin import (
 from fraud import (
     handle_fraud_menu, handle_fraud_toggle, handle_fraud_scan, handle_fraud_ok,
 )
+from remnawave import (
+    handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
+    handle_rw_squads, handle_rw_squad_toggle, handle_rw_migrate,
+    handle_rw_migrate_go,
+)
 from backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
     handle_backup_apply,
@@ -437,6 +442,22 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_log_channel(query, context)
     elif data == "clear_log_channel":
         await handle_clear_log_channel(query)
+    elif data == "rw_menu":
+        await handle_rw_menu(query, context)
+    elif data == "rw_url":
+        await handle_rw_url(query, context)
+    elif data == "rw_token":
+        await handle_rw_token(query, context)
+    elif data == "rw_test":
+        await handle_rw_test(query, context)
+    elif data == "rw_squads":
+        await handle_rw_squads(query, context)
+    elif data.startswith("rw_squad:"):
+        await handle_rw_squad_toggle(query, context, data.split(":", 1)[1])
+    elif data == "rw_migrate":
+        await handle_rw_migrate(query, context)
+    elif data == "rw_migrate_go":
+        await handle_rw_migrate_go(query, context)
     elif data == "backup_menu":
         await handle_backup_menu(query, context)
     elif data == "backup_export":

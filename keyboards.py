@@ -77,7 +77,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
         # инфраструктура
         [b("🖥 Серверы и 3x-UI", "xui_settings"), b("🌐 Сайт", "site_menu")],
-        [b("💾 Бэкап и перенос", "backup_menu")],
+        [b("💾 Бэкап и перенос", "backup_menu"), b("🆕 Remnawave", "rw_menu")],
         [b("📄 Документы", "documents_menu"), b("🧾 Лог-канал", "log_channel_settings")],
         [b(mnt_label, "mnt_menu")],
         [b("🔄 Обновиться с GitHub", "git_update")],

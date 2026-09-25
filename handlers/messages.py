@@ -41,6 +41,7 @@ from states import (
     AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_QUICK_REPLY,
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
     AWAITING_SITE_DOMAIN, AWAITING_SITE_LOGO, AWAITING_BACKUP_FILE,
+    AWAITING_RW_URL, AWAITING_RW_TOKEN,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
@@ -313,6 +314,46 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{reply_to}:1")],
                 [InlineKeyboardButton("◀️ К тикетам", callback_data="ticket_list:1")],
             ]),
+        )
+        return
+
+    # ── Remnawave ────────────────────────────────────────────────────────────
+    if state == AWAITING_RW_URL:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        url = text.strip().rstrip("/")
+        if url.endswith("/api"):
+            url = url[:-4]
+        if not url.startswith("http"):
+            await update.message.reply_text("❌ Адрес должен начинаться с http.",
+                                            reply_markup=back_admin())
+            return
+        from remnawave import save_settings
+        save_settings(rw_url=url)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(
+            f"✅ Адрес панели сохранён: <code>{url}</code>", parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔌 Проверить", callback_data="rw_test"),
+                 InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
+        )
+        return
+
+    if state == AWAITING_RW_TOKEN:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from remnawave import save_settings
+        save_settings(rw_token=text.strip())
+        context.user_data.pop("state", None)
+        # токен не должен остаться в переписке
+        try:
+            await update.message.delete()
+        except Exception:
+            pass
+        await update.message.reply_text(
+            "✅ <b>Токен сохранён</b>\n\n<i>Сообщение с ним удалил.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔌 Проверить", callback_data="rw_test"),
+                 InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
         )
         return
 
