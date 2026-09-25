@@ -61,7 +61,7 @@ async def handle_admin_subs_menu(query, page: int = 1):
 async def handle_presets_menu(query):
     cfg = load_config()
     squad_names = {}
-    if cfg.get("rw_squads"):
+    if cfg.get("rw_squads") or cfg.get("rw_expire_squads"):
         import remnawave as rw
         got = await rw.list_squads()
         if got.get("ok"):

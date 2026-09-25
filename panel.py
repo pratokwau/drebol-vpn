@@ -196,6 +196,34 @@ async def reissue_subscription(email: str, limit_hwid: int = None) -> dict:
             "sub_url": data.get("subscriptionUrl", "")}
 
 
+async def set_squads(email: str, squads) -> dict:
+    """Переводит клиента в указанные сквады. Пустой список — ничего не делаем."""
+    if not squads:
+        return {"success": True, "moved": False}
+    import remnawave as rw
+    r = await rw.patch(_name(email), activeInternalSquads=list(squads))
+    if not r["ok"]:
+        return _fail(str(r.get("error")))
+    return {"success": True, "moved": True}
+
+
+async def restore_squads(email: str) -> dict:
+    """Возвращает клиента в рабочие сквады — после оплаты, промокода или ЧС."""
+    import remnawave as rw
+    return await set_squads(email, rw.settings()["squads"])
+
+
+async def move_to_expire_squads(email: str) -> dict:
+    """Уводит в сквады окончания, когда срок кончился.
+
+    Доступ к этому моменту всё равно закрыт: панель считает срок сама, да и бот
+    отключает клиента. Смысл перевода — housekeeping: в рабочих сквадах
+    остаются только платящие, и в панели сразу видно, кто отвалился.
+    """
+    import remnawave as rw
+    return await set_squads(email, rw.settings()["expire_squads"])
+
+
 # ── Устройства и адреса ───────────────────────────────────────────────────────
 
 async def get_client_hwids(email: str) -> dict:
