@@ -27,6 +27,10 @@ from handlers.admin import (
 from fraud import (
     handle_fraud_menu, handle_fraud_toggle, handle_fraud_scan, handle_fraud_ok,
 )
+from backup import (
+    handle_backup_menu, handle_backup_export, handle_backup_import,
+    handle_backup_apply,
+)
 from site_deploy import (
     handle_site_menu, handle_site_server, handle_site_domain,
     handle_site_deploy, handle_site_cert, handle_site_delete, handle_site_logo,
@@ -433,6 +437,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_log_channel(query, context)
     elif data == "clear_log_channel":
         await handle_clear_log_channel(query)
+    elif data == "backup_menu":
+        await handle_backup_menu(query, context)
+    elif data == "backup_export":
+        await handle_backup_export(query, context)
+    elif data == "backup_import":
+        await handle_backup_import(query, context)
+    elif data == "backup_apply":
+        await handle_backup_apply(query, context)
     elif data == "site_menu":
         context.user_data.pop("state", None)
         await handle_site_menu(query)

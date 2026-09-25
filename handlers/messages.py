@@ -40,7 +40,7 @@ from states import (
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_QUICK_REPLY,
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
-    AWAITING_SITE_DOMAIN, AWAITING_SITE_LOGO,
+    AWAITING_SITE_DOMAIN, AWAITING_SITE_LOGO, AWAITING_BACKUP_FILE,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
@@ -564,6 +564,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == AWAITING_SITE_LOGO:
         await update.message.reply_text("🖼 Пришли картинку файлом или фото.")
+        return
+
+    if state == AWAITING_BACKUP_FILE:
+        await update.message.reply_text("📥 Пришли файл .zip с бэкапом.")
         return
 
     # ── Сайт на втором сервере: адрес, пользователь, пароль ──────────────────
@@ -1421,6 +1425,23 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     caption = msg.caption or ""
+
+    # ── Файл с бэкапом ──────────────────────────────────────────────────────
+    if is_admin and state == AWAITING_BACKUP_FILE:
+        from backup import offer_restore
+        context.user_data.pop("state", None)
+        if not msg.document:
+            await msg.reply_text("📥 Пришли именно файл .zip, который выгружал бот.")
+            return
+        note = await msg.reply_text("📥 Проверяю архив…")
+        tg_file = await context.bot.get_file(file_id)
+        blob = bytes(await tg_file.download_as_bytearray())
+        try:
+            await note.delete()
+        except Exception:
+            pass
+        await offer_restore(msg, context, blob)
+        return
 
     # ── Логотип для сайта ───────────────────────────────────────────────────
     if is_admin and state == AWAITING_SITE_LOGO:

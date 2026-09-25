@@ -189,6 +189,23 @@ async def get_all_paid_subs_with_tg() -> list:
             return await cur.fetchall()
 
 
+async def subs_for_migration() -> list:
+    """Всё, что нужно, чтобы завести подписку в другой панели.
+
+    Берём только живые: истёкшие переносить незачем — человек всё равно
+    придёт продлевать, и подписка создастся уже на новой панели.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, email, expire_date, limit_ip, limit_hwid, total_gb,
+                   status, times_renewed, extra_devices, sub_url
+            FROM paid_subs
+            WHERE tg_id IS NOT NULL AND status IN ('active', 'renewal')
+            ORDER BY id
+        """) as cur:
+            return await cur.fetchall()
+
+
 async def update_paid_sub_field(sub_id: int, field: str, value):
     allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending",
                 "ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url",
