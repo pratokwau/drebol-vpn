@@ -102,7 +102,6 @@ from adminsub.handlers import (
     handle_sub_edit_hwid, handle_sub_edit_traffic,
     handle_sub_extend, handle_sub_reduce, handle_sub_devices, handle_sub_ips,
     handle_sub_hwid_del, handle_sub_hwid_clear, handle_sub_reissue,
-    handle_subs_push, handle_subs_push_go,
 )
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
@@ -558,10 +557,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_admin_subs_menu(query, int(data.split(":")[1]))
     elif data == "create_sub":
         await handle_create_sub(query, context)
-    elif data == "subs_push":
-        await handle_subs_push(query, context)
-    elif data == "subs_push_go":
-        await handle_subs_push_go(query, context)
     elif data == "sub_presets":
         await handle_presets_menu(query)
     elif data == "preset_expire":
