@@ -22,7 +22,8 @@ def subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bool) -
 
     create_label = "➕ Создать подписку" if presets_ready else "➕ Создать (сначала настройки)"
     kb.append([InlineKeyboardButton(create_label, callback_data="create_sub")])
-    kb.append([InlineKeyboardButton("⚙️ Настройки", callback_data="sub_presets")])
+    kb.append([InlineKeyboardButton("⚙️ Настройки", callback_data="sub_presets"),
+               InlineKeyboardButton("🚚 Завести в панели", callback_data="subs_push")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     return InlineKeyboardMarkup(kb)
 

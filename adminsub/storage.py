@@ -51,6 +51,16 @@ async def get_sub_by_tg_id(tg_id: int) -> tuple | None:
             return await cur.fetchone()
 
 
+async def all_subs_for_panel() -> list:
+    """Всё, что нужно, чтобы завести админскую подписку в панели."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, email, expire_date, limit_hwid, total_gb, sub_url
+            FROM admin_subs ORDER BY id
+        """) as cur:
+            return await cur.fetchall()
+
+
 async def delete_sub(sub_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM admin_subs WHERE id = ?", (sub_id,))
