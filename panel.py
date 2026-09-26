@@ -8,10 +8,15 @@
 """
 
 import asyncio
+import logging
 import re
 import time
 from datetime import datetime
 from urllib.parse import urlparse
+
+
+# последняя неприменённая дата — её показывает «Здоровье серверов»
+LAST_EXPIRE_FAIL = None
 
 
 def build_email(tg_id: int, username=None, prefix: str = "") -> str:
@@ -136,10 +141,56 @@ async def create_client(expire_date: str, limit_ip: int, limit_hwid: int,
 
 async def update_client_expire(email: str, new_expire_str: str,
                                limit_hwid: int = None) -> dict:
+    """Меняет срок окончания и сразу сверяет, что панель его приняла.
+
+    Сверка нужна, потому что по этой дате панель сама закрывает доступ: если
+    запрос тихо не применился, бот считал бы подписку закрытой, а человек
+    продолжал бы пользоваться VPN. Смена срока — редкое событие, лишний
+    запрос на проверку тут дешевле такой ошибки.
+    """
     import remnawave as rw
-    r = await rw.patch(_name(email), expireAt=_iso(new_expire_str),
+    want = _iso(new_expire_str)
+    name = _name(email)
+    r = await rw.patch(name, expireAt=want,
                        hwidDeviceLimit=None if limit_hwid is None else int(limit_hwid))
-    return {"success": True} if r["ok"] else _fail(str(r.get("error")))
+    if not r["ok"]:
+        return _note_fail(email, new_expire_str, str(r.get("error")))
+
+    got = ((r["data"] or {}).get("expireAt")) if isinstance(r.get("data"), dict) else None
+    if got is None:
+        back = await rw.user_by_name(name)
+        got = (back["data"] or {}).get("expireAt") if back["ok"] else None
+    if got is not None and not _same_moment(got, want):
+        return _note_fail(email, new_expire_str,
+                          f"панель оставила свой срок: {got} вместо {want}")
+    return {"success": True}
+
+
+def _same_moment(a, b) -> bool:
+    """Одна ли это дата с точностью до минуты (панель может вернуть свой формат)."""
+    def moment(raw):
+        try:
+            return datetime.fromisoformat(str(raw).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    ma, mb = moment(a), moment(b)
+    if ma is None or mb is None:
+        return str(a)[:16] == str(b)[:16]
+    return abs(ma - mb) < 90
+
+
+def _note_fail(email: str, wanted: str, error: str) -> dict:
+    """Запоминает и пишет в журнал сервиса неприменённый срок.
+
+    Часть вызывающих мест ответ не смотрит, а расхождение по сроку — это
+    открытый доступ у того, кто уже не платит. Пусть остаётся хотя бы след
+    в journalctl и в «Здоровье серверов».
+    """
+    global LAST_EXPIRE_FAIL
+    LAST_EXPIRE_FAIL = {"email": email, "wanted": wanted, "error": error,
+                        "at": datetime.now().strftime("%d.%m.%Y %H:%M:%S")}
+    logging.error("panel: срок %s для %s не применён: %s", wanted, email, error)
+    return {"success": False, "error": error}
 
 
 async def update_client_limits(email: str, limit_ip: int = None,

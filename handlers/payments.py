@@ -315,9 +315,17 @@ async def finalize_refund(context, payment_id: int, revoke: bool | None = None) 
         from paidsub.handlers import revoke_paid_period
         rv = await revoke_paid_period(tg_id, period, context,
                                       reason=f"Возврат платежа #{p_id}")
-        period_line = (f"\n📅 Срок отозван, новая дата: <b>{rv['expire']}</b>"
-                       if rv.get("ok") else
-                       f"\n⚠️ Срок отозвать не удалось: {rv.get('error')}")
+        if not rv.get("ok"):
+            period_line = f"\n⚠️ Срок отозвать не удалось: {rv.get('error')}"
+        else:
+            period_line = f"\n📅 Срок отозван, новая дата: <b>{rv['expire']}</b>"
+            if rv.get("panel_error"):
+                # молчать тут нельзя: в базе срок уменьшен, а в панели остался
+                # старый — значит доступ у человека ещё живой
+                from html import escape as _esc
+                period_line += ("\n⚠️ <b>Панель не подтвердила</b>: "
+                                f"<code>{_esc(str(rv['panel_error']))}</code>\n"
+                                "Проверь срок клиента в панели руками.")
     elif period:
         period_line = "\n📅 Срок подписки оставлен без изменений"
 

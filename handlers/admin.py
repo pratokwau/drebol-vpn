@@ -186,9 +186,23 @@ async def handle_healthcheck(query):
             lines.append("<blockquote expandable>" + "\n".join(rows) + "</blockquote>")
             lines.append("<i>Сколько человек на узле — по данным панели.</i>")
 
+    import panel as panel_mod
+    fail = panel_mod.LAST_EXPIRE_FAIL
+    if fail:
+        lines.append("\n⚠️ <b>Срок не применился</b>")
+        lines.append("<blockquote>"
+                     f"Клиент: <code>{escape(str(fail['email']))}</code>\n"
+                     f"Ставили: <b>{escape(str(fail['wanted']))}</b>\n"
+                     f"Когда: {escape(str(fail['at']))}\n"
+                     f"<code>{escape(str(fail['error']))}</code></blockquote>\n"
+                     "<i>У этого клиента срок в панели разошёлся с базой — "
+                     "проверь его вручную.</i>")
+
     problems = []
     if not panel["ok"]:
         problems.append("панель не отвечает — бот не сможет выдавать и продлевать ключи")
+    if fail:
+        problems.append(f"срок не применился у {escape(str(fail['email']))}")
     if not sub["ok"]:
         problems.append("ссылки подписок не отдаются — выданные ключи не обновятся у клиентов")
     dead = [n["tag"] for n in nodes if n["enabled"] and not n["reachable"]]

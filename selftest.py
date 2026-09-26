@@ -470,9 +470,11 @@ async def client_flow(bot, sub_id):
               "новая ссылка в базе", f"было {before}, стало {row[5]}")
     log.check("новая ссылка совпадает с панелью", row[5] == pu.get("subscriptionUrl"),
               "ссылка из панели", pu.get("subscriptionUrl"))
-    log.check("клиенту отправили новую ссылку",
-              any("sub/" in t for t in bot.to(TEST_TG_ID)) or "sub/" in q.text,
-              "сообщение с новой ссылкой", q.text[:160])
+    new_url = row[5]
+    log.check("клиент увидел новую ссылку",
+              new_url and (new_url in q.text
+                           or any(new_url in t for t in bot.to(TEST_TG_ID))),
+              f"на экране или в сообщении есть {new_url}", q.text[:200])
 
     # ── поддержка
     from handlers.support import open_support
@@ -687,6 +689,35 @@ async def money_and_expiry(bot, sub_id):
               any("продлен" in t.lower() or "оплат" in t.lower()
                   for t in bot.to(TEST_TG_ID)),
               "сообщение об оплате", bot.to(TEST_TG_ID)[-1:])
+
+    # ── возврат платежа: срок обязан уехать назад и в базе, и в панели
+    from database import record_paid_payment
+    pay_id = await record_paid_payment(
+        tg_id=TEST_TG_ID, provider="platega", amount=100,
+        period_seconds=30 * 86400,
+        external_id=f"selftest-refund-{TEST_TG_ID}")
+    row = await get_paid_sub(sub_id)
+    before_refund = row[6]
+    from handlers.payments import finalize_refund
+    bot.sent.clear()
+    await finalize_refund(c, pay_id, revoke=True)
+    row = await get_paid_sub(sub_id)
+    pu = await panel_user(row[2])
+    cut = days_between(row[6], before_refund)
+    log.check("возврат уменьшает срок в базе", cut == 30,
+              "−30 дней (оплаченный период)", f"{cut} дней ({before_refund} → {row[6]})")
+    log.check("возврат уменьшает срок и в панели",
+              iso_day(pu.get("expireAt")) == ru_day(row[6]),
+              f"expireAt = {ru_day(row[6])}", iso_day(pu.get("expireAt")))
+    admin_said = [t for _c, t in bot.sent if "Возврат по платежу" in (t or "")]
+    log.check("админу пришёл отчёт о возврате", bool(admin_said),
+              "сообщение админу", bot.sent[-2:])
+    if admin_said:
+        log.check("в отчёте нет обещаний, которых панель не подтвердила",
+                  "не подтвердила" not in admin_said[0],
+                  "или дата применилась, или честное предупреждение",
+                  admin_said[0][:200])
+    log.note(f"после возврата панель показывает статус: {pu.get('status')}")
 
     # ── окончание срока: ставим дату в прошлое и зовём проверку
     past = (datetime.now() - timedelta(minutes=5)).strftime(DATE_FMT)

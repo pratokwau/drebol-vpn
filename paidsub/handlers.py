@@ -550,7 +550,12 @@ async def _process_referral_bonus(invited_tg_id: int, context):
                 new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
 
                 await set_expire_date(ref_sub_id, new_expire_str)
-                await update_client_expire(ref_email, new_expire_str)
+                ref_panel = await update_client_expire(ref_email, new_expire_str)
+                if not ref_panel.get("success"):
+                    from log_channel import send_log as _log
+                    await _log(context.bot,
+                        f"⚠️ Бонус за друга: срок не применился в панели у "
+                        f"<code>{ref_email}</code> — {ref_panel.get('error', '?')}")
 
                 await add_history(
                     referrer_id, "referral_bonus",
@@ -593,7 +598,12 @@ async def _process_referral_bonus(invited_tg_id: int, context):
                 new_inv_str = new_inv_expire.strftime("%d.%m.%Y %H:%M:%S")
 
                 await set_expire_date(inv_sub_id, new_inv_str)
-                await update_client_expire(inv_email, new_inv_str)
+                inv_panel = await update_client_expire(inv_email, new_inv_str)
+                if not inv_panel.get("success"):
+                    from log_channel import send_log as _log
+                    await _log(context.bot,
+                        f"⚠️ Приветственный бонус: срок не применился в панели у "
+                        f"<code>{inv_email}</code> — {inv_panel.get('error', '?')}")
 
                 await add_history(
                     invited_tg_id, "referral_invited_bonus",
@@ -1998,14 +2008,30 @@ async def revoke_paid_period(tg_id: int, period_seconds: int | None, context,
     new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
     await set_expire_date(sub_id, new_expire_str)
 
-    from panel import update_client_expire
-    await update_client_expire(email, new_expire_str)
+    # Деньги вернули — доступ должен закрыться, поэтому ответ панели проверяем,
+    # а не выбрасываем: иначе бот отчитается новой датой, а человек продолжит
+    # пользоваться VPN по старому сроку.
+    from panel import update_client_expire, toggle_client
+    panel_error = ""
+    r = await update_client_expire(email, new_expire_str)
+    if not r.get("success"):
+        panel_error = str(r.get("error") or "панель не приняла новый срок")
+
+    if new_expire <= datetime.now():
+        # срок ушёл в прошлое: закрываем доступ сразу, не дожидаясь, пока
+        # панель сама заметит дату — за возврат человек уже не платит
+        off = await toggle_client(email, False)
+        if not off.get("success"):
+            panel_error = ((panel_error + "; ") if panel_error else "") + \
+                str(off.get("error") or "не удалось отключить клиента")
+        await update_paid_sub_field(sub_id, "status", "expired")
 
     await add_history(
         tg_id, "payment_refunded",
-        f"{reason}\nОтозвано: {fmt_duration(int(period_seconds))}\nНовая дата: {new_expire_str}",
+        f"{reason}\nОтозвано: {fmt_duration(int(period_seconds))}\nНовая дата: {new_expire_str}"
+        + (f"\n⚠️ Панель: {panel_error}" if panel_error else ""),
     )
-    return {"ok": True, "expire": new_expire_str}
+    return {"ok": True, "expire": new_expire_str, "panel_error": panel_error}
 
 
 def _renew_base(full_row) -> tuple:
@@ -2077,7 +2103,15 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     info = await get_client_info(email)
     if info.get("success") and not info.get("enabled", True):
         await toggle_client(email, True)
-    await update_client_expire(email, new_expire_str)
+    paid_panel = await update_client_expire(email, new_expire_str)
+    if not paid_panel.get("success"):
+        # оплата прошла, а срок в панели не сдвинулся — человек остался
+        # без доступа, и знать об этом надо немедленно
+        from log_channel import send_log as _log
+        await _log(context.bot,
+            f"🛑 Оплата зачтена, но панель не приняла новый срок: "
+            f"<code>{email}</code> — {paid_panel.get('error', '?')}\n"
+            f"Проставь срок <b>{new_expire_str}</b> в панели руками.")
 
     promo_line = ""
     pending_promo = promo_code or await get_pending_promo(tg_id)

@@ -740,7 +740,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await set_expire_date(sub_id, new_expire_str)
                 await update_paid_sub_field(sub_id, "status", "active")
                 from panel import update_client_expire, toggle_client, get_client_info
-                await update_client_expire(row[2], new_expire_str)
+                pushed = await update_client_expire(row[2], new_expire_str)
+                if not pushed.get("success"):
+                    await update.message.reply_text(
+                        "⚠️ <b>Панель не приняла новый срок</b>\n"
+                        f"<code>{pushed.get('error', '?')}</code>\n\n"
+                        "<i>В базе срок изменён — поправь его в панели руками.</i>",
+                        parse_mode="HTML", reply_markup=back_admin())
                 info = await get_client_info(row[2])
                 if info.get("success") and not info.get("enabled", True):
                     await toggle_client(row[2], True)
@@ -1067,10 +1073,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
                     await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
                     from panel import update_client_expire
-                    await update_client_expire(row[2], new_expire_str)
+                    fixed = await update_client_expire(row[2], new_expire_str)
+                    if not fixed.get("success"):
+                        note_panel = ("\n⚠️ Панель не приняла срок: "
+                                      f"<code>{fixed.get('error', '?')}</code>")
+                    else:
+                        note_panel = ""
                     note = (
                         f"\n📅 Период заканчивается: <b>{period_end.strftime('%d.%m.%Y %H:%M:%S')}</b>\n"
-                        f"⏳ Оплатить до: <b>{new_expire_str}</b>"
+                        f"⏳ Оплатить до: <b>{new_expire_str}</b>" + note_panel
                     )
                     await add_history(
                         row[1], "settings_changed",
