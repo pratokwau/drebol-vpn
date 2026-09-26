@@ -20,8 +20,6 @@ async def handle_admin_panel(query):
         from database import get_dashboard_stats
         s = await get_dashboard_stats()
         todo = []
-        if s["payment_pending"]:
-            todo.append(f"💰 заявок на оплату: <b>{s['payment_pending']}</b>")
         if s["requests_pending"]:
             todo.append(f"🆕 запросов на триал: <b>{s['requests_pending']}</b>")
         if unread:
@@ -108,7 +106,6 @@ async def handle_dashboard(query):
         "</blockquote>\n\n"
         f"{panel_block}"
         "⏳ <b>Ждут действия</b>\n<blockquote>"
-        f"Заявок на оплату: <b>{s['payment_pending']}</b>\n"
         f"Запросов на триал: <b>{s['requests_pending']}</b>\n"
         f"Открытых тикетов: <b>{s['unread_tickets']}</b>"
         "</blockquote>\n\n"

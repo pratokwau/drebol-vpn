@@ -646,6 +646,70 @@ async def handle_sub_reissue(query, context, sub_id: int):
 
 
 
+# ── Ники в панели ─────────────────────────────────────────────────────────────
+
+async def refresh_panel_names() -> dict:
+    """Приводит подписи клиентов в панели к текущим никам из Telegram.
+
+    Имя клиента и ссылку подписки не трогаем: они связаны, и переименование
+    сломало бы ключ у человека. Обновляем описание и TG ID — то, по чему
+    клиента узнаёшь в панели.
+    """
+    import asyncio
+    import aiosqlite
+    from database import DB_PATH
+    from panel import sync_client_note
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT s.id, s.tg_id, s.email, u.username
+            FROM admin_subs s LEFT JOIN users u ON u.id = s.tg_id
+            ORDER BY s.id
+        """) as cur:
+            rows = await cur.fetchall()
+
+    checked, updated, errors = 0, 0, []
+    for _sub_id, tg_id, email, uname in rows:
+        checked += 1
+        r = await sync_client_note(email, f"@{uname}" if uname else "", tg_id)
+        if r.get("success"):
+            updated += bool(r.get("changed"))
+        else:
+            errors.append(f"{email}: {r.get('error')}")
+        await asyncio.sleep(0.08)
+    return {"ok": True, "checked": checked, "updated": updated, "errors": errors}
+
+
+async def handle_subs_names_sync(query, context):
+    from html import escape
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    import remnawave as rw
+    if not rw.is_configured():
+        await query.answer("Сначала задай адрес панели и токен", show_alert=True)
+        return
+
+    await query.edit_message_text("🔄 Сверяю ники с панелью…")
+    res = await refresh_panel_names()
+    errors = res.get("errors") or []
+    lines = ["🔄 <b>Ники в панели</b>", "",
+             "<blockquote>"
+             f"Проверено подписок: <b>{res['checked']}</b>\n"
+             f"Обновлено подписей: <b>{res['updated']}</b>\n"
+             f"С ошибкой: <b>{len(errors)}</b></blockquote>"]
+    if errors:
+        shown = "\n".join(escape(e[:120]) for e in errors[:5])
+        lines += ["", "⚠️ <b>Не получилось</b>", f"<blockquote>{shown}</blockquote>"]
+        if len(errors) > 5:
+            lines.append(f"<i>…и ещё {len(errors) - 5}</i>")
+    lines += ["", "<i>Имя клиента и ссылка подписки не менялись — они связаны, "
+              "и переименование сломало бы ключ. Ник и TG ID лежат в описании.</i>"]
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К настройкам", callback_data="sub_presets")]]),
+    )
+
+
 def save_preset(key: str, value):
     cfg = load_config()
     cfg[key] = value

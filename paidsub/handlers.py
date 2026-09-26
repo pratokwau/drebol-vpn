@@ -12,7 +12,7 @@ from paidsub.storage import (
     update_paid_sub_field, get_expired_paid_subs, set_expire_date,
     add_history, list_history, get_history_entry,
     get_muted_until, set_mute, clear_mute, list_muted,
-    list_pending_requests, list_pending_payments,
+    list_pending_requests,
     get_referrer, mark_referral_rewarded, get_all_referral_stats,
     create_promo, get_promo, get_promo_by_id, list_promos, toggle_promo,
     delete_promo, promo_used_by, record_promo_use, promo_use_count, get_pending_promo,
@@ -20,7 +20,7 @@ from paidsub.storage import (
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
     approve_keyboard, paid_sub_settings_keyboard,
-    paid_history_keyboard, payment_approve_keyboard, muted_list_keyboard,
+    paid_history_keyboard, muted_list_keyboard,
 )
 from paidsub.time_parser import fmt_duration, fmt_duration_precise
 
@@ -61,9 +61,8 @@ def renew_label(sec) -> str:
 
 
 def _price_label() -> str:
-    """У Platega сумма — запасная, когда тарифов нет; у CloudTips она основная."""
-    from handlers.payprovider import uses_pay_link
-    return "💵 Сумма" if uses_pay_link() else "💵 Сумма без тарифов"
+    """Сумма нужна, когда тарифов нет: по ней бот выставит счёт."""
+    return "💵 Сумма без тарифов"
 
 
 def _fmt_presets(cfg: dict, squad_names=None) -> str:
@@ -222,16 +221,6 @@ async def handle_paid_preset_price(query, context):
     )
 
 
-async def handle_paid_preset_pay_url(query, context):
-    from states import AWAITING_PAID_PAY_URL
-    context.user_data["state"] = AWAITING_PAID_PAY_URL
-    cfg = load_config()
-    current = cfg.get("paid_pay_url") or "не задана"
-    await query.edit_message_text(
-        f"🔗 <b>Ссылка на оплату</b>\n\n<blockquote>Сейчас: <b>{current}</b></blockquote>\n\n<i>Пришли URL.</i>",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
 
 
 
@@ -684,12 +673,10 @@ async def handle_paid_sub_view(query, sub_id: int):
     #      ind_trial(13),ind_pay(14),ind_renew(15),ind_price(16),ind_pay_url(17)
     _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _limit_ip, limit_hwid, total_gb, created_at = row[:11]
     status = row[11] if len(row) > 11 else "active"
-    payment_pending = row[12] if len(row) > 12 else 0
     ind_trial = row[13] if len(row) > 13 else None
     ind_pay = row[14] if len(row) > 14 else None
     ind_renew = row[15] if len(row) > 15 else None
     ind_price = row[16] if len(row) > 16 else None
-    ind_pay_url = row[17] if len(row) > 17 else None
 
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
@@ -712,10 +699,7 @@ async def handle_paid_sub_view(query, sub_id: int):
     status_labels = {"active": "активна", "renewal": "ожидает продления", "expired": "истекла"}
     status_label = status_labels.get(status, status)
 
-    # Оплата ожидает
     payment_line = ""
-    if payment_pending:
-        payment_line = "💳 Оплата: <b>ожидает проверки</b>\n"
 
     # Количество продлений
     from paidsub.storage import get_paid_sub_by_tg_id
@@ -768,9 +752,6 @@ async def handle_paid_sub_view(query, sub_id: int):
         ind_lines.append(f"⏳ На продление: <b>{fmt_duration(ind_renew)}</b>")
     if ind_price is not None:
         ind_lines.append(f"💵 Сумма: <b>{ind_price} ₽</b>")
-    from handlers.payprovider import uses_pay_link
-    if ind_pay_url and uses_pay_link():
-        ind_lines.append(f"🔗 Ссылка оплаты: <b>{_esc_name(ind_pay_url)}</b>")
     ind_block = ""
     if ind_lines:
         ind_block = ("\n⚙️ <b>Свои условия</b>\n<blockquote>"
@@ -1514,7 +1495,6 @@ async def handle_paid_sub_settings(query, sub_id: int):
     ind_pay = row[14] if len(row) > 14 else None
     ind_renew = row[15] if len(row) > 15 else None
     ind_price = row[16] if len(row) > 16 else None
-    ind_pay_url = row[17] if len(row) > 17 else None
 
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
     hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
@@ -1534,10 +1514,8 @@ async def handle_paid_sub_settings(query, sub_id: int):
     pay_str = fmt_duration(eff["pay_period"])
     renew_str = renew_label(eff["renew_time"])
     price_str = f"{eff['price']} ₽"
-    from handlers.payprovider import uses_pay_link, provider_label
-    pay_line = (f"🔗 Ссылка на оплату: <b>{_esc_name(eff['pay_url'] or 'не задана')}</b>\n"
-                if uses_pay_link() else
-                f"💳 Оплата: <b>{provider_label()}</b> — счёт выставляет бот\n")
+    from handlers.payprovider import provider_label
+    pay_line = f"💳 Оплата: <b>{provider_label()}</b> — счёт выставляет бот\n"
 
     await query.edit_message_text(
         f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
@@ -1552,7 +1530,7 @@ async def handle_paid_sub_settings(query, sub_id: int):
         f"{pay_line}\n"
         "Выбери параметр для изменения:",
         parse_mode="HTML",
-        reply_markup=paid_sub_settings_keyboard(sub_id, with_pay_url=uses_pay_link()),
+        reply_markup=paid_sub_settings_keyboard(sub_id),
     )
 
 
@@ -1631,14 +1609,6 @@ async def handle_paid_sub_edit_price(query, sub_id: int, context):
     )
 
 
-async def handle_paid_sub_edit_pay_url(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EDIT_PAY_URL
-    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_PAY_URL
-    context.user_data["edit_sub_id"] = sub_id
-    await query.edit_message_text(
-        f"🔗 <b>Ссылка на оплату подписки #{sub_id}</b>\n\n<i>Пришли URL.</i>",
-        parse_mode="HTML", reply_markup=back_admin(),
-    )
 
 
 # ── Починка окна оплаты ──────────────────────────────────────────────────────
@@ -2147,125 +2117,8 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     return {"ok": True, "expire": new_expire_str}
 
 
-async def handle_confirm_payment(query, tg_id: int, context):
-    """Админ подтвердил оплату — продлеваем подписку на оплаченный период."""
-    row = await get_paid_sub_by_tg_id(tg_id)
-    if not row:
-        await query.edit_message_text(
-            f"❌ Подписка для <code>{tg_id}</code> не найдена.",
-            parse_mode="HTML",
-        )
-        return
-
-    sub_id = row[0]
-    email = row[2]
-    expire_str = row[6]
-
-    full_row = await get_paid_sub(sub_id)
-    cfg = load_config()
-    # условия подписки — с неё самой; правки применяются со следующего периода
-    from paidsub.storage import sub_settings
-    settings = sub_settings(full_row)
-    pay_seconds = settings["pay_period"]
-    renew_seconds = settings["renew_time"]
-    base, _carried = _renew_base(full_row)
-    new_period_end = base + timedelta(seconds=pay_seconds)
-    new_expire = new_period_end + timedelta(seconds=renew_seconds)
-    new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-
-    await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
-    await update_paid_sub_field(
-        sub_id, "period_end", new_period_end.strftime("%d.%m.%Y %H:%M:%S")
-    )
-    await update_paid_sub_field(sub_id, "status", "active")
-    await update_paid_sub_field(sub_id, "payment_pending", 0)
-    # срок сдвинулся — напоминания о скором конце начинают отсчёт заново
-    await update_paid_sub_field(sub_id, "remind_stage", 0)
-    cur_renewed = row[12] if len(row) > 12 else 0
-    await update_paid_sub_field(sub_id, "times_renewed", cur_renewed + 1)
-
-    from panel import get_client_info, toggle_client, update_client_expire
-    info = await get_client_info(email)
-    if info.get("success") and not info.get("enabled", True):
-        await toggle_client(email, True)
-
-    # Обновляем срок в панели
-    await update_client_expire(email, new_expire_str)
-
-    # Промокод: списываем использование и снимаем pending
-    promo_line = ""
-    pending_promo = await get_pending_promo(tg_id)
-    if pending_promo:
-        promo = await get_promo(pending_promo)
-        if promo and not await promo_used_by(pending_promo, tg_id):
-            await record_promo_use(pending_promo, tg_id)
-            await add_history(tg_id, "promo_used", f"Промокод {pending_promo} (−{promo[2]}%)")
-            promo_line = f"🎟 Промокод: <b>{pending_promo}</b> (−{promo[2]}%)\n"
-        await update_paid_sub_field(sub_id, "pending_promo", None)
-
-    price = settings["price"]
-    if pending_promo and promo_line:
-        promo_obj = await get_promo(pending_promo)
-        if promo_obj:
-            final_price = apply_discount(price, promo_obj[2])
-        else:
-            final_price = price
-        pay_details = f"Сумма: {final_price} ₽ (промокод {pending_promo} −{promo_obj[2] if promo_obj else 0}%)\nДо: {new_expire_str}"
-    else:
-        final_price = price
-        pay_details = f"Сумма: {price} ₽\nДо: {new_expire_str}"
-    await add_history(tg_id, "payment_confirmed", pay_details)
-
-    # Ручное подтверждение тоже пишем в платежи, иначе раздел «Оплаты»
-    # показывал бы только то, что прошло через платёжную систему
-    try:
-        from database import record_paid_payment
-        await record_paid_payment(
-            tg_id=tg_id, provider="manual", amount=int(final_price),
-            period_seconds=pay_seconds,
-            promo_code=pending_promo if promo_line else None,
-        )
-    except Exception:
-        pass
-
-    from log_channel import send_log
-    from database import get_user_info
-    u = await get_user_info(tg_id)
-    u_name = _esc_name(u[1] if u else None, tg_id)
-    await send_log(context.bot,
-        f"💰 Оплата подтверждена: {u_name} (<code>{tg_id}</code>)\n"
-        f"{promo_line}📅 До: {new_expire_str}"
-    )
-
-    await query.edit_message_text(
-        f"✅ Оплата подтверждена для <code>{tg_id}</code>!\n\n"
-        f"{promo_line}"
-        f"📅 Новая дата: <b>{new_expire_str}</b>",
-        parse_mode="HTML",
-    )
-
-    await _notify_user(context.bot, tg_id,
-        "✅ <b>Оплата прошла — спасибо!</b>\n\n"
-        f"<blockquote>➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
-        f"📅 Подписка до: <b>{new_expire_str[:16]}</b></blockquote>"
-    )
 
 
-async def handle_reject_payment(query, tg_id: int, context):
-    """Админ отклонил заявку на оплату."""
-    await add_history(tg_id, "payment_rejected")
-    row = await get_paid_sub_by_tg_id(tg_id)
-    if row:
-        await update_paid_sub_field(row[0], "payment_pending", 0)
-    await query.edit_message_text(
-        f"❌ Заявка на оплату от <code>{tg_id}</code> отклонена.",
-        parse_mode="HTML",
-    )
-    await _notify_user(context.bot, tg_id,
-        "😕 <b>Оплата не подтверждена</b>\n\n"
-        "<blockquote>Мы не нашли ваш платёж.</blockquote>\n\n"
-        "<i>Если вы точно оплатили — напишите в поддержку и приложите чек.</i>"
-    )
 
 
 # ── Запросы ──────────────────────────────────────────────────────────────────
@@ -2274,9 +2127,8 @@ async def handle_paid_requests(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from database import get_user_info
     trial_rows = await list_pending_requests()
-    payment_rows = await list_pending_payments()
 
-    if not trial_rows and not payment_rows:
+    if not trial_rows:
         await query.edit_message_text(
             "📬 <b>Запросы</b>\n\nНет ожидающих запросов.",
             parse_mode="HTML",
@@ -2303,19 +2155,6 @@ async def handle_paid_requests(query):
                 InlineKeyboardButton(f"🔇", callback_data=f"paid_mute_user:{tg_id}"),
             ])
         lines.append("")
-
-    if payment_rows:
-        lines.append("<b>💰 Запросы на проверку оплаты:</b>\n")
-        for tg_id, email, expire in payment_rows:
-            user_info = await get_user_info(tg_id)
-            name = user_info[1] if user_info else str(tg_id)
-            uname = f"@{user_info[2]}" if user_info and user_info[2] else f"id{tg_id}"
-            lines.append(f"👤 {name} ({uname}) · до {expire}")
-            kb.append([
-                InlineKeyboardButton(f"✅ {tg_id}", callback_data=f"confirm_payment:{tg_id}"),
-                InlineKeyboardButton(f"❌ {tg_id}", callback_data=f"reject_payment:{tg_id}"),
-                InlineKeyboardButton(f"🔇", callback_data=f"paid_mute_user:{tg_id}"),
-            ])
 
     kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
 

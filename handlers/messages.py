@@ -20,13 +20,13 @@ from states import (
     AWAITING_PAID_PRESET_HWID,
     AWAITING_PAID_PRESET_TRAFFIC,
     AWAITING_PAID_TRIAL_PERIOD, AWAITING_PAID_PAY_PERIOD,
-    AWAITING_PAID_RENEW_TIME, AWAITING_PAID_PRICE, AWAITING_PAID_PAY_URL,
+    AWAITING_PAID_RENEW_TIME, AWAITING_PAID_PRICE,
     AWAITING_PAID_SUB_EXTEND,
     AWAITING_PAID_SUB_EDIT_EXPIRE,
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
     AWAITING_PAID_SUB_EDIT_TRIAL, AWAITING_PAID_SUB_EDIT_PAY_PERIOD,
     AWAITING_PAID_SUB_EDIT_RENEW_TIME, AWAITING_PAID_SUB_EDIT_PRICE,
-    AWAITING_PAID_SUB_EDIT_PAY_URL, AWAITING_PAID_MUTE_USER,
+    AWAITING_PAID_MUTE_USER,
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE, AWAITING_PAID_FIX_RENEW,
@@ -683,15 +683,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Сумма: <b>{text} ₽</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
-    if state == AWAITING_PAID_PAY_URL:
-        if not text.startswith("http"):
-            await update.message.reply_text("❌ Ссылка должна начинаться с http.", reply_markup=back_admin())
-            return
-        _save("paid_pay_url", text)
-        context.user_data.pop("state", None)
-        await update.message.reply_text("✅ Ссылка на оплату сохранена.", reply_markup=back_admin())
-        return
-
     # ── Платные подписки: обычные пресеты ────────────────────────────────────────
     if state == AWAITING_PAID_PRESET_HWID:
         if not text.isdigit():
@@ -1105,18 +1096,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             from paidsub.storage import update_paid_sub_field
             await update_paid_sub_field(sub_id, "ind_price", int(text))
         await update.message.reply_text(f"✅ Сумма: <b>{text} ₽</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_PAID_SUB_EDIT_PAY_URL:
-        if not text.startswith("http"):
-            await update.message.reply_text("❌ Ссылка должна начинаться с http.", reply_markup=back_admin())
-            return
-        sub_id = context.user_data.pop("edit_sub_id", None)
-        context.user_data.pop("state", None)
-        if sub_id:
-            from paidsub.storage import update_paid_sub_field
-            await update_paid_sub_field(sub_id, "ind_pay_url", text)
-        await update.message.reply_text("✅ Ссылка на оплату сохранена.", reply_markup=back_admin())
         return
 
     # ── Реферальный бонус ───────────────────────────────────────────────────────

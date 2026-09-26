@@ -29,7 +29,7 @@ FEATURES = {
     "trial": ("🆓", "Выдача пробного периода", ()),
     "subscription": ("👤", "Моя подписка", ("qr_code", "copy_sub")),
     "payments": ("💳", "Оплата и продление",
-                 ("renew_sub", "pay_invoice", "tariff_pick", "i_paid",
+                 ("renew_sub", "pay_invoice", "tariff_pick",
                   "enter_promo", "remove_promo")),
     "reissue": ("🔁", "Перевыпуск ключа", ("reissue_key", "reissue_do")),
     "support": ("💬", "Поддержка", ("support_open", "support_page", "support_files")),

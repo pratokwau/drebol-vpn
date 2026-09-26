@@ -13,7 +13,6 @@ from paidsub.time_parser import fmt_duration
 PROVIDER_LABELS = {
     "platega": "Platega",
     "manual": "вручную",
-    "cloudpayments": "CloudPayments",
 }
 
 STATUS_LABELS = {

@@ -41,25 +41,11 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
 
 
 def _money_rows(b) -> list:
-    """Денежные кнопки под активную платёжку.
-
-    Тарифы и автосчета умеет только Platega; у CloudTips вместо них одна
-    ссылка на оплату и фиксированная сумма.
-    """
-    from handlers.payprovider import uses_pay_link
-    if uses_pay_link():
-        return [[b("💵 Сумма", "paid_preset_price"),
-                 b("🔗 Ссылка на оплату", "paid_preset_pay_url")],
-                [b("💳 Платёжка", "pay_provider_menu")]]
     return [[b("🏷 Тарифы", "tariffs_menu"), b("💵 Сумма", "paid_preset_price")],
             [b("💳 Платёжка", "pay_provider_menu")]]
 
 
 def _devices_rows(b) -> list:
-    """Докуп устройств продаётся счётом, поэтому он только у Platega."""
-    from handlers.payprovider import uses_pay_link
-    if uses_pay_link():
-        return []
     return [[b("📱 Цена устройства", "paid_device_price"),
              b("📱 Максимум докупа", "paid_device_max")]]
 
@@ -111,29 +97,34 @@ def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardM
     ])
 
 
-def paid_sub_settings_keyboard(sub_id: int, with_pay_url: bool = True) -> InlineKeyboardMarkup:
-    """Кнопки правки подписки.
-
-    Ссылку на оплату показываем только там, где она нужна: у Platega счёт
-    выставляет бот, и эта кнопка сбивала бы с толку.
-    """
+def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
     def b(text, action):
         return InlineKeyboardButton(text, callback_data=f"{action}:{sub_id}")
 
-    money = [b("💵 Сумма", "paid_sub_edit_price")]
-    if with_pay_url:
-        money.append(b("🔗 Ссылка на оплату", "paid_sub_edit_pay_url"))
     return InlineKeyboardMarkup([
         [b("📅 Дата окончания", "paid_sub_edit_expire")],
         [b("🖥 Лимит устройств", "paid_sub_edit_hwid")],
         [b("📶 Трафик (ГБ)", "paid_sub_edit_traffic"), b("🆓 Пробный период", "paid_sub_edit_trial")],
         [b("💰 Период оплаты", "paid_sub_edit_pay_period"), b("⏳ На продление", "paid_sub_edit_renew")],
-        money,
+        [b("💵 Сумма", "paid_sub_edit_price")],
         [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"paid_sub_view:{sub_id}")],
     ])
 
 
+def approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Одобрить", callback_data=f"paid_approve:{tg_id}"),
+         InlineKeyboardButton("❌ Отклонить", callback_data=f"paid_reject:{tg_id}")],
+        [InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}")],
+    ])
+
+
+
+
+
+
 def paid_history_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
+    """Навигация по истории действий. Одна страница — только кнопка назад."""
     kb = []
     nav = []
     if page > 1:
@@ -145,24 +136,6 @@ def paid_history_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
         kb.append(nav)
     kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
     return InlineKeyboardMarkup(kb)
-
-
-def approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Одобрить", callback_data=f"paid_approve:{tg_id}"),
-         InlineKeyboardButton("❌ Отклонить", callback_data=f"paid_reject:{tg_id}")],
-        [InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}")],
-    ])
-
-
-def payment_approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Подтвердить оплату", callback_data=f"confirm_payment:{tg_id}")],
-        [InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_payment:{tg_id}"),
-         InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}")],
-    ])
-
-
 
 
 def muted_list_keyboard(muted_rows: list) -> InlineKeyboardMarkup:

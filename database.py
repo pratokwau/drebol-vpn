@@ -120,7 +120,6 @@ async def init_db():
             ("ind_pay_period", "paid_pay_period"),
             ("ind_renew_time", "paid_renew_time"),
             ("ind_price", "paid_price"),
-            ("ind_pay_url", "paid_pay_url"),
         ):
             _val = _cfg.get(_key)
             if _val:
@@ -467,7 +466,6 @@ async def get_dashboard_stats() -> dict:
         trial_active = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed = 0 AND status IN ('active','renewal')")
         paying_active = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed > 0 AND status IN ('active','renewal')")
         paying_total = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed > 0")
-        payment_pending = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE payment_pending = 1")
         paid_other = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE status NOT IN ('active','renewal','expired')")
 
         requests_pending = await _one(db, "SELECT COUNT(*) FROM paid_sub_requests WHERE status = 'pending'")
@@ -511,7 +509,6 @@ async def get_dashboard_stats() -> dict:
         "paid_total": paid_total, "paid_active": paid_active, "paid_expired": paid_expired,
         "paid_other": paid_other,
         "trial_active": trial_active, "paying_active": paying_active, "paying_total": paying_total,
-        "payment_pending": payment_pending,
         "requests_pending": requests_pending, "admin_subs": admin_subs,
         "ref_total": ref_total, "ref_rewarded": ref_rewarded,
         "promos_active": promos_active, "promo_uses": promo_uses,
@@ -549,8 +546,6 @@ async def get_users_by_segment(segment: str) -> list[int]:
             q = "SELECT DISTINCT tg_id FROM paid_subs WHERE tg_id IS NOT NULL AND times_renewed > 0"
         elif segment == "no_sub":
             q = "SELECT id FROM users WHERE id NOT IN (SELECT tg_id FROM paid_subs WHERE tg_id IS NOT NULL)"
-        elif segment == "pending_pay":
-            q = "SELECT DISTINCT tg_id FROM paid_subs WHERE tg_id IS NOT NULL AND payment_pending = 1"
         else:
             q = "SELECT id FROM users"
         async with db.execute(q) as cur:

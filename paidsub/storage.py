@@ -94,7 +94,6 @@ def sub_settings(row) -> dict:
         "pay_period": pick(14, "paid_pay_period", 2592000),
         "renew_time": pick_zeroable(15, "paid_renew_time", 0),
         "price": pick(16, "paid_price", 0),
-        "pay_url": pick(17, "paid_pay_url", ""),
     }
 
 
@@ -147,7 +146,6 @@ async def snapshot_sub_settings(sub_id: int):
             ("ind_pay_period", "paid_pay_period"),
             ("ind_renew_time", "paid_renew_time"),
             ("ind_price", "paid_price"),
-            ("ind_pay_url", "paid_pay_url"),
         ):
             val = cfg.get(key)
             if val:
@@ -164,14 +162,6 @@ async def get_paid_sub_status(tg_id: int) -> str:
     return row[11] if len(row) > 11 else "active"
 
 
-async def is_payment_pending(tg_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT payment_pending FROM paid_subs WHERE tg_id = ? ORDER BY created_at DESC LIMIT 1",
-            (tg_id,),
-        ) as cur:
-            row = await cur.fetchone()
-            return bool(row and row[0])
 
 
 async def delete_paid_sub(sub_id: int):
@@ -245,15 +235,6 @@ async def list_pending_requests() -> list:
             return await cur.fetchall()
 
 
-async def list_pending_payments() -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT tg_id, email, expire_date
-            FROM paid_subs
-            WHERE payment_pending = 1
-            ORDER BY expire_date ASC
-        """) as cur:
-            return await cur.fetchall()
 
 
 async def resolve_request(tg_id: int, status: str):

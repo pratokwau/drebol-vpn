@@ -160,6 +160,33 @@ async def update_client_traffic(email: str, total_gb: int) -> dict:
     return {"success": True} if r["ok"] else _fail(str(r.get("error")))
 
 
+async def sync_client_note(email: str, note: str = "", tg_id=None) -> dict:
+    """Обновляет подпись клиента в панели: ник и TG ID.
+
+    Имя клиента менять нельзя — оно вшито в ссылку подписки, — поэтому ник
+    живёт в описании. Если в панели уже то же самое, запрос не отправляем.
+    """
+    import remnawave as rw
+    name = _name(email)
+    want = f"Drebol VPN · {note}" if note else "Создано ботом Drebol VPN"
+    r = await rw.user_by_name(name)
+    if not r["ok"]:
+        return _fail(str(r.get("error")))
+    data = r["data"] or {}
+    same_note = (data.get("description") or "") == want
+    same_tg = (not tg_id) or str(data.get("telegramId") or "") == str(tg_id)
+    if same_note and same_tg:
+        return {"success": True, "changed": False}
+
+    fields = {"description": want}
+    if tg_id:
+        fields["telegramId"] = int(tg_id)
+    upd = await rw.patch(name, **fields)
+    if not upd["ok"]:
+        return _fail(str(upd.get("error")))
+    return {"success": True, "changed": True}
+
+
 async def toggle_client(email: str, enable: bool) -> dict:
     import remnawave as rw
     r = await rw.action(_name(email), "enable" if enable else "disable")

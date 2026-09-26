@@ -159,33 +159,20 @@ async def _left_line(row) -> str:
 async def handle_renew_sub(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     user = query.from_user
-    cfg = load_config()
 
-    from paidsub.storage import get_paid_sub_by_tg_id, sub_settings
+    from paidsub.storage import get_paid_sub_by_tg_id
     row = await get_paid_sub_by_tg_id(user.id)
-    settings = sub_settings(row)
-    price = settings["price"]
-    pay_url = settings["pay_url"]
-    pay_seconds = settings["pay_period"]
-    from paidsub.time_parser import fmt_duration
-    period_str = fmt_duration(pay_seconds)
-
-    uname = f"@{user.username}" if user.username else f"id{user.id}"
-    hint_text = f"{user.id} - {uname}"
 
     # Применённый промокод (если валиден)
     from paidsub.storage import get_pending_promo, update_paid_sub_field
     from paidsub.handlers import validate_promo, apply_discount
     promo_line = ""
-    price_line = f"💵 Сумма: <b>{price} ₽</b>"
     promo_btn_row = [InlineKeyboardButton("🎟 Ввести промокод", callback_data="enter_promo")]
     pending = await get_pending_promo(user.id)
     if pending:
         promo, err = await validate_promo(pending, user.id)
         if promo:
             percent = promo[2]
-            final_price = apply_discount(price, percent)
-            price_line = f"💵 Сумма: <s>{price} ₽</s> → <b>{final_price} ₽</b>"
             promo_line = f"🎟 Промокод <b>{escape(str(promo[1]))}</b> · скидка <b>−{percent}%</b>"
             promo_btn_row = [InlineKeyboardButton("❌ Убрать промокод", callback_data="remove_promo")]
         else:
@@ -193,85 +180,57 @@ async def handle_renew_sub(query):
             if row:
                 await update_paid_sub_field(row[0], "pending_promo", None)
 
-    from handlers.payprovider import current_provider
-    provider = current_provider()
+    # Счёт выставляет бот, оплата засчитывается автоматически
+    import platega_api as pg
+    if pg.is_configured():
+        from database import list_tariffs
+        tariffs = await list_tariffs(only_active=True)
 
-    # Platega: счёт выставляет бот, оплата засчитывается автоматически
-    if provider == "platega":
-        import platega_api as pg
-        if pg.is_configured():
-            from database import list_tariffs
-            tariffs = await list_tariffs(only_active=True)
+        # Есть тарифы — клиент выбирает срок сам
+        if tariffs:
+            discount = None
+            if pending:
+                promo_ok, _ = await validate_promo(pending, user.id)
+                if promo_ok:
+                    discount = promo_ok[2]
 
-            # Есть тарифы — клиент выбирает срок сам
-            if tariffs:
-                discount = None
-                if pending:
-                    promo_ok, _ = await validate_promo(pending, user.id)
-                    if promo_ok:
-                        discount = promo_ok[2]
+            kb = []
+            for t_id, name, t_period, t_price, _a, _s in tariffs:
+                final = apply_discount(t_price, discount) if discount else t_price
+                label = f"{name}  ·  {final} ₽"
+                if discount:
+                    label += f" (−{discount}%)"
+                kb.append([InlineKeyboardButton(label, callback_data=f"tariff_pick:{t_id}")])
+            kb.append(promo_btn_row)
+            kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
 
-                kb = []
-                for t_id, name, t_period, t_price, _a, _s in tariffs:
-                    final = apply_discount(t_price, discount) if discount else t_price
-                    label = f"{name}  ·  {final} ₽"
-                    if discount:
-                        label += f" (−{discount}%)"
-                    kb.append([InlineKeyboardButton(
-                        label, callback_data=f"tariff_pick:{t_id}"
-                    )])
-                kb.append(promo_btn_row)
-                kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
-
-                notes = [x for x in (promo_line, await _left_line(row)) if x]
-                await query.edit_message_text(
-                    "💳 <b>Продление подписки</b>\n\n"
-                    "Выберите срок — оплата пройдёт прямо здесь, в боте."
-                    + ("\n\n" + "\n".join(notes) if notes else ""),
-                    parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup(kb),
-                )
-                return
-
-            # Тарифов нет — срок и цена берутся из самой подписки,
-            # но экран тот же: там же добираются устройства
-            await handle_tariff_pick(query, None, 0)
+            notes = [x for x in (promo_line, await _left_line(row)) if x]
+            await query.edit_message_text(
+                "💳 <b>Продление подписки</b>\n\n"
+                "Выберите срок — оплата пройдёт прямо здесь, в боте."
+                + ("\n\n" + "\n".join(notes) if notes else ""),
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(kb),
+            )
             return
-        # ключи не заданы — не оставляем человека без вариантов
-        pay_url = pay_url or ""
 
-    kb = []
-    if pay_url:
-        kb.append([InlineKeyboardButton("💳 Оплатить", url=pay_url)])
-    kb.append(promo_btn_row)
-    kb.append([InlineKeyboardButton("✅ Я оплатил", callback_data="i_paid")])
-    kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
+        # Тарифов нет — срок и цена берутся из самой подписки,
+        # но экран тот же: там же добираются устройства
+        await handle_tariff_pick(query, None, 0)
+        return
 
+    # Ключи платёжки не заданы — честно говорим, что оплатить сейчас нельзя
     await query.edit_message_text(
         "💳 <b>Продление подписки</b>\n\n"
-        f"<blockquote>⏱ Срок: <b>{period_str}</b>\n"
-        f"{price_line}"
-        + (f"\n{promo_line}" if promo_line else "") + "</blockquote>\n\n"
-        "<b>В комментарии к оплате укажите:</b>\n"
-        f"<code>{hint_text}</code>\n\n"
-        "<i>После оплаты нажмите «✅ Я оплатил» — мы проверим и продлим подписку.</i>",
+        "<blockquote>Оплата сейчас недоступна — мы её настраиваем.</blockquote>\n\n"
+        "<i>Напишите в поддержку: подскажем, когда всё заработает, "
+        "и не дадим подписке закончиться.</i>",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(kb),
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+        ]),
     )
-
-
-async def _offer_devices(row) -> tuple:
-    """Что предложить по устройствам: цена, сколько ещё можно докупить.
-
-    Докуп идёт только там, где лимит устройств вообще есть: при нулевом
-    лимите панель их не считает, и слот было бы не к чему прибавить.
-    Возвращает (цена, сколько ещё можно взять, текущий лимит, докуплено).
-    """
-    price, max_extra, limit_now, bought = _device_state(row)
-    free = max(0, max_extra - bought)
-    if not price or not limit_now or not free:
-        return 0, 0, limit_now, bought
-    return price, free, limit_now, bought
 
 
 def _device_state(row) -> tuple:
@@ -549,110 +508,6 @@ async def handle_remove_promo(query, context):
     await handle_renew_sub(query)
 
 
-async def handle_i_paid(query, context):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from datetime import datetime
-    user = query.from_user
-
-    from paidsub.storage import is_payment_pending, get_paid_sub_by_tg_id, update_paid_sub_field, get_muted_until, get_paid_sub
-    muted = await get_muted_until(user.id)
-    if muted:
-        muted_dt = None
-        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-            try:
-                muted_dt = datetime.strptime(muted, fmt)
-                break
-            except ValueError:
-                continue
-        if muted_dt and datetime.now() < muted_dt:
-            await query.edit_message_text(
-                "🔇 <b>Заявки временно недоступны</b>\n\n"
-                f"<blockquote>Можно будет отправить после <b>{muted}</b>.</blockquote>\n\n"
-                "<i>Если это ошибка — напишите в поддержку.</i>",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
-                ]),
-            )
-            return
-
-    if await is_payment_pending(user.id):
-        await query.edit_message_text(
-            "⏳ <b>Заявка уже у нас</b>\n\n"
-            "<blockquote>Мы проверяем оплату. Как только всё подтвердится — "
-            "подписка продлится, а вам придёт уведомление.</blockquote>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
-            ]),
-        )
-        return
-
-    row = await get_paid_sub_by_tg_id(user.id)
-    if row:
-        await update_paid_sub_field(row[0], "payment_pending", 1)
-
-    uname = f"@{user.username}" if user.username else f"id{user.id}"
-
-    await query.edit_message_text(
-        "✅ <b>Заявка отправлена</b>\n\n"
-        "<blockquote>Мы проверим оплату и продлим подписку. "
-        "Уведомление придёт сюда, в бот.</blockquote>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")]
-        ]),
-    )
-
-    from config import ADMIN_ID
-    row = await get_paid_sub_by_tg_id(user.id)
-    sub_info = ""
-    if row:
-        sub_info = f"📧 <code>{row[2]}</code>\n📅 Подписка до: <b>{row[6]}</b>\n"
-
-    cfg = load_config()
-    # цена по условиям самой подписки, дальше применится промокод
-    from paidsub.storage import sub_settings
-    price = sub_settings(row)["price"]
-
-    from paidsub.storage import get_pending_promo
-    from paidsub.handlers import validate_promo, apply_discount
-    promo_admin_line = ""
-    pending = await get_pending_promo(user.id)
-    if pending:
-        promo, err = await validate_promo(pending, user.id)
-        if promo:
-            percent = promo[2]
-            final_price = apply_discount(price, percent)
-            promo_admin_line = (
-                f"🎟 Промокод: <b>{escape(str(promo[1]))}</b> (−{percent}%)\n"
-                f"💵 К оплате: <s>{price} ₽</s> → <b>{final_price} ₽</b>"
-            )
-    if not promo_admin_line:
-        promo_admin_line = f"💵 К оплате: <b>{price} ₽</b>"
-
-    if user.username:
-        link_line = f'⛓‍💥 <a href="https://t.me/{user.username}">Написать</a>'
-    else:
-        link_line = f'⛓‍💥 <a href="tg://user?id={user.id}">Написать</a>'
-
-    from paidsub.keyboards import payment_approve_keyboard
-    kb = payment_approve_keyboard(user.id)
-
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=(
-            f"💰 <b>Заявка на оплату</b>\n\n"
-            f'👤 <a href="tg://user?id={user.id}">{escape(str(user.first_name or user.id))}</a> '
-            f"({escape(str(uname))})  ·  <code>{user.id}</code>\n"
-            f"{link_line}\n\n"
-            f"<blockquote>{sub_info}{promo_admin_line}</blockquote>\n\n"
-            "<i>Проверьте поступление и подтвердите или отклоните.</i>"
-        ),
-        parse_mode="HTML",
-        reply_markup=kb,
-        disable_web_page_preview=True,
-    )
 
 
 async def handle_news(query):

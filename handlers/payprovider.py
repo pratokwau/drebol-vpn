@@ -1,7 +1,7 @@
-"""Раздел «Платёжная система»: выбор способа приёма платежей.
+"""Раздел «Платёжная система»: настройки приёма платежей через Platega.
 
-CloudPayments — прежняя схема: ссылка на оплату и подтверждение админом.
-Platega — приём через API: бот сам выставляет счёт и сам засчитывает оплату.
+Бот сам выставляет счёт и сам засчитывает оплату — подтверждать вручную
+не нужно. Другого способа приёма платежей в боте нет.
 """
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -11,42 +11,15 @@ from config import load_config, save_config
 from keyboards import back_admin
 from states import AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET
 
-# Ключ «cloudpayments» остался с первых версий — в конфиге у людей уже лежит он,
-# поэтому меняем только подпись
-PROVIDERS = {
-    "cloudpayments": "CloudTips",
-    "platega": "Platega",
-}
-DEFAULT_PROVIDER = "cloudpayments"
-
-
-def current_provider() -> str:
-    p = (load_config().get("pay_provider") or DEFAULT_PROVIDER).lower()
-    return p if p in PROVIDERS else DEFAULT_PROVIDER
-
 
 def provider_label() -> str:
-    return PROVIDERS[current_provider()]
-
-
-def uses_pay_link() -> bool:
-    """Нужна ли ссылка на оплату.
-
-    У CloudTips человек платит по ссылке и админ подтверждает вручную.
-    Platega выставляет счёт сама, и ссылка из настроек там ни при чём —
-    показывать её в подписках значит путать саму себя.
-    """
-    return current_provider() == "cloudpayments"
+    return "Platega"
 
 
 def provider_line() -> str:
-    """Строка о платёжке для админских экранов — по активной системе."""
-    from html import escape
-    cfg = load_config()
-    if uses_pay_link():
-        url = cfg.get("paid_pay_url") or "не задана"
-        return f"💳 CloudTips  ·  🔗 <b>{escape(str(url))}</b>"
+    """Строка о платёжке для админских экранов."""
     import platega_api as pg
+    cfg = load_config()
     if not pg.is_configured():
         return "💳 Platega  ·  ⚠️ <b>ключи не заданы</b>"
     method = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
@@ -65,69 +38,32 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
     if context:
         context.user_data.pop("state", None)
     cfg = load_config()
-    cur = current_provider()
 
     import platega_api as pg
-    from html import escape
-    lines = ["💳 <b>Платёжная система</b>", ""]
+    ready = pg.is_configured()
+    method_id = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
+    lines = ["💳 <b>Платёжная система</b>", "",
+             f"<blockquote>Приём платежей: <b>Platega</b>\n"
+             f"🆔 MerchantId: <code>{_mask(cfg.get('platega_merchant_id'))}</code>\n"
+             f"🔑 Ключ: <code>{_mask(cfg.get('platega_secret'))}</code>\n"
+             f"💠 Способ: <b>{pg.PAYMENT_METHODS.get(method_id, method_id)}</b></blockquote>", "",
+             "<i>Бот сам выставляет счёт и сам засчитывает оплату — "
+             "подтверждать вручную не нужно.</i>"]
+    if not ready:
+        lines.append("\n⚠️ <b>Не хватает данных</b> — заполни MerchantId и ключ. "
+                     "Пока их нет, клиенты не смогут оплатить подписку.")
 
-    if cur == "cloudpayments":
-        pay_url = cfg.get("paid_pay_url") or "не задана"
-        lines += [
-            f"<blockquote>Активна: <b>{PROVIDERS[cur]}</b>\n"
-            f"🔗 Ссылка: <code>{escape(str(pay_url))}</code></blockquote>", "",
-            "<i>Человек платит по ссылке и жмёт «Я оплатил» — ты подтверждаешь вручную. "
-            "Тарифы и автосчета в этом режиме не работают.</i>",
-        ]
-    else:
-        ready = pg.is_configured()
-        method_id = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
-        lines += [
-            f"<blockquote>Активна: <b>{PROVIDERS[cur]}</b>\n"
-            f"🆔 MerchantId: <code>{_mask(cfg.get('platega_merchant_id'))}</code>\n"
-            f"🔑 Ключ: <code>{_mask(cfg.get('platega_secret'))}</code>\n"
-            f"💠 Способ: <b>{pg.PAYMENT_METHODS.get(method_id, method_id)}</b></blockquote>", "",
-            "<i>Бот сам выставляет счёт и сам засчитывает оплату — подтверждать вручную не нужно.</i>",
-        ]
-        if not ready:
-            lines.append("\n⚠️ <b>Не хватает данных</b> — заполни MerchantId и ключ.")
-
-    rows = []
-    for key, label in PROVIDERS.items():
-        mark = "✅ " if key == cur else ""
-        rows.append([InlineKeyboardButton(
-            f"{mark}{label}", callback_data=f"pay_provider_set:{key}"
-        )])
-
-    if cur == "platega":
-        rows.append([
-            InlineKeyboardButton("🆔 MerchantId", callback_data="platega_set_merchant"),
-            InlineKeyboardButton("🔑 Ключ", callback_data="platega_set_secret"),
-        ])
-        rows.append([InlineKeyboardButton("💠 Способ оплаты", callback_data="platega_methods"),
-                     InlineKeyboardButton("🔌 Проверить", callback_data="platega_test")])
-    else:
-        rows.append([InlineKeyboardButton("🔗 Ссылка на оплату", callback_data="paid_preset_pay_url")])
-
-    rows.append([InlineKeyboardButton("◀️ К настройкам", callback_data="paid_sub_presets")])
+    rows = [
+        [InlineKeyboardButton("🆔 MerchantId", callback_data="platega_set_merchant"),
+         InlineKeyboardButton("🔑 Ключ", callback_data="platega_set_secret")],
+        [InlineKeyboardButton("💠 Способ оплаты", callback_data="platega_methods"),
+         InlineKeyboardButton("🔌 Проверить", callback_data="platega_test")],
+        [InlineKeyboardButton("◀️ К настройкам", callback_data="paid_sub_presets")],
+    ]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(rows), disable_web_page_preview=True,
     )
-
-
-async def handle_pay_provider_set(query, context: ContextTypes.DEFAULT_TYPE, provider: str):
-    if provider not in PROVIDERS:
-        await query.answer("Неизвестная система", show_alert=True)
-        return
-    cfg = load_config()
-    cfg["pay_provider"] = provider
-    save_config(cfg)
-
-    from log_channel import send_log
-    await send_log(context.bot, f"💳 Платёжная система переключена на {PROVIDERS[provider]}")
-    await query.answer(f"Активна {PROVIDERS[provider]}")
-    await handle_pay_provider_menu(query, context)
 
 
 async def handle_platega_set_merchant(query, context: ContextTypes.DEFAULT_TYPE):

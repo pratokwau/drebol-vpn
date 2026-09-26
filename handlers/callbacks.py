@@ -7,7 +7,7 @@ from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard, subscribe_text
 from handlers.user import (
     handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub,
-    handle_news, handle_how_to, handle_renew_sub, handle_i_paid, handle_referral,
+    handle_news, handle_how_to, handle_renew_sub, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_qr_code, handle_reissue_key, handle_reissue_do, handle_prices, handle_info,
     handle_pay_invoice, handle_tariff_pick, handle_my_devices, handle_dev_del,
@@ -79,7 +79,7 @@ from handlers.tariffs import (
     handle_tariff_edit,
 )
 from handlers.payprovider import (
-    handle_pay_provider_menu, handle_pay_provider_set,
+    handle_pay_provider_menu,
     handle_platega_set_merchant, handle_platega_set_secret,
     handle_platega_methods, handle_platega_method_set, handle_platega_test,
 )
@@ -102,12 +102,13 @@ from adminsub.handlers import (
     handle_sub_edit_hwid, handle_sub_edit_traffic,
     handle_sub_extend, handle_sub_reduce, handle_sub_devices, handle_sub_ips,
     handle_sub_hwid_del, handle_sub_hwid_clear, handle_sub_reissue,
+    handle_subs_names_sync,
 )
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
     handle_paid_preset_hwid, handle_paid_preset_traffic,
     handle_paid_preset_trial, handle_paid_preset_pay_period, handle_paid_preset_renew,
-    handle_paid_preset_price, handle_paid_preset_pay_url,
+    handle_paid_preset_price,
     handle_paid_create_sub, handle_paid_create_type,
     handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
     handle_approve, handle_reject, handle_request_sub,
@@ -121,8 +122,7 @@ from paidsub.handlers import (
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
     handle_paid_sub_edit_trial, handle_paid_sub_edit_pay_period,
-    handle_paid_sub_edit_renew_time, handle_paid_sub_edit_price, handle_paid_sub_edit_pay_url,
-    handle_confirm_payment, handle_reject_payment,
+    handle_paid_sub_edit_renew_time, handle_paid_sub_edit_price,
     handle_paid_history, handle_paid_history_view, handle_mute_user, handle_unmute_user, handle_muted_list,
     handle_paid_requests,
     handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
@@ -246,8 +246,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _p = data.split(":")
         await handle_tariff_pick(query, context, int(_p[1]),
                                  int(_p[2]) if len(_p) > 2 else None)
-    elif data == "i_paid":
-        await handle_i_paid(query, context)
     elif data == "my_sub":
         await handle_my_sub(query)
     elif data == "news":
@@ -557,6 +555,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_admin_subs_menu(query, int(data.split(":")[1]))
     elif data == "create_sub":
         await handle_create_sub(query, context)
+    elif data == "subs_names_sync":
+        await handle_subs_names_sync(query, context)
     elif data == "sub_presets":
         await handle_presets_menu(query)
     elif data == "preset_expire":
@@ -624,8 +624,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_tariff_edit(query, context, int(data.split(":")[1]), "name")
     elif data == "pay_provider_menu":
         await handle_pay_provider_menu(query, context)
-    elif data.startswith("pay_provider_set:"):
-        await handle_pay_provider_set(query, context, data.split(":")[1])
     elif data == "platega_set_merchant":
         await handle_platega_set_merchant(query, context)
     elif data == "platega_set_secret":
@@ -646,8 +644,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_preset_renew(query, context)
     elif data == "paid_preset_price":
         await handle_paid_preset_price(query, context)
-    elif data == "paid_preset_pay_url":
-        await handle_paid_preset_pay_url(query, context)
     elif data == "paid_preset_hwid":
         await handle_paid_preset_hwid(query, context)
     elif data == "paid_preset_traffic":
@@ -709,8 +705,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_edit_renew_time(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_price:"):
         await handle_paid_sub_edit_price(query, int(data.split(":")[1]), context)
-    elif data.startswith("paid_sub_edit_pay_url:"):
-        await handle_paid_sub_edit_pay_url(query, int(data.split(":")[1]), context)
     elif data == "paid_history":
         await handle_paid_history(query)
     elif data.startswith("paid_history_page:"):
@@ -768,7 +762,3 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_approve(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_reject:"):
         await handle_reject(query, int(data.split(":")[1]), context)
-    elif data.startswith("confirm_payment:"):
-        await handle_confirm_payment(query, int(data.split(":")[1]), context)
-    elif data.startswith("reject_payment:"):
-        await handle_reject_payment(query, int(data.split(":")[1]), context)

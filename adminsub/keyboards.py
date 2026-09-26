@@ -34,6 +34,7 @@ def presets_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="preset_traffic")],
         # доступ к серверам задают сквады панели
         [InlineKeyboardButton("👥 Сквады Remnawave", callback_data="rw_squads")],
+        [InlineKeyboardButton("🔄 Обновить ники в панели", callback_data="subs_names_sync")],
         [InlineKeyboardButton("◀️ Назад к подпискам", callback_data="admin_subs")],
     ])
 
