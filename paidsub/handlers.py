@@ -1808,7 +1808,11 @@ async def expiry_reminder_tick(context):
 # ── Job: проверка истечения подписок ──────────────────────────────────────────
 
 async def check_expired_subs(context):
-    """Проверяет подписки: уведомляет при смене статуса и закрывает доступ."""
+    """Следит за сроками: меняет статусы и предупреждает людей.
+
+    Доступ в панели не выключаем — у клиента там тот же срок окончания,
+    и панель закрывает его сама, переводя в EXPIRED.
+    """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     cfg = load_config()
     global_renew_seconds = cfg.get("paid_renew_time", 86400)
@@ -1919,7 +1923,11 @@ async def check_expired_subs(context):
         else:
             # Время на оплату вышло
             if status != "expired":
-                # Переход → expired: одноразовое уведомление и отключение в панели
+                # Переход → expired: одноразовое уведомление, в панель не лезем.
+                # Срок окончания у клиента в панели тот же, что у нас в базе,
+                # поэтому доступ она закрывает сама — переводит в EXPIRED, когда
+                # время вышло. Отключать вручную значит делать ту же работу
+                # дважды и рисковать разъехаться с панелью.
                 # Без окна на продление период и доступ кончаются в один момент,
                 # поэтому «конец периода» фиксируем здесь же — статистика его ждёт
                 was_active = status == "active"
@@ -1931,13 +1939,17 @@ async def check_expired_subs(context):
                                            "триал" if times_renewed == 0 else "оплаченный")
                     await log_activity(tg_id, "ev:expired")
 
-                # доступ просто закрываем: что делать с истёкшими дальше,
-                # решает сама панель — у неё это уже встроено
-                from panel import get_client_info, toggle_client
-                info = await get_client_info(email)
-                enabled = info.get("enabled", True) if info.get("success") else False
-                if enabled:
-                    await toggle_client(email, False)
+                # Единственное, что делаем в панели, — ещё раз отдаём ей ту же
+                # дату окончания. Запрос идемпотентный, зато если срок в панели
+                # когда-то разъехался с базой (например, правили руками),
+                # он снова сойдётся, и панель закроет доступ.
+                from panel import update_client_expire
+                synced = await update_client_expire(email, expire_str)
+                if not synced.get("success"):
+                    from log_channel import send_log as _send_log
+                    await _send_log(context.bot,
+                        f"⚠️ Срок в панели не сошёлся с базой: <code>{email}</code> — "
+                        f"{synced.get('error', '?')}\nПроверь, закрыт ли доступ.")
 
                 if tg_id:
                     kb = InlineKeyboardMarkup([
@@ -1945,7 +1957,7 @@ async def check_expired_subs(context):
                     ])
                     try:
                         if was_active:
-                            # окна не было: период кончился — доступ выключился сразу
+                            # окна не было: период кончился — доступ закрылся сразу
                             head = ("Пробный период закончился"
                                     if times_renewed == 0 else "Подписка закончилась")
                             body = (f"🔴 <b>{head}</b>\n\n"
