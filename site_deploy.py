@@ -383,11 +383,6 @@ async def site_tariffs(cfg: dict) -> list:
         rows = await list_tariffs()
         tariffs = [{"name": name, "price": price, "period": fmt_duration(period)}
                    for _, name, period, price, is_active, _ in rows if is_active]
-        if not tariffs:
-            price = cfg.get("paid_price", 0)
-            period = cfg.get("paid_pay_period")
-            if price and period:
-                tariffs = [{"name": fmt_duration(period), "price": price}]
         return tariffs
     except Exception:
         return []

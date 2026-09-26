@@ -62,8 +62,7 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [b(auto_label, "toggle_auto_trial")],
         # сроки
-        [b("🆓 Пробный период", "paid_preset_trial"), b("💰 Период оплаты", "paid_preset_pay_period")],
-        [b("⏳ Время на продление", "paid_preset_renew")],
+        [b("🆓 Пробный период", "paid_preset_trial")],
         # деньги — показываем то, что умеет активная платёжка
         *_money_rows(b),
         # лимиты
@@ -105,7 +104,6 @@ def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
         [b("📅 Дата окончания", "paid_sub_edit_expire")],
         [b("🖥 Лимит устройств", "paid_sub_edit_hwid")],
         [b("📶 Трафик (ГБ)", "paid_sub_edit_traffic"), b("🆓 Пробный период", "paid_sub_edit_trial")],
-        [b("⏳ На продление", "paid_sub_edit_renew")],
         [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"paid_sub_view:{sub_id}")],
     ])
 

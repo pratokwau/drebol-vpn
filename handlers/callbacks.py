@@ -19,11 +19,13 @@ from handlers.admin import (
     handle_channel_menu, handle_dashboard, handle_healthcheck,
     handle_find_user, handle_user_profile, handle_ban_user, handle_unban_user,
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
-    handle_winback_settings, handle_toggle_winback,
     handle_remind_settings, handle_toggle_remind, handle_set_remind,
     handle_toggle_remind_trials, handle_remind_test, handle_set_remind_quiet,
-    handle_set_winback_days, handle_set_winback_percent,
     handle_user_history, handle_dm_user, handle_payment_stats,
+)
+from winback import (
+    handle_winback_settings, handle_toggle_winback, handle_toggle_winback_paid,
+    handle_set_winback, handle_winback_test,
 )
 from fraud import (
     handle_fraud_menu, handle_fraud_toggle, handle_fraud_scan, handle_fraud_ok,
@@ -109,7 +111,7 @@ from adminsub.handlers import (
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
     handle_paid_preset_hwid, handle_paid_preset_traffic,
-    handle_paid_preset_trial, handle_paid_preset_pay_period, handle_paid_preset_renew,
+    handle_paid_preset_trial,
     handle_paid_preset_price,
     handle_paid_create_sub, handle_paid_create_type,
     handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
@@ -120,11 +122,9 @@ from paidsub.handlers import (
     handle_paid_device_price, handle_paid_device_max,
     handle_paid_devices, handle_paid_ips, handle_paid_hwid_del,
     handle_paid_hwid_clear,
-    handle_paid_fix_renew, handle_paid_fix_renew_apply,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
     handle_paid_sub_edit_trial,
-    handle_paid_sub_edit_renew_time,
     handle_paid_history, handle_paid_history_view, handle_mute_user, handle_unmute_user, handle_muted_list,
     handle_paid_requests,
     handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
@@ -519,10 +519,13 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_winback_settings(query)
     elif data == "toggle_winback":
         await handle_toggle_winback(query)
-    elif data == "set_winback_days":
-        await handle_set_winback_days(query, context)
-    elif data == "set_winback_percent":
-        await handle_set_winback_percent(query, context)
+    elif data == "toggle_winback_paid":
+        await handle_toggle_winback_paid(query)
+    elif data == "winback_test":
+        await handle_winback_test(query, context)
+    elif data in ("set_winback_days", "set_winback_percent", "set_winback_days2",
+                  "set_winback_percent2", "set_winback_life"):
+        await handle_set_winback(query, context, data.removeprefix("set_winback_"))
     elif data == "toggle_auto_trial":
         await handle_toggle_auto_trial(query)
     elif data == "broadcast":
@@ -628,7 +631,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "paid_create_sub":
         await handle_paid_create_sub(query, context)
     elif data.startswith("paid_create_type:"):
-        await handle_paid_create_type(query, context, data.split(":")[1] == "trial")
+        await handle_paid_create_type(query, context, data.split(":", 1)[1])
     elif data == "tariffs_menu":
         await handle_tariffs_menu(query, context)
     elif data == "tariff_add":
@@ -663,10 +666,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":
         await handle_paid_preset_trial(query, context)
-    elif data == "paid_preset_pay_period":
-        await handle_paid_preset_pay_period(query, context)
-    elif data == "paid_preset_renew":
-        await handle_paid_preset_renew(query, context)
     elif data == "paid_preset_price":
         await handle_paid_preset_price(query, context)
     elif data == "paid_preset_hwid":
@@ -710,10 +709,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_bulk_limits_apply(query, context)
     elif data == "paid_bulk_apply":
         await handle_paid_bulk_apply(query, context)
-    elif data == "paid_fix_renew":
-        await handle_paid_fix_renew(query, context)
-    elif data == "paid_fix_renew_apply":
-        await handle_paid_fix_renew_apply(query, context)
     elif data.startswith("paid_sub_settings:"):
         await handle_paid_sub_settings(query, int(data.split(":")[1]))
     elif data.startswith("paid_sub_edit_expire:"):
@@ -724,8 +719,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_edit_traffic(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_trial:"):
         await handle_paid_sub_edit_trial(query, int(data.split(":")[1]), context)
-    elif data.startswith("paid_sub_edit_renew:"):
-        await handle_paid_sub_edit_renew_time(query, int(data.split(":")[1]), context)
     elif data == "paid_history":
         await handle_paid_history(query)
     elif data.startswith("paid_history_page:"):

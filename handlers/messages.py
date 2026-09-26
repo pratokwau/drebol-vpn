@@ -19,23 +19,22 @@ from states import (
     AWAITING_PAID_SUB_TG_ID,
     AWAITING_PAID_PRESET_HWID,
     AWAITING_PAID_PRESET_TRAFFIC,
-    AWAITING_PAID_TRIAL_PERIOD, AWAITING_PAID_PAY_PERIOD,
-    AWAITING_PAID_RENEW_TIME, AWAITING_PAID_PRICE,
+    AWAITING_PAID_TRIAL_PERIOD, AWAITING_PAID_PRICE,
     AWAITING_PAID_SUB_EXTEND,
     AWAITING_PAID_SUB_EDIT_EXPIRE,
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
     AWAITING_PAID_SUB_EDIT_TRIAL,
-    AWAITING_PAID_SUB_EDIT_RENEW_TIME,
     AWAITING_PAID_MUTE_USER,
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
-    AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE, AWAITING_PAID_FIX_RENEW,
+    AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
     AWAITING_PAID_BULK_HWID,
     AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE,
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
+    AWAITING_WINBACK_DAYS2, AWAITING_WINBACK_PERCENT2, AWAITING_WINBACK_LIFE,
     AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD,
     AWAITING_REMIND_QUIET, AWAITING_QUICK_REPLY,
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
@@ -551,35 +550,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Пробный период: <b>{fmt_duration(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
-    if state == AWAITING_PAID_PAY_PERIOD:
-        seconds = parse_duration(text)
-        if not seconds:
-            await update.message.reply_text(
-                "❌ Не удалось распознать. Примеры: <code>30 дней</code>, <code>1 месяц</code>",
-                parse_mode="HTML", reply_markup=back_admin(),
-            )
-            return
-        _save("paid_pay_period", seconds)
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Период оплаты: <b>{fmt_duration(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_PAID_RENEW_TIME:
-        # Ноль выключает окно: продлить можно в любой момент,
-        # а остаток срока при оплате не сгорает
-        seconds = 0 if text.strip().lower() in ("0", "выкл", "нет", "off") else parse_duration(text)
-        if seconds is None:
-            await update.message.reply_text(
-                "❌ Не удалось распознать. Примеры: <code>3 дня</code>, <code>12 часов</code>, <code>0</code> — выключить.",
-                parse_mode="HTML", reply_markup=back_admin(),
-            )
-            return
-        _save("paid_renew_time", seconds)
-        context.user_data.pop("state", None)
-        from paidsub.handlers import renew_label
-        await update.message.reply_text(f"✅ Время на продление: <b>{renew_label(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
     if state == AWAITING_REMIND_QUIET:
         parts = text.replace("-", " ").replace(":", " ").split()
         if parts and parts[0] in ("0", "выкл", "нет", "off"):
@@ -873,19 +843,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Починка окна оплаты ──────────────────────────────────────────────────
-    if state == AWAITING_PAID_FIX_RENEW:
-        seconds = parse_duration(text)
-        if not seconds:
-            await update.message.reply_text(
-                "❌ Не удалось распознать. Примеры: <code>1 день</code>, <code>12 часов</code>",
-                parse_mode="HTML", reply_markup=back_admin(),
-            )
-            return
-        context.user_data.pop("state", None)
-        from paidsub.handlers import preview_fix_renew
-        await preview_fix_renew(update.message, context, seconds)
-        return
-
     # ── Платные подписки: массовое добавление/убавление срока ─────────────────────
     if state in (AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE):
         seconds = parse_duration(text)
@@ -1055,63 +1012,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Пробный период: <b>{fmt_dur(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
-    if state == AWAITING_PAID_SUB_EDIT_RENEW_TIME:
-        seconds = 0 if text.strip().lower() in ("0", "выкл", "нет", "off") else parse_duration(text)
-        if seconds is None:
-            await update.message.reply_text(
-                "❌ Не удалось распознать. Примеры: <code>3 дня</code>, <code>12 часов</code>",
-                parse_mode="HTML", reply_markup=back_admin(),
-            )
-            return
-        sub_id = context.user_data.pop("edit_sub_id", None)
-        context.user_data.pop("state", None)
-        from paidsub.time_parser import fmt_duration as fmt_dur
-        note = ""
-        if sub_id:
-            from paidsub.storage import update_paid_sub_field, get_paid_sub, sub_settings, add_history
-            row = await get_paid_sub(sub_id)
-            if row:
-                old_renew = sub_settings(row)["renew_time"]
-                await update_paid_sub_field(sub_id, "ind_renew_time", seconds)
-                # expire_date = конец периода + время на оплату. Сам пробный/оплаченный
-                # период трогать нельзя, поэтому сдвигаем только окно оплаты.
-                expire_dt = None
-                for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-                    try:
-                        expire_dt = datetime.strptime(row[6], fmt)
-                        break
-                    except ValueError:
-                        continue
-                if expire_dt:
-                    period_end = expire_dt - timedelta(seconds=old_renew)
-                    new_expire = period_end + timedelta(seconds=seconds)
-                    new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-                    await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
-                    from panel import update_client_expire
-                    fixed = await update_client_expire(row[2], new_expire_str)
-                    if not fixed.get("success"):
-                        note_panel = ("\n⚠️ Панель не приняла срок: "
-                                      f"<code>{fixed.get('error', '?')}</code>")
-                    else:
-                        note_panel = ""
-                    note = (
-                        f"\n📅 Период заканчивается: <b>{period_end.strftime('%d.%m.%Y %H:%M:%S')}</b>\n"
-                        f"⏳ Оплатить до: <b>{new_expire_str}</b>" + note_panel
-                    )
-                    await add_history(
-                        row[1], "settings_changed",
-                        f"Подписка #{sub_id}: время на оплату → {fmt_dur(seconds)}\n"
-                        f"Оплатить до: {new_expire_str}",
-                    )
-            else:
-                await update_paid_sub_field(sub_id, "ind_renew_time", seconds)
-        from paidsub.handlers import renew_label
-        await update.message.reply_text(
-            f"✅ Время на продление: <b>{renew_label(seconds)}</b>{note}",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-
     # ── Реферальный бонус ───────────────────────────────────────────────────────
     if state == AWAITING_REFERRAL_BONUS:
         seconds = parse_duration(text)
@@ -1265,6 +1165,35 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Winback: дни ─────────────────────────────────────────────────────────
+    if state in (AWAITING_WINBACK_DAYS2, AWAITING_WINBACK_LIFE):
+        low = 0 if state == AWAITING_WINBACK_DAYS2 else 1
+        if not text.isdigit() or int(text) < low:
+            await update.message.reply_text(
+                f"❌ Введи целое число (минимум {low}).", reply_markup=back_admin())
+            return
+        key = ("winback_days2" if state == AWAITING_WINBACK_DAYS2 else "winback_life_days")
+        _save(key, int(text))
+        context.user_data.pop("state", None)
+        if state == AWAITING_WINBACK_DAYS2 and int(text) == 0:
+            said = "✅ Вторая волна выключена."
+        elif state == AWAITING_WINBACK_DAYS2:
+            said = f"✅ Вторая волна: через <b>{text} дн.</b>"
+        else:
+            said = f"✅ Промокод живёт <b>{text} дн.</b>"
+        await update.message.reply_text(said, parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_WINBACK_PERCENT2:
+        if not text.isdigit() or not (1 <= int(text) <= 100):
+            await update.message.reply_text("❌ Введи число от 1 до 100.",
+                                            reply_markup=back_admin())
+            return
+        _save("winback_percent2", int(text))
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ Скидка второй волны: <b>{text}%</b>",
+                                        parse_mode="HTML", reply_markup=back_admin())
+        return
+
     if state == AWAITING_WINBACK_DAYS:
         if not text.isdigit() or int(text) < 1:
             await update.message.reply_text("❌ Введи целое число дней (минимум 1).", reply_markup=back_admin())

@@ -407,13 +407,18 @@ async def init_db():
                 banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Winback
+        # Winback: stage — какая волна уже уходила человеку
         await db.execute("""
             CREATE TABLE IF NOT EXISTS winback_sent (
                 tg_id INTEGER PRIMARY KEY,
                 sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            await db.execute(
+                "ALTER TABLE winback_sent ADD COLUMN stage INTEGER NOT NULL DEFAULT 1")
+        except Exception:
+            pass
         # убираем :443/:80 из существующих sub_url
         from panel import strip_default_port
         async with db.execute("SELECT id, sub_url FROM admin_subs") as cur:
@@ -1517,15 +1522,49 @@ async def is_banned(tg_id: int) -> bool:
 
 # ── Winback ──────────────────────────────────────────────────────────────────
 
+async def winback_stage(tg_id: int) -> int:
+    """Какая волна человеку уже уходила. 0 — ещё ни одной."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT stage FROM winback_sent WHERE tg_id = ?", (tg_id,)) as cur:
+            row = await cur.fetchone()
+    return int(row[0] or 1) if row else 0
+
+
+async def winback_stats() -> dict:
+    """Сколько писем ушло и сколько людей после них вернулись."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async def one(q, args=()):
+            async with db.execute(q, args) as cur:
+                return (await cur.fetchone())[0]
+        people = await one("SELECT COUNT(*) FROM winback_sent")
+        sent = await one("SELECT COALESCE(SUM(stage), 0) FROM winback_sent")
+        used = await one("SELECT COUNT(*) FROM promo_uses WHERE code LIKE 'BACK%'")
+        returned = await one("""
+            SELECT COUNT(*) FROM (
+                SELECT w.tg_id FROM winback_sent w
+                WHERE EXISTS (
+                    SELECT 1 FROM payments p
+                    WHERE p.tg_id = w.tg_id AND p.status = 'paid'
+                      AND p.paid_at IS NOT NULL AND p.paid_at >= w.sent_at
+                ) GROUP BY w.tg_id
+            )
+        """)
+    return {"people": people, "sent": sent, "used": used, "returned": returned,
+            "percent": round(returned * 100 / people) if people else 0}
+
+
 async def is_winback_sent(tg_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT 1 FROM winback_sent WHERE tg_id = ?", (tg_id,)) as cur:
             return (await cur.fetchone()) is not None
 
 
-async def mark_winback_sent(tg_id: int):
+async def mark_winback_sent(tg_id: int, stage: int = 1):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT OR REPLACE INTO winback_sent (tg_id) VALUES (?)", (tg_id,))
+        await db.execute(
+            "INSERT OR REPLACE INTO winback_sent (tg_id, stage, sent_at) "
+            "VALUES (?, ?, CURRENT_TIMESTAMP)", (tg_id, int(stage)))
         await db.commit()
 
 

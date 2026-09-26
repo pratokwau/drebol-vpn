@@ -40,12 +40,10 @@ async def handle_tariffs_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
 
     lines = ["🏷 <b>Тарифы</b>", ""]
     if not rows:
-        price = cfg.get("paid_price", 0)
-        period = cfg.get("paid_pay_period")
         lines.append(
-            "<blockquote>Тарифов нет — клиент видит одну цену из общих настроек:\n"
-            f"<b>{price} ₽</b> за <b>{fmt_duration(period) if period else '—'}</b></blockquote>\n\n"
-            "<i>Добавь тарифы, чтобы клиент выбирал срок сам.</i>"
+            "<blockquote>⚠️ Тарифов нет — продлить подписку никто не сможет.</blockquote>\n\n"
+            "<i>Срок и цену платного периода задают только тарифы. "
+            "Добавь хотя бы один.</i>"
         )
     else:
         active = sum(1 for r in rows if r[4])

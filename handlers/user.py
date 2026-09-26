@@ -267,7 +267,22 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
             return
         name, pay_seconds, price = t[1], t[2], int(t[3])
     else:
-        name, pay_seconds, price = "Подписка", settings["pay_period"], int(settings["price"])
+        # тарифов нет — срок брать неоткуда, продлевать нечем
+        pay_seconds = int(settings["pay_period"] or 0)
+        if not pay_seconds:
+            await query.edit_message_text(
+                "💳 <b>Продление подписки</b>\n\n"
+                "<blockquote>Сейчас нет доступных тарифов.</blockquote>\n\n"
+                "<i>Напишите в поддержку — подскажем, когда появятся, "
+                "и не дадим подписке закончиться.</i>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
+                    [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
+                ]),
+            )
+            return
+        name, price = "Подписка", int(settings["price"])
 
     # Промокод действует на срок, устройства считаются отдельно —
     # иначе скидка растекается на разовую покупку слотов
@@ -594,7 +609,6 @@ async def handle_prices(query):
     cfg = load_config()
 
     price = cfg.get("paid_price", 0) or 0
-    pay_period = cfg.get("paid_pay_period")
     trial_period = cfg.get("paid_trial_period")
     traffic = int(cfg.get("paid_preset_traffic", 0) or 0)
     # устройства — это лимит HWID из настроек платных подписок
@@ -625,8 +639,7 @@ async def handle_prices(query):
         lines.append("<blockquote>" + "\n".join(rows) + "</blockquote>")
     elif price:
         lines.append("💳 <b>Подписка</b>")
-        period = f" за {fmt_duration(pay_period)}" if pay_period else ""
-        lines.append(f"<blockquote><b>{price} ₽</b>{period}</blockquote>")
+        lines.append(f"<blockquote><b>{price} ₽</b></blockquote>")
 
     if devices > 0:
         word = "устройства" if devices % 10 == 1 and devices % 100 != 11 else "устройств"

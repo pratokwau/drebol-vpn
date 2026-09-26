@@ -89,10 +89,13 @@ def sub_settings(row) -> dict:
             val = cfg.get(key, default)
         return int(val or 0)
 
+    # Период оплаты и окно на продление остались только у старых подписок:
+    # новые берут срок из тарифа, а окна нет вовсе. Поэтому общий конфиг
+    # тут больше не запасной вариант — ноль честнее.
     return {
         "trial_period": pick(13, "paid_trial_period", 86400),
-        "pay_period": pick(14, "paid_pay_period", 2592000),
-        "renew_time": pick_zeroable(15, "paid_renew_time", 0),
+        "pay_period": int((row[14] if row is not None and len(row) > 14 else 0) or 0),
+        "renew_time": pick_zeroable(15, "", 0),
         "price": pick(16, "paid_price", 0),
     }
 
@@ -143,8 +146,6 @@ async def snapshot_sub_settings(sub_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         for col, key in (
             ("ind_trial_period", "paid_trial_period"),
-            ("ind_pay_period", "paid_pay_period"),
-            ("ind_renew_time", "paid_renew_time"),
             ("ind_price", "paid_price"),
         ):
             val = cfg.get(key)

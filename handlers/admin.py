@@ -708,63 +708,12 @@ async def handle_set_remind(query, context: ContextTypes.DEFAULT_TYPE, which: st
     )
 
 
-async def handle_winback_settings(query):
-    cfg = load_config()
-    enabled = cfg.get("winback_enabled", False)
-    days = cfg.get("winback_days", 3)
-    percent = cfg.get("winback_percent", 20)
-    status = "🟢 включён" if enabled else "🔴 выключен"
-    await query.edit_message_text(
-        "🎯 <b>Winback — возврат ушедших</b>\n\n"
-        f"<blockquote>Статус: <b>{status}</b>\n"
-        f"📅 Через <b>{days}</b> дн. после окончания подписки\n"
-        f"💯 Скидка: <b>{percent}%</b></blockquote>\n\n"
-        "<i>Бот сам отправляет спецпредложение со скидкой тем, "
-        "у кого подписка закончилась.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                "🔴 Выключить" if enabled else "🟢 Включить",
-                callback_data="toggle_winback",
-            )],
-            [InlineKeyboardButton("📅 Через сколько дней", callback_data="set_winback_days"),
-             InlineKeyboardButton("💯 Скидка", callback_data="set_winback_percent")],
-            [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
-        ]),
-    )
 
 
-async def handle_toggle_winback(query):
-    cfg = load_config()
-    cfg["winback_enabled"] = not cfg.get("winback_enabled", False)
-    save_config(cfg)
-    await handle_winback_settings(query)
 
 
-async def handle_set_winback_days(query, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["state"] = AWAITING_WINBACK_DAYS
-    cfg = load_config()
-    current = cfg.get("winback_days", 3)
-    await query.edit_message_text(
-        "📅 <b>Winback · через сколько дней</b>\n\n"
-        f"<blockquote>Сейчас: <b>{current}</b> дн.</blockquote>\n\n"
-        "<i>Пришли число дней после окончания подписки.</i>",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
 
 
-async def handle_set_winback_percent(query, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["state"] = AWAITING_WINBACK_PERCENT
-    cfg = load_config()
-    current = cfg.get("winback_percent", 20)
-    await query.edit_message_text(
-        "💯 <b>Winback · скидка</b>\n\n"
-        f"<blockquote>Сейчас: <b>{current}%</b></blockquote>\n\n"
-        "<i>Пришли размер скидки в процентах, от 1 до 100.</i>",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
 
 
 # ── Написать юзеру ─────────────────────────────────────────────────────────

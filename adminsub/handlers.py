@@ -1,3 +1,5 @@
+from html import escape
+
 from telegram import Bot
 from telegram.ext import ContextTypes
 
@@ -28,7 +30,8 @@ def _presets_ready(cfg: dict) -> bool:
 
 
 def _fmt_presets(cfg: dict, squad_names: dict | None = None) -> str:
-    exp = cfg.get("preset_expire", "не задан")
+    """Тот же вид, что у платных подписок: сроки, лимиты, доступ."""
+    exp = cfg.get("preset_expire", "не задана")
     hwid = cfg.get("preset_hwid", "не задан")
     traf_raw = cfg.get("preset_traffic")
     if traf_raw is None:
@@ -37,23 +40,32 @@ def _fmt_presets(cfg: dict, squad_names: dict | None = None) -> str:
         traf = "безлимит"
     else:
         traf = f"{traf_raw} ГБ"
-    head = (f"📅 Дата окончания: <b>{exp}</b>\n"
-            f"🖥 Лимит устройств: <b>{hwid}</b>\n"
-            f"📶 Трафик: <b>{traf}</b>\n")
+
     names = squad_names or {}
     chosen = [names.get(u, u) for u in (cfg.get("rw_squads") or [])]
-    return head + ("👥 Сквады: <b>{}</b>".format(", ".join(chosen)) if chosen
-                   else "👥 Сквады: <b>не выбраны</b>")
+    return (
+        "⏱ <b>Срок</b>\n<blockquote>"
+        f"📅 Дата окончания: <b>{exp}</b>\n"
+        "<i>Одна на все выдаваемые подписки</i></blockquote>\n\n"
+        "📊 <b>Лимиты</b>\n<blockquote>"
+        f"🖥 Устройств: <b>{hwid}</b>\n"
+        f"📶 Трафик: <b>{traf}</b></blockquote>\n\n"
+        "👥 <b>Сквады Remnawave</b>\n<blockquote>"
+        + ("Выдаём: <b>{}</b>".format(", ".join(escape(str(c)) for c in chosen))
+           if chosen else "Выдаём: <b>не выбраны</b>")
+        + "</blockquote>"
+    )
 
 
 async def handle_admin_subs_menu(query, page: int = 1):
     rows, total_pages = await list_subs(page)
     cfg = load_config()
     ready = _presets_ready(cfg)
-    header = "📋 <b>Админские подписки</b>\n"
-    body = "\n\nПодписок пока нет." if not rows else f"\n\nСтр. {page}/{total_pages}"
+    header = "📋 <b>Админские подписки</b>"
+    body = ("\n\n<blockquote>Подписок пока нет.</blockquote>" if not rows
+            else f"\n<i>Страница {page} из {total_pages} · нажми на подписку, чтобы открыть</i>")
     if not ready:
-        body += "\n\n⚠️ Задай настройки, чтобы создавать подписки в один клик."
+        body += "\n\n⚠️ <i>Задай настройки, чтобы создавать подписки.</i>"
     await query.edit_message_text(
         header + body,
         parse_mode="HTML",
@@ -71,9 +83,10 @@ async def handle_presets_menu(query):
             for sq in got["squads"]:
                 squad_names[sq["uuid"]] = sq["name"]
     await query.edit_message_text(
-        "⚙️ <b>Настройки подписки (по умолчанию)</b>\n\n"
+        "⚙️ <b>Настройки админских подписок</b>\n\n"
         + _fmt_presets(cfg, squad_names)
-        + "\n\nВыбери параметр для изменения:",
+        + "\n\n<i>Применяются только к новым подпискам. У выданных условия "
+          "зафиксированы при создании — меняются в самой подписке.</i>",
         parse_mode="HTML",
         reply_markup=presets_keyboard(),
     )
@@ -200,50 +213,73 @@ def _fmt_bytes(b: int) -> str:
 
 
 async def handle_sub_view(query, sub_id: int):
+    from datetime import datetime
+    from paidsub.storage import parse_sub_date
+    from paidsub.time_parser import fmt_duration_precise
+
     row = await get_sub(sub_id)
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _limit_ip, limit_hwid, total_gb, created_at = row
-    traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
+    _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _ip, limit_hwid, total_gb, created_at = row
 
-    # Получаем реальный трафик и статус из панели
+    # расход и статус спрашиваем у панели: в базе их нет
     from panel import get_client_traffic, get_client_info
     t = await get_client_traffic(email)
-    if t["success"]:
-        up = t.get("up", 0)
-        down = t.get("down", 0)
-        traffic_line = f"📶 Трафик: <b>{traffic_limit}</b> — ⬆ {_fmt_bytes(up)} ⬇ {_fmt_bytes(down)}"
+    traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
+    if t.get("success"):
+        used = _fmt_bytes(int(t.get("up", 0)) + int(t.get("down", 0)))
+        traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>  ·  израсходовано {used}"
     else:
         traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>"
 
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
     status_icon = "🟢" if enabled else "🔴"
+    status_label = "активна" if enabled else "отключена"
 
-    tg_line = f'👤 TG: <a href="tg://user?id={tg_id}">{tg_id}</a>\n' if tg_id else ""
-    # Если есть username — ссылка через @, иначе через tg://user?id=
+    # кто это
     from database import get_user_info
     user_info = await get_user_info(tg_id) if tg_id else None
     uname = user_info[2] if user_info and user_info[2] else None
+    shown = escape(str(user_info[1])) if user_info and user_info[1] else str(tg_id or "—")
     if tg_id and uname:
-        link_line = f'⛓‍💥 <a href="https://t.me/{uname}">Написать</a>'
+        tg_line = f'👤 <a href="https://t.me/{escape(uname)}">{shown}</a>'
     elif tg_id:
-        link_line = f'⛓‍💥 <a href="tg://user?id={tg_id}">Написать</a>'
+        tg_line = f'👤 <a href="tg://user?id={tg_id}">{shown}</a>'
     else:
-        link_line = ""
+        tg_line = "👤 <i>без привязки к Telegram</i>"
+    if tg_id:
+        tg_line += f"  ·  <code>{tg_id}</code>"
+
+    # сколько осталось
+    now_dt = datetime.now()
+    expire_dt = parse_sub_date(expire)
+    if expire_dt and now_dt < expire_dt:
+        left = int((expire_dt - now_dt).total_seconds())
+        time_line = (f"📅 Действует до: <b>{expire}</b>\n"
+                     f"⏱ Осталось: <b>{fmt_duration_precise(left)}</b>")
+    else:
+        time_line = f"📅 До: <b>{expire}</b>\n⏱ <b>Истекла</b>"
 
     await query.edit_message_text(
-        f"📄 <b>Подписка #{sub_id}</b> {status_icon}\n\n"
-        + tg_line +
-        f"📧 Email: <code>{email}</code>\n"
-        f"🆔 UUID: <code>{uuid_val}</code>\n"
-        f"📅 До: <b>{expire}</b>\n"
+        f"📄 <b>Админская подписка #{sub_id}</b>  {status_icon}\n"
+        + tg_line + "\n"
+        + "\n📌 <b>Срок</b>\n<blockquote>"
+        f"Статус: <b>{status_label}</b>  ·  выдана вручную\n"
+        + time_line
+        + "</blockquote>\n\n"
+        "📊 <b>Лимиты</b>\n<blockquote>"
         f"🖥 Устройств: <b>{limit_hwid or 'без ограничения'}</b>\n"
         f"{traffic_line}\n"
-        f"🕐 Создано: {created_at}\n"
-        + (f"\n{link_line}\n" if link_line else "") +
-        f"\n🔗 Ссылка:\n<code>{sub_url}</code>",
+        f"🕐 Создана: {created_at}"
+        "</blockquote>\n"
+        "\n🔧 <b>Технические данные</b>\n<blockquote expandable>"
+        f"📧 Email: <code>{email}</code>\n"
+        f"🆔 UUID: <code>{uuid_val}</code>\n"
+        f"📋 Sub ID: <code>{sub_id_str}</code>"
+        "</blockquote>\n\n"
+        f"🔗 <b>Ссылка</b>\n<code>{sub_url}</code>",
         parse_mode="HTML",
         reply_markup=sub_view_keyboard(sub_id, enabled),
         disable_web_page_preview=True,
@@ -320,10 +356,11 @@ async def handle_sub_settings(query, sub_id: int):
     hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
     await query.edit_message_text(
         f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
-        f"📅 Дата окончания: <b>{expire}</b>\n"
+        "<blockquote>"
+        f"📅 Действует до: <b>{expire}</b>\n"
         f"🖥 Лимит устройств: <b>{hwid_str}</b>\n"
-        f"📶 Трафик: <b>{traffic}</b>\n\n"
-        "Выбери параметр для изменения:",
+        f"📶 Трафик: <b>{traffic}</b></blockquote>\n\n"
+        "<i>Правки уходят и в базу, и в панель.</i>",
         parse_mode="HTML",
         reply_markup=sub_settings_keyboard(sub_id),
     )

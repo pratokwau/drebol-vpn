@@ -5,10 +5,10 @@ def subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bool) -
     kb = []
     for row in rows:
         sub_id, tg_id, email, expire, total_gb, _ = row
-        traffic = f"{total_gb}ГБ" if total_gb > 0 else "∞"
-        tg_label = f"tg:{tg_id} · " if tg_id else ""
+        traffic = f"{total_gb} ГБ" if total_gb > 0 else "∞"
+        name = str(email or "") or f"tg:{tg_id}"
         kb.append([InlineKeyboardButton(
-            f"{tg_label}{email} · до {expire} · {traffic}",
+            f"👤 {name} · до {str(expire)[:10]} · {traffic}",
             callback_data=f"sub_view:{sub_id}",
         )])
     if total_pages > 1:
@@ -22,7 +22,7 @@ def subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bool) -
 
     create_label = "➕ Создать подписку" if presets_ready else "➕ Создать (сначала настройки)"
     kb.append([InlineKeyboardButton(create_label, callback_data="create_sub")])
-    kb.append([InlineKeyboardButton("⚙️ Настройки", callback_data="sub_presets")])
+    kb.append([InlineKeyboardButton("⚙️ Настройки подписок", callback_data="sub_presets")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     return InlineKeyboardMarkup(kb)
 
