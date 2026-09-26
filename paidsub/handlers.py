@@ -754,14 +754,11 @@ async def handle_paid_sub_view(query, sub_id: int):
     # Индивидуальные настройки
     cfg = load_config()
     ind_lines = []
+    # период оплаты и сумму задают тарифы — в подписке их больше не переопределяем
     if ind_trial:
         ind_lines.append(f"🆓 Пробный: <b>{fmt_duration(ind_trial)}</b>")
-    if ind_pay:
-        ind_lines.append(f"💰 Период оплаты: <b>{fmt_duration(ind_pay)}</b>")
     if ind_renew:
         ind_lines.append(f"⏳ На продление: <b>{fmt_duration(ind_renew)}</b>")
-    if ind_price is not None:
-        ind_lines.append(f"💵 Сумма: <b>{ind_price} ₽</b>")
     ind_block = ""
     if ind_lines:
         ind_block = ("\n⚙️ <b>Свои условия</b>\n<blockquote>"
@@ -1521,9 +1518,7 @@ async def handle_paid_sub_settings(query, sub_id: int):
             if _e else "—"
         )
     trial_str = fmt_duration(eff["trial_period"])
-    pay_str = fmt_duration(eff["pay_period"])
     renew_str = renew_label(eff["renew_time"])
-    price_str = f"{eff['price']} ₽"
     from handlers.payprovider import provider_label
     pay_line = f"💳 Оплата: <b>{provider_label()}</b> — счёт выставляет бот\n"
 
@@ -1534,9 +1529,7 @@ async def handle_paid_sub_settings(query, sub_id: int):
         f"🖥 Лимит устройств: <b>{hwid_str}</b>\n"
         f"📶 Трафик: <b>{traffic}</b>\n"
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
-        f"💰 Период оплаты: <b>{pay_str}</b>\n"
         f"⏳ На продление: <b>{renew_str}</b>\n"
-        f"💵 Сумма: <b>{price_str}</b>\n"
         f"{pay_line}\n"
         "Выбери параметр для изменения:",
         parse_mode="HTML",
@@ -1589,14 +1582,6 @@ async def handle_paid_sub_edit_trial(query, sub_id: int, context):
     )
 
 
-async def handle_paid_sub_edit_pay_period(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EDIT_PAY_PERIOD
-    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_PAY_PERIOD
-    context.user_data["edit_sub_id"] = sub_id
-    await query.edit_message_text(
-        f"💰 <b>Период оплаты подписки #{sub_id}</b>\n\n{_TIME_HINT}",
-        parse_mode="HTML", reply_markup=back_admin(),
-    )
 
 
 async def handle_paid_sub_edit_renew_time(query, sub_id: int, context):
@@ -1609,14 +1594,6 @@ async def handle_paid_sub_edit_renew_time(query, sub_id: int, context):
     )
 
 
-async def handle_paid_sub_edit_price(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EDIT_PRICE
-    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_PRICE
-    context.user_data["edit_sub_id"] = sub_id
-    await query.edit_message_text(
-        f"💵 <b>Сумма подписки #{sub_id}</b>\n\n<i>Пришли сумму в рублях (число).</i>",
-        parse_mode="HTML", reply_markup=back_admin(),
-    )
 
 
 
@@ -1750,6 +1727,21 @@ async def handle_paid_fix_renew_apply(query, context):
 
 # ── Job: напоминания о скором конце ───────────────────────────────────────────
 
+def in_quiet_hours(now, cfg) -> bool:
+    """Ночью людей не будим. Окно задаётся часами: с 23 до 9, например."""
+    start = cfg.get("remind_quiet_from")
+    end = cfg.get("remind_quiet_to")
+    if start is None or end is None:
+        return False
+    start, end = int(start), int(end)
+    if start == end:
+        return False
+    hour = now.hour
+    if start < end:
+        return start <= hour < end
+    return hour >= start or hour < end          # окно через полночь
+
+
 async def expiry_reminder_tick(context):
     """Пишет заранее, что срок подходит к концу.
 
@@ -1764,18 +1756,26 @@ async def expiry_reminder_tick(context):
     if not cfg.get("remind_enabled", True):
         return
     stages = [int(cfg.get("remind_first", 3 * 86400) or 0),
-              int(cfg.get("remind_second", 86400) or 0)]
+              int(cfg.get("remind_second", 86400) or 0),
+              int(cfg.get("remind_third", 0) or 0)]
     if not any(stages):
+        return
+
+    now = datetime.now()
+    # тихие часы: ночью не пишем, отправим позже — джоб крутится каждые полчаса
+    if in_quiet_hours(now, cfg):
         return
 
     rows = await get_subs_for_reminder()
     if not rows:
         return
-    now = datetime.now()
     skip = await blacklisted_ids()
+    remind_trials = cfg.get("remind_trials", True)
 
     for sub_id, tg_id, period_end_str, times_renewed, stage in rows:
         if not tg_id or tg_id in skip:
+            continue
+        if not times_renewed and not remind_trials:
             continue
         end = parse_sub_date(period_end_str)
         if not end:

@@ -105,8 +105,7 @@ def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
         [b("📅 Дата окончания", "paid_sub_edit_expire")],
         [b("🖥 Лимит устройств", "paid_sub_edit_hwid")],
         [b("📶 Трафик (ГБ)", "paid_sub_edit_traffic"), b("🆓 Пробный период", "paid_sub_edit_trial")],
-        [b("💰 Период оплаты", "paid_sub_edit_pay_period"), b("⏳ На продление", "paid_sub_edit_renew")],
-        [b("💵 Сумма", "paid_sub_edit_price")],
+        [b("⏳ На продление", "paid_sub_edit_renew")],
         [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"paid_sub_view:{sub_id}")],
     ])
 

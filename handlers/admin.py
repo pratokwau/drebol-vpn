@@ -594,28 +594,91 @@ async def handle_clear_log_channel(query):
 
 async def handle_remind_settings(query):
     cfg = load_config()
-    enabled = cfg.get("remind_enabled", True)
     from paidsub.time_parser import fmt_duration
-    first = int(cfg.get("remind_first", 3 * 86400) or 0)
-    second = int(cfg.get("remind_second", 86400) or 0)
+    from database import remind_stats
+    enabled = cfg.get("remind_enabled", True)
+    stages = [int(cfg.get("remind_first", 3 * 86400) or 0),
+              int(cfg.get("remind_second", 86400) or 0),
+              int(cfg.get("remind_third", 0) or 0)]
+    trials = cfg.get("remind_trials", True)
+    q_from, q_to = cfg.get("remind_quiet_from"), cfg.get("remind_quiet_to")
+    quiet = (f"с {int(q_from):02d}:00 до {int(q_to):02d}:00"
+             if q_from is not None and q_to is not None else "не заданы")
+    st = await remind_stats(30)
+
+    def line(num, sec):
+        return f"{num} <b>{'за ' + fmt_duration(sec) if sec else 'выключено'}</b>"
+
     status = "🟢 включены" if enabled else "🔴 выключены"
     await query.edit_message_text(
         "⏰ <b>Напоминания о конце подписки</b>\n\n"
         f"<blockquote>Статус: <b>{status}</b>\n"
-        f"1️⃣ Первое: <b>{'за ' + fmt_duration(first) if first else 'выключено'}</b>\n"
-        f"2️⃣ Второе: <b>{'за ' + fmt_duration(second) if second else 'выключено'}</b></blockquote>\n\n"
+        f"{line('1️⃣ Первое:', stages[0])}\n"
+        f"{line('2️⃣ Второе:', stages[1])}\n"
+        f"{line('3️⃣ Третье:', stages[2])}\n"
+        f"🌙 Тихие часы: <b>{quiet}</b>\n"
+        f"🆓 Писать пробным: <b>{'да' if trials else 'нет'}</b></blockquote>\n\n"
+        "<blockquote>За 30 дней\n"
+        f"📨 Отправлено: <b>{st['sent']}</b> — людям: <b>{st['people']}</b>\n"
+        f"💰 Заплатили после напоминания: <b>{st['paid']}</b> ({st['percent']}%)</blockquote>\n\n"
         "<i>Бот заранее пишет, что срок подходит к концу, и зовёт продлить — остаток "
         "при оплате не сгорает. Каждое напоминание уходит один раз за период, "
         "продление сбрасывает счёт.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                "🔴 Выключить" if enabled else "🟢 Включить",
-                callback_data="toggle_remind",
-            )],
+            [InlineKeyboardButton("🔴 Выключить" if enabled else "🟢 Включить",
+                                  callback_data="toggle_remind"),
+             InlineKeyboardButton("📨 Прислать пример", callback_data="remind_test")],
             [InlineKeyboardButton("1️⃣ Первое", callback_data="set_remind_first"),
-             InlineKeyboardButton("2️⃣ Второе", callback_data="set_remind_second")],
+             InlineKeyboardButton("2️⃣ Второе", callback_data="set_remind_second"),
+             InlineKeyboardButton("3️⃣ Третье", callback_data="set_remind_third")],
+            [InlineKeyboardButton("🌙 Тихие часы", callback_data="set_remind_quiet"),
+             InlineKeyboardButton(f"🆓 Пробным: {'да' if trials else 'нет'}",
+                                  callback_data="toggle_remind_trials")],
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+        ]),
+    )
+
+
+async def handle_toggle_remind_trials(query):
+    cfg = load_config()
+    cfg["remind_trials"] = not cfg.get("remind_trials", True)
+    save_config(cfg)
+    await handle_remind_settings(query)
+
+
+async def handle_remind_test(query, context):
+    """Присылает админу тот же текст, что получит человек."""
+    from paidsub.time_parser import fmt_duration_precise
+    cfg = load_config()
+    left = int(cfg.get("remind_first", 3 * 86400) or 86400)
+    try:
+        await context.bot.send_message(
+            chat_id=query.from_user.id,
+            text=("⏳ <b>Подписка скоро закончится</b>\n\n"
+                  f"<blockquote>Осталось: <b>{fmt_duration_precise(left)}</b></blockquote>\n\n"
+                  "<i>Продлите сейчас — оставшиеся дни не сгорят, а прибавятся.</i>\n\n"
+                  "— — —\n<i>Это пример, так его увидит клиент.</i>"),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]]),
+        )
+        await query.answer("Пример отправлен сюда же")
+    except Exception as e:
+        await query.answer(f"Не отправилось: {type(e).__name__}", show_alert=True)
+
+
+async def handle_set_remind_quiet(query, context: ContextTypes.DEFAULT_TYPE):
+    from states import AWAITING_REMIND_QUIET
+    context.user_data["state"] = AWAITING_REMIND_QUIET
+    await query.edit_message_text(
+        "🌙 <b>Тихие часы</b>\n\n"
+        "В это время бот не пишет людям напоминания — отправит, когда окно закончится.\n\n"
+        "<blockquote>Пришли два числа: <code>23 9</code> — молчать с 23:00 до 09:00\n"
+        "<code>0</code> — выключить тихие часы</blockquote>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ Назад", callback_data="remind_settings")],
         ]),
     )
 
@@ -628,10 +691,11 @@ async def handle_toggle_remind(query):
 
 
 async def handle_set_remind(query, context: ContextTypes.DEFAULT_TYPE, which: str):
-    from states import AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND
-    context.user_data["state"] = (AWAITING_REMIND_FIRST if which == "first"
-                                  else AWAITING_REMIND_SECOND)
-    num = "Первое" if which == "first" else "Второе"
+    from states import AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD
+    context.user_data["state"] = {"first": AWAITING_REMIND_FIRST,
+                                  "second": AWAITING_REMIND_SECOND,
+                                  "third": AWAITING_REMIND_THIRD}[which]
+    num = {"first": "Первое", "second": "Второе", "third": "Третье"}[which]
     await query.edit_message_text(
         f"⏰ <b>{num} напоминание</b>\n\n"
         "За сколько до конца периода писать?\n\n"

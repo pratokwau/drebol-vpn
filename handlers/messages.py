@@ -24,8 +24,8 @@ from states import (
     AWAITING_PAID_SUB_EXTEND,
     AWAITING_PAID_SUB_EDIT_EXPIRE,
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
-    AWAITING_PAID_SUB_EDIT_TRIAL, AWAITING_PAID_SUB_EDIT_PAY_PERIOD,
-    AWAITING_PAID_SUB_EDIT_RENEW_TIME, AWAITING_PAID_SUB_EDIT_PRICE,
+    AWAITING_PAID_SUB_EDIT_TRIAL,
+    AWAITING_PAID_SUB_EDIT_RENEW_TIME,
     AWAITING_PAID_MUTE_USER,
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
@@ -36,7 +36,8 @@ from states import (
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
-    AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_QUICK_REPLY,
+    AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD,
+    AWAITING_REMIND_QUIET, AWAITING_QUICK_REPLY,
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
     AWAITING_SITE_DOMAIN, AWAITING_SITE_LOGO, AWAITING_BACKUP_FILE,
     AWAITING_RW_URL, AWAITING_RW_TOKEN,
@@ -62,8 +63,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     is_admin = user.id == ADMIN_ID
     # Ввод помощника: ответ в тикет, поиск юзера, сообщение юзеру
-    from staff import HELPER_STATES, is_helper, staff_chat_ids
+    from staff import HELPER_STATES, is_helper, helper_states, staff_chat_ids
     helper_input = state in HELPER_STATES and not is_admin
+    # право могли снять, пока ввод был не закончен
+    if helper_input and is_helper(user.id) and state not in helper_states(user.id):
+        context.user_data.pop("state", None)
+        await update.message.reply_text("🛡 Это больше не в твоих правах.")
+        return
     if helper_input and not is_helper(user.id):
         # доступ сняли, пока ввод был не закончен
         context.user_data.pop("state", None)
@@ -574,7 +580,31 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Время на продление: <b>{renew_label(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
-    if state in (AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND):
+    if state == AWAITING_REMIND_QUIET:
+        parts = text.replace("-", " ").replace(":", " ").split()
+        if parts and parts[0] in ("0", "выкл", "нет", "off"):
+            _save("remind_quiet_from", None)
+            _save("remind_quiet_to", None)
+            context.user_data.pop("state", None)
+            await update.message.reply_text("✅ Тихие часы выключены — пишем в любое время.",
+                                            reply_markup=back_admin())
+            return
+        nums = [int(p) for p in parts if p.isdigit() and 0 <= int(p) <= 23]
+        if len(nums) != 2:
+            await update.message.reply_text(
+                "❌ Нужно два числа от 0 до 23. Например: <code>23 9</code>",
+                parse_mode="HTML", reply_markup=back_admin())
+            return
+        _save("remind_quiet_from", nums[0])
+        _save("remind_quiet_to", nums[1])
+        context.user_data.pop("state", None)
+        await update.message.reply_text(
+            f"✅ Тихие часы: <b>с {nums[0]:02d}:00 до {nums[1]:02d}:00</b>\n"
+            "<i>В это окно напоминания не уходят — бот отправит их позже.</i>",
+            parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state in (AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD):
         # ноль выключает конкретное напоминание, остальное — обычный срок
         seconds = 0 if text.strip().lower() in ("0", "выкл", "нет", "off") else parse_duration(text)
         if seconds is None:
@@ -583,7 +613,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML", reply_markup=back_admin(),
             )
             return
-        key = "remind_first" if state == AWAITING_REMIND_FIRST else "remind_second"
+        key = {AWAITING_REMIND_FIRST: "remind_first",
+               AWAITING_REMIND_SECOND: "remind_second",
+               AWAITING_REMIND_THIRD: "remind_third"}[state]
         _save(key, seconds)
         context.user_data.pop("state", None)
         await update.message.reply_text(
@@ -1023,23 +1055,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Пробный период: <b>{fmt_dur(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
-    if state == AWAITING_PAID_SUB_EDIT_PAY_PERIOD:
-        seconds = parse_duration(text)
-        if not seconds:
-            await update.message.reply_text(
-                "❌ Не удалось распознать. Примеры: <code>30 дней</code>, <code>1 месяц</code>",
-                parse_mode="HTML", reply_markup=back_admin(),
-            )
-            return
-        sub_id = context.user_data.pop("edit_sub_id", None)
-        context.user_data.pop("state", None)
-        if sub_id:
-            from paidsub.storage import update_paid_sub_field
-            await update_paid_sub_field(sub_id, "ind_pay_period", seconds)
-        from paidsub.time_parser import fmt_duration as fmt_dur
-        await update.message.reply_text(f"✅ Период оплаты: <b>{fmt_dur(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
     if state == AWAITING_PAID_SUB_EDIT_RENEW_TIME:
         seconds = 0 if text.strip().lower() in ("0", "выкл", "нет", "off") else parse_duration(text)
         if seconds is None:
@@ -1095,18 +1110,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Время на продление: <b>{renew_label(seconds)}</b>{note}",
             parse_mode="HTML", reply_markup=back_admin(),
         )
-        return
-
-    if state == AWAITING_PAID_SUB_EDIT_PRICE:
-        if not text.isdigit():
-            await update.message.reply_text("❌ Введи число (сумма в рублях).", reply_markup=back_admin())
-            return
-        sub_id = context.user_data.pop("edit_sub_id", None)
-        context.user_data.pop("state", None)
-        if sub_id:
-            from paidsub.storage import update_paid_sub_field
-            await update_paid_sub_field(sub_id, "ind_price", int(text))
-        await update.message.reply_text(f"✅ Сумма: <b>{text} ₽</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Реферальный бонус ───────────────────────────────────────────────────────

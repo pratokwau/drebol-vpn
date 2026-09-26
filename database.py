@@ -1265,6 +1265,39 @@ async def digest_stats(day_offset: int = 1) -> dict:
             "active_subs": active_subs, "label": label}
 
 
+async def remind_stats(days: int = 30) -> dict:
+    """Сколько напоминаний ушло и сколько людей после них заплатили."""
+    window = f"-{int(days)} days"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM activity_log WHERE action = 'ev:reminded' "
+            "AND created_at >= datetime('now', ?)", (window,),
+        ) as cur:
+            sent = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COUNT(DISTINCT tg_id) FROM activity_log WHERE action = 'ev:reminded' "
+            "AND created_at >= datetime('now', ?)", (window,),
+        ) as cur:
+            people = (await cur.fetchone())[0]
+        # заплатил после того, как получил напоминание
+        async with db.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT a.tg_id, MIN(a.created_at) AS first_rem
+                FROM activity_log a
+                WHERE a.action = 'ev:reminded' AND a.created_at >= datetime('now', ?)
+                GROUP BY a.tg_id
+            ) r
+            WHERE EXISTS (
+                SELECT 1 FROM payments p
+                WHERE p.tg_id = r.tg_id AND p.status = 'paid'
+                  AND p.paid_at IS NOT NULL AND p.paid_at >= r.first_rem
+            )
+        """, (window,)) as cur:
+            paid = (await cur.fetchone())[0]
+    return {"sent": sent, "people": people, "paid": paid,
+            "percent": round(paid * 100 / people) if people else 0}
+
+
 async def purge_activity(days: int = 90) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
@@ -1557,6 +1590,61 @@ async def ignore_fraud_pair(a: int, b: int):
         await db.commit()
 
 
+async def set_fraud_pair_status(a: int, b: int, status: str):
+    lo, hi = (a, b) if a <= b else (b, a)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE fraud_pairs SET status = ? WHERE tg_a = ? AND tg_b = ?", (status, lo, hi)
+        )
+        await db.commit()
+
+
+async def get_fraud_pair(a: int, b: int) -> tuple | None:
+    lo, hi = (a, b) if a <= b else (b, a)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT tg_a, tg_b, kind, value, status, created_at FROM fraud_pairs "
+            "WHERE tg_a = ? AND tg_b = ?", (lo, hi),
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def list_fraud_pairs(status: str | None = None, limit: int = 15) -> list:
+    """Находки для экрана. status=None — все, иначе new / ignored / blocked."""
+    q = ("SELECT tg_a, tg_b, kind, value, status, created_at FROM fraud_pairs")
+    args: list = []
+    if status:
+        q += " WHERE status = ?"
+        args.append(status)
+    q += " ORDER BY created_at DESC LIMIT ?"
+    args.append(int(limit))
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(q, args) as cur:
+            return await cur.fetchall()
+
+
+async def fingerprint_cluster(kind: str, value: str) -> list:
+    """Все аккаунты, засветившиеся с этим отпечатком, с датами."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT tg_id, email, MIN(first_seen), MAX(last_seen) FROM device_seen "
+            "WHERE kind = ? AND value = ? AND tg_id IS NOT NULL GROUP BY tg_id, email "
+            "ORDER BY MIN(first_seen)",
+            (kind, value),
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def user_fingerprint_stats(tg_id: int) -> dict:
+    """Сколько устройств и адресов запомнено у человека."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT kind, COUNT(DISTINCT value) FROM device_seen "
+            "WHERE tg_id = ? GROUP BY kind", (tg_id,),
+        ) as cur:
+            return {k: n for k, n in await cur.fetchall()}
+
+
 async def fraud_stats() -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
         async def one(q):
@@ -1564,6 +1652,14 @@ async def fraud_stats() -> dict:
                 return (await cur.fetchone())[0]
         return {
             "fingerprints": await one("SELECT COUNT(*) FROM device_seen"),
+            "devices": await one("SELECT COUNT(DISTINCT value) FROM device_seen WHERE kind = 'hwid'"),
+            "ips": await one("SELECT COUNT(DISTINCT value) FROM device_seen WHERE kind = 'ip'"),
             "pairs": await one("SELECT COUNT(*) FROM fraud_pairs"),
+            "new": await one("SELECT COUNT(*) FROM fraud_pairs WHERE status = 'new'"),
             "ignored": await one("SELECT COUNT(*) FROM fraud_pairs WHERE status = 'ignored'"),
+            "blocked": await one("SELECT COUNT(*) FROM fraud_pairs WHERE status = 'blocked'"),
+            # отпечаток, который светится больше чем у двух аккаунтов, — уже не совпадение
+            "clusters": await one(
+                "SELECT COUNT(*) FROM (SELECT value FROM device_seen WHERE kind = 'hwid' "
+                "AND tg_id IS NOT NULL GROUP BY value HAVING COUNT(DISTINCT tg_id) > 2)"),
         }

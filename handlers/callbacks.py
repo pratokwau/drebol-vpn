@@ -21,11 +21,13 @@ from handlers.admin import (
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
     handle_winback_settings, handle_toggle_winback,
     handle_remind_settings, handle_toggle_remind, handle_set_remind,
+    handle_toggle_remind_trials, handle_remind_test, handle_set_remind_quiet,
     handle_set_winback_days, handle_set_winback_percent,
     handle_user_history, handle_dm_user, handle_payment_stats,
 )
 from fraud import (
     handle_fraud_menu, handle_fraud_toggle, handle_fraud_scan, handle_fraud_ok,
+    handle_fraud_list, handle_fraud_pair, handle_fraud_stop, handle_fraud_ip_toggle,
 )
 from remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
@@ -56,7 +58,7 @@ from handlers.control import (
     handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
 )
 from staff import (
-    is_helper, helper_can, handle_helper_panel,
+    is_helper, helper_can, handle_helper_panel, handle_helper_card, handle_helper_perm,
     handle_helpers_menu, handle_helper_add, handle_helper_del,
 )
 from handlers.confirm import confirm_gate
@@ -121,8 +123,8 @@ from paidsub.handlers import (
     handle_paid_fix_renew, handle_paid_fix_renew_apply,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
-    handle_paid_sub_edit_trial, handle_paid_sub_edit_pay_period,
-    handle_paid_sub_edit_renew_time, handle_paid_sub_edit_price,
+    handle_paid_sub_edit_trial,
+    handle_paid_sub_edit_renew_time,
     handle_paid_history, handle_paid_history_view, handle_mute_user, handle_unmute_user, handle_muted_list,
     handle_paid_requests,
     handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
@@ -143,7 +145,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     adm = _is_admin(update)
     # Помощнику открыты только разделы поддержки — белым списком
     helper = not adm and is_helper(update.effective_user.id)
-    staff_cb = helper and helper_can(data)
+    staff_cb = helper and helper_can(data, update.effective_user.id)
 
     if data == "noop":
         return
@@ -366,6 +368,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_connect_help_set(query, context, int(data.split(":")[1]))
     elif data == "helpers_menu":
         await handle_helpers_menu(query, context)
+    elif data.startswith("helper_card:"):
+        await handle_helper_card(query, int(data.split(":")[1]))
+    elif data.startswith("helper_perm:"):
+        _, huid, perm = data.split(":", 2)
+        await handle_helper_perm(query, context, int(huid), perm)
     elif data == "helper_add":
         await handle_helper_add(query, context)
     elif data.startswith("helper_del:"):
@@ -479,9 +486,25 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_fraud_toggle(query)
     elif data == "fraud_scan":
         await handle_fraud_scan(query, context)
+    elif data == "fraud_ip_toggle":
+        await handle_fraud_ip_toggle(query)
+    elif data.startswith("fraud_list:"):
+        await handle_fraud_list(query, data.split(":", 1)[1])
+    elif data.startswith("fraud_pair:"):
+        _p = data.split(":")
+        await handle_fraud_pair(query, int(_p[1]), int(_p[2]))
+    elif data.startswith("fraud_stop:"):
+        _p = data.split(":")
+        await handle_fraud_stop(query, context, int(_p[1]), int(_p[2]), int(_p[3]))
     elif data.startswith("fraud_ok:"):
         _f = data.split(":")
         await handle_fraud_ok(query, int(_f[1]), int(_f[2]))
+    elif data == "toggle_remind_trials":
+        await handle_toggle_remind_trials(query)
+    elif data == "remind_test":
+        await handle_remind_test(query, context)
+    elif data == "set_remind_quiet":
+        await handle_set_remind_quiet(query, context)
     elif data == "remind_settings":
         await handle_remind_settings(query)
     elif data == "toggle_remind":
@@ -490,6 +513,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_remind(query, context, "first")
     elif data == "set_remind_second":
         await handle_set_remind(query, context, "second")
+    elif data == "set_remind_third":
+        await handle_set_remind(query, context, "third")
     elif data == "winback_settings":
         await handle_winback_settings(query)
     elif data == "toggle_winback":
@@ -699,12 +724,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_edit_traffic(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_trial:"):
         await handle_paid_sub_edit_trial(query, int(data.split(":")[1]), context)
-    elif data.startswith("paid_sub_edit_pay_period:"):
-        await handle_paid_sub_edit_pay_period(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_renew:"):
         await handle_paid_sub_edit_renew_time(query, int(data.split(":")[1]), context)
-    elif data.startswith("paid_sub_edit_price:"):
-        await handle_paid_sub_edit_price(query, int(data.split(":")[1]), context)
     elif data == "paid_history":
         await handle_paid_history(query)
     elif data.startswith("paid_history_page:"):
