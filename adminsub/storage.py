@@ -58,7 +58,8 @@ async def delete_sub(sub_id: int):
 
 
 async def update_sub_field(sub_id: int, field: str, value):
-    allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb"}
+    allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb",
+               "uuid", "sub_id", "sub_url"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:

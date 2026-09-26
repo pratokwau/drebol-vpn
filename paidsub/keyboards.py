@@ -81,7 +81,7 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         # деньги — показываем то, что умеет активная платёжка
         *_money_rows(b),
         # лимиты
-        [b("🌐 Лимит IP", "paid_preset_ip"), b("🖥 Лимит HWID", "paid_preset_hwid")],
+        [b("🖥 Лимит устройств", "paid_preset_hwid")],
         *_devices_rows(b),
         [b("📶 Трафик (ГБ)", "paid_preset_traffic")],
         # панель
@@ -125,7 +125,7 @@ def paid_sub_settings_keyboard(sub_id: int, with_pay_url: bool = True) -> Inline
         money.append(b("🔗 Ссылка на оплату", "paid_sub_edit_pay_url"))
     return InlineKeyboardMarkup([
         [b("📅 Дата окончания", "paid_sub_edit_expire")],
-        [b("🌐 Лимит IP", "paid_sub_edit_ip"), b("🖥 Лимит HWID", "paid_sub_edit_hwid")],
+        [b("🖥 Лимит устройств", "paid_sub_edit_hwid")],
         [b("📶 Трафик (ГБ)", "paid_sub_edit_traffic"), b("🆓 Пробный период", "paid_sub_edit_trial")],
         [b("💰 Период оплаты", "paid_sub_edit_pay_period"), b("⏳ На продление", "paid_sub_edit_renew")],
         money,

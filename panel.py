@@ -153,6 +153,13 @@ async def update_client_limits(email: str, limit_ip: int = None,
     return {"success": True} if r["ok"] else _fail(str(r.get("error")))
 
 
+async def update_client_traffic(email: str, total_gb: int) -> dict:
+    """Лимит трафика. 0 — безлимит."""
+    import remnawave as rw
+    r = await rw.patch(_name(email), trafficLimitBytes=int(total_gb or 0) * 1024 ** 3)
+    return {"success": True} if r["ok"] else _fail(str(r.get("error")))
+
+
 async def toggle_client(email: str, enable: bool) -> dict:
     import remnawave as rw
     r = await rw.action(_name(email), "enable" if enable else "disable")

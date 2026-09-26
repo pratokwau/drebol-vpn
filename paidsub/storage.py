@@ -180,12 +180,8 @@ async def delete_paid_sub(sub_id: int):
         await db.commit()
 
 
-async def subs_for_migration() -> list:
-    """Всё, что нужно, чтобы завести подписку в другой панели.
-
-    Берём только живые: истёкшие переносить незачем — человек всё равно
-    придёт продлевать, и подписка создастся уже на новой панели.
-    """
+async def live_paid_subs() -> list:
+    """Живые подписки со всем, что нужно, чтобы написать человеку про его ключ."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
             SELECT id, tg_id, email, expire_date, limit_ip, limit_hwid, total_gb,

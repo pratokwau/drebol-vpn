@@ -13,19 +13,18 @@ AWAITING_SUB_TG_ID = "awaiting_sub_tg_id"
 
 # Настройки-пресеты для админских подписок
 AWAITING_PRESET_EXPIRE = "awaiting_preset_expire"
-AWAITING_PRESET_IP = "awaiting_preset_ip"
 AWAITING_PRESET_HWID = "awaiting_preset_hwid"
 AWAITING_PRESET_TRAFFIC = "awaiting_preset_traffic"
 
 # Редактирование конкретной админской подписки
 AWAITING_SUB_EDIT_EXPIRE = "awaiting_sub_edit_expire"
-AWAITING_SUB_EDIT_IP = "awaiting_sub_edit_ip"
 AWAITING_SUB_EDIT_HWID = "awaiting_sub_edit_hwid"
 AWAITING_SUB_EDIT_TRAFFIC = "awaiting_sub_edit_traffic"
+AWAITING_SUB_EXTEND = "awaiting_sub_extend"
+AWAITING_SUB_REDUCE = "awaiting_sub_reduce"
 
 # Платные подписки
 AWAITING_PAID_SUB_TG_ID = "awaiting_paid_sub_tg_id"
-AWAITING_PAID_PRESET_IP = "awaiting_paid_preset_ip"
 AWAITING_PAID_PRESET_HWID = "awaiting_paid_preset_hwid"
 AWAITING_PAID_PRESET_TRAFFIC = "awaiting_paid_preset_traffic"
 AWAITING_PAID_TRIAL_PERIOD = "awaiting_paid_trial_period"
@@ -35,7 +34,6 @@ AWAITING_PAID_PRICE = "awaiting_paid_price"
 AWAITING_PAID_PAY_URL = "awaiting_paid_pay_url"
 AWAITING_PAID_SUB_EXTEND = "awaiting_paid_sub_extend"
 AWAITING_PAID_SUB_EDIT_EXPIRE = "awaiting_paid_sub_edit_expire"
-AWAITING_PAID_SUB_EDIT_IP = "awaiting_paid_sub_edit_ip"
 AWAITING_PAID_SUB_EDIT_HWID = "awaiting_paid_sub_edit_hwid"
 AWAITING_PAID_SUB_EDIT_TRAFFIC = "awaiting_paid_sub_edit_traffic"
 AWAITING_PAID_SUB_EDIT_TRIAL = "awaiting_paid_sub_edit_trial"
@@ -52,7 +50,6 @@ AWAITING_PAID_FIX_RENEW = "awaiting_paid_fix_renew"
 AWAITING_PAID_BULK_EXTEND = "awaiting_paid_bulk_extend"
 AWAITING_DEVICE_PRICE = "awaiting_device_price"
 AWAITING_DEVICE_MAX = "awaiting_device_max"
-AWAITING_PAID_BULK_IP = "awaiting_paid_bulk_ip"
 AWAITING_PAID_BULK_HWID = "awaiting_paid_bulk_hwid"
 AWAITING_PAID_BULK_REDUCE = "awaiting_paid_bulk_reduce"
 

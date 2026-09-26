@@ -10,18 +10,19 @@ from states import (
     AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
-    AWAITING_PRESET_EXPIRE, AWAITING_PRESET_IP,
+    AWAITING_PRESET_EXPIRE,
     AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC,
     AWAITING_SUB_TG_ID,
-    AWAITING_SUB_EDIT_EXPIRE, AWAITING_SUB_EDIT_IP,
+    AWAITING_SUB_EDIT_EXPIRE,
     AWAITING_SUB_EDIT_HWID, AWAITING_SUB_EDIT_TRAFFIC,
+    AWAITING_SUB_EXTEND, AWAITING_SUB_REDUCE,
     AWAITING_PAID_SUB_TG_ID,
-    AWAITING_PAID_PRESET_IP, AWAITING_PAID_PRESET_HWID,
+    AWAITING_PAID_PRESET_HWID,
     AWAITING_PAID_PRESET_TRAFFIC,
     AWAITING_PAID_TRIAL_PERIOD, AWAITING_PAID_PAY_PERIOD,
     AWAITING_PAID_RENEW_TIME, AWAITING_PAID_PRICE, AWAITING_PAID_PAY_URL,
     AWAITING_PAID_SUB_EXTEND,
-    AWAITING_PAID_SUB_EDIT_EXPIRE, AWAITING_PAID_SUB_EDIT_IP,
+    AWAITING_PAID_SUB_EDIT_EXPIRE,
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
     AWAITING_PAID_SUB_EDIT_TRIAL, AWAITING_PAID_SUB_EDIT_PAY_PERIOD,
     AWAITING_PAID_SUB_EDIT_RENEW_TIME, AWAITING_PAID_SUB_EDIT_PRICE,
@@ -29,7 +30,7 @@ from states import (
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE, AWAITING_PAID_FIX_RENEW,
-    AWAITING_PAID_BULK_IP, AWAITING_PAID_BULK_HWID,
+    AWAITING_PAID_BULK_HWID,
     AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE,
     AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
@@ -384,22 +385,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Дата окончания: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
-    if state == AWAITING_PRESET_IP:
-        if not text.isdigit():
-            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
-            return
-        _save("preset_ip", int(text))
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Лимит IP: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
     if state == AWAITING_PRESET_HWID:
         if not text.isdigit():
             await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
             return
         _save("preset_hwid", int(text))
         context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Лимит HWID: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Лимит устройств: <b>{text}</b>",
+                                        parse_mode="HTML", reply_markup=back_admin())
         return
 
     if state == AWAITING_PRESET_TRAFFIC:
@@ -426,22 +419,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
+        note = ""
         if sub_id:
-            from adminsub.storage import update_sub_field
+            from adminsub.storage import update_sub_field, get_sub
+            from panel import update_client_expire
             await update_sub_field(sub_id, "expire_date", text)
-        await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_SUB_EDIT_IP:
-        if not text.isdigit():
-            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
-            return
-        sub_id = context.user_data.pop("edit_sub_id", None)
-        context.user_data.pop("state", None)
-        if sub_id:
-            from adminsub.storage import update_sub_field
-            await update_sub_field(sub_id, "limit_ip", int(text))
-        await update.message.reply_text(f"✅ Лимит IP обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+            row = await get_sub(sub_id)
+            # без этого дата менялась только в базе, а панель жила со старой
+            if row:
+                res = await update_client_expire(row[2], text)
+                if not res.get("success"):
+                    note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
+        await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>{note}",
+                                        parse_mode="HTML", reply_markup=back_admin())
         return
 
     if state == AWAITING_SUB_EDIT_HWID:
@@ -450,10 +440,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
+        note = ""
         if sub_id:
-            from adminsub.storage import update_sub_field
+            from adminsub.storage import update_sub_field, get_sub
+            from panel import update_client_limits
             await update_sub_field(sub_id, "limit_hwid", int(text))
-        await update.message.reply_text(f"✅ Лимит HWID обновлён: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
+            row = await get_sub(sub_id)
+            if row:
+                res = await update_client_limits(row[2], limit_hwid=int(text))
+                if not res.get("success"):
+                    note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
+        await update.message.reply_text(f"✅ Лимит устройств обновлён: <b>{text}</b>{note}",
+                                        parse_mode="HTML", reply_markup=back_admin())
         return
 
     if state == AWAITING_SUB_EDIT_TRAFFIC:
@@ -468,10 +466,48 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
+        note = ""
         if sub_id:
-            from adminsub.storage import update_sub_field
+            from adminsub.storage import update_sub_field, get_sub
+            from panel import update_client_traffic
             await update_sub_field(sub_id, "total_gb", val)
-        await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
+            row = await get_sub(sub_id)
+            if row:
+                res = await update_client_traffic(row[2], val)
+                if not res.get("success"):
+                    note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
+        await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>{note}",
+                                        parse_mode="HTML", reply_markup=back_admin())
+        return
+
+
+    # ── Админская подписка: добавить и убавить срок ──────────────────────────────
+    if state in (AWAITING_SUB_EXTEND, AWAITING_SUB_REDUCE):
+        from paidsub.time_parser import parse_duration
+        seconds = parse_duration(text)
+        if not seconds:
+            await update.message.reply_text(
+                "❌ Не удалось распознать. Примеры: <code>5 часов</code>, <code>7 дней</code>",
+                parse_mode="HTML", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        direction = 1 if state == AWAITING_SUB_EXTEND else -1
+        context.user_data.pop("state", None)
+        if not sub_id:
+            await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+            return
+        from adminsub.handlers import shift_sub_expire
+        from paidsub.time_parser import fmt_duration as fmt_dur
+        res = await shift_sub_expire(sub_id, seconds, direction, context)
+        if not res.get("ok"):
+            await update.message.reply_text(
+                f"⚠️ <b>Панель не приняла</b>\n<code>{res.get('error', '?')}</code>",
+                parse_mode="HTML", reply_markup=back_admin())
+            return
+        sign = "➕ Добавлено" if direction > 0 else "➖ Убавлено"
+        await update.message.reply_text(
+            f"✅ {sign}: <b>{fmt_dur(seconds)}</b>\n📅 Новая дата: <b>{res['until']}</b>",
+            parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Платные подписки: TG ID ──────────────────────────────────────────────────
@@ -657,15 +693,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Платные подписки: обычные пресеты ────────────────────────────────────────
-    if state == AWAITING_PAID_PRESET_IP:
-        if not text.isdigit():
-            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
-            return
-        _save("paid_preset_ip", int(text))
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Лимит IP: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
     if state == AWAITING_PAID_PRESET_HWID:
         if not text.isdigit():
             await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
@@ -913,37 +940,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="HTML", reply_markup=back_admin())
         return
 
-    if state in (AWAITING_PAID_BULK_IP, AWAITING_PAID_BULK_HWID):
+    if state == AWAITING_PAID_BULK_HWID:
         if not text.isdigit():
             await update.message.reply_text("❌ Введи число. <code>0</code> — без ограничения.",
                                             parse_mode="HTML", reply_markup=back_admin())
             return
-        kind = "ip" if state == AWAITING_PAID_BULK_IP else "hwid"
         context.user_data.pop("state", None)
         from paidsub.handlers import preview_bulk_limits
-        await preview_bulk_limits(update.message, context, kind, int(text))
-        return
-
-    if state == AWAITING_PAID_SUB_EDIT_IP:
-        if not text.isdigit():
-            await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
-            return
-        sub_id = context.user_data.pop("edit_sub_id", None)
-        context.user_data.pop("state", None)
-        panel_note = ""
-        if sub_id:
-            from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
-            from panel import update_client_limits
-            await update_paid_sub_field(sub_id, "limit_ip", int(text))
-            r = await get_paid_sub(sub_id)
-            if r:
-                # без этого лимит менялся только в базе, а панель жила со старым
-                res = await update_client_limits(r[2], limit_ip=int(text))
-                if not res.get("success"):
-                    panel_note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
-                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: лимит IP → {text}")
-        await update.message.reply_text(f"✅ Лимит IP обновлён: <b>{text}</b>{panel_note}",
-                                        parse_mode="HTML", reply_markup=back_admin())
+        await preview_bulk_limits(update.message, context, "hwid", int(text))
         return
 
     if state == AWAITING_PAID_SUB_EDIT_HWID:
@@ -989,13 +993,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
+        panel_note = ""
         if sub_id:
             from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
+            from panel import update_client_traffic
             await update_paid_sub_field(sub_id, "total_gb", val)
             r = await get_paid_sub(sub_id)
             if r:
+                res = await update_client_traffic(r[2], val)
+                if not res.get("success"):
+                    panel_note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
                 await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: трафик → {label}")
-        await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>{panel_note}",
+                                        parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Платные подписки: индивидуальные время-настройки ─────────────────────────

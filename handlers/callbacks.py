@@ -29,8 +29,8 @@ from fraud import (
 )
 from remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
-    handle_rw_squads, handle_rw_squad_toggle, handle_rw_migrate,
-    handle_rw_migrate_go, handle_rw_notify, handle_rw_notify_go,
+    handle_rw_squads, handle_rw_squad_toggle,
+    handle_rw_notify, handle_rw_notify_go,
 )
 from backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
@@ -96,14 +96,16 @@ from handlers.tickets import (
 )
 from adminsub.handlers import (
     handle_admin_subs_menu, handle_presets_menu,
-    handle_preset_expire, handle_preset_ip, handle_preset_hwid, handle_preset_traffic,
+    handle_preset_expire, handle_preset_hwid, handle_preset_traffic,
     handle_create_sub, handle_sub_view, handle_sub_delete, handle_sub_toggle,
-    handle_sub_settings, handle_sub_edit_expire, handle_sub_edit_ip,
+    handle_sub_settings, handle_sub_edit_expire,
     handle_sub_edit_hwid, handle_sub_edit_traffic,
+    handle_sub_extend, handle_sub_reduce, handle_sub_devices, handle_sub_ips,
+    handle_sub_hwid_del, handle_sub_hwid_clear, handle_sub_reissue,
 )
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
-    handle_paid_preset_ip, handle_paid_preset_hwid, handle_paid_preset_traffic,
+    handle_paid_preset_hwid, handle_paid_preset_traffic,
     handle_paid_preset_trial, handle_paid_preset_pay_period, handle_paid_preset_renew,
     handle_paid_preset_price, handle_paid_preset_pay_url,
     handle_paid_create_sub, handle_paid_create_type,
@@ -111,13 +113,13 @@ from paidsub.handlers import (
     handle_approve, handle_reject, handle_request_sub,
     handle_paid_sub_freeze, handle_paid_sub_extend, handle_paid_sub_reduce,
     handle_paid_bulk_menu, handle_paid_bulk_extend, handle_paid_bulk_reduce,
-    handle_paid_bulk_ip, handle_paid_bulk_hwid, handle_paid_bulk_limits_apply,
+    handle_paid_bulk_hwid, handle_paid_bulk_limits_apply,
     handle_paid_device_price, handle_paid_device_max,
     handle_paid_devices, handle_paid_ips, handle_paid_hwid_del,
     handle_paid_hwid_clear,
     handle_paid_fix_renew, handle_paid_fix_renew_apply,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
-    handle_paid_sub_edit_ip, handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
+    handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
     handle_paid_sub_edit_trial, handle_paid_sub_edit_pay_period,
     handle_paid_sub_edit_renew_time, handle_paid_sub_edit_price, handle_paid_sub_edit_pay_url,
     handle_confirm_payment, handle_reject_payment,
@@ -442,10 +444,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_rw_squads(query, context)
     elif data.startswith("rw_squad:"):
         await handle_rw_squad_toggle(query, context, data.split(":", 1)[1])
-    elif data == "rw_migrate":
-        await handle_rw_migrate(query, context)
-    elif data == "rw_migrate_go":
-        await handle_rw_migrate_go(query, context)
     elif data == "rw_notify":
         await handle_rw_notify(query, context)
     elif data == "rw_notify_go":
@@ -563,8 +561,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_presets_menu(query)
     elif data == "preset_expire":
         await handle_preset_expire(query, context)
-    elif data == "preset_ip":
-        await handle_preset_ip(query, context)
     elif data == "preset_hwid":
         await handle_preset_hwid(query, context)
     elif data == "preset_traffic":
@@ -575,12 +571,25 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_sub_toggle(query, int(data.split(":")[1]), context)
     elif data.startswith("sub_delete:"):
         await handle_sub_delete(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_extend:"):
+        await handle_sub_extend(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_reduce:"):
+        await handle_sub_reduce(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_devices:"):
+        await handle_sub_devices(query, int(data.split(":")[1]))
+    elif data.startswith("sub_ips:"):
+        await handle_sub_ips(query, int(data.split(":")[1]))
+    elif data.startswith("sub_hwid_del:"):
+        _, sid, ref = data.split(":", 2)
+        await handle_sub_hwid_del(query, context, int(sid), ref)
+    elif data.startswith("sub_hwid_clear:"):
+        await handle_sub_hwid_clear(query, context, int(data.split(":")[1]))
+    elif data.startswith("sub_reissue:"):
+        await handle_sub_reissue(query, context, int(data.split(":")[1]))
     elif data.startswith("sub_settings:"):
         await handle_sub_settings(query, int(data.split(":")[1]))
     elif data.startswith("sub_edit_expire:"):
         await handle_sub_edit_expire(query, int(data.split(":")[1]), context)
-    elif data.startswith("sub_edit_ip:"):
-        await handle_sub_edit_ip(query, int(data.split(":")[1]), context)
     elif data.startswith("sub_edit_hwid:"):
         await handle_sub_edit_hwid(query, int(data.split(":")[1]), context)
     elif data.startswith("sub_edit_traffic:"):
@@ -639,8 +648,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_preset_price(query, context)
     elif data == "paid_preset_pay_url":
         await handle_paid_preset_pay_url(query, context)
-    elif data == "paid_preset_ip":
-        await handle_paid_preset_ip(query, context)
     elif data == "paid_preset_hwid":
         await handle_paid_preset_hwid(query, context)
     elif data == "paid_preset_traffic":
@@ -676,8 +683,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_device_price(query, context)
     elif data == "paid_device_max":
         await handle_paid_device_max(query, context)
-    elif data == "paid_bulk_ip":
-        await handle_paid_bulk_ip(query, context)
     elif data == "paid_bulk_hwid":
         await handle_paid_bulk_hwid(query, context)
     elif data == "paid_bulk_limits_apply":
@@ -692,8 +697,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_settings(query, int(data.split(":")[1]))
     elif data.startswith("paid_sub_edit_expire:"):
         await handle_paid_sub_edit_expire(query, int(data.split(":")[1]), context)
-    elif data.startswith("paid_sub_edit_ip:"):
-        await handle_paid_sub_edit_ip(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_hwid:"):
         await handle_paid_sub_edit_hwid(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_traffic:"):

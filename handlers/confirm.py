@@ -31,6 +31,8 @@ CONFIRM_TITLES = {
     "bl_readd": "Возврат в ЧС",
     "bl_remote_toggle": "Общий ЧС вкл/выкл",
     "paid_hwid_clear": "Очистка устройств подписки",
+    "sub_hwid_clear": "Очистка устройств админской подписки",
+    "sub_reissue": "Перевыпуск ключа админской подписки",
     "site_delete": "Удаление сайта",
 }
 
@@ -243,7 +245,29 @@ async def _paid_hwid_clear(arg):
             "🧹 Да, очистить", f"paid_devices:{arg}", f"paid_sub_view:{arg}")
 
 
+async def _sub_hwid_clear(arg):
+    from adminsub.storage import get_sub
+    row = await get_sub(int(arg))
+    who = await _who(row[1]) if row else "?"
+    return (f"🧹 <b>Очистить все устройства?</b>\n\n👤 {who}\n\n"
+            "Панель забудет запомненные устройства этой подписки. "
+            "Человеку придётся подключить их заново — бот об этом напишет.",
+            "🧹 Да, очистить", f"sub_devices:{arg}", f"sub_view:{arg}")
+
+
+async def _sub_reissue(arg):
+    from adminsub.storage import get_sub
+    row = await get_sub(int(arg))
+    who = await _who(row[1]) if row else "?"
+    return (f"🔁 <b>Перевыпустить ключ?</b>\n\n👤 {who}\n\n"
+            "Ссылка подписки сменится, старая сразу перестанет работать. "
+            "Новую бот отправит человеку сам.",
+            "🔁 Да, перевыпустить", f"sub_view:{arg}", f"sub_view:{arg}")
+
+
 RULES = {
+    "sub_hwid_clear": _sub_hwid_clear,
+    "sub_reissue": _sub_reissue,
     "site_delete": _site_delete,
     "paid_hwid_clear": _paid_hwid_clear,
     "paid_sub_delete": _paid_sub_delete,

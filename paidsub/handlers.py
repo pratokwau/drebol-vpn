@@ -49,7 +49,6 @@ def _paid_presets_ready(cfg: dict) -> bool:
         cfg.get("paid_trial_period") is not None,
         cfg.get("paid_pay_period") is not None,
         cfg.get("paid_renew_time") is not None,
-        cfg.get("paid_preset_ip") is not None,
         cfg.get("paid_preset_hwid") is not None,
         cfg.get("paid_preset_traffic") is not None,
     ])
@@ -81,7 +80,6 @@ def _fmt_presets(cfg: dict, squad_names=None) -> str:
 
     from handlers.payprovider import provider_line
 
-    ip = cfg.get("paid_preset_ip", "не задан")
     hwid = cfg.get("paid_preset_hwid", "не задан")
     traf_raw = cfg.get("paid_preset_traffic")
     if traf_raw is None:
@@ -102,11 +100,11 @@ def _fmt_presets(cfg: dict, squad_names=None) -> str:
         + "</blockquote>"
     )
     return _presets_text(trial_str, pay_str, renew_str, provider_line(),
-                         price_str, ip, hwid, traf, panel_block)
+                         price_str, hwid, traf, panel_block)
 
 
 def _presets_text(trial_str, pay_str, renew_str, pay_line,
-                  price_str, ip, hwid, traf, panel_block) -> str:
+                  price_str, hwid, traf, panel_block) -> str:
     """Один вид экрана настроек на обе панели — меняется только нижний блок."""
     return (
         "⏱ <b>Сроки</b>\n<blockquote>"
@@ -117,7 +115,7 @@ def _presets_text(trial_str, pay_str, renew_str, pay_line,
         f"{pay_line}\n"
         f"{_price_label()}: <b>{price_str}</b></blockquote>\n\n"
         "📊 <b>Лимиты</b>\n<blockquote>"
-        f"🌐 IP: <b>{ip}</b>  ·  🖥 HWID: <b>{hwid}</b>\n"
+        f"🖥 Устройств: <b>{hwid}</b>\n"
         f"📶 Трафик: <b>{traf}</b></blockquote>\n\n"
         + panel_block
     )
@@ -236,14 +234,6 @@ async def handle_paid_preset_pay_url(query, context):
     )
 
 
-async def handle_paid_preset_ip(query, context):
-    from states import AWAITING_PAID_PRESET_IP
-    context.user_data["state"] = AWAITING_PAID_PRESET_IP
-    await query.edit_message_text(
-        "🌐 <b>Лимит IP</b>\n\n<i>Пришли число (0 = безлимит).</i>",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
 
 
 async def handle_paid_preset_hwid(query, context):
@@ -350,7 +340,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
 
     result = await create_client(
         expire_date=expire_date,
-        limit_ip=int(cfg.get("paid_preset_ip", 0)),
+        limit_ip=0,
         limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
         total_gb=int(cfg.get("paid_preset_traffic", 0)),
         email=email,
@@ -372,7 +362,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
         sub_id=result["sub_id"],
         sub_url=result["sub_url"],
         expire_date=result["expire"],
-        limit_ip=int(cfg.get("paid_preset_ip", 0)),
+        limit_ip=0,
         limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
         total_gb=int(cfg.get("paid_preset_traffic", 0)),
     )
@@ -497,12 +487,10 @@ async def handle_request_sub(query, context):
     trial_sec = cfg.get("paid_trial_period", 86400)
     pay_sec = cfg.get("paid_pay_period", 2592000)
     renew_sec = cfg.get("paid_renew_time", 86400)
-    ip = cfg.get("paid_preset_ip", 0)
     hwid = cfg.get("paid_preset_hwid", 0)
     traf_raw = cfg.get("paid_preset_traffic", 0)
     traf_str = f"{traf_raw} ГБ" if traf_raw > 0 else "безлимит"
     price = cfg.get("paid_price", 0)
-    ip_str = str(ip) if ip > 0 else "безлимит"
     hwid_str = str(hwid) if hwid > 0 else "безлимит"
 
     await context.bot.send_message(
@@ -517,8 +505,7 @@ async def handle_request_sub(query, context):
             f"💰 После оплаты: <b>{fmt_duration(pay_sec)}</b>\n"
             f"⏳ На продление: <b>{renew_label(renew_sec)}</b>\n"
             f"💵 Сумма: <b>{price} ₽</b>\n"
-            f"🌐 Лимит IP: <b>{ip_str}</b>\n"
-            f"🖥 Лимит HWID: <b>{hwid_str}</b>\n"
+            f"🖥 Лимит устройств: <b>{hwid_str}</b>\n"
             f"📶 Трафик: <b>{traf_str}</b>\n\n"
             "Одобрить пробную подписку?"
         ),
@@ -695,7 +682,7 @@ async def handle_paid_sub_view(query, sub_id: int):
     # row: id(0),tg_id(1),email(2),uuid(3),sub_id(4),sub_url(5),expire(6),
     #      ip(7),hwid(8),traffic(9),created(10),status(11),payment_pending(12),
     #      ind_trial(13),ind_pay(14),ind_renew(15),ind_price(16),ind_pay_url(17)
-    _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row[:11]
+    _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _limit_ip, limit_hwid, total_gb, created_at = row[:11]
     status = row[11] if len(row) > 11 else "active"
     payment_pending = row[12] if len(row) > 12 else 0
     ind_trial = row[13] if len(row) > 13 else None
@@ -846,7 +833,7 @@ async def handle_paid_sub_view(query, sub_id: int):
         + time_left_line.rstrip("\n")
         + "</blockquote>\n\n"
         "📊 <b>Лимиты</b>\n<blockquote>"
-        f"🌐 IP: <b>{limit_ip}</b>  ·  🖥 HWID: <b>{limit_hwid}</b>\n"
+        f"🖥 Устройств: <b>{limit_hwid or 'без ограничения'}</b>\n"
         f"{traffic_line}\n"
         f"🕐 Создана: {created_at}"
         "</blockquote>\n"
@@ -1015,8 +1002,7 @@ async def handle_paid_bulk_menu(query):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("➕ Добавить срок", callback_data="paid_bulk_extend"),
              InlineKeyboardButton("➖ Убавить срок", callback_data="paid_bulk_reduce")],
-            [InlineKeyboardButton("📱 Лимит IP всем", callback_data="paid_bulk_ip"),
-             InlineKeyboardButton("🔑 Лимит HWID всем", callback_data="paid_bulk_hwid")],
+            [InlineKeyboardButton("🔑 Лимит устройств всем", callback_data="paid_bulk_hwid")],
             [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
         ]),
     )
@@ -1209,12 +1195,11 @@ async def handle_paid_ips(query, sub_id: int):
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    email, limit_ip = row[2], row[7]
+    email = row[2]
     await query.edit_message_text("🌐 Спрашиваю панель…")
     r = await get_client_ips(email)
 
-    lines = [f"🌐 <b>IP-адреса подписки #{sub_id}</b>\n",
-             f"📱 Лимит IP: <b>{limit_ip or 'без ограничения'}</b>"]
+    lines = [f"🌐 <b>IP-адреса подписки #{sub_id}</b>\n"]
     kb = []
     if not r.get("ok"):
         lines.append(f"\n❌ Панель не ответила:\n<code>{escape(str(r.get('error')))}</code>")
@@ -1306,15 +1291,6 @@ async def handle_paid_device_max(query, context):
     )
 
 
-async def handle_paid_bulk_ip(query, context):
-    from states import AWAITING_PAID_BULK_IP
-    context.user_data["state"] = AWAITING_PAID_BULK_IP
-    await query.edit_message_text(
-        "📱 <b>Лимит IP для всех подписок</b>\n\n"
-        "Сколько одновременных подключений с разных адресов разрешить?\n"
-        "Введи число, <code>0</code> — без ограничения.",
-        parse_mode="HTML", reply_markup=back_admin(),
-    )
 
 
 async def handle_paid_bulk_hwid(query, context):
@@ -1329,7 +1305,7 @@ async def handle_paid_bulk_hwid(query, context):
 
 
 # что именно правим оптом: подпись для экрана и колонка в базе
-LIMIT_KINDS = {"ip": ("📱", "IP", "limit_ip"), "hwid": ("🔑", "HWID", "limit_hwid")}
+LIMIT_KINDS = {"hwid": ("🔑", "устройств", "limit_hwid")}
 
 
 async def preview_bulk_limits(message, context, kind: str, value: int):
@@ -1414,7 +1390,7 @@ async def bulk_set_limits(kind: str, value: int, context) -> dict:
         target = value + int(extra or 0) if (kind == "hwid" and value) else value
         await update_paid_sub_field(sub_id, field, target)
         res = await update_client_limits(
-            email, **({"limit_ip": target} if kind == "ip" else {"limit_hwid": target}))
+            email, limit_hwid=target)
         if not res.get("success"):
             panel_fail += 1
         updated += 1
@@ -1532,7 +1508,6 @@ async def handle_paid_sub_settings(query, sub_id: int):
     # row: id,tg_id,email,uuid,sub_id,sub_url,expire,ip,hwid,traffic,created,status,payment_pending,
     #       ind_trial,ind_pay_period,ind_renew,ind_price,ind_pay_url
     expire = row[6]
-    limit_ip = row[7]
     limit_hwid = row[8]
     total_gb = row[9]
     ind_trial = row[13] if len(row) > 13 else None
@@ -1542,7 +1517,6 @@ async def handle_paid_sub_settings(query, sub_id: int):
     ind_pay_url = row[17] if len(row) > 17 else None
 
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
-    ip_str = str(limit_ip) if limit_ip > 0 else "безлимит"
     hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
 
     # показываем действующие условия подписки, а не «общие»:
@@ -1569,8 +1543,7 @@ async def handle_paid_sub_settings(query, sub_id: int):
         f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
         f"📅 Период до: <b>{period_end_line}</b>\n"
         f"⏳ Оплатить до: <b>{expire}</b>\n"
-        f"🌐 Лимит IP: <b>{ip_str}</b>\n"
-        f"🖥 Лимит HWID: <b>{hwid_str}</b>\n"
+        f"🖥 Лимит устройств: <b>{hwid_str}</b>\n"
         f"📶 Трафик: <b>{traffic}</b>\n"
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
         f"💰 Период оплаты: <b>{pay_str}</b>\n"
@@ -1596,14 +1569,6 @@ async def handle_paid_sub_edit_expire(query, sub_id: int, context):
     )
 
 
-async def handle_paid_sub_edit_ip(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EDIT_IP
-    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_IP
-    context.user_data["edit_sub_id"] = sub_id
-    await query.edit_message_text(
-        f"🌐 <b>Лимит IP подписки #{sub_id}</b>\n\n<i>Пришли число (0 = безлимит).</i>",
-        parse_mode="HTML", reply_markup=back_admin(),
-    )
 
 
 async def handle_paid_sub_edit_hwid(query, sub_id: int, context):

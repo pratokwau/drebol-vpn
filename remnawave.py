@@ -1,12 +1,12 @@
-"""Remnawave: подключение к панели и заведение клиентов пачкой.
+"""Remnawave: связь с панелью и её настройки в боте.
 
-Здесь живут настройки панели, выбор сквадов, разовое заведение всех живых
-подписок из базы и рассылка ссылок людям.
+Здесь живут адрес и токен панели, выбор сквадов, запросы к её API и рассылка
+ссылок подписок людям.
 
 Пути и поля взяты из контракта API панели: всё под /api, ответы завёрнуты
-в {"response": ...}. Пользователь опознаётся по username — его мы генерируем
-сами из email подписки, поэтому повторный перенос не плодит дублей,
-а обновляет уже заведённых.
+в {"response": ...}. Клиент опознаётся по username — его мы получаем из email
+подписки одним и тем же правилом, поэтому бот всегда попадает в того же
+человека, а не плодит дублей.
 """
 
 import asyncio
@@ -31,9 +31,6 @@ def settings() -> dict:
         "url": (cfg.get("rw_url") or "").rstrip("/"),
         "token": cfg.get("rw_token") or "",
         "squads": list(cfg.get("rw_squads") or []),
-        "expire_squads": list(cfg.get("rw_expire_squads") or []),
-        "migrated_at": cfg.get("rw_migrated_at") or "",
-        "migrated_count": int(cfg.get("rw_migrated_count") or 0),
     }
 
 
@@ -157,22 +154,10 @@ async def user_id(username: str):
     return _IDS.get(username) if r["ok"] else None
 
 
-# метка «стереть поле»: просто None в patch означает «не трогать»
-CLEAR = object()
-
-
 async def patch(username: str, **fields) -> dict:
-    """Точечная правка пользователя: меняем только переданное.
-
-    Поле, которому передали CLEAR, уходит в панель как null — так снимается
-    тег и прочее, что панель хранит «или значение, или ничего».
-    """
+    """Точечная правка пользователя: меняем только переданное."""
     body = {"username": username}
-    for key, value in fields.items():
-        if value is CLEAR:
-            body[key] = None
-        elif value is not None:
-            body[key] = value
+    body.update({k: v for k, v in fields.items() if v is not None})
     return await update_user(body)
 
 
@@ -260,134 +245,6 @@ def to_iso(raw: str) -> str:
     return dt.astimezone().isoformat(timespec="seconds")
 
 
-def build_payload(row, squads: list) -> dict:
-    """Собирает тело запроса из нашей подписки."""
-    (_sub_id, tg_id, email, expire_date, _limit_ip, limit_hwid,
-     total_gb, _status, _renewed, _extra, _sub_url) = row
-    payload = {
-        "username": make_username(email, tg_id),
-        "status": "ACTIVE",
-        "expireAt": to_iso(expire_date),
-        "trafficLimitBytes": int(total_gb or 0) * 1024 ** 3,
-        "hwidDeviceLimit": int(limit_hwid or 0),
-        "telegramId": int(tg_id),
-        "description": "Заведено ботом Drebol VPN",
-    }
-    if squads:
-        payload["activeInternalSquads"] = list(squads)
-    return payload
-
-
-async def migrate_subs(progress=None) -> dict:
-    """Заводит в панели все живые подписки из базы.
-
-    Уже заведённых не создаём заново, а приводим к нашим данным: так можно
-    повторять сколько угодно раз, ничего не ломая. Пригодится после чистой
-    установки панели или восстановления базы из бэкапа.
-    """
-    from paidsub.storage import subs_for_migration, update_paid_sub_field
-    s = settings()
-    rows = await subs_for_migration()
-    if not rows:
-        return {"ok": True, "total": 0, "created": 0, "updated": 0, "errors": []}
-
-    created = updated = 0
-    errors = []
-    for i, row in enumerate(rows, 1):
-        sub_id, tg_id, email = row[0], row[1], row[2]
-        payload = build_payload(row, s["squads"])
-        try:
-            found = await get_user(payload["username"])
-            if found["ok"]:
-                body = dict(payload)
-                body.pop("status", None)      # статусом управляет сама панель
-                res = await update_user(body)
-                action = "updated"
-            else:
-                res = await create_user(payload)
-                action = "created"
-
-            if not res["ok"]:
-                errors.append(f"{email}: {res.get('error')}")
-                continue
-
-            data = res["data"] or {}
-            link = data.get("subscriptionUrl") or ""
-            if link:
-                await update_paid_sub_field(sub_id, "sub_url", link)
-            if data.get("shortUuid"):
-                await update_paid_sub_field(sub_id, "sub_id", data["shortUuid"])
-            if data.get("vlessUuid"):
-                await update_paid_sub_field(sub_id, "uuid", data["vlessUuid"])
-            created += action == "created"
-            updated += action == "updated"
-        except Exception as e:
-            errors.append(f"{email}: {type(e).__name__}: {e}")
-
-        if progress and (i % 10 == 0 or i == len(rows)):
-            await progress(i, len(rows))
-        await asyncio.sleep(STEP_PAUSE)
-
-    save_settings(rw_migrated_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
-                  rw_migrated_count=created + updated)
-    return {"ok": True, "total": len(rows), "created": created,
-            "updated": updated, "errors": errors}
-
-
-# ── Метки, оставшиеся от переезда ─────────────────────────────────────────────
-
-# По этим приметам видно клиента, заведённого при переезде со старой панели.
-OLD_MARKS = ("3x-UI", "3xui", "Перенос из")
-OLD_TAGS = ("MIGRATED", "MIGRATION", "FROM3XUI")
-
-
-def _has_old_mark(user: dict) -> bool:
-    tag = (user.get("tag") or "").upper()
-    note = user.get("description") or ""
-    return tag in OLD_TAGS or any(m.lower() in note.lower() for m in OLD_MARKS)
-
-
-async def count_old_marks() -> dict:
-    """Сколько клиентов ещё помечены переездом."""
-    users = await all_users()
-    marked = [u for u in users if _has_old_mark(u)]
-    return {"ok": True, "total": len(users), "marked": len(marked)}
-
-
-async def clear_old_marks(progress=None) -> dict:
-    """Снимает тег и описание, оставшиеся от переезда.
-
-    Вместо старой пометки пишем обычное описание: ник человека, если он есть
-    в базе бота, — по нему клиента видно в панели без сверки с базой.
-    """
-    from database import get_user_info
-    users = await all_users()
-    marked = [u for u in users if _has_old_mark(u)]
-    cleaned, errors = 0, []
-    for i, u in enumerate(marked, 1):
-        name = u.get("username")
-        if not name:
-            continue
-        note = "Создано ботом Drebol VPN"
-        tg_id = u.get("telegramId")
-        if tg_id:
-            try:
-                row = await get_user_info(int(tg_id))
-                if row and row[2]:
-                    note = f"Drebol VPN · @{row[2]}"
-            except Exception:
-                pass
-        r = await patch(name, description=note, tag=CLEAR)
-        if r["ok"]:
-            cleaned += 1
-        else:
-            errors.append(f"{name}: {r.get('error')}")
-        if progress and (i % 10 == 0 or i == len(marked)):
-            await progress(i, len(marked))
-        await asyncio.sleep(STEP_PAUSE)
-    return {"ok": True, "marked": len(marked), "cleaned": cleaned, "errors": errors}
-
-
 # ── Экраны админки ────────────────────────────────────────────────────────────
 
 def _back():
@@ -403,18 +260,12 @@ async def handle_rw_menu(query, context=None):
     url = f"<code>{escape(s['url'])}</code>" if s["url"] else "не задан"
     token = "задан" if s["token"] else "не задан"
     squads = f"выбрано <b>{len(s['squads'])}</b>" if s["squads"] else "не выбраны"
-    expire_squads = (f"выбрано <b>{len(s['expire_squads'])}</b>"
-                     if s["expire_squads"] else "нет — доступ просто отключаем")
-    state = (f"{s['migrated_at']} · {s['migrated_count']} подписок"
-             if s["migrated_at"] else "ещё не заводили пачкой")
 
     lines = ["🖥 <b>Панель Remnawave</b>", "",
              "<blockquote>"
              f"🌐 Адрес: {url}\n"
              f"🔑 Токен: <b>{token}</b>\n"
-             f"👥 Сквады: {squads}\n"
-             f"🏁 Сквады окончания: {expire_squads}\n"
-             f"🚚 Заводили клиентов: {state}</blockquote>", "",
+             f"👥 Сквады: {squads}</blockquote>", "",
              "<i>Через неё идут выдача, продление, лимиты устройств, "
              "перевыпуск ключа и заморозка.</i>"]
 
@@ -422,12 +273,8 @@ async def handle_rw_menu(query, context=None):
            InlineKeyboardButton("🔑 Токен", callback_data="rw_token")]]
     if is_configured():
         kb.append([InlineKeyboardButton("👥 Сквады", callback_data="rw_squads"),
-                   InlineKeyboardButton("🏁 Окончание", callback_data="rw_squads_expire")])
-        kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test"),
-                   InlineKeyboardButton("🧹 Метки переезда", callback_data="rw_marks")])
+                   InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
-        kb.append([InlineKeyboardButton("🚚 Завести клиентов в панели",
-                                        callback_data="rw_migrate")])
         kb.append([InlineKeyboardButton("📨 Разослать ссылки клиентам",
                                         callback_data="rw_notify")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
@@ -478,33 +325,9 @@ async def handle_rw_test(query, context):
     )
 
 
-SQUAD_MODES = {
-    "main": {
-        "key": "rw_squads", "toggle": "rw_squad", "screen": "rw_squads",
-        "title": "👥 <b>Сквады для клиентов</b>",
-        "hint": "Отметь, какие выдавать. Выбранные получат все новые подписки "
-                "и все, кого заводим пачкой.",
-        "empty": "<i>Ничего не выбрано — панель заведёт людей без доступа.</i>",
-        "back": ("◀️ К панели", "rw_menu"),
-    },
-    "expire": {
-        "key": "rw_expire_squads", "toggle": "rw_squad_exp", "screen": "rw_squads_expire",
-        "title": "🏁 <b>Сквады после окончания подписки</b>",
-        "hint": "Куда переводить клиента, когда срок кончился. Доступ к этому "
-                "моменту всё равно закрыт — смысл в порядке: в рабочих сквадах "
-                "остаются только платящие, и сразу видно, кто отвалился. "
-                "После оплаты клиент вернётся в рабочие сквады сам.",
-        "empty": "<i>Ничего не выбрано — по окончании просто отключаем доступ "
-                 "и сквады не трогаем.</i>",
-        "back": ("◀️ К настройкам", "paid_sub_presets"),
-    },
-}
-
-
-async def handle_rw_squads(query, context, mode: str = "main"):
-    """Выбор сквадов: и тех, что выдаём, и тех, куда уводим после окончания."""
+async def handle_rw_squads(query, context):
+    """Какие сквады выдавать клиентам."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    cfg = SQUAD_MODES.get(mode) or SQUAD_MODES["main"]
     await query.edit_message_text("👥 Загружаю сквады…")
     r = await list_squads()
     if not r["ok"]:
@@ -513,163 +336,33 @@ async def handle_rw_squads(query, context, mode: str = "main"):
             parse_mode="HTML", reply_markup=_back())
         return
 
-    chosen = set(load_config().get(cfg["key"]) or [])
+    chosen = set(settings()["squads"])
     rows = []
     for sq in r["squads"]:
         mark = "✅ " if sq["uuid"] in chosen else ""
         rows.append([InlineKeyboardButton(
             f"{mark}{sq['name']} · {sq['inbounds']} инб · {sq['members']} чел",
-            callback_data=f"{cfg['toggle']}:{sq['uuid']}")])
-    rows.append([InlineKeyboardButton(cfg["back"][0], callback_data=cfg["back"][1])])
+            callback_data=f"rw_squad:{sq['uuid']}")])
+    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="rw_menu")])
 
     await query.edit_message_text(
-        cfg["title"] + "\n\n" + cfg["hint"] + "\n\n"
-        + (cfg["empty"] if not chosen else ""),
+        "👥 <b>Сквады для клиентов</b>\n\n"
+        "Отметь, какие выдавать. Выбранные получат все новые подписки "
+        "и все, кого заводим пачкой.\n\n"
+        + ("<i>Ничего не выбрано — панель заведёт людей без доступа.</i>"
+           if not chosen else ""),
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
     )
 
 
-async def handle_rw_squad_toggle(query, context, uuid: str, mode: str = "main"):
-    key = (SQUAD_MODES.get(mode) or SQUAD_MODES["main"])["key"]
-    chosen = list(load_config().get(key) or [])
+async def handle_rw_squad_toggle(query, context, uuid: str):
+    chosen = settings()["squads"]
     if uuid in chosen:
         chosen.remove(uuid)
     else:
         chosen.append(uuid)
-    save_settings(**{key: chosen})
-    await handle_rw_squads(query, context, mode)
-
-
-# ── Метки переезда ────────────────────────────────────────────────────────────
-
-async def handle_rw_marks(query, context):
-    """Сколько клиентов помечены переездом и предложение снять метки."""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text("🧹 Смотрю метки…")
-    r = await count_old_marks()
-    if not r["ok"]:
-        await query.edit_message_text(
-            f"❌ <b>Панель не ответила</b>\n\n<code>{escape(str(r.get('error'))[:300])}</code>",
-            parse_mode="HTML", reply_markup=_back())
-        return
-    if not r["marked"]:
-        await query.edit_message_text(
-            "🧹 <b>Метки переезда</b>\n\n"
-            f"<blockquote>Клиентов в панели: <b>{r['total']}</b>\n"
-            "Помеченных переездом: <b>нет</b></blockquote>\n\n"
-            "<i>Чистить нечего.</i>",
-            parse_mode="HTML", reply_markup=_back())
-        return
-
-    await query.edit_message_text(
-        "🧹 <b>Метки переезда</b>\n\n"
-        f"<blockquote>Клиентов в панели: <b>{r['total']}</b>\n"
-        f"С меткой переезда: <b>{r['marked']}</b></blockquote>\n\n"
-        "Сниму тег и напишу обычное описание: ник человека, если он есть "
-        "в базе бота.\n\n"
-        "<i>Подписок, сроков и ссылок это не касается.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🧹 Снять метки", callback_data="rw_marks_go")],
-            [InlineKeyboardButton("◀️ Отмена", callback_data="rw_menu")],
-        ]),
-    )
-
-
-async def handle_rw_marks_go(query, context):
-    await query.edit_message_text("🧹 Снимаю метки…")
-
-    async def progress(done, total):
-        try:
-            await query.edit_message_text(
-                f"🧹 Снимаю метки… <b>{done}</b> из <b>{total}</b>", parse_mode="HTML")
-        except Exception:
-            pass
-
-    res = await clear_old_marks(progress)
-    errors = res.get("errors") or []
-    lines = ["✅ <b>Готово</b>", "",
-             "<blockquote>"
-             f"Было с меткой: <b>{res['marked']}</b>\n"
-             f"Почистили: <b>{res['cleaned']}</b>\n"
-             f"С ошибкой: <b>{len(errors)}</b></blockquote>"]
-    if errors:
-        shown = "\n".join(escape(e[:120]) for e in errors[:5])
-        lines += ["", "⚠️ <b>Не получилось</b>", f"<blockquote>{shown}</blockquote>"]
-        if len(errors) > 5:
-            lines.append(f"<i>…и ещё {len(errors) - 5}</i>")
-
-    from log_channel import send_log
-    await send_log(context.bot,
-                   f"🧹 Метки переезда сняты у {res['cleaned']} клиентов, "
-                   f"ошибок {len(errors)}")
-    await query.edit_message_text("\n".join(lines), parse_mode="HTML", reply_markup=_back())
-
-
-async def handle_rw_migrate(query, context):
-    """Показывает, кого заведём в панели, и спрашивает подтверждение."""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from paidsub.storage import subs_for_migration
-    rows = await subs_for_migration()
-    s = settings()
-    if not rows:
-        await query.answer("Заводить некого: живых подписок нет", show_alert=True)
-        return
-
-    warn = ("\n⚠️ <b>Сквады не выбраны</b> — люди заведутся без доступа.\n"
-            if not s["squads"] else "")
-    await query.edit_message_text(
-        "🚚 <b>Завести клиентов в панели</b>\n\n"
-        f"<blockquote>Живых подписок: <b>{len(rows)}</b>\n"
-        f"Сквадов: <b>{len(s['squads'])}</b></blockquote>\n"
-        f"{warn}\n"
-        "Срок, лимит устройств и трафик возьму из базы. Кто уже есть в панели — "
-        "обновлю, а не продублирую.\n\n"
-        "<i>Ссылки в боте обновятся сразу, клиентам разошлём отдельной кнопкой.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🚚 Завести", callback_data="rw_migrate_go")],
-            [InlineKeyboardButton("◀️ Отмена", callback_data="rw_menu")],
-        ]),
-    )
-
-
-async def handle_rw_migrate_go(query, context):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text("🚚 Завожу…")
-
-    async def progress(done, total):
-        try:
-            await query.edit_message_text(f"🚚 Завожу… <b>{done}</b> из <b>{total}</b>",
-                                          parse_mode="HTML")
-        except Exception:
-            pass
-
-    res = await migrate_subs(progress)
-    errors = res.get("errors") or []
-    lines = ["✅ <b>Готово</b>", "",
-             "<blockquote>"
-             f"Всего подписок: <b>{res['total']}</b>\n"
-             f"Создано: <b>{res['created']}</b>\n"
-             f"Обновлено: <b>{res['updated']}</b>\n"
-             f"С ошибкой: <b>{len(errors)}</b></blockquote>"]
-    if errors:
-        shown = "\n".join(escape(e[:120]) for e in errors[:5])
-        lines += ["", "⚠️ <b>Не получилось</b>", f"<blockquote>{shown}</blockquote>"]
-        if len(errors) > 5:
-            lines.append(f"<i>…и ещё {len(errors) - 5}</i>")
-    lines += ["", "<i>Открой пару ссылок из панели — и можно рассылать их людям.</i>"]
-
-    from log_channel import send_log
-    await send_log(context.bot,
-        f"🚚 Клиенты в Remnawave: создано {res['created']}, "
-        f"обновлено {res['updated']}, ошибок {len(errors)}")
-    await query.edit_message_text(
-        "\n".join(lines), parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
-        disable_web_page_preview=True,
-    )
+    save_settings(rw_squads=chosen)
+    await handle_rw_squads(query, context)
 
 
 # ── Рассылка новых ссылок ─────────────────────────────────────────────────────
@@ -677,8 +370,8 @@ async def handle_rw_migrate_go(query, context):
 async def handle_rw_notify(query, context):
     """Спрашивает подтверждение: ссылки уходят живым людям, молча нельзя."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from paidsub.storage import subs_for_migration
-    rows = await subs_for_migration()
+    from paidsub.storage import live_paid_subs
+    rows = await live_paid_subs()
     with_link = [r for r in rows if r[10]]
     if not with_link:
         await query.answer("Некому: ссылок в базе нет", show_alert=True)
@@ -701,8 +394,8 @@ async def handle_rw_notify(query, context):
 
 async def handle_rw_notify_go(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton
-    from paidsub.storage import subs_for_migration
-    rows = [r for r in await subs_for_migration() if r[10]]
+    from paidsub.storage import live_paid_subs
+    rows = [r for r in await live_paid_subs() if r[10]]
     await query.edit_message_text("📨 Рассылаю…")
 
     sent = failed = 0
