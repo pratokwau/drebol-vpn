@@ -653,9 +653,6 @@ async def handle_paid_sub_view(query, sub_id: int):
     _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _limit_ip, limit_hwid, total_gb, created_at = row[:11]
     status = row[11] if len(row) > 11 else "active"
     ind_trial = row[13] if len(row) > 13 else None
-    ind_pay = row[14] if len(row) > 14 else None
-    ind_renew = row[15] if len(row) > 15 else None
-    ind_price = row[16] if len(row) > 16 else None
 
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
@@ -721,13 +718,11 @@ async def handle_paid_sub_view(query, sub_id: int):
                 mute_line = f"🔇 Заглушен до: <b>{muted_until}</b>\n"
 
     # Индивидуальные настройки
-    cfg = load_config()
     ind_lines = []
-    # период оплаты и сумму задают тарифы — в подписке их больше не переопределяем
+    # период оплаты, сумму и окно продления задают тарифы — в подписке
+    # их больше не переопределяем, своим остался только пробный период
     if ind_trial:
         ind_lines.append(f"🆓 Пробный: <b>{fmt_duration(ind_trial)}</b>")
-    if ind_renew:
-        ind_lines.append(f"⏳ На продление: <b>{fmt_duration(ind_renew)}</b>")
     ind_block = ""
     if ind_lines:
         ind_block = ("\n⚙️ <b>Свои условия</b>\n<blockquote>"
@@ -1467,17 +1462,13 @@ async def handle_paid_sub_settings(query, sub_id: int):
     expire = row[6]
     limit_hwid = row[8]
     total_gb = row[9]
-    ind_trial = row[13] if len(row) > 13 else None
-    ind_pay = row[14] if len(row) > 14 else None
-    ind_renew = row[15] if len(row) > 15 else None
-    ind_price = row[16] if len(row) > 16 else None
 
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
     hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
 
     # показываем действующие условия подписки, а не «общие»:
     # с ними она реально живёт, по ним считаются сроки и уведомления
-    from paidsub.storage import sub_settings, parse_sub_date
+    from paidsub.storage import sub_settings
     eff = sub_settings(row)
     period_end_line = row[18] if len(row) > 18 and row[18] else expire
     trial_str = fmt_duration(eff["trial_period"])

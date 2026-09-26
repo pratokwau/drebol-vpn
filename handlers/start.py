@@ -49,9 +49,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     from database import is_banned
     if user.id != ADMIN_ID and await is_banned(user.id):
-        await update.message.reply_text(
-            "🚫 <b>Аккаунт заблокирован</b>\n\n"
-            "<i>Если это ошибка — свяжитесь с администратором.</i>", parse_mode="HTML")
+        from blacklist import banned_view
+        await update.message.reply_text(await banned_view(user.id), parse_mode="HTML")
         return
 
     # Чёрный список: вместо меню — причина и кнопка поддержки

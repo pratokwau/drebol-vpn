@@ -20,7 +20,7 @@ from states import (
     AWAITING_ADMIN_REPLY, AWAITING_DM_USER, AWAITING_FIND_USER, AWAITING_HELPER_ID,
     AWAITING_PAID_SUB_EXTEND, AWAITING_PAID_SUB_REDUCE, AWAITING_QUICK_REPLY,
     AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
-    AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK,
+    AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK, AWAITING_BL_UNTIL,
     AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
 )
 
@@ -94,9 +94,11 @@ PERMS = {
     "blacklist": {
         "label": "⛔ Чёрный список",
         "hint": "добавлять и снимать из чёрного списка",
-        "exact": {"bl_menu", "bl_list", "bl_add_start"},
-        "prefix": ("bl_view:", "bl_add_for:", "bl_del:", "bl_readd:", "bl_list:"),
-        "states": {AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK},
+        "exact": {"bl_menu", "bl_list", "bl_add_start", "bl_add", "bl_check", "bl_add_apply"},
+        "prefix": ("bl_view:", "bl_add_for:", "bl_del:", "bl_readd:", "bl_list:",
+                   "bl_reason:", "bl_term:", "bl_bans:", "bl_ban:", "bl_unban:"),
+        "states": {AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK,
+                   AWAITING_BL_UNTIL},
         "button": ("⛔ Чёрный список", "bl_menu"),
     },
     "broadcast": {

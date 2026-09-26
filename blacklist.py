@@ -6,10 +6,14 @@
 • общий список BEDOLAGA-DEV/VPN-BLACKLIST бот обновляет сам;
 • админ добавляет своих и снимает любых. Снятие человека из общего списка
   запоминается исключением — иначе следующее обновление вернуло бы его;
+• блокировка бывает срочной: бот снимет её сам, когда срок выйдет, и вернёт
+  подписку с сохранённым остатком;
 • при внесении подписка останавливается сразу, остаток срока запоминается
   и возвращается, если человека убрать из списка;
 • найденным в общем списке триал останавливается сам, а оплаченную подписку
-  бот не трогает — пишет админу: человек заплатил, решать ему.
+  бот не трогает — пишет админу: человек заплатил, решать ему;
+• рядом живёт бан в боте — он закрывает бота целиком, тоже с причиной,
+  сроком и автором. Всё, что ставили и снимали, видно в карточке человека.
 """
 
 from __future__ import annotations
@@ -21,7 +25,9 @@ from datetime import datetime, timedelta
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import ADMIN_ID, load_config, save_config
-from states import AWAITING_BL_ADD, AWAITING_BL_CHECK, AWAITING_BL_REASON
+from states import (
+    AWAITING_BL_ADD, AWAITING_BL_CHECK, AWAITING_BL_REASON, AWAITING_BL_UNTIL,
+)
 
 DEFAULT_URL = "https://raw.githubusercontent.com/BEDOLAGA-DEV/VPN-BLACKLIST/main/blacklist.txt"
 DEFAULT_REASON = "Нарушение правил сервиса"
@@ -80,15 +86,20 @@ def public_reason(reason: str | None) -> str:
 
 
 async def entry(tg_id: int) -> dict | None:
-    """Действующая запись ЧС: {source: manual|remote, reason, since} или None."""
+    """Действующая запись ЧС: {source, reason, since, until, by_id} или None."""
     if tg_id == ADMIN_ID:
         return None
     from database import bl_lookup
     info = await bl_lookup(tg_id)
     if info["manual"]:
-        return {"source": "manual", "reason": info["manual"][0], "since": info["manual"][1]}
-    if info["remote_listed"] and not info["allowed"] and remote_on():
-        return {"source": "remote", "reason": info["remote"] or "", "since": None}
+        reason, since, until, by_id = info["manual"]
+        # у временной записи вышел срок — держать уже нельзя, уборка снимет её сама
+        if not _passed(until):
+            return {"source": "manual", "reason": reason, "since": since,
+                    "until": until, "by_id": by_id}
+    elif info["remote_listed"] and not info["allowed"] and remote_on():
+        return {"source": "remote", "reason": info["remote"] or "",
+                "since": None, "until": None, "by_id": None}
     return None
 
 
@@ -109,10 +120,13 @@ def user_may(data: str) -> bool:
     return data in USER_ALLOWED or data.startswith(USER_ALLOWED_PREFIXES)
 
 
-def blocked_view(reason: str | None):
+def blocked_view(reason: str | None, until_local: str | None = None):
     import maintenance as mnt
     text = ("⛔ <b>Доступ к сервису закрыт</b>\n\n"
             f"<blockquote>Причина: {html.escape(public_reason(reason))}</blockquote>")
+    if until_local:
+        text += (f"\n\n<blockquote>⏳ Доступ вернётся сам: "
+                 f"<b>{fmt_until(until_local)}</b></blockquote>")
     if not mnt.feature_enabled("support"):
         return text, None
     return (text + "\n\n<i>Если это ошибка — напишите в поддержку.</i>",
@@ -120,7 +134,7 @@ def blocked_view(reason: str | None):
 
 
 async def show_blocked(e: dict, query=None, message=None):
-    text, kb = blocked_view(e["reason"])
+    text, kb = blocked_view(e["reason"], e.get("until"))
     if query:
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
     else:
@@ -134,8 +148,8 @@ async def _tell(bot, tg_id: int, text: str, kb=None):
         pass
 
 
-async def _notify_blocked(bot, tg_id: int, reason: str):
-    text, kb = blocked_view(reason)
+async def _notify_blocked(bot, tg_id: int, reason: str, until_local: str | None = None):
+    text, kb = blocked_view(reason, until_local)
     await _tell(bot, tg_id, text, kb)
 
 
@@ -252,33 +266,108 @@ async def restore_unlisted(bot) -> list[int]:
     return done
 
 
+# ── Срок блокировки ──────────────────────────────────────────────────────────
+
+# Быстрые причины: чаще всего блокируют за это, печатать руками незачем
+QUICK_REASONS = [
+    "Повторные пробные периоды",
+    "Шаринг ключа",
+    "Возврат платежа",
+    "Спам и реклама",
+    "Оскорбления в поддержке",
+]
+
+# Сроки: код → (подпись, секунды). 0 — бессрочно
+TERMS = [("forever", "♾ Навсегда", 0), ("1d", "1 день", 86400),
+         ("7d", "7 дней", 7 * 86400), ("30d", "30 дней", 30 * 86400)]
+TERM_SECONDS = {code: secs for code, _label, secs in TERMS}
+
+
+def _offset() -> timedelta:
+    """Насколько местное время впереди UTC — sqlite сравнивает сроки в UTC."""
+    return datetime.now() - datetime.utcnow()
+
+
+def until_utc(seconds: int) -> str | None:
+    """Момент снятия блокировки для базы. 0 секунд — бессрочно."""
+    if not seconds:
+        return None
+    return (datetime.utcnow() + timedelta(seconds=seconds)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _to_local(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    try:
+        return (datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S")
+                + _offset()).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def fmt_until(local_raw: str | None) -> str:
+    """Местный срок в человеческий вид: «04.10.2026 12:00 · осталось 7 дней»."""
+    from paidsub.time_parser import fmt_duration_precise
+    if not local_raw:
+        return "бессрочно"
+    try:
+        d = datetime.strptime(local_raw[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return local_raw[:16]
+    left = int((d - datetime.now()).total_seconds())
+    tail = f" · осталось {fmt_duration_precise(left)}" if left > 0 else " · срок вышел"
+    return d.strftime("%d.%m.%Y %H:%M") + tail
+
+
+def term_line(until_db: str | None) -> str:
+    """Срок из базы (UTC) в человеческий вид."""
+    return fmt_until(_to_local(until_db))
+
+
+def _passed(local_raw: str | None) -> bool:
+    if not local_raw:
+        return False
+    try:
+        return datetime.strptime(local_raw[:19], "%Y-%m-%d %H:%M:%S") <= datetime.now()
+    except ValueError:
+        return False
+
+
 # ── Действия админа ──────────────────────────────────────────────────────────
 
-async def blacklist_add(bot, tg_id: int, reason: str) -> dict:
-    from database import bl_add_manual
-    await bl_add_manual(tg_id, reason)
+async def blacklist_add(bot, tg_id: int, reason: str, until: str | None = None,
+                        by_id: int | None = None) -> dict:
+    from database import bl_add_manual, bl_log
+    await bl_add_manual(tg_id, reason, until, by_id)
+    await bl_log(tg_id, "added", reason, by_id)
     res = await stop_subs(tg_id, reason)
-    await _notify_blocked(bot, tg_id, reason)
-    await _log(bot, f"⛔ В чёрный список: <code>{tg_id}</code> — {html.escape(reason[:200])}")
+    await _notify_blocked(bot, tg_id, reason, _to_local(until))
+    await _log(bot, f"⛔ В чёрный список: <code>{tg_id}</code> — {html.escape(reason[:200])}"
+                    f" · {term_line(until)}")
     return res
 
 
-async def blacklist_remove(bot, tg_id: int) -> dict:
-    from database import bl_remove
+async def blacklist_remove(bot, tg_id: int, by_id: int | None = None,
+                           auto: bool = False) -> dict:
+    from database import bl_log, bl_remove
     await bl_remove(tg_id)
+    await bl_log(tg_id, "expired" if auto else "removed",
+                 "срок блокировки вышел" if auto else None, by_id)
     res = await restore_subs(tg_id)
     await _notify_restored(bot, tg_id, res)
-    await _log(bot, f"✅ Убран из чёрного списка: <code>{tg_id}</code>")
+    await _log(bot, ("⏳ Срок в ЧС вышел, доступ вернул сам: " if auto
+                     else "✅ Убран из чёрного списка: ") + f"<code>{tg_id}</code>")
     return res
 
 
-async def blacklist_readd(bot, tg_id: int) -> dict | None:
+async def blacklist_readd(bot, tg_id: int, by_id: int | None = None) -> dict | None:
     """Снимает исключение: запись общего списка снова действует."""
-    from database import bl_unallow
+    from database import bl_log, bl_unallow
     await bl_unallow(tg_id)
     e = await entry(tg_id)
     if not e:
         return None
+    await bl_log(tg_id, "readded", e["reason"], by_id)
     res = await stop_subs(tg_id, e["reason"])
     await _notify_blocked(bot, tg_id, e["reason"])
     await _log(bot, f"⛔ Снова в чёрном списке: <code>{tg_id}</code>")
@@ -291,8 +380,57 @@ async def blacklist_stop(bot, tg_id: int) -> dict | None:
     if not e:
         return None
     res = await stop_subs(tg_id, e["reason"])
-    await _notify_blocked(bot, tg_id, e["reason"])
+    await _notify_blocked(bot, tg_id, e["reason"], e.get("until"))
     return res
+
+
+# ── Бан в боте ───────────────────────────────────────────────────────────────
+
+def ban_view(reason: str | None, until_local: str | None = None) -> str:
+    text = "🚫 <b>Аккаунт заблокирован</b>"
+    if reason:
+        text += f"\n\n<blockquote>Причина: {html.escape(public_reason(reason))}</blockquote>"
+    if until_local:
+        text += f"\n\n<blockquote>⏳ Блокировка снимется сама: <b>{fmt_until(until_local)}</b></blockquote>"
+    return text + "\n\n<i>Если это ошибка — свяжитесь с администратором.</i>"
+
+
+async def banned_view(tg_id: int) -> str:
+    """Текст для забаненного: с причиной и сроком, если они заданы."""
+    from database import ban_entry
+    b = await ban_entry(tg_id) or {}
+    return ban_view(b.get("reason"), b.get("until"))
+
+
+async def ban(bot, tg_id: int, reason: str | None = None, until: str | None = None,
+              by_id: int | None = None):
+    """Бан в боте: человек вообще не может пользоваться ботом."""
+    from database import ban_user, bl_log
+    await ban_user(tg_id, reason, until, by_id)
+    await bl_log(tg_id, "banned", reason, by_id)
+    await _tell(bot, tg_id, ban_view(reason, _to_local(until)))
+    await _log(bot, f"🚫 Забанен в боте: <code>{tg_id}</code>"
+                    + (f" — {html.escape(reason[:200])}" if reason else "")
+                    + f" · {term_line(until)}")
+
+
+async def unban(bot, tg_id: int, by_id: int | None = None, auto: bool = False):
+    from database import bl_log, unban_user
+    await unban_user(tg_id)
+    await bl_log(tg_id, "unbanned", "срок бана вышел" if auto else None, by_id)
+    await _tell(bot, tg_id, "✅ <b>Блокировка снята</b>\n\n"
+                            "<i>Бот снова работает — откройте /start.</i>")
+    await _log(bot, ("⏳ Срок бана вышел, разбанил сам: " if auto
+                     else "✅ Разбанен в боте: ") + f"<code>{tg_id}</code>")
+
+
+async def blacklist_expire_tick(context):
+    """Снимает временные блокировки, у которых вышел срок."""
+    from database import bans_expired_now, bl_expired_now
+    for tg_id, _reason in await bl_expired_now():
+        await blacklist_remove(context.bot, tg_id, auto=True)
+    for tg_id in await bans_expired_now():
+        await unban(context.bot, tg_id, auto=True)
 
 
 # ── Обновление общего списка ─────────────────────────────────────────────────
@@ -394,11 +532,23 @@ async def blacklist_sync_tick(context):
 
 # ── Экраны админки ───────────────────────────────────────────────────────────
 
+HIST_WORDS = {
+    "added": "внесён в ЧС", "removed": "снят с ЧС", "expired": "снят по сроку",
+    "readded": "возвращён в ЧС", "banned": "забанен", "unbanned": "разбанен",
+}
+
+
 def _who_line(u, tg_id) -> str:
     if not u:
         return f"<code>{tg_id}</code> · ботом не пользовался"
     name = html.escape(u[1] or str(tg_id))
     return (f"{name} (@{html.escape(u[2])})" if u[2] else name) + f" · <code>{tg_id}</code>"
+
+
+def _by_line(by_id) -> str:
+    if not by_id:
+        return "неизвестно кто"
+    return "ты" if int(by_id) == ADMIN_ID else f"помощник <code>{by_id}</code>"
 
 
 def _result_note(head: str, res: dict | None) -> str:
@@ -431,33 +581,46 @@ async def handle_bl_menu(query, context=None, note: str = ""):
     if context:
         context.user_data.pop("state", None)
         context.user_data.pop("bl_pending", None)
-    from database import bl_counts
+    from database import bl_counts, bl_stats
+    from paidsub.time_parser import fmt_duration
     cfg = load_config()
     on = remote_on()
     c = await bl_counts(on)
-    lines = ["⛔ <b>Чёрный список</b>", ""]
+    st = await bl_stats()
+    lines = ["⛔ <b>Чёрный список и баны</b>", ""]
     if note:
         lines += [note, ""]
     synced = cfg.get("blacklist_synced_at") or "ещё не обновлялся"
-    stats = [
+    who = [
         f"👥 Твоих пользователей в ЧС: <b>{c['ours']}</b>"
         + (f"  ·  с подпиской: <b>{c['ours_active']}</b>" if c["ours_active"] else ""),
-        f"✍️ Вручную: <b>{c['manual']}</b>  ·  исключений: <b>{c['allow']}</b>",
+        f"✍️ Вручную: <b>{c['manual']}</b> (бессрочно <b>{st['forever']}</b> · "
+        f"со сроком <b>{st['temporary']}</b>)  ·  исключений: <b>{c['allow']}</b>",
+        f"🚫 Забанены в боте: <b>{st['banned']}</b>"
+        + (f" (со сроком <b>{st['banned_temp']}</b>)" if st["banned_temp"] else ""),
         f"🌐 Общий список: <b>{'вкл' if on else 'выкл'}</b>  ·  записей: <b>{c['remote']}</b>",
         f"🔄 Обновлён: {synced}",
     ]
-    lines.append("<blockquote>" + "\n".join(stats) + "</blockquote>")
+    lines.append("<blockquote>" + "\n".join(who) + "</blockquote>")
+    month = [f"📆 За 30 дней: заблокировано <b>{st['added_30d']}</b> · "
+             f"снято <b>{st['removed_30d']}</b>"]
+    if st["held"]:
+        month.append(f"🧊 Подписок на паузе: <b>{st['held']}</b> · "
+                     f"сохранено срока: <b>{fmt_duration(st['held_seconds'])}</b>")
+    lines.append("<blockquote>" + "\n".join(month) + "</blockquote>")
     if cfg.get("blacklist_last_error"):
         lines.append(f"\n⚠️ Последнее обновление не удалось: "
                      f"<code>{html.escape(cfg['blacklist_last_error'])}</code>")
-    lines.append("\n<i>Кто в списке, не может взять триал, оплатить или продлить подписку — "
-                 "бот показывает причину и оставляет только поддержку.</i>")
+    lines.append("\n<i>ЧС закрывает покупки и подписку, оставляя поддержку. "
+                 "Бан закрывает бота целиком. Оба можно поставить на срок — "
+                 "снимутся сами.</i>")
     kb = [
         [InlineKeyboardButton("➕ Внести в ЧС", callback_data="bl_add"),
          InlineKeyboardButton("🔍 Проверить ID", callback_data="bl_check")],
         [InlineKeyboardButton("👥 Твои пользователи в ЧС", callback_data="bl_list:ours:1")],
         [InlineKeyboardButton("✍️ Вручную", callback_data="bl_list:manual:1"),
          InlineKeyboardButton("✅ Исключения", callback_data="bl_list:allow:1")],
+        [InlineKeyboardButton(f"🚫 Баны в боте · {st['banned']}", callback_data="bl_bans:1")],
         [InlineKeyboardButton("🔄 Обновить общий", callback_data="bl_sync"),
          InlineKeyboardButton(f"🌐 Общий · {'вкл ✅' if on else 'выкл'}",
                               callback_data="bl_remote_toggle")],
@@ -497,27 +660,63 @@ async def handle_bl_list(query, scope: str, page: int = 1):
                                   reply_markup=InlineKeyboardMarkup(kb))
 
 
+async def handle_bl_bans(query, page: int = 1):
+    """Кто закрыт в боте целиком."""
+    from database import bans_list
+    rows, pages, total = await bans_list(page, PER_PAGE)
+    page = min(max(1, page), pages)
+    lines = ["🚫 <b>Баны в боте</b>",
+             f"<i>всего {total} · стр. {page} из {pages} · нажми, чтобы открыть</i>"]
+    if not rows:
+        lines = [lines[0], "", "<blockquote>Никто не забанен.</blockquote>"]
+    kb = []
+    for tg_id, fn, _un, reason, until in rows:
+        term = "♾ навсегда" if not until else ("⏳ " + fmt_until(until).split(" · ")[0])
+        label = f"👤 {fn or tg_id} · {term}" + (f" · {public_reason(reason)}" if reason else "")
+        kb.append([InlineKeyboardButton(label[:60], callback_data=f"bl_view:{tg_id}")])
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"bl_bans:{page - 1}"))
+    if pages > 1:
+        nav.append(InlineKeyboardButton(f"{page}/{pages}", callback_data="noop"))
+    if page < pages:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"bl_bans:{page + 1}"))
+    if nav:
+        kb.append(nav)
+    kb.append([InlineKeyboardButton("◀️ К чёрному списку", callback_data="bl_menu")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
 async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
-    from database import bl_holds, bl_lookup, get_user_info
+    from database import (
+        ban_entry, bl_history, bl_holds, bl_lookup, bl_times_listed, get_user_info,
+    )
     from paidsub.storage import get_paid_sub_by_tg_id
     from paidsub.time_parser import fmt_duration
     u = await get_user_info(tg_id)
     info = await bl_lookup(tg_id)
     e = await entry(tg_id)
+    b = await ban_entry(tg_id)
     holds = {h[1]: h[3] for h in await bl_holds(tg_id)}
     sub = await get_paid_sub_by_tg_id(tg_id)
     sub_live = bool(sub) and sub[11] in ("active", "renewal")
 
-    lines = ["⛔ <b>Чёрный список</b>", ""]
+    lines = ["⛔ <b>Блокировки человека</b>", ""]
     if note:
         lines += [note, ""]
     lines.append(f"👤 {_who_line(u, tg_id)}")
+
     card = []
     if e:
         card.append("📌 Статус: <b>в чёрном списке</b>")
         card.append(f"📝 Причина: {html.escape(e['reason'] or '—')}")
-        card.append("🌐 Источник: общий список" if e["source"] == "remote"
-                    else "✍️ Внесён вручную" + (f" {e['since'][:16]}" if e.get("since") else ""))
+        if e["source"] == "remote":
+            card.append("🌐 Источник: общий список")
+        else:
+            card.append(f"⏳ Срок: <b>{fmt_until(e.get('until'))}</b>")
+            card.append("✍️ Внёс: " + _by_line(e.get("by_id"))
+                        + (f" · {e['since'][:16]}" if e.get("since") else ""))
         card.append(f"👁 Человек видит: «{html.escape(public_reason(e['reason']))}»")
     elif info["allowed"]:
         card.append("📌 Статус: <b>исключение</b> — есть в общем списке, но ты разрешил")
@@ -526,16 +725,42 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
         card.append("📌 Статус: есть в общем списке, но он выключен")
     else:
         card.append("📌 Статус: <b>не в чёрном списке</b>")
-    if "paid" in holds:
-        card.append(f"💳 Подписка остановлена из-за ЧС · сохранён остаток: <b>{fmt_duration(holds['paid'])}</b>"
-                    if holds["paid"] else "💳 Подписка остановлена из-за ЧС · остатка не было")
-    elif sub_live:
-        card.append(f"💳 Подписка действует до <b>{sub[6]}</b>")
-    elif sub:
-        card.append("💳 Подписка закончилась")
-    else:
-        card.append("💳 Подписки нет")
     lines += ["", "<blockquote>" + "\n".join(card) + "</blockquote>"]
+
+    ban_card = []
+    if b:
+        ban_card.append("🚫 Бан в боте: <b>стоит</b> — бот для человека закрыт целиком")
+        if b["reason"]:
+            ban_card.append(f"📝 Причина: {html.escape(b['reason'])}")
+        ban_card.append(f"⏳ Срок: <b>{fmt_until(b['until'])}</b>")
+        ban_card.append("✍️ Забанил: " + _by_line(b["by_id"])
+                        + (f" · {b['since'][:16]}" if b.get("since") else ""))
+    else:
+        ban_card.append("🚫 Бан в боте: <b>нет</b>")
+    lines += ["", "<blockquote>" + "\n".join(ban_card) + "</blockquote>"]
+
+    sub_card = []
+    if "paid" in holds:
+        sub_card.append(f"💳 Подписка остановлена из-за ЧС · сохранён остаток: "
+                        f"<b>{fmt_duration(holds['paid'])}</b>"
+                        if holds["paid"] else "💳 Подписка остановлена из-за ЧС · остатка не было")
+    elif sub_live:
+        sub_card.append(f"💳 Подписка действует до <b>{sub[6]}</b>")
+    elif sub:
+        sub_card.append("💳 Подписка закончилась")
+    else:
+        sub_card.append("💳 Подписки нет")
+    lines += ["", "<blockquote>" + "\n".join(sub_card) + "</blockquote>"]
+
+    hist = await bl_history(tg_id, 5)
+    if hist:
+        times = await bl_times_listed(tg_id)
+        rows = [f"🕘 Попадал в ЧС: <b>{times}</b> " + _plural_times(times)]
+        for action, reason, _by, when in hist:
+            word = HIST_WORDS.get(action, action)
+            tail = f" — {html.escape(public_reason(reason))}" if reason else ""
+            rows.append(f"• {when[8:10]}.{when[5:7]} {when[11:16]} — {word}{tail}"[:120])
+        lines += ["", "<blockquote>" + "\n".join(rows) + "</blockquote>"]
 
     kb = []
     if e:
@@ -547,6 +772,8 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
         kb.append([InlineKeyboardButton("⛔ Вернуть в ЧС", callback_data=f"bl_readd:{tg_id}")])
     else:
         kb.append([InlineKeyboardButton("⛔ Внести в ЧС", callback_data=f"bl_add_for:{tg_id}")])
+    kb.append([InlineKeyboardButton("✅ Разбанить", callback_data=f"bl_unban:{tg_id}") if b
+               else InlineKeyboardButton("🚫 Забанить в боте", callback_data=f"bl_ban:{tg_id}")])
     tail = [InlineKeyboardButton("◀️ К списку", callback_data="bl_menu")]
     if u:
         tail.insert(0, InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{tg_id}"))
@@ -554,30 +781,26 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
     await _send(target, "\n".join(lines), InlineKeyboardMarkup(kb), edit)
 
 
+def _plural_times(n: int) -> str:
+    if n % 10 == 1 and n % 100 != 11:
+        return "раз"
+    return "раза" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "раз"
+
+
 def _cancel(cb: str = "bl_menu"):
     return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Отмена", callback_data=cb)]])
 
+
+# ── Внесение: кого → за что → на сколько → «Да» ──────────────────────────────
 
 async def handle_bl_add_start(query, context):
     context.user_data["state"] = AWAITING_BL_ADD
     await query.edit_message_text(
         "➕ <b>Внести в чёрный список</b>\n\n"
-        "Пришли ID или @username и через пробел причину:\n"
-        "<blockquote><code>123456789 Шаринг подписки</code></blockquote>\n\n"
-        "<i>Причину увидит сам человек — ссылки бот из неё уберёт.</i>",
+        "Пришли ID или @username — причину и срок выберешь кнопками:\n"
+        "<blockquote><code>123456789</code></blockquote>\n\n"
+        "<i>Можно сразу с причиной: <code>123456789 Шаринг ключа</code>.</i>",
         parse_mode="HTML", reply_markup=_cancel(),
-    )
-
-
-async def handle_bl_add_for(query, context, tg_id: int):
-    from database import get_user_info
-    context.user_data["state"] = AWAITING_BL_REASON
-    context.user_data["bl_target"] = tg_id
-    await query.edit_message_text(
-        f"⛔ <b>Внести в чёрный список</b>\n\n"
-        f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}</blockquote>\n\n"
-        "<i>Напиши причину одним сообщением — её увидит сам человек.</i>",
-        parse_mode="HTML", reply_markup=_cancel(f"bl_view:{tg_id}"),
     )
 
 
@@ -589,6 +812,173 @@ async def handle_bl_check_start(query, context):
     )
 
 
+async def handle_bl_new(target, context, kind: str, tg_id: int, edit: bool = True):
+    """Шаг 1: за что. kind — bl (чёрный список) или ban (бан в боте)."""
+    from database import get_user_info
+    context.user_data.pop("state", None)
+    context.user_data["bl_pending"] = {"kind": kind, "tg_id": tg_id}
+    head = ("⛔ <b>Внести в чёрный список</b>" if kind == "bl"
+            else "🚫 <b>Забанить в боте</b>")
+    what = ("Не сможет купить и продлить, подписка встанет на паузу, останется поддержка."
+            if kind == "bl" else "Бот перестанет отвечать вообще — ни меню, ни поддержки.")
+    kb = [[InlineKeyboardButton(r, callback_data=f"bl_reason:{i}")]
+          for i, r in enumerate(QUICK_REASONS)]
+    kb.append([InlineKeyboardButton("✍️ Своя причина", callback_data="bl_reason:own")])
+    kb.append([InlineKeyboardButton("❌ Отмена", callback_data=f"bl_view:{tg_id}")])
+    await _send(target,
+                f"{head}\n\n<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
+                f"{what}</blockquote>\n\n<b>За что?</b>\n"
+                "<i>Причину увидит сам человек — ссылки бот из неё уберёт.</i>",
+                InlineKeyboardMarkup(kb), edit)
+
+
+async def handle_bl_reason(query, context, choice: str):
+    pending = context.user_data.get("bl_pending")
+    if not pending:
+        await handle_bl_menu(query, context)
+        return
+    if choice == "own":
+        context.user_data["state"] = AWAITING_BL_REASON
+        await query.edit_message_text(
+            "✍️ <b>Своя причина</b>\n\n<i>Напиши причину одним сообщением — "
+            "её увидит сам человек.</i>", parse_mode="HTML",
+            reply_markup=_cancel(f"bl_view:{pending['tg_id']}"),
+        )
+        return
+    try:
+        pending["reason"] = QUICK_REASONS[int(choice)]
+    except (ValueError, IndexError):
+        pending["reason"] = DEFAULT_REASON
+    await handle_bl_term_ask(query, context)
+
+
+async def handle_bl_term_ask(target, context, edit: bool = True):
+    """Шаг 2: на сколько."""
+    pending = context.user_data.get("bl_pending")
+    if not pending:
+        await _send(target, "⛔ <b>Начни заново</b>", _cancel(), edit)
+        return
+    context.user_data.pop("state", None)
+    head = ("⛔ <b>Внести в чёрный список</b>" if pending["kind"] == "bl"
+            else "🚫 <b>Забанить в боте</b>")
+    kb = [[InlineKeyboardButton(label, callback_data=f"bl_term:{code}")]
+          for code, label, _s in TERMS]
+    kb.append([InlineKeyboardButton("✍️ Свой срок", callback_data="bl_term:own")])
+    kb.append([InlineKeyboardButton("❌ Отмена", callback_data=f"bl_view:{pending['tg_id']}")])
+    await _send(target,
+                f"{head}\n\n<blockquote>📝 Причина: "
+                f"{html.escape(pending.get('reason') or DEFAULT_REASON)}</blockquote>\n\n"
+                "<b>На сколько?</b>\n<i>Временную блокировку бот снимет сам, "
+                "подписку вернёт с сохранённым остатком.</i>",
+                InlineKeyboardMarkup(kb), edit)
+
+
+async def handle_bl_term(query, context, code: str):
+    pending = context.user_data.get("bl_pending")
+    if not pending:
+        await handle_bl_menu(query, context)
+        return
+    if code == "own":
+        context.user_data["state"] = AWAITING_BL_UNTIL
+        await query.edit_message_text(
+            "✍️ <b>Свой срок</b>\n\n"
+            "<blockquote>Напиши, на сколько: <code>3 дня</code>, <code>2 недели</code>, "
+            "<code>6 месяцев</code>.</blockquote>", parse_mode="HTML",
+            reply_markup=_cancel(f"bl_view:{pending['tg_id']}"),
+        )
+        return
+    pending["until"] = until_utc(TERM_SECONDS.get(code, 0))
+    await handle_bl_confirm(query, context)
+
+
+async def handle_bl_confirm(target, context, edit: bool = True):
+    """Шаг 3: вопрос перед делом — подписка встанет сразу."""
+    from database import get_user_info
+    from handlers.confirm import confirm_keyboard
+    from paidsub.storage import get_paid_sub_by_tg_id
+    pending = context.user_data.get("bl_pending")
+    if not pending:
+        await _send(target, "⛔ <b>Начни заново</b>", _cancel(), edit)
+        return
+    tg_id = pending["tg_id"]
+    reason = pending.get("reason") or DEFAULT_REASON
+    term = term_line(pending.get("until"))
+    if pending["kind"] == "ban":
+        text = (f"🚫 <b>Забанить в боте?</b>\n\n"
+                f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
+                f"📝 Причина: {html.escape(reason)}\n"
+                f"⏳ Срок: <b>{term}</b>\n"
+                "🤐 Бот перестанет отвечать совсем — даже поддержка закроется.</blockquote>\n\n"
+                "<i>Подписку бан не трогает: срок продолжит идти.</i>")
+        yes = "🚫 Да, забанить"
+    else:
+        sub = await get_paid_sub_by_tg_id(tg_id)
+        if sub and sub[11] in ("active", "renewal"):
+            sub_line = (f"💳 Подписка до <b>{sub[6]}</b> остановится сразу. Остаток срока "
+                        "сохранится и вернётся при снятии.")
+        else:
+            sub_line = "💳 Действующей подписки нет — просто не сможет взять триал и оплатить."
+        text = (f"⛔ <b>Внести в чёрный список?</b>\n\n"
+                f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
+                f"📝 Причина: {html.escape(reason)}\n"
+                f"⏳ Срок: <b>{term}</b>\n{sub_line}</blockquote>\n\n"
+                f"<i>Человек получит сообщение, что доступ закрыт: "
+                f"«{html.escape(public_reason(reason))}».</i>")
+        yes = "⛔ Да, внести в ЧС"
+    await _send(target, text,
+                confirm_keyboard(yes, "bl_add_apply", f"bl_view:{tg_id}", "bl_menu"), edit)
+
+
+async def handle_bl_add_apply(query, context):
+    pending = context.user_data.pop("bl_pending", None)
+    if not pending:
+        # бот перезапускался — начать заново
+        await handle_bl_menu(query, context)
+        return
+    tg_id = pending["tg_id"]
+    reason = pending.get("reason") or DEFAULT_REASON
+    until = pending.get("until")
+    by_id = getattr(getattr(query, "from_user", None), "id", None)
+    if pending["kind"] == "ban":
+        await ban(context.bot, tg_id, reason, until, by_id)
+        note = "<i>🚫 Забанен в боте. " + term_line(until).capitalize() + ".</i>"
+        await handle_bl_view(query, tg_id, note=note)
+        return
+    res = await blacklist_add(context.bot, tg_id, reason, until, by_id)
+    await handle_bl_view(query, tg_id,
+                         note=_result_note(f"⛔ Внесён в чёрный список ({term_line(until)}).", res))
+
+
+# ── Снятие ───────────────────────────────────────────────────────────────────
+
+async def handle_bl_del(query, context, tg_id: int):
+    by_id = getattr(getattr(query, "from_user", None), "id", None)
+    res = await blacklist_remove(context.bot, tg_id, by_id)
+    await handle_bl_view(query, tg_id, note=_result_note("✅ Убран из чёрного списка.", res))
+
+
+async def handle_bl_stop(query, context, tg_id: int):
+    res = await blacklist_stop(context.bot, tg_id)
+    head = "⛔ Готово." if res is not None else "Человек уже не в ЧС — ничего не менял."
+    await handle_bl_view(query, tg_id, note=_result_note(head, res))
+
+
+async def handle_bl_readd(query, context, tg_id: int):
+    by_id = getattr(getattr(query, "from_user", None), "id", None)
+    res = await blacklist_readd(context.bot, tg_id, by_id)
+    head = ("⛔ Снова в чёрном списке." if res is not None
+            else "В общем списке его уже нет — вносить нечего.")
+    await handle_bl_view(query, tg_id, note=_result_note(head, res))
+
+
+async def handle_bl_unban(query, context, tg_id: int):
+    by_id = getattr(getattr(query, "from_user", None), "id", None)
+    await unban(context.bot, tg_id, by_id)
+    await handle_bl_view(query, tg_id, note="<i>✅ Разбанен — бот снова ему отвечает.</i>")
+
+
+# ── Ввод текстом ─────────────────────────────────────────────────────────────
+
 async def _resolve(token: str) -> int | None:
     token = token.strip()
     if token.isdigit():
@@ -598,23 +988,7 @@ async def _resolve(token: str) -> int | None:
     return u[0] if u else None
 
 
-async def _add_question(tg_id: int, reason: str) -> str:
-    from database import get_user_info
-    from paidsub.storage import get_paid_sub_by_tg_id
-    sub = await get_paid_sub_by_tg_id(tg_id)
-    if sub and sub[11] in ("active", "renewal"):
-        sub_line = (f"💳 Подписка до <b>{sub[6]}</b> остановится сразу. Остаток срока сохранится "
-                    "и вернётся, если убрать человека из ЧС.")
-    else:
-        sub_line = "💳 Действующей подписки нет — просто не сможет взять триал и оплатить."
-    return (f"⛔ <b>Внести в чёрный список?</b>\n\n"
-            f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
-            f"📝 Причина: {html.escape(reason)}\n{sub_line}</blockquote>\n\n"
-            f"<i>Человек получит сообщение, что доступ закрыт: «{html.escape(public_reason(reason))}».</i>")
-
-
 async def handle_bl_input(update, context, state: str, text: str):
-    from handlers.confirm import confirm_keyboard
     msg = update.message
     if state == AWAITING_BL_CHECK:
         tg_id = await _resolve(text.split()[0]) if text.split() else None
@@ -626,58 +1000,61 @@ async def handle_bl_input(update, context, state: str, text: str):
         await handle_bl_view(msg, tg_id, edit=False)
         return
 
+    if state == AWAITING_BL_UNTIL:
+        from paidsub.time_parser import parse_duration
+        pending = context.user_data.get("bl_pending")
+        if not pending:
+            context.user_data.pop("state", None)
+            await msg.reply_text("⛔ <b>Начни заново</b>", parse_mode="HTML", reply_markup=_cancel())
+            return
+        secs = parse_duration(text)
+        if not secs:
+            await msg.reply_text("⏳ <b>Не понял срок</b>\n\n"
+                                 "<i>Напиши так: <code>3 дня</code>, <code>2 недели</code>, "
+                                 "<code>6 месяцев</code>.</i>", parse_mode="HTML",
+                                 reply_markup=_cancel(f"bl_view:{pending['tg_id']}"))
+            return
+        pending["until"] = until_utc(secs)
+        context.user_data.pop("state", None)
+        await handle_bl_confirm(msg, context, edit=False)
+        return
+
     if state == AWAITING_BL_ADD:
         parts = text.split(maxsplit=1)
         tg_id = await _resolve(parts[0]) if parts else None
-        reason = parts[1] if len(parts) > 1 else ""
-    else:
-        tg_id, reason = context.user_data.get("bl_target"), text
-    if not tg_id:
-        await msg.reply_text("🔍 <b>Не нашёл</b>\n\n<i>Пришли числовой ID или @username пользователя бота "
-                             "и через пробел причину.</i>", parse_mode="HTML", reply_markup=_cancel())
+        reason = (parts[1].strip() if len(parts) > 1 else "")[:300]
+        if not tg_id:
+            await msg.reply_text("🔍 <b>Не нашёл</b>\n\n<i>Пришли числовой ID или @username "
+                                 "пользователя бота.</i>", parse_mode="HTML", reply_markup=_cancel())
+            return
+        if tg_id == ADMIN_ID:
+            await msg.reply_text("🙃 <b>Себя в чёрный список внести нельзя</b>", parse_mode="HTML",
+                                 reply_markup=_cancel())
+            return
+        context.user_data.pop("state", None)
+        if reason:
+            context.user_data["bl_pending"] = {"kind": "bl", "tg_id": tg_id, "reason": reason}
+            await handle_bl_term_ask(msg, context, edit=False)
+        else:
+            await handle_bl_new(msg, context, "bl", tg_id, edit=False)
         return
-    if tg_id == ADMIN_ID:
-        await msg.reply_text("🙃 <b>Себя в чёрный список внести нельзя</b>", parse_mode="HTML",
+
+    # AWAITING_BL_REASON — своя причина для уже выбранного человека
+    pending = context.user_data.get("bl_pending")
+    if not pending:
+        context.user_data.pop("state", None)
+        await msg.reply_text("⛔ <b>Начни заново</b>", parse_mode="HTML", reply_markup=_cancel())
+        return
+    if pending["tg_id"] == ADMIN_ID:
+        await msg.reply_text("🙃 <b>Себя заблокировать нельзя</b>", parse_mode="HTML",
                              reply_markup=_cancel())
         return
-    reason = reason.strip()[:300] or DEFAULT_REASON
+    pending["reason"] = text.strip()[:300] or DEFAULT_REASON
     context.user_data.pop("state", None)
-    context.user_data.pop("bl_target", None)
-    # вносим только после «Да» — подписка остановится сразу
-    context.user_data["bl_pending"] = {"tg_id": tg_id, "reason": reason}
-    await msg.reply_text(
-        await _add_question(tg_id, reason), parse_mode="HTML", disable_web_page_preview=True,
-        reply_markup=confirm_keyboard("⛔ Да, внести в ЧС", "bl_add_apply", f"bl_view:{tg_id}", "bl_menu"),
-    )
+    await handle_bl_term_ask(msg, context, edit=False)
 
 
-async def handle_bl_add_apply(query, context):
-    pending = context.user_data.pop("bl_pending", None)
-    if not pending:
-        # уже внесён или бот перезапускался — начать заново
-        await handle_bl_menu(query, context)
-        return
-    res = await blacklist_add(context.bot, pending["tg_id"], pending["reason"])
-    await handle_bl_view(query, pending["tg_id"], note=_result_note("⛔ Внесён в чёрный список.", res))
-
-
-async def handle_bl_del(query, context, tg_id: int):
-    res = await blacklist_remove(context.bot, tg_id)
-    await handle_bl_view(query, tg_id, note=_result_note("✅ Убран из чёрного списка.", res))
-
-
-async def handle_bl_stop(query, context, tg_id: int):
-    res = await blacklist_stop(context.bot, tg_id)
-    head = "⛔ Готово." if res is not None else "Человек уже не в ЧС — ничего не менял."
-    await handle_bl_view(query, tg_id, note=_result_note(head, res))
-
-
-async def handle_bl_readd(query, context, tg_id: int):
-    res = await blacklist_readd(context.bot, tg_id)
-    head = ("⛔ Снова в чёрном списке." if res is not None
-            else "В общем списке его уже нет — вносить нечего.")
-    await handle_bl_view(query, tg_id, note=_result_note(head, res))
-
+# ── Общий список ─────────────────────────────────────────────────────────────
 
 async def handle_bl_sync_now(query, context):
     await query.edit_message_text("🔄 Обновляю общий список…")

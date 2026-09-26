@@ -45,7 +45,7 @@ from states import (
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
     AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
-    AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK,
+    AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK, AWAITING_BL_UNTIL,
     AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
 )
 
@@ -141,7 +141,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin:
         from database import is_banned
         if await is_banned(user.id):
-            await update.message.reply_text("🚫 Ваш аккаунт заблокирован. Обратитесь к администратору.")
+            from blacklist import banned_view
+            await update.message.reply_text(await banned_view(user.id), parse_mode="HTML")
             return
 
     # ── Чёрный список: писать можно только в поддержку (она выше) ────────────
@@ -1133,7 +1134,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Чёрный список: внести, причина, проверить ────────────────────────────
-    if state in (AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK) and is_admin:
+    # помощник с правом на ЧС тоже вводит — право проверено выше
+    if state in (AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK,
+                 AWAITING_BL_UNTIL) and (is_admin or helper_input):
         from blacklist import handle_bl_input
         await handle_bl_input(update, context, state, text)
         return

@@ -6,7 +6,6 @@ from keyboards import admin_keyboard, back_admin, documents_keyboard, channel_ke
 from states import (
     AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
-    AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_DM_USER,
 )
 
@@ -365,7 +364,12 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     ]
 
     if banned:
-        lines.append("\n🚫 <b>Забанен</b>")
+        from blacklist import fmt_until
+        from database import ban_entry
+        b = await ban_entry(tg_id) or {}
+        lines.append("\n🚫 <b>Забанен</b> · " + fmt_until(b.get("until")))
+        if b.get("reason"):
+            lines.append(f"<i>{escape(str(b['reason'])[:150])}</i>")
     from blacklist import entry as bl_entry, public_reason
     ble = await bl_entry(tg_id)
     if ble:
@@ -529,21 +533,11 @@ async def handle_user_history(query, tg_id: int, page: int = 1):
     )
 
 
-async def handle_ban_user(query, tg_id: int):
-    from database import ban_user
-    from log_channel import send_log
-    await ban_user(tg_id)
-    await send_log(query._bot, f"🚫 Забанен: <code>{tg_id}</code>")
-    await query.answer(f"🚫 Пользователь {tg_id} забанен", show_alert=True)
-    await handle_user_profile(query, tg_id)
-
-
-async def handle_unban_user(query, tg_id: int):
-    from database import unban_user
-    from log_channel import send_log
-    await unban_user(tg_id)
-    await send_log(query._bot, f"🔓 Разбанен: <code>{tg_id}</code>")
-    await query.answer(f"🔓 Пользователь {tg_id} разбанен", show_alert=True)
+async def handle_unban_user(query, context, tg_id: int):
+    """Бан ставится через «Чёрный список» (причина и срок), снимается отсюда."""
+    from blacklist import unban
+    await unban(context.bot, tg_id, getattr(query.from_user, "id", None))
+    await query.answer("✅ Разбанен", show_alert=True)
     await handle_user_profile(query, tg_id)
 
 

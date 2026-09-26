@@ -20,7 +20,7 @@ CONFIRM_TITLES = {
     "paid_sub_toggle": "Вкл/выкл подписки",
     "sub_toggle": "Вкл/выкл админской подписки",
     "paid_sub_freeze": "Заморозка подписки",
-    "ban_user": "Бан пользователя",
+    "bl_unban": "Разбан пользователя",
     "promo_delete": "Удаление промокода",
     "helper_del": "Снятие помощника",
     "mnt_toggle": "Вкл/выкл техработ",
@@ -124,12 +124,6 @@ async def _paid_sub_freeze(arg):
             "🧊 Да, заморозить", f"paid_sub_view:{arg}", "paid_subs")
 
 
-async def _ban_user(arg):
-    return (f"🚫 <b>Забанить пользователя?</b>\n\n👤 {await _who(int(arg))}\n\n"
-            "Пользоваться ботом будет нельзя, пока не разбанишь.",
-            "🚫 Да, забанить", f"user_profile:{arg}", "admin_panel")
-
-
 async def _promo_delete(arg):
     from paidsub.storage import get_promo_by_id, promo_use_count
     p = await get_promo_by_id(int(arg))
@@ -175,6 +169,12 @@ async def _clear_log_channel(arg):
     return ("🗑 <b>Отключить лог-канал?</b>\n\n"
             "События перестанут дублироваться в канал. Вернуть можно, снова указав его ID.",
             "🗑 Да, отключить", "log_channel_settings", "admin_panel")
+
+
+async def _bl_unban(arg):
+    return (f"✅ <b>Разбанить в боте?</b>\n\n👤 {await _who(int(arg))}\n\n"
+            "Бот снова начнёт ему отвечать. Чёрный список это не снимает.",
+            "✅ Да, разбанить", f"bl_view:{arg}", "bl_menu")
 
 
 async def _bl_del(arg):
@@ -275,7 +275,7 @@ RULES = {
     "paid_sub_toggle": lambda arg: _toggle(arg, admin_sub=False),
     "sub_toggle": lambda arg: _toggle(arg, admin_sub=True),
     "paid_sub_freeze": _paid_sub_freeze,
-    "ban_user": _ban_user,
+    "bl_unban": _bl_unban,
     "promo_delete": _promo_delete,
     "helper_del": _helper_del,
     "mnt_toggle": _mnt_toggle,

@@ -271,6 +271,9 @@ async def post_init(app: Application):
         bl_hours = int(load_config().get("blacklist_sync_hours", 6) or 6)
         app.job_queue.run_repeating(blacklist_sync_tick, interval=bl_hours * 3600, first=120)
 
+        from blacklist import blacklist_expire_tick
+        app.job_queue.run_repeating(blacklist_expire_tick, interval=300, first=150)
+
         from winback import winback_tick
         app.job_queue.run_repeating(winback_tick, interval=3600, first=600)
 

@@ -17,7 +17,7 @@ from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
     handle_set_privacy_url, handle_set_terms_url, handle_documents_menu,
     handle_channel_menu, handle_dashboard, handle_healthcheck,
-    handle_find_user, handle_user_profile, handle_ban_user, handle_unban_user,
+    handle_find_user, handle_user_profile, handle_unban_user,
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
     handle_remind_settings, handle_toggle_remind, handle_set_remind,
     handle_toggle_remind_trials, handle_remind_test, handle_set_remind_quiet,
@@ -65,9 +65,10 @@ from staff import (
 )
 from handlers.confirm import confirm_gate
 from blacklist import (
-    handle_bl_menu, handle_bl_list, handle_bl_view, handle_bl_add_start, handle_bl_add_for,
+    handle_bl_menu, handle_bl_list, handle_bl_view, handle_bl_add_start, handle_bl_new,
     handle_bl_check_start, handle_bl_add_apply, handle_bl_del, handle_bl_stop, handle_bl_readd,
-    handle_bl_sync_now, handle_bl_remote_toggle,
+    handle_bl_sync_now, handle_bl_remote_toggle, handle_bl_reason, handle_bl_term,
+    handle_bl_bans, handle_bl_unban,
 )
 from promos import (
     handle_promo_give_start, handle_promo_give_for, handle_promo_give_custom,
@@ -391,7 +392,17 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "bl_check":
         await handle_bl_check_start(query, context)
     elif data.startswith("bl_add_for:"):
-        await handle_bl_add_for(query, context, int(data.split(":")[1]))
+        await handle_bl_new(query, context, "bl", int(data.split(":")[1]))
+    elif data.startswith("bl_ban:"):
+        await handle_bl_new(query, context, "ban", int(data.split(":")[1]))
+    elif data.startswith("bl_unban:"):
+        await handle_bl_unban(query, context, int(data.split(":")[1]))
+    elif data.startswith("bl_reason:"):
+        await handle_bl_reason(query, context, data.split(":")[1])
+    elif data.startswith("bl_term:"):
+        await handle_bl_term(query, context, data.split(":")[1])
+    elif data.startswith("bl_bans:"):
+        await handle_bl_bans(query, int(data.split(":")[1]))
     elif data == "bl_add_apply":
         await handle_bl_add_apply(query, context)
     elif data.startswith("bl_del:"):
@@ -421,9 +432,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("user_profile:"):
         await handle_user_profile(query, int(data.split(":")[1]))
     elif data.startswith("ban_user:"):
-        await handle_ban_user(query, int(data.split(":")[1]))
+        await handle_bl_new(query, context, "ban", int(data.split(":")[1]))
     elif data.startswith("unban_user:"):
-        await handle_unban_user(query, int(data.split(":")[1]))
+        await handle_unban_user(query, context, int(data.split(":")[1]))
     elif data.startswith("user_history:"):
         parts = data.split(":")
         await handle_user_history(query, int(parts[1]), int(parts[2]))
