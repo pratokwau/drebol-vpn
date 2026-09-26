@@ -24,7 +24,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
     rows = []
     # у кого подписка есть — заходит в действия с ней, у кого нет — оформляет
     rows.append([InlineKeyboardButton(
-        "⚙️ Моя подписка" if paid_sub_status else "🆓 Получить подписку",
+        "⛓️‍💥 Моя подписка" if paid_sub_status else "🆓 Получить подписку",
         callback_data="my_paid_sub")])
     # вторым рядом — то, за чем приходят чаще всего; парой, чтобы меню было короче
     pair = []
