@@ -19,19 +19,18 @@ from states import (
     AWAITING_PAID_SUB_TG_ID,
     AWAITING_PAID_PRESET_HWID,
     AWAITING_PAID_PRESET_TRAFFIC,
-    AWAITING_PAID_TRIAL_PERIOD, AWAITING_PAID_PRICE,
+    AWAITING_PAID_TRIAL_PERIOD,
     AWAITING_PAID_SUB_EXTEND,
     AWAITING_PAID_SUB_EDIT_EXPIRE,
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
     AWAITING_PAID_SUB_EDIT_TRIAL,
-    AWAITING_PAID_MUTE_USER,
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
     AWAITING_PAID_BULK_HWID,
     AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX,
-    AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE,
-    AWAITING_PROMO_NEW_PERCENT, AWAITING_PROMO_NEW_EXPIRE,
+    AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
+    AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_WINBACK_DAYS2, AWAITING_WINBACK_PERCENT2, AWAITING_WINBACK_LIFE,
@@ -677,15 +676,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if state == AWAITING_PAID_PRICE:
-        if not text.isdigit():
-            await update.message.reply_text("❌ Введи число (сумма в рублях).", reply_markup=back_admin())
-            return
-        _save("paid_price", int(text))
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Сумма: <b>{text} ₽</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
     # ── Платные подписки: обычные пресеты ────────────────────────────────────────
     if state == AWAITING_PAID_PRESET_HWID:
         if not text.isdigit():
@@ -1047,84 +1037,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Создание промокода ───────────────────────────────────────────────────────
-    if state == AWAITING_PROMO_NEW_CODE:
-        from paidsub.storage import get_promo
-        code = text.strip().upper()
-        if not code or len(code) > 32 or " " in code:
-            await update.message.reply_text(
-                "❌ Код без пробелов, до 32 символов. Попробуй ещё раз:",
-                reply_markup=back_admin(),
-            )
-            return
-        if await get_promo(code):
-            await update.message.reply_text("❌ Такой промокод уже существует.", reply_markup=back_admin())
-            return
-        context.user_data["new_promo"] = {"code": code}
-        context.user_data["state"] = AWAITING_PROMO_NEW_PERCENT
-        await update.message.reply_text(
-            f"🎟 Код: <b>{code}</b>\n\nТеперь введи размер скидки в % (число от 1 до 100):",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-
-    if state == AWAITING_PROMO_NEW_PERCENT:
-        if not text.isdigit() or not (1 <= int(text) <= 100):
-            await update.message.reply_text("❌ Введи число от 1 до 100:", reply_markup=back_admin())
-            return
-        context.user_data.setdefault("new_promo", {})["percent"] = int(text)
-        context.user_data["state"] = AWAITING_PROMO_NEW_EXPIRE
-        await update.message.reply_text(
-            f"💯 Скидка: <b>{text}%</b>\n\n"
-            "Введи дату окончания действия промокода в формате <code>дд.мм.гггг</code>\n"
-            "или отправь <code>-</code> — без срока действия:",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-
-    if state == AWAITING_PROMO_NEW_EXPIRE:
-        from paidsub.storage import create_promo
-        expires_at = None
-        if text.strip() != "-":
-            try:
-                datetime.strptime(text.strip(), "%d.%m.%Y")
-                expires_at = text.strip()
-            except ValueError:
-                await update.message.reply_text(
-                    "❌ Формат: <code>дд.мм.гггг</code> или <code>-</code>",
-                    parse_mode="HTML", reply_markup=back_admin(),
-                )
-                return
-        data = context.user_data.pop("new_promo", {})
-        context.user_data.pop("state", None)
-        code = data.get("code")
-        percent = data.get("percent")
-        if not code or not percent:
-            await update.message.reply_text("❌ Данные потеряны, начни заново.", reply_markup=back_admin())
-            return
-        ok = await create_promo(code, percent, expires_at)
-        if not ok:
-            await update.message.reply_text("❌ Не удалось создать промокод.", reply_markup=back_admin())
-            return
-        exp_line = f"📅 Действует до: <b>{expires_at}</b>" if expires_at else "📅 Без срока действия"
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        await update.message.reply_text(
-            f"✅ <b>Промокод создан!</b>\n\n"
-            f"🎟 <b>{code}</b> · скидка <b>−{percent}%</b>\n{exp_line}",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎟 К промокодам", callback_data="promo_menu")],
-            ]),
-        )
-        return
-
     # ── Найти юзера ───────────────────────────────────────────────────────────
     if state == AWAITING_FIND_USER:
-        if not text.isdigit():
-            await update.message.reply_text("❌ TG ID — это число.", reply_markup=back_admin())
-            return
-        context.user_data.pop("state", None)
-        from handlers.admin import handle_user_profile
-        await handle_user_profile(update.message, int(text), edit=False)
+        from handlers.admin import handle_user_search
+        await handle_user_search(update.message, context, text)
         return
 
     # ── Новый помощник ────────────────────────────────────────────────────────
@@ -1142,7 +1058,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Выдача промокода: кому и какая награда ───────────────────────────────
-    if state in (AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM) and is_admin:
+    if state in (AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
+                 AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
+                 AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE,
+                 AWAITING_PROMO_FIND) and is_admin:
         from promos import handle_promo_input
         await handle_promo_input(update, context, state, text)
         return
@@ -1271,33 +1190,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
         return
 
-    # ── Мьют пользователя (ставь в конец админских) ──────────────────────────────
-    if state == AWAITING_PAID_MUTE_USER:
-        seconds = parse_duration(text)
-        if not seconds:
-            await update.message.reply_text(
-                "❌ Не удалось распознать. Примеры: <code>5 часов</code>, <code>7 дней</code>",
-                parse_mode="HTML", reply_markup=back_admin(),
-            )
-            return
-        mute_tg_id = context.user_data.pop("mute_tg_id", None)
-        context.user_data.pop("state", None)
-        if mute_tg_id:
-            from paidsub.storage import set_mute, add_history
-            muted_until = (datetime.now() + timedelta(seconds=seconds)).strftime("%d.%m.%Y %H:%M:%S")
-            await set_mute(mute_tg_id, muted_until)
-            await add_history(
-                mute_tg_id, "user_muted",
-                f"Заглушён до {muted_until}\nСрок: {fmt_duration(seconds)}",
-            )
-            await update.message.reply_text(
-                f"🔇 Пользователь <code>{mute_tg_id}</code> заглушён до <b>{muted_until}</b>\n"
-                f"({fmt_duration(seconds)})",
-                parse_mode="HTML", reply_markup=back_admin(),
-            )
-            return
-        await update.message.reply_text("❌ Пользователь не найден.", reply_markup=back_admin())
-        return
 
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -21,7 +21,7 @@ from handlers.admin import (
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
     handle_remind_settings, handle_toggle_remind, handle_set_remind,
     handle_toggle_remind_trials, handle_remind_test, handle_set_remind_quiet,
-    handle_user_history, handle_dm_user, handle_payment_stats,
+    handle_dm_user, handle_payment_stats,
 )
 from winback import (
     handle_winback_settings, handle_toggle_winback, handle_toggle_winback_paid,
@@ -54,7 +54,7 @@ from maintenance import (
     handle_maintenance_text, handle_feature_toggle,
 )
 from handlers.control import (
-    handle_control_menu, handle_activity_feed, handle_user_activity,
+    handle_control_menu, handle_activity_feed, handle_user_activity, handle_hist_entry,
     handle_online, handle_traffic, handle_digest_toggle,
     handle_digest_hour_menu, handle_digest_set_hour, handle_digest_now,
     handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
@@ -74,6 +74,11 @@ from promos import (
     handle_promo_give_start, handle_promo_give_for, handle_promo_give_custom,
     handle_promo_give_pick, handle_promo_give_do, handle_promo_seg, handle_promo_seg_pick,
     handle_promo_seg_preview, handle_promo_seg_do, handle_promo_income,
+    handle_promo_menu, handle_promo_list, handle_promo_view, handle_promo_uses,
+    handle_promo_toggle, handle_promo_delete, handle_promo_first, handle_promo_edit,
+    handle_promo_clean, handle_promo_clean_do, handle_promo_create, handle_promo_draft,
+    handle_promo_new_ask, handle_promo_new_set, handle_promo_new_save,
+    handle_promo_batch, handle_promo_batch_n, handle_promo_batch_go, handle_promo_find,
 )
 from handlers.payments import (
     handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
@@ -113,7 +118,6 @@ from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
     handle_paid_preset_hwid, handle_paid_preset_traffic,
     handle_paid_preset_trial,
-    handle_paid_preset_price,
     handle_paid_create_sub, handle_paid_create_type,
     handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
     handle_approve, handle_reject, handle_request_sub,
@@ -126,11 +130,7 @@ from paidsub.handlers import (
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
     handle_paid_sub_edit_trial,
-    handle_paid_history, handle_paid_history_view, handle_mute_user, handle_unmute_user, handle_muted_list,
-    handle_paid_requests,
     handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
-    handle_promos_menu, handle_promo_view, handle_promo_create,
-    handle_promo_toggle, handle_promo_delete,
     handle_toggle_auto_trial, handle_paid_bulk_apply,
 )
 
@@ -346,6 +346,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("act_feed:"):
         _, scope, pg = data.split(":")
         await handle_activity_feed(query, scope, int(pg))
+    elif data.startswith("ctl_hist:"):
+        await handle_hist_entry(query, int(data.split(":")[1]))
+    elif data.startswith("user_feed:"):
+        _, uid, scope, pg = data.split(":")
+        await handle_user_activity(query, int(uid), int(pg), scope)
     elif data.startswith("user_activity:"):
         _, uid, pg = data.split(":")
         await handle_user_activity(query, int(uid), int(pg))
@@ -435,9 +440,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_bl_new(query, context, "ban", int(data.split(":")[1]))
     elif data.startswith("unban_user:"):
         await handle_unban_user(query, context, int(data.split(":")[1]))
-    elif data.startswith("user_history:"):
-        parts = data.split(":")
-        await handle_user_history(query, int(parts[1]), int(parts[2]))
     elif data.startswith("dm_user:"):
         await handle_dm_user(query, int(data.split(":")[1]), context)
     elif data.startswith("payment_stats:"):
@@ -677,8 +679,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":
         await handle_paid_preset_trial(query, context)
-    elif data == "paid_preset_price":
-        await handle_paid_preset_price(query, context)
     elif data == "paid_preset_hwid":
         await handle_paid_preset_hwid(query, context)
     elif data == "paid_preset_traffic":
@@ -730,12 +730,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_edit_traffic(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_trial:"):
         await handle_paid_sub_edit_trial(query, int(data.split(":")[1]), context)
-    elif data == "paid_history":
-        await handle_paid_history(query)
-    elif data.startswith("paid_history_page:"):
-        await handle_paid_history(query, int(data.split(":")[1]))
-    elif data.startswith("paid_history_view:"):
-        await handle_paid_history_view(query, int(data.split(":")[1]))
     elif data == "referral_settings":
         await handle_referral_settings(query)
     elif data == "set_referral_bonus":
@@ -743,9 +737,40 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "set_referral_invited_bonus":
         await handle_set_referral_invited_bonus(query, context)
     elif data == "promo_menu":
-        await handle_promos_menu(query)
+        await handle_promo_menu(query, context)
+    elif data.startswith("promo_list:"):
+        _, tab, pg = data.split(":")
+        await handle_promo_list(query, tab, int(pg))
     elif data == "promo_create":
         await handle_promo_create(query, context)
+    elif data == "promo_find":
+        await handle_promo_find(query, context)
+    elif data == "promo_clean":
+        await handle_promo_clean(query, context)
+    elif data == "promo_clean_do":
+        await handle_promo_clean_do(query, context)
+    elif data == "promo_batch":
+        await handle_promo_batch(query, context)
+    elif data.startswith("promo_batch_n:"):
+        await handle_promo_batch_n(query, context, int(data.split(":")[1]))
+    elif data.startswith("promo_batch_go:"):
+        _, kind, val, cnt = data.split(":")
+        await handle_promo_batch_go(query, context, kind, int(val), int(cnt))
+    elif data.startswith("promo_new_ask:"):
+        await handle_promo_new_ask(query, context, data.split(":")[1])
+    elif data == "promo_new_back":
+        await handle_promo_draft(query, context)
+    elif data.startswith("promo_new_reward:"):
+        _, kind, val = data.split(":")
+        await handle_promo_new_set(query, context, "reward", f"{kind}:{val}")
+    elif data.startswith("promo_new_limit:"):
+        await handle_promo_new_set(query, context, "limit", data.split(":")[1])
+    elif data.startswith("promo_new_days:"):
+        await handle_promo_new_set(query, context, "days", data.split(":")[1])
+    elif data == "promo_new_first":
+        await handle_promo_new_set(query, context, "first", "")
+    elif data == "promo_new_save":
+        await handle_promo_new_save(query, context)
     elif data == "promo_give":
         await handle_promo_give_start(query, context)
     elif data.startswith("promo_give_for:"):
@@ -771,18 +796,17 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_promo_income(query)
     elif data.startswith("promo_view:"):
         await handle_promo_view(query, int(data.split(":")[1]))
+    elif data.startswith("promo_uses:"):
+        await handle_promo_uses(query, int(data.split(":")[1]))
+    elif data.startswith("promo_first:"):
+        await handle_promo_first(query, int(data.split(":")[1]))
+    elif data.startswith("promo_edit:"):
+        _, pid, what = data.split(":")
+        await handle_promo_edit(query, context, int(pid), what)
     elif data.startswith("promo_toggle:"):
         await handle_promo_toggle(query, int(data.split(":")[1]))
     elif data.startswith("promo_delete:"):
         await handle_promo_delete(query, int(data.split(":")[1]))
-    elif data == "paid_requests":
-        await handle_paid_requests(query)
-    elif data == "paid_muted_list":
-        await handle_muted_list(query)
-    elif data.startswith("paid_mute_user:"):
-        await handle_mute_user(query, int(data.split(":")[1]), context)
-    elif data.startswith("paid_unmute_user:"):
-        await handle_unmute_user(query, int(data.split(":")[1]))
     elif data.startswith("paid_approve:"):
         await handle_approve(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_reject:"):

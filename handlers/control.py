@@ -2,6 +2,9 @@
 
 • лента — каждое нажатие, команда и вид сообщения в боте;
 • важные события — регистрации, триалы, оплаты, возвраты, отключения;
+• история подписок — то, что делали с подписками: раньше она жила отдельным
+  разделом в «Платных подписках», теперь это вкладка здесь;
+• аудит админки — кто из своих что нажимал, с отдельной вкладкой помощников;
 • кто сейчас онлайн на VPN и кто сколько потратил трафика;
 • ежедневная сводка админу.
 
@@ -20,7 +23,9 @@ from telegram.ext import ContextTypes
 
 from config import load_config, save_config
 
-PER_PAGE = 15
+PER_PAGE = 30
+# Телеграм режет сообщение на 4096 символах — держим запас под заголовок и кнопки
+TEXT_BUDGET = 3500
 
 # Подписи действий по началу callback-данных
 CB_LABELS = {
@@ -105,6 +110,88 @@ CB_LABELS = {
     "promo_toggle": "🎟 Промокод вкл/выкл",
     "helper_add": "👥 Добавление помощника",
     "ctl_ch_toggle": "🆘 Помощь с подключением вкл/выкл",
+    "ctl_menu": "🛰 Открыл контроль",
+    "act_feed": "📜 Смотрел ленту",
+    "ctl_hist": "📜 Открыл запись истории",
+    "ctl_online": "🔌 Смотрел, кто онлайн",
+    "ctl_traffic": "📊 Смотрел трафик",
+    "ctl_digest_now": "📤 Сводка вручную",
+    "ctl_digest_toggle": "📨 Сводка вкл/выкл",
+    "ctl_digest_hour": "🕘 Время сводки",
+    "dashboard": "📊 Смотрел статистику",
+    "paid_subs": "💳 Список подписок",
+    "paid_sub_view": "💳 Открыл подписку",
+    "paid_sub_extend": "➕ Добавил срок",
+    "paid_sub_reduce": "➖ Убавил срок",
+    "paid_sub_settings": "⚙️ Настройки подписки",
+    "paid_sub_edit_expire": "📅 Правил дату окончания",
+    "paid_sub_edit_hwid": "🖥 Правил лимит устройств",
+    "paid_sub_edit_traffic": "📶 Правил трафик",
+    "paid_sub_edit_trial": "🆓 Правил пробный период",
+    "paid_create_sub": "➕ Создание подписки",
+    "paid_create_type": "➕ Выбрал тариф для выдачи",
+    "paid_bulk_menu": "⚡ Массовые действия",
+    "paid_sub_presets": "⚙️ Настройки подписок",
+    "paid_preset_trial": "🆓 Правил пробный период",
+    "paid_preset_hwid": "🖥 Правил лимит устройств",
+    "paid_preset_traffic": "📶 Правил общий трафик",
+    "paid_device_price": "📱 Цена устройства",
+    "paid_device_max": "📱 Максимум докупа",
+    "toggle_auto_trial": "⚡ Авто-триал вкл/выкл",
+    "tariffs_menu": "🏷 Тарифы",
+    "tariff_add": "🏷 Добавление тарифа",
+    "tariff_view": "🏷 Открыл тариф",
+    "pay_provider_menu": "💳 Платёжка",
+    "payments": "💰 Оплаты",
+    "payment_view": "💰 Открыл платёж",
+    "refund_menu": "💸 Возвраты",
+    "promo_menu": "🎟 Промокоды",
+    "promo_view": "🎟 Открыл промокод",
+    "promo_create": "➕ Создание промокода",
+    "promo_batch": "🎬 Партия промокодов",
+    "promo_give": "🎁 Выдача промокода",
+    "promo_seg": "📤 Раздача сегменту",
+    "promo_clean": "🧹 Чистка промокодов",
+    "promo_uses": "👥 Кто применял промокод",
+    "referral_settings": "👥 Рефералы",
+    "bl_menu": "⛔ Чёрный список",
+    "bl_view": "⛔ Открыл карточку блокировок",
+    "bl_new": "⛔ Начал блокировку",
+    "bl_ban": "🚫 Начал бан",
+    "bl_unban": "✅ Разбан",
+    "bl_reason": "📝 Выбрал причину блокировки",
+    "bl_term": "⏳ Выбрал срок блокировки",
+    "bl_check": "🔍 Проверка в ЧС",
+    "bl_remote_toggle": "🌐 Общий ЧС вкл/выкл",
+    "fraud_list": "🕵 Список находок",
+    "fraud_pair": "🕵 Открыл находку",
+    "fraud_ip_toggle": "🌐 Адрес как улика вкл/выкл",
+    "winback_settings": "🎯 Winback",
+    "winback_test": "📨 Пример письма winback",
+    "toggle_winback": "🎯 Winback вкл/выкл",
+    "toggle_winback_paid": "👤 Winback: кому писать",
+    "set_winback_days": "1️⃣ Срок первой волны",
+    "set_winback_percent": "1️⃣ Скидка первой волны",
+    "set_winback_days2": "2️⃣ Срок второй волны",
+    "set_winback_percent2": "2️⃣ Скидка второй волны",
+    "set_winback_life": "⏳ Срок промокода winback",
+    "remind_test": "📨 Пример напоминания",
+    "toggle_remind": "⏰ Напоминания вкл/выкл",
+    "toggle_remind_trials": "🆓 Напоминания пробным",
+    "set_remind_first": "1️⃣ Первое напоминание",
+    "set_remind_second": "2️⃣ Второе напоминание",
+    "set_remind_third": "3️⃣ Третье напоминание",
+    "set_remind_quiet": "🌙 Тихие часы",
+    "helpers_menu": "👥 Помощники",
+    "helper_card": "👥 Открыл помощника",
+    "helper_panel": "🧰 Панель помощника",
+    "subs_menu": "🛠 Админские подписки",
+    "sub_view": "🛠 Открыл админскую подписку",
+    "sub_create": "➕ Создание админской подписки",
+    "broadcast": "📣 Рассылка",
+    "log_channel": "🧾 Лог-канал",
+    "documents": "📕 Документы",
+    "mnt_menu": "⏸ Техработы",
     # работа в поддержке — в аудите видно, кто из помощников что открывал
     "admin_panel": "⚙️ Открыл панель",
     "ticket_list": "🎫 Тикеты",
@@ -159,6 +246,36 @@ FEED_TITLES = {
     "all": "📜 Лента действий",
     "important": "⭐ Важные события",
     "admin": "⚙️ Аудит админки",
+    "helpers": "👥 Помощники",
+    "subs": "💳 История подписок",
+}
+
+# Подписи записей истории подписок (они же были в «Платных подписках»)
+HIST_LABELS = {
+    "trial_approved": "✅ Пробный одобрен",
+    "trial_rejected": "❌ Пробный отклонён",
+    "payment_confirmed": "✅ Оплата подтверждена",
+    "payment_rejected": "❌ Оплата отклонена",
+    "payment_refunded": "↩️ Возврат платежа",
+    "sub_created": "🆕 Подписка создана",
+    "sub_extended": "➕ Срок добавлен",
+    "sub_reduced": "➖ Срок убавлен",
+    "sub_frozen": "🧊 Заморожена",
+    "sub_enabled": "▶️ Включена",
+    "sub_disabled": "⏸ Отключена",
+    "sub_deleted": "🗑 Удалена",
+    "bulk_extended": "⚡➕ Массово: срок добавлен",
+    "bulk_reduced": "⚡➖ Массово: срок убавлен",
+    "settings_changed": "⚙️ Изменены настройки",
+    "referral_bonus": "🎁 Реферальный бонус",
+    "referral_invited_bonus": "🎁 Бонус приглашённого",
+    "promo_used": "🎟 Промокод применён",
+    "promo_issued": "🎁 Выдан промокод",
+    "promo_days": "🎁 Начислены дни по промокоду",
+    "blacklisted": "⛔ Внесён в ЧС",
+    "unblacklisted": "✅ Убран из ЧС",
+    "devices_bought": "📱 Докупил устройства",
+    "key_reissued": "🔁 Перевыпущен ключ",
 }
 
 
@@ -188,17 +305,32 @@ def _fmt_bytes(value) -> str:
     return f"{b:.2f} ТБ"
 
 
+def _arg_tail(rest: str) -> str:
+    """Хвост кнопки: к чему она относилась — номер подписки, ID человека, код."""
+    parts = [p for p in rest.split(":")[1:] if p]
+    # последняя «1» почти всегда номер страницы, а не смысл действия
+    if len(parts) > 1 and parts[-1] == "1":
+        parts = parts[:-1]
+    if not parts:
+        return ""
+    return " · <code>" + _esc(":".join(parts))[:40] + "</code>"
+
+
 def action_label(action: str, details: str | None) -> str:
     kind, _, rest = (action or "").partition(":")
     if kind == "cb":
         # опасные кнопки: нажатие только спрашивает «Точно?», действие — ok:…
         from handlers.confirm import OK_PREFIX, confirm_title
         if rest.startswith(OK_PREFIX):
-            return f"✅ {confirm_title(rest[len(OK_PREFIX):]) or _esc(rest)}"
+            done = rest[len(OK_PREFIX):]
+            return f"✅ {confirm_title(done) or _esc(done)}" + _arg_tail(done)
         title = confirm_title(rest)
         if title:
-            return f"❔ {title}?"
-        return CB_LABELS.get(rest.split(":")[0], f"⚙️ {_esc(rest)}")
+            return f"❔ {title}?" + _arg_tail(rest)
+        label = CB_LABELS.get(rest.split(":")[0])
+        if label:
+            return label + _arg_tail(rest)
+        return f"⚙️ {_esc(rest)}"
     if kind == "cmd":
         return f"▶️ /{_esc(rest)}" + (f" <code>{_esc(details)}</code>" if details else "")
     if kind == "msg":
@@ -261,10 +393,11 @@ def _back(cb: str, label: str = "◀️ К контролю") -> list:
 async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
     if context:
         context.user_data.pop("state", None)
-    from database import activity_summary
+    from database import activity_summary, control_today
     from panel import get_online_emails
 
     s = await activity_summary()
+    t = await control_today()
     online = await get_online_emails()
     cfg = load_config()
 
@@ -276,6 +409,23 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
     else:
         now.append("🔌 Онлайн на VPN: <i>панель не ответила</i>")
     lines = ["🛰 <b>Контроль</b>", "", "<blockquote>" + "\n".join(now) + "</blockquote>"]
+
+    money = [f"💰 Оплат: <b>{t['pays']}</b> на <b>{t['amount']} ₽</b>",
+             f"🆕 Новых людей: <b>{t['new_users']}</b>  ·  "
+             f"🆓 выдано триалов: <b>{t['trials']}</b>",
+             f"🔴 Закончились подписки: <b>{t['expired']}</b>"]
+    extra = []
+    if t["refunds"]:
+        extra.append(f"↩️ возвратов: <b>{t['refunds']}</b>")
+    if t["failed"]:
+        extra.append(f"❌ незакрытых счётов: <b>{t['failed']}</b>")
+    if t["tickets"]:
+        extra.append(f"🎫 обращений: <b>{t['tickets']}</b>")
+    if t["blocked"]:
+        extra.append(f"⛔ блокировок: <b>{t['blocked']}</b>")
+    if extra:
+        money.append("  ·  ".join(extra))
+    lines.append("\n📆 <b>Сегодня</b>\n<blockquote>" + "\n".join(money) + "</blockquote>")
 
     if s["top_today"]:
         lines.append("\n🔥 <b>Чаще всего сегодня</b>")
@@ -302,12 +452,15 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
     kb = [
         [InlineKeyboardButton("📜 Лента действий", callback_data="act_feed:all:1"),
          InlineKeyboardButton("⭐ Важное", callback_data="act_feed:important:1")],
-        [InlineKeyboardButton("⚙️ Аудит админки", callback_data="act_feed:admin:1")],
+        [InlineKeyboardButton("💳 История подписок", callback_data="act_feed:subs:1")],
+        [InlineKeyboardButton("⚙️ Аудит админки", callback_data="act_feed:admin:1"),
+         InlineKeyboardButton("👥 Помощники", callback_data="act_feed:helpers:1")],
         [
             InlineKeyboardButton("🔌 Кто онлайн", callback_data="ctl_online"),
             InlineKeyboardButton("📊 Трафик", callback_data="ctl_traffic"),
         ],
-        [InlineKeyboardButton("🆘 Помощь с подключением", callback_data="ctl_ch_menu")],
+        [InlineKeyboardButton("🔍 Найти человека", callback_data="find_user"),
+         InlineKeyboardButton("🆘 Помощь с подключением", callback_data="ctl_ch_menu")],
         [InlineKeyboardButton(
             "📨 Сводка · вкл ✅" if digest_on else "📨 Сводка · выкл",
             callback_data="ctl_digest_toggle",
@@ -335,56 +488,158 @@ def _nav(base_cb: str, page: int, total_pages: int) -> list:
     return nav
 
 
+def _fit(rows: list, budget: int = TEXT_BUDGET) -> list:
+    """Обрезает список строк под лимит телеграма, сохраняя порядок."""
+    out, used = [], 0
+    for r in rows:
+        if used + len(r) + 1 > budget:
+            out.append("<i>…остальное не влезло в сообщение — листай страницы</i>")
+            break
+        out.append(r)
+        used += len(r) + 1
+    return out
+
+
+def hist_label(action: str) -> str:
+    return HIST_LABELS.get(action, f"• {_esc(action)}")
+
+
+async def _subs_feed(page: int, tg_id: int | None = None):
+    """История подписок: те же записи, что раньше жили в «Платных подписках»."""
+    from paidsub.storage import get_user_history, list_history
+    if tg_id:
+        rows, pages = await get_user_history(tg_id, page, PER_PAGE)
+        rows = [(r[0], r[1], r[2], r[3], r[4], None, None) for r in rows]
+    else:
+        rows, pages = await list_history(page, PER_PAGE)
+    lines = []
+    for entry_id, uid, action, details, ts, fn, un in rows:
+        who = f"{_who(fn, un, uid)} · " if not tg_id else ""
+        head = (details or "").splitlines()[0] if details else ""
+        tail = f" — {_esc(head)}" if head else ""
+        lines.append(f"<code>{_short_ts(ts)}</code> {who}{hist_label(action)}{tail}"
+                     f" /h{entry_id}")
+    return lines, pages
+
+
 async def handle_activity_feed(query, scope: str = "all", page: int = 1):
     from config import ADMIN_ID
     from database import list_activity
     if scope not in FEED_TITLES:
         scope = "all"
-    rows, total_pages = await list_activity(scope, page, PER_PAGE)
 
-    lines = [f"<b>{FEED_TITLES[scope]}</b> — стр. {page}/{total_pages}\n"]
-    if not rows:
-        lines.append("Пока пусто.")
-    for tg_id, action, details, ts, fn, un in rows:
-        # в аудите себя не подписываем, а помощника — да
-        who = "" if scope == "admin" and tg_id == ADMIN_ID else f"{_who(fn, un, tg_id)} · "
-        lines.append(f"<code>{_short_ts(ts)}</code> {who}{action_label(action, details)}")
+    if scope == "subs":
+        lines, total_pages = await _subs_feed(page)
+        page = min(max(1, page), total_pages)
+        head = [f"<b>{FEED_TITLES[scope]}</b> — стр. {page}/{total_pages}",
+                "<i>у каждой записи свой номер: /h123 — открыть подробности</i>", ""]
+    else:
+        rows, total_pages = await list_activity(scope, page, PER_PAGE)
+        page = min(max(1, page), total_pages)
+        head = [f"<b>{FEED_TITLES[scope]}</b> — стр. {page}/{total_pages}", ""]
+        lines = []
+        for tg_id, action, details, ts, fn, un in rows:
+            # в аудите себя не подписываем, а помощника — да
+            who = "" if scope == "admin" and tg_id == ADMIN_ID else f"{_who(fn, un, tg_id)} · "
+            lines.append(f"<code>{_short_ts(ts)}</code> {who}{action_label(action, details)}")
+    if not lines:
+        lines = ["Пока пусто."]
 
     kb = []
     nav = _nav(f"act_feed:{scope}", page, total_pages)
     if nav:
         kb.append(nav)
-    kb.append([
-        InlineKeyboardButton(("• " if key == scope else "") + title.split(" ", 1)[1],
-                             callback_data=f"act_feed:{key}:1")
-        for key, title in FEED_TITLES.items()
-    ])
+    keys = list(FEED_TITLES)
+    for chunk in (keys[:3], keys[3:]):
+        if chunk:
+            kb.append([InlineKeyboardButton(("• " if key == scope else "")
+                                            + FEED_TITLES[key].split(" ", 1)[1],
+                                            callback_data=f"act_feed:{key}:1")
+                       for key in chunk])
     kb.append(_back("ctl_menu"))
     await query.edit_message_text(
-        "\n".join(lines), parse_mode="HTML",
+        "\n".join(head + _fit(lines)), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb), disable_web_page_preview=True,
     )
 
 
-async def handle_user_activity(query, tg_id: int, page: int = 1):
-    from database import list_activity, get_user_info
-    rows, total_pages = await list_activity(f"user:{tg_id}", page, PER_PAGE)
+async def handle_hist_entry(target, entry_id: int, edit: bool = True):
+    """Подробности записи истории подписок."""
+    from database import get_user_info
+    from paidsub.storage import get_history_entry
+    entry = await get_history_entry(entry_id)
+    if not entry:
+        if edit:
+            await target.answer("Запись не найдена", show_alert=True)
+        else:
+            await target.reply_text("📋 Такой записи в истории нет.")
+        return
+    _id, tg_id, action, details, created_at = entry
+    u = await get_user_info(tg_id) if tg_id else None
+    kb = []
+    if tg_id:
+        kb.append([InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{tg_id}"),
+                   InlineKeyboardButton("📜 Его действия", callback_data=f"user_activity:{tg_id}:1")])
+    kb.append(_back("act_feed:subs:1", "◀️ К истории"))
+    text = (f"📋 <b>{hist_label(action)}</b>\n\n"
+            f"<blockquote>👤 {_who(u[1] if u else None, u[2] if u else None, tg_id)}\n"
+            f"🕐 {_short_ts(created_at) if created_at else '?'}</blockquote>"
+            + (f"\n\n<blockquote expandable>{_esc(details)}</blockquote>" if details else ""))
+    kwargs = dict(parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb),
+                  disable_web_page_preview=True)
+    if edit:
+        await target.edit_message_text(text, **kwargs)
+    else:
+        await target.reply_text(text, **kwargs)
+
+
+async def hist_command(update, context):
+    """/h123 из ленты истории — подробности записи одним нажатием."""
+    from staff import helper_can, is_helper
+    from config import ADMIN_ID
+    uid = update.effective_user.id
+    if uid != ADMIN_ID and not (is_helper(uid) and helper_can("ctl_hist:0", uid)):
+        return
+    digits = "".join(c for c in (update.message.text or "") if c.isdigit())
+    if digits:
+        await handle_hist_entry(update.message, int(digits), edit=False)
+
+
+USER_TABS = {"all": "📜 Всё", "important": "⭐ Важное", "subs": "💳 Подписка"}
+
+
+async def handle_user_activity(query, tg_id: int, page: int = 1, scope: str = "all"):
+    """Что человек делал в боте — то же, что в «Контроле», но про одного."""
+    from database import get_user_info, list_activity
+    if scope not in USER_TABS:
+        scope = "all"
     u = await get_user_info(tg_id)
     name = _who(u[1] if u else None, u[2] if u else None, tg_id)
 
-    lines = [f"📜 <b>Действия: {name}</b>", f"🆔 <code>{tg_id}</code> · стр. {page}/{total_pages}\n"]
-    if not rows:
-        lines.append("Действий пока нет.")
-    for _tg, action, details, ts, _fn, _un in rows:
-        lines.append(f"<code>{_short_ts(ts)}</code> {action_label(action, details)}")
+    if scope == "subs":
+        lines, total_pages = await _subs_feed(page, tg_id)
+    else:
+        key = f"user_important:{tg_id}" if scope == "important" else f"user:{tg_id}"
+        rows, total_pages = await list_activity(key, page, PER_PAGE)
+        lines = [f"<code>{_short_ts(ts)}</code> {action_label(action, details)}"
+                 for _tg, action, details, ts, _fn, _un in rows]
+    page = min(max(1, page), total_pages)
+    head = [f"📜 <b>{USER_TABS[scope]}: {name}</b>",
+            f"🆔 <code>{tg_id}</code> · стр. {page}/{total_pages}", ""]
+    if not lines:
+        lines = ["Записей пока нет."]
 
-    kb = []
-    nav = _nav(f"user_activity:{tg_id}", page, total_pages)
+    kb = [[InlineKeyboardButton(("• " if k == scope else "") + label,
+                                callback_data=f"user_feed:{tg_id}:{k}:1")
+           for k, label in USER_TABS.items()]]
+    nav = _nav(f"user_feed:{tg_id}:{scope}", page, total_pages)
     if nav:
-        kb.append(nav)
-    kb.append(_back(f"user_profile:{tg_id}", "◀️ К профилю"))
+        kb.insert(0, nav)
+    kb.append([InlineKeyboardButton("🛰 Вся лента", callback_data="act_feed:all:1"),
+               InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{tg_id}")])
+    kb.append(_back("ctl_menu"))
     await query.edit_message_text(
-        "\n".join(lines), parse_mode="HTML",
+        "\n".join(head + _fit(lines)), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb), disable_web_page_preview=True,
     )
 

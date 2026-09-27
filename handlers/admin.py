@@ -19,8 +19,6 @@ async def handle_admin_panel(query):
         from database import get_dashboard_stats
         s = await get_dashboard_stats()
         todo = []
-        if s["requests_pending"]:
-            todo.append(f"🆕 запросов на триал: <b>{s['requests_pending']}</b>")
         if unread:
             todo.append(f"🎫 открытых тикетов: <b>{unread}</b>")
         summary = (
@@ -105,7 +103,6 @@ async def handle_dashboard(query):
         "</blockquote>\n\n"
         f"{panel_block}"
         "⏳ <b>Ждут действия</b>\n<blockquote>"
-        f"Запросов на триал: <b>{s['requests_pending']}</b>\n"
         f"Открытых тикетов: <b>{s['unread_tickets']}</b>"
         "</blockquote>\n\n"
         "🎁 <b>Прочее</b>\n<blockquote>"
@@ -319,20 +316,73 @@ async def handle_git_update(query):
 
 # ── Найти юзера ──────────────────────────────────────────────────────────────
 
+SUB_MARKS = {"active": "🟢", "expired": "🔴"}
+
+
+def _found_label(tg_id, first_name, username, sub_status) -> str:
+    mark = SUB_MARKS.get(sub_status, "⚪️")
+    name = str(first_name or tg_id)
+    tail = f" @{username}" if username else f" · {tg_id}"
+    return f"{mark} {name}{tail}"[:60]
+
+
 async def handle_find_user(query, context: ContextTypes.DEFAULT_TYPE):
+    """Поиск человека: по ID, @username, имени или имени клиента в панели."""
+    from database import recent_visitors
     context.user_data["state"] = AWAITING_FIND_USER
+    kb = []
+    for tg_id, fn, un, _ts in await recent_visitors(6):
+        kb.append([InlineKeyboardButton(_found_label(tg_id, fn, un, None),
+                                        callback_data=f"user_profile:{tg_id}")])
+    kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text(
-        "🔍 <b>Найти пользователя</b>\n\n"
-        "<i>Пришли Telegram ID пользователя одним сообщением.</i>",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
+        "🔍 <b>Найти человека</b>\n\n"
+        "<blockquote>Пришли что угодно из этого:\n"
+        "🆔 <code>123456789</code> — Telegram ID\n"
+        "🔗 <code>@username</code> — ник в телеграме\n"
+        "✍️ <code>Иван</code> — часть имени\n"
+        "🔑 <code>paid_123</code> — имя клиента в панели</blockquote>\n\n"
+        "<i>Ниже — кто заходил в бота последним.</i>",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb),
     )
+
+
+async def handle_user_search(target, context, needle: str, edit: bool = False):
+    """Показывает найденных. Один точный — сразу открываем карточку."""
+    from database import get_user_info, search_users
+    rows = await search_users(needle, 12)
+    token = needle.strip().lstrip("@")
+    if token.isdigit() and not rows and await get_user_info(int(token)):
+        rows = [(int(token), None, None, None)]
+    if len(rows) == 1:
+        context.user_data.pop("state", None)
+        await handle_user_profile(target, rows[0][0], edit=edit)
+        return
+    from html import escape
+    kb = [[InlineKeyboardButton(_found_label(*r), callback_data=f"user_profile:{r[0]}")]
+          for r in rows]
+    kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
+    if rows:
+        context.user_data.pop("state", None)
+        text = (f"🔍 <b>Нашёл: {len(rows)}</b>\n\n"
+                f"<blockquote>Запрос: <code>{escape(needle[:60])}</code></blockquote>\n\n"
+                "<i>🟢 подписка активна · 🔴 истекла · ⚪️ подписки нет.\n"
+                "Нажми на человека, чтобы открыть карточку.</i>")
+    else:
+        text = (f"🔍 <b>Никого не нашёл</b>\n\n"
+                f"<blockquote>Запрос: <code>{escape(needle[:60])}</code></blockquote>\n\n"
+                "<i>Попробуй ID, @username, часть имени или имя клиента в панели.</i>")
+    kwargs = dict(parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb))
+    if edit:
+        await target.edit_message_text(text, **kwargs)
+    else:
+        await target.reply_text(text, **kwargs)
 
 
 async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     from database import get_user_info, is_banned
     from paidsub.storage import (
-        get_paid_sub_by_tg_id, get_referral_stats, get_muted_until,
+        get_paid_sub_by_tg_id, get_referral_stats,
     )
     import aiosqlite
     from database import DB_PATH
@@ -382,7 +432,7 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     sub = await get_paid_sub_by_tg_id(tg_id)
     if sub:
         status = sub[11] if len(sub) > 11 else "active"
-        status_labels = {"active": "🟢 активна", "renewal": "🟡 ждёт продления", "expired": "🔴 истекла"}
+        status_labels = {"active": "🟢 активна", "expired": "🔴 истекла"}
         times = sub[12] if len(sub) > 12 else 0
         from panel import get_last_online
         from handlers.control import last_seen_text
@@ -400,11 +450,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         ]
     else:
         lines += ["", "💳 Подписки <b>нет</b>"]
-
-    # Мьют
-    muted = await get_muted_until(tg_id)
-    if muted:
-        lines.append(f"🔇 Заглушён до: <b>{muted}</b>")
 
     # Рефералы
     ref_stats = await get_referral_stats(tg_id)
@@ -444,7 +489,8 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     if ticket_count > 0:
         info_btns.append(InlineKeyboardButton("🎫 Переписка", callback_data=f"ticket_view:{tg_id}:1"))
     if history_count > 0:
-        info_btns.append(InlineKeyboardButton("🕐 История", callback_data=f"user_history:{tg_id}:1"))
+        info_btns.append(InlineKeyboardButton("🕐 История подписки",
+                                             callback_data=f"user_feed:{tg_id}:subs:1"))
     kb_rows.append(info_btns)
     if limited:
         kb_rows.append([InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}")])
@@ -458,10 +504,7 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
             InlineKeyboardButton("🎁 Выдать промокод", callback_data=f"promo_give_for:{tg_id}"),
             InlineKeyboardButton("⛔ Чёрный список", callback_data=f"bl_view:{tg_id}"),
         ])
-        kb_rows.append([
-            InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}"),
-            InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}"),
-        ])
+        kb_rows.append([InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}")])
         kb_rows.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     kb = InlineKeyboardMarkup(kb_rows)
 
@@ -470,67 +513,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         await query_or_msg.edit_message_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
     else:
         await query_or_msg.reply_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
-
-
-_ACTION_LABELS_ADMIN = {
-    "sub_created": "📦 Создана",
-    "trial_approved": "🆓 Триал",
-    "trial_rejected": "❌ Триал отклонён",
-    "payment_confirmed": "💰 Оплата",
-    "payment_rejected": "❌ Оплата отклонена",
-    "promo_used": "🎟 Промокод",
-    "referral_bonus": "🎁 Реф. бонус",
-    "referral_invited_bonus": "🎁 Бонус приглашённого",
-    "payment_refunded": "↩️ Возврат",
-    "sub_enabled": "▶️ Включена",
-    "sub_disabled": "⏸ Приостановлена",
-    "sub_deleted": "🗑 Удалена",
-    "sub_frozen": "❄️ Заморожена",
-    "user_unmuted": "🔊 Разблокирован",
-}
-
-
-async def handle_user_history(query, tg_id: int, page: int = 1):
-    from database import get_user_info
-    from paidsub.storage import get_user_history
-    from html import escape
-    rows, total_pages = await get_user_history(tg_id, page)
-    u = await get_user_info(tg_id)
-    name = escape(str(u[1] if u else tg_id))
-
-    if not rows:
-        await query.edit_message_text(
-            f"🕐 <b>История — {name}</b>\n\nЗаписей нет.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ Профиль", callback_data=f"user_profile:{tg_id}")],
-            ]),
-        )
-        return
-
-    lines = [f"🕐 <b>История — {name}</b> (<code>{tg_id}</code>)\n"]
-    for entry_id, _, action, details, created_at in rows:
-        label = _ACTION_LABELS_ADMIN.get(action, action)
-        ts = created_at[:16] if created_at else ""
-        detail_line = f"\n     <i>{escape(details[:100])}</i>" if details else ""
-        lines.append(f"{label} · {ts}{detail_line}")
-
-    kb = []
-    if total_pages > 1:
-        nav = []
-        if page > 1:
-            nav.append(InlineKeyboardButton("◀️", callback_data=f"user_history:{tg_id}:{page - 1}"))
-        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
-        if page < total_pages:
-            nav.append(InlineKeyboardButton("▶️", callback_data=f"user_history:{tg_id}:{page + 1}"))
-        kb.append(nav)
-    kb.append([InlineKeyboardButton("◀️ Профиль", callback_data=f"user_profile:{tg_id}")])
-
-    await query.edit_message_text(
-        "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(kb),
-    )
 
 
 async def handle_unban_user(query, context, tg_id: int):

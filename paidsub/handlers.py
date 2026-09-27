@@ -10,17 +10,13 @@ from paidsub.storage import (
     list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
     add_request, get_pending_request, resolve_request,
     update_paid_sub_field, get_expired_paid_subs, set_expire_date,
-    add_history, list_history, get_history_entry,
-    get_muted_until, set_mute, clear_mute, list_muted,
-    list_pending_requests,
+    add_history,
     get_referrer, mark_referral_rewarded, get_all_referral_stats,
-    create_promo, get_promo, get_promo_by_id, list_promos, toggle_promo,
-    delete_promo, promo_used_by, record_promo_use, promo_use_count, get_pending_promo,
+    get_promo, promo_used_by, record_promo_use, promo_use_count, get_pending_promo,
 )
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
     approve_keyboard, paid_sub_settings_keyboard,
-    paid_history_keyboard, muted_list_keyboard,
 )
 from paidsub.time_parser import fmt_duration, fmt_duration_precise
 
@@ -52,17 +48,9 @@ def _paid_presets_ready(cfg: dict) -> bool:
     ])
 
 
-def _price_label() -> str:
-    """Сумма нужна, когда тарифов нет: по ней бот выставит счёт."""
-    return "💵 Сумма без тарифов"
-
-
 def _fmt_presets(cfg: dict, squad_names=None) -> str:
     trial = cfg.get("paid_trial_period")
     trial_str = fmt_duration(trial) if trial else "не задан"
-
-    price = cfg.get("paid_price")
-    price_str = f"{price} ₽" if price is not None else "не задана"
 
     from handlers.payprovider import provider_line
 
@@ -85,10 +73,10 @@ def _fmt_presets(cfg: dict, squad_names=None) -> str:
            if chosen else "Выдаём: <b>не выбраны</b>")
         + "</blockquote>"
     )
-    return _presets_text(trial_str, provider_line(), price_str, hwid, traf, panel_block)
+    return _presets_text(trial_str, provider_line(), hwid, traf, panel_block)
 
 
-def _presets_text(trial_str, pay_line, price_str, hwid, traf, panel_block) -> str:
+def _presets_text(trial_str, pay_line, hwid, traf, panel_block) -> str:
     """Общий вид экрана настроек: сроки, оплата, лимиты, доступ."""
     return (
         "⏱ <b>Сроки</b>\n<blockquote>"
@@ -96,7 +84,7 @@ def _presets_text(trial_str, pay_line, price_str, hwid, traf, panel_block) -> st
         "<i>Сроки платных периодов задают тарифы</i></blockquote>\n\n"
         "💳 <b>Оплата</b>\n<blockquote>"
         f"{pay_line}\n"
-        f"{_price_label()}: <b>{price_str}</b></blockquote>\n\n"
+        "<i>Цену платного периода задают тарифы</i></blockquote>\n\n"
         "📊 <b>Лимиты</b>\n<blockquote>"
         f"🖥 Устройств: <b>{hwid}</b>\n"
         f"📶 Трафик: <b>{traf}</b></blockquote>\n\n"
@@ -165,19 +153,6 @@ async def handle_paid_preset_trial(query, context):
 
 
 
-
-
-async def handle_paid_preset_price(query, context):
-    from states import AWAITING_PAID_PRICE
-    context.user_data["state"] = AWAITING_PAID_PRICE
-    cfg = load_config()
-    current = cfg.get("paid_price")
-    cur_str = f"{current} ₽" if current is not None else "не задана"
-    await query.edit_message_text(
-        f"💵 <b>Сумма подписки</b>\n\n<blockquote>Сейчас: <b>{cur_str}</b></blockquote>\n\n<i>Пришли сумму в рублях (число).</i>",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
 
 
 
@@ -391,25 +366,6 @@ async def handle_request_sub(query, context):
         )
         return
 
-    muted = await get_muted_until(user.id)
-    if muted:
-        muted_dt = None
-        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-            try:
-                muted_dt = datetime.strptime(muted, fmt)
-                break
-            except ValueError:
-                continue
-        if muted_dt and datetime.now() < muted_dt:
-            await query.edit_message_text(
-                "⚙️ <b>Моя подписка</b>\n\n"
-                f"<blockquote>🔇 Запросы недоступны до <b>{muted}</b></blockquote>\n\n"
-                "<i>Если это ошибка — напишите в поддержку.</i>",
-                parse_mode="HTML",
-                reply_markup=back_main(),
-            )
-            return
-
     pending = await get_pending_request(user.id)
     if pending:
         await query.edit_message_text(
@@ -450,7 +406,6 @@ async def handle_request_sub(query, context):
     hwid = cfg.get("paid_preset_hwid", 0)
     traf_raw = cfg.get("paid_preset_traffic", 0)
     traf_str = f"{traf_raw} ГБ" if traf_raw > 0 else "безлимит"
-    price = cfg.get("paid_price", 0)
     hwid_str = str(hwid) if hwid > 0 else "безлимит"
 
     await context.bot.send_message(
@@ -462,7 +417,6 @@ async def handle_request_sub(query, context):
             f"🆔 TG ID: <code>{user.id}</code>\n\n"
             f"<b>Параметры подписки:</b>\n"
             f"🆓 Пробный период: <b>{fmt_duration(trial_sec)}</b>\n"
-            f"💵 Сумма без тарифов: <b>{price} ₽</b>\n"
             f"🖥 Лимит устройств: <b>{hwid_str}</b>\n"
             f"📶 Трафик: <b>{traf_str}</b>\n\n"
             "Одобрить пробную подписку?"
@@ -672,7 +626,7 @@ async def handle_paid_sub_view(query, sub_id: int):
     status_icon = "🟢" if enabled else "🔴"
 
     # Статус подписки
-    status_labels = {"active": "активна", "renewal": "ожидает продления", "expired": "истекла"}
+    status_labels = {"active": "активна", "expired": "истекла"}
     status_label = status_labels.get(status, status)
 
     payment_line = ""
@@ -702,21 +656,6 @@ async def handle_paid_sub_view(query, sub_id: int):
     if tg_id:
         tg_line += f"  ·  <code>{tg_id}</code>\n"
 
-    # Мьют
-    mute_line = ""
-    if tg_id:
-        muted_until = await get_muted_until(tg_id)
-        if muted_until:
-            muted_dt = None
-            for fmt_m in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-                try:
-                    muted_dt = datetime.strptime(muted_until, fmt_m)
-                    break
-                except ValueError:
-                    continue
-            if muted_dt and datetime.now() < muted_dt:
-                mute_line = f"🔇 Заглушен до: <b>{muted_until}</b>\n"
-
     # Индивидуальные настройки
     ind_lines = []
     # период оплаты, сумму и окно продления задают тарифы — в подписке
@@ -738,44 +677,20 @@ async def handle_paid_sub_view(query, sub_id: int):
             referral_line = (f"👥 Пришёл от: <b>{_esc_name(ref_name, referrer_id)}</b> "
                              f"(<code>{referrer_id}</code>)\n")
 
-    # Оставшееся время
-    # Конец периода и окно оплаты — это разные даты. Показываем обе:
-    # «Осталось» по дате окончания включало бы окно оплаты и выглядело бы так,
-    # будто пробный период длится на всё окно дольше, чем на самом деле.
-    from paidsub.storage import parse_sub_date, sub_settings
-    eff = sub_settings(row)
-    renew_sec = int(eff["renew_time"])
+    # Оставшееся время: период и доступ кончаются в один момент — окна нет
+    from paidsub.storage import parse_sub_date
     now_dt = datetime.now()
-
     expire_dt = parse_sub_date(expire)
-    period_end_raw = row[18] if len(row) > 18 else None
-    period_end_dt = parse_sub_date(period_end_raw) if period_end_raw else None
-    if not period_end_dt and expire_dt:
-        period_end_dt = expire_dt - timedelta(seconds=renew_sec)
+    period_label = "Пробный период" if times_renewed == 0 else "Оплаченный период"
 
-    period_label = "пробный период" if times_renewed == 0 else "оплаченный период"
-    time_left_line = ""
-
-    if period_end_dt and now_dt < period_end_dt:
-        left = int((period_end_dt - now_dt).total_seconds())
-        time_left_line = (
-            f"📅 {period_label.capitalize()} до: <b>{period_end_dt.strftime('%d.%m.%Y %H:%M:%S')}</b>\n"
-            f"⏱ Осталось: <b>{fmt_duration_precise(left)}</b>\n"
-            + (f"⏳ Затем на оплату: <b>{fmt_duration(renew_sec)}</b> — до {expire}\n"
-               if renew_sec else "")
-        )
-    elif expire_dt and now_dt < expire_dt:
+    if expire_dt and now_dt < expire_dt:
         left = int((expire_dt - now_dt).total_seconds())
-        ended = period_end_dt.strftime('%d.%m.%Y %H:%M:%S') if period_end_dt else "—"
-        time_left_line = (
-            f"📅 {period_label.capitalize()} закончился: <b>{ended}</b>\n"
-            f"⏳ Оплатить до: <b>{expire}</b>\n"
-            f"⏱ На оплату осталось: <b>{fmt_duration_precise(left)}</b>\n"
-        )
+        time_left_line = (f"📅 {period_label} до: <b>{expire}</b>\n"
+                          f"⏱ Осталось: <b>{fmt_duration_precise(left)}</b>\n")
     else:
         time_left_line = f"📅 До: <b>{expire}</b>\n⏱ <b>Истекла</b>\n"
 
-    extra_lines = (mute_line + referral_line).strip()
+    extra_lines = referral_line.strip()
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b>  {status_icon}\n"
         + tg_line
@@ -1644,169 +1559,65 @@ async def expiry_reminder_tick(context):
 async def check_expired_subs(context):
     """Следит за сроками: меняет статусы и предупреждает людей.
 
-    Доступ в панели не выключаем — у клиента там тот же срок окончания,
+    Окна оплаты нет: подписка работает до даты окончания, потом сразу
+    истекает. Доступ в панели не выключаем — у клиента там тот же срок,
     и панель закрывает его сама, переводя в EXPIRED.
     """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    cfg = load_config()
-    # окно на продление осталось только у старых подписок — в их собственных полях
-    global_renew_seconds = 0
-
-    subs = await get_expired_paid_subs()
-    now = datetime.now()
-
     from paidsub.storage import parse_sub_date
 
-    # Предохранитель: одномоментный переход большого числа активных подписок
-    # в «продлите» — почти всегда следствие правки настроек, а не реального
-    # истечения. Уведомления в таком случае не шлём, а зовём админа разбираться.
-    flip_limit = int(cfg.get("mass_flip_limit", 5) or 5)
-    would_flip = 0
-    for _r in subs:
-        _status, _expire_s, _renew, _pe = _r[7], _r[6], _r[9], _r[10]
-        if _status != "active":
-            continue
-        _exp = parse_sub_date(_expire_s)
-        if not _exp:
-            continue
-        _end = parse_sub_date(_pe) if _pe else _exp - timedelta(seconds=_renew or global_renew_seconds)
-        if _end and now >= _end:
-            would_flip += 1
-
-    if would_flip > flip_limit:
-        # джоб крутится каждые 10 секунд — предупреждаем один раз, до разбора
-        if not cfg.get("mass_flip_alerted"):
-            from config import ADMIN_ID, save_config
-            from log_channel import send_log
-            warn = (
-                f"🛑 <b>Массовый переход подписок</b>\n\n"
-                f"Сразу <b>{would_flip}</b> активных подписок оказались в конце периода.\n"
-                f"Похоже на последствие правки настроек, а не на реальное истечение.\n\n"
-                f"Уведомления пользователям <b>не отправлены</b>, статусы не тронуты.\n"
-                f"Проверь «⏳ Окно оплаты» в меню платных подписок."
-            )
-            cfg["mass_flip_alerted"] = True
-            save_config(cfg)
-            try:
-                await context.bot.send_message(chat_id=ADMIN_ID, text=warn, parse_mode="HTML")
-                await send_log(context.bot, warn)
-            except Exception:
-                pass
-        return
-
-    if cfg.get("mass_flip_alerted"):
-        from config import save_config
-        cfg["mass_flip_alerted"] = False
-        save_config(cfg)
-
-    for row in subs:
-        (sub_id, tg_id, email, uuid_val, sub_id_str, sub_url,
-         expire_str, status, times_renewed, ind_renew_time, period_end_str) = row
-        renew_seconds = ind_renew_time if ind_renew_time else global_renew_seconds
+    now = datetime.now()
+    for row in await get_expired_paid_subs():
+        (sub_id, tg_id, email, _uuid_val, _sub_id_str, _sub_url,
+         expire_str, status, times_renewed, _ind_renew_time, _period_end) = row
 
         expire_dt = parse_sub_date(expire_str)
         if not expire_dt:
             continue
 
-        # Конец периода берём сохранённый. Вычислять его как expire − время_на_оплату
-        # нельзя: правка времени на оплату тогда сдвигает конец периода задним числом
-        # и разом выкидывает всех активных в «продлите подписку».
-        main_period_end = parse_sub_date(period_end_str) if period_end_str else None
-        if not main_period_end:
-            main_period_end = expire_dt - timedelta(seconds=renew_seconds)
-
-        if now < main_period_end:
-            # Основной период ещё идёт — статус active
+        if now < expire_dt:
             if status != "active":
                 await update_paid_sub_field(sub_id, "status", "active")
             continue
 
-        if now < expire_dt:
-            # Основной период кончился, идёт время на оплату
-            if status == "active":
-                # Переход active → renewal: одноразовое уведомление
-                await update_paid_sub_field(sub_id, "status", "renewal")
-                if tg_id:
-                    from database import log_activity
-                    await log_activity(tg_id, "ev:period_ended",
-                                       "триал" if times_renewed == 0 else "оплаченный")
-                if tg_id:
-                    kb = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
-                    ])
-                    try:
-                        if times_renewed > 0:
-                            period_text = "Подписка истекла"
-                        else:
-                            period_text = "Пробный период закончился"
-                        # Сколько осталось окна — считаем по датам самой подписки:
-                        # у старых записей окно ещё идёт, даже если в настройках его убрали
-                        window = max(0, int((expire_dt - now).total_seconds()))
-                        await context.bot.send_message(
-                            chat_id=tg_id,
-                            text=(
-                                f"⚠️ <b>{period_text}</b>\n\n"
-                                f"<blockquote>VPN проработает ещё "
-                                f"<b>{fmt_duration_precise(window)}</b> — "
-                                f"успейте продлить.</blockquote>"
-                            ),
-                            parse_mode="HTML",
-                            reply_markup=kb,
-                        )
-                    except Exception:
-                        pass
-        else:
-            # Время на оплату вышло
-            if status != "expired":
-                # Переход → expired: одноразовое уведомление, в панель не лезем.
-                # Срок окончания у клиента в панели тот же, что у нас в базе,
-                # поэтому доступ она закрывает сама — переводит в EXPIRED, когда
-                # время вышло. Отключать вручную значит делать ту же работу
-                # дважды и рисковать разъехаться с панелью.
-                # Без окна на продление период и доступ кончаются в один момент,
-                # поэтому «конец периода» фиксируем здесь же — статистика его ждёт
-                was_active = status == "active"
-                await update_paid_sub_field(sub_id, "status", "expired")
-                if tg_id:
-                    from database import log_activity
-                    if was_active:
-                        await log_activity(tg_id, "ev:period_ended",
-                                           "триал" if times_renewed == 0 else "оплаченный")
-                    await log_activity(tg_id, "ev:expired")
+        if status == "expired":
+            continue
 
-                # Единственное, что делаем в панели, — ещё раз отдаём ей ту же
-                # дату окончания. Запрос идемпотентный, зато если срок в панели
-                # когда-то разъехался с базой (например, правили руками),
-                # он снова сойдётся, и панель закроет доступ.
-                from panel import update_client_expire
-                synced = await update_client_expire(email, expire_str)
-                if not synced.get("success"):
-                    from log_channel import send_log as _send_log
-                    await _send_log(context.bot,
-                        f"⚠️ Срок в панели не сошёлся с базой: <code>{email}</code> — "
-                        f"{synced.get('error', '?')}\nПроверь, закрыт ли доступ.")
+        # Срок вышел: помечаем истёкшей и один раз говорим об этом человеку
+        await update_paid_sub_field(sub_id, "status", "expired")
+        if tg_id:
+            from database import log_activity
+            await log_activity(tg_id, "ev:period_ended",
+                               "триал" if times_renewed == 0 else "оплаченный")
+            await log_activity(tg_id, "ev:expired")
 
-                if tg_id:
-                    kb = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
-                    ])
-                    try:
-                        if was_active:
-                            # окна не было: период кончился — доступ закрылся сразу
-                            head = ("Пробный период закончился"
-                                    if times_renewed == 0 else "Подписка закончилась")
-                            body = (f"🔴 <b>{head}</b>\n\n"
-                                    "<i>Продлите — VPN включится сразу после оплаты.</i>")
-                        else:
-                            body = ("🔴 <b>Подписка отключена</b>\n\n"
-                                    "<i>Продлите — VPN включится сразу после оплаты.</i>")
-                        await context.bot.send_message(
-                            chat_id=tg_id, text=body,
-                            parse_mode="HTML", reply_markup=kb,
-                        )
-                    except Exception:
-                        pass
+        # Единственное, что делаем в панели, — ещё раз отдаём ей ту же дату
+        # окончания. Запрос идемпотентный, зато если срок в панели когда-то
+        # разъехался с базой (например, правили руками), он снова сойдётся.
+        from panel import update_client_expire
+        synced = await update_client_expire(email, expire_str)
+        if not synced.get("success"):
+            from log_channel import send_log as _send_log
+            await _send_log(context.bot,
+                f"⚠️ Срок в панели не сошёлся с базой: <code>{email}</code> — "
+                f"{synced.get('error', '?')}\nПроверь, закрыт ли доступ.")
 
+        if not tg_id:
+            continue
+        head = ("Пробный период закончился" if times_renewed == 0
+                else "Подписка закончилась")
+        try:
+            await context.bot.send_message(
+                chat_id=tg_id,
+                text=(f"🔴 <b>{head}</b>\n\n"
+                      "<i>Продлите — VPN включится сразу после оплаты.</i>"),
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")]
+                ]),
+            )
+        except Exception:
+            pass
 
 
 async def revoke_paid_period(tg_id: int, period_seconds: int | None, context,
@@ -1814,8 +1625,8 @@ async def revoke_paid_period(tg_id: int, period_seconds: int | None, context,
     """Отзывает оплаченный срок — обратная операция к начислению при оплате.
 
     Двигает дату окончания назад на оплаченный период, конец периода сдвигается
-    вместе с ней. Если срок уходит в прошлое, дальше подписку переведёт в окно
-    оплаты или в истёкшие обычная проверка сроков.
+    вместе с ней. Если срок уходит в прошлое, обычная проверка сроков
+    переведёт подписку в истёкшие.
     """
     if not period_seconds:
         return {"ok": False, "error": "у платежа нет сохранённого периода"}
@@ -1869,6 +1680,8 @@ def _renew_base(full_row) -> tuple:
     from paidsub.storage import parse_sub_date
     now = datetime.now()
     raw = full_row[18] if full_row is not None and len(full_row) > 18 else None
+    if not raw:
+        raw = full_row[6] if full_row is not None and len(full_row) > 6 else None
     end = parse_sub_date(raw) if raw else None
     if end and end > now:
         return end, int((end - now).total_seconds())
@@ -1916,17 +1729,13 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
         guessed = (f"⚠️ У платежа не было срока — начислил "
                    f"{fmt_duration(pay_seconds)} "
                    + ("по первому тарифу" if tariffs else "по умолчанию (30 дней)"))
-    renew_seconds = int(settings["renew_time"] or 0)
-
     base, _carried = _renew_base(full_row)
-    new_period_end = base + timedelta(seconds=pay_seconds)
-    new_expire = new_period_end + timedelta(seconds=renew_seconds)
+    # окна оплаты нет: конец периода и конец доступа — одна и та же дата
+    new_expire = base + timedelta(seconds=pay_seconds)
     new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
 
     await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
-    await update_paid_sub_field(
-        sub_id, "period_end", new_period_end.strftime("%d.%m.%Y %H:%M:%S")
-    )
+    await update_paid_sub_field(sub_id, "period_end", new_expire_str)
     await update_paid_sub_field(sub_id, "status", "active")
     await update_paid_sub_field(sub_id, "payment_pending", 0)
     # срок сдвинулся — напоминания о скором конце начинают отсчёт заново
@@ -2004,192 +1813,6 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
 
 
 # ── Запросы ──────────────────────────────────────────────────────────────────
-
-async def handle_paid_requests(query):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from database import get_user_info
-    trial_rows = await list_pending_requests()
-
-    if not trial_rows:
-        await query.edit_message_text(
-            "📬 <b>Запросы</b>\n\nНет ожидающих запросов.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")]
-            ]),
-        )
-        return
-
-    kb = []
-    lines = []
-
-    if trial_rows:
-        lines.append("<b>🆓 Запросы на пробный период:</b>\n")
-        for tg_id, created_at in trial_rows:
-            user_info = await get_user_info(tg_id)
-            name = user_info[1] if user_info else str(tg_id)
-            uname = f"@{user_info[2]}" if user_info and user_info[2] else f"id{tg_id}"
-            ts = created_at[:16] if created_at else "?"
-            lines.append(f"👤 {name} ({uname}) · <code>{ts}</code>")
-            kb.append([
-                InlineKeyboardButton(f"✅ {tg_id}", callback_data=f"paid_approve:{tg_id}"),
-                InlineKeyboardButton(f"❌ {tg_id}", callback_data=f"paid_reject:{tg_id}"),
-                InlineKeyboardButton(f"🔇", callback_data=f"paid_mute_user:{tg_id}"),
-            ])
-        lines.append("")
-
-    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
-
-    await query.edit_message_text(
-        "📬 <b>Запросы</b>\n\n" + "\n".join(lines),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(kb),
-    )
-
-
-# ── История ──────────────────────────────────────────────────────────────────
-
-_ACTION_LABELS = {
-    "trial_approved": "✅ Пробный одобрен",
-    "trial_rejected": "❌ Пробный отклонён",
-    "payment_confirmed": "✅ Оплата подтверждена",
-    "payment_rejected": "❌ Оплата отклонена",
-    "sub_created": "🆕 Подписка создана",
-    "sub_extended": "➕ Срок добавлен",
-    "sub_reduced": "➖ Срок убавлен",
-    "sub_frozen": "🧊 Заморожена",
-    "sub_enabled": "▶️ Включена",
-    "sub_disabled": "⏸ Отключена",
-    "sub_deleted": "🗑 Удалена",
-    "bulk_extended": "⚡➕ Массово: срок добавлен",
-    "bulk_reduced": "⚡➖ Массово: срок убавлен",
-    "settings_changed": "⚙️ Изменены настройки",
-    "referral_bonus": "🎁 Реферальный бонус",
-    "referral_invited_bonus": "🎁 Бонус приглашённого",
-    "payment_refunded": "↩️ Возврат платежа",
-    "promo_used": "🎟 Промокод применён",
-    "user_muted": "🔇 Заглушён",
-    "user_unmuted": "🔊 Разглушён",
-}
-
-
-async def handle_paid_history(query, page: int = 1):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    rows, total_pages = await list_history(page)
-    if not rows:
-        await query.edit_message_text(
-            "📜 <b>История</b>\n\nПока нет записей.",
-            parse_mode="HTML",
-            reply_markup=paid_history_keyboard(1, 1),
-        )
-        return
-    kb = []
-    for entry_id, tg_id, action, details, created_at in rows:
-        label = _ACTION_LABELS.get(action, action)
-        ts = created_at[5:16] if created_at else "?"  # MM-DD HH:MM
-        kb.append([InlineKeyboardButton(
-            f"{label} · {tg_id} · {ts}",
-            callback_data=f"paid_history_view:{entry_id}",
-        )])
-    # навигация
-    nav = []
-    if page > 1:
-        nav.append(InlineKeyboardButton("◀️", callback_data=f"paid_history_page:{page - 1}"))
-    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
-    if page < total_pages:
-        nav.append(InlineKeyboardButton("▶️", callback_data=f"paid_history_page:{page + 1}"))
-    if total_pages > 1:
-        kb.append(nav)
-    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
-
-    await query.edit_message_text(
-        f"📜 <b>История действий</b>\n\n"
-        f"Всего показано: стр. {page}/{total_pages}\n"
-        "Нажми на запись, чтобы посмотреть детали 👇",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(kb),
-    )
-
-
-async def handle_paid_history_view(query, entry_id: int):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from database import get_user_info
-    entry = await get_history_entry(entry_id)
-    if not entry:
-        await query.answer("Запись не найдена", show_alert=True)
-        return
-    _, tg_id, action, details, created_at = entry
-    label = _ACTION_LABELS.get(action, action)
-
-    user_info = await get_user_info(tg_id) if tg_id else None
-    name = user_info[1] if user_info else str(tg_id)
-    uname = f"@{user_info[2]}" if user_info and user_info[2] else f"id{tg_id}"
-
-    text = (
-        f"📋 <b>Детали действия</b>\n\n"
-        f"🎬 Действие: <b>{label}</b>\n"
-        f"👤 Пользователь: <b>{name}</b> ({uname})\n"
-        f"🆔 TG ID: <code>{tg_id}</code>\n"
-        f"🕐 Время: <b>{created_at}</b>\n"
-    )
-    if details:
-        text += f"\n📝 Подробности:\n{details}"
-
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️ К истории", callback_data="paid_history")],
-    ])
-    await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb)
-
-
-# ── Мьют / Размьют ──────────────────────────────────────────────────────────
-
-async def handle_mute_user(query, tg_id: int, context):
-    from states import AWAITING_PAID_MUTE_USER
-    context.user_data["state"] = AWAITING_PAID_MUTE_USER
-    context.user_data["mute_tg_id"] = tg_id
-    await query.edit_message_text(
-        f"🔇 <b>Заглушить пользователя {tg_id}</b>\n\n"
-        "Введи время блокировки запросов:\n"
-        "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code>",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
-
-
-async def handle_unmute_user(query, tg_id: int):
-    await clear_mute(tg_id)
-    await add_history(tg_id, "user_unmuted", "Снята блокировка запросов")
-    await query.answer(f"🔊 Пользователь {tg_id} разглушён", show_alert=True)
-    await handle_muted_list(query)
-
-
-async def handle_muted_list(query):
-    from datetime import datetime as dt
-    rows = await list_muted()
-    active = [(tg_id, mu) for tg_id, mu in rows if _is_mute_active(mu)]
-    if not active:
-        await query.edit_message_text(
-            "🔇 <b>Заглушённые</b>\n\nНет заглушённых пользователей.",
-            parse_mode="HTML",
-            reply_markup=muted_list_keyboard([]),
-        )
-        return
-    await query.edit_message_text(
-        "🔇 <b>Заглушённые</b>\n\n"
-        "Нажми на пользователя, чтобы разглушить:",
-        parse_mode="HTML",
-        reply_markup=muted_list_keyboard(active),
-    )
-
-
-def _is_mute_active(muted_until: str) -> bool:
-    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-        try:
-            return datetime.now() < datetime.strptime(muted_until, fmt)
-        except ValueError:
-            continue
-    return False
-
 
 # ── Авто-обновление ников ────────────────────────────────────────────────────
 
@@ -2309,114 +1932,11 @@ async def validate_promo(code: str, tg_id: int):
         return None, "❌ Вы уже использовали этот промокод."
     if max_uses and await promo_use_count(code_u) >= int(max_uses):
         return None, "❌ Промокод уже разобрали — закончились активации."
+    if len(promo) > 12 and promo[12]:
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if row and (row[12] if len(row) > 12 else 0):
+            return None, "❌ Этот промокод — только для тех, кто ещё не оплачивал подписку."
     return promo, None
-
-
-async def handle_promos_menu(query):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from promos import reward_label
-    promos = await list_promos()
-    kb = []
-    personal = 0
-    for pid, code, percent, expires_at, active, owner, max_uses, kind, days, uses in promos:
-        mark = "🟢" if active else "🔴"
-        if owner:
-            personal += 1
-        who = "🎯" if owner else "🌍"
-        limit = f"/{max_uses}" if max_uses else ""
-        exp = f" · до {expires_at}" if expires_at else ""
-        kb.append([InlineKeyboardButton(
-            f"{mark}{who} {code} · {reward_label(kind or 'percent', days if kind == 'days' else percent)}"
-            f" · {uses}{limit}{exp}",
-            callback_data=f"promo_view:{pid}",
-        )])
-    kb.append([InlineKeyboardButton("🎁 Выдать лично", callback_data="promo_give"),
-               InlineKeyboardButton("📤 Раздать сегменту", callback_data="promo_seg")])
-    kb.append([InlineKeyboardButton("➕ Создать общий код", callback_data="promo_create"),
-               InlineKeyboardButton("📊 Что принесли", callback_data="promo_income")])
-    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
-    body = (f"Всего кодов: <b>{len(promos)}</b>  ·  личных: <b>{personal}</b>"
-            if promos else "Промокодов пока нет.")
-    await query.edit_message_text(
-        "🎟 <b>Промокоды</b>\n\n"
-        f"<blockquote>{body}</blockquote>\n\n"
-        "<i>🌍 общий — работает у всех, кто его узнает\n"
-        "🎯 личный — привязан к человеку, у чужого не сработает\n"
-        "Награда — скидка в % на продление или подаренные дни.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(kb),
-    )
-
-
-async def handle_promo_view(query, promo_id: int):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    promo = await get_promo_by_id(promo_id)
-    if not promo:
-        await query.answer("Промокод не найден", show_alert=True)
-        return
-    from paidsub.storage import promo_income
-    from promos import reward_text
-    pid, code, percent, expires_at, active, created_at = promo[:6]
-    owner = promo[6] if len(promo) > 6 else None
-    max_uses = promo[7] if len(promo) > 7 else 0
-    kind = promo[8] if len(promo) > 8 else "percent"
-    days = promo[9] if len(promo) > 9 else 0
-    note = promo[10] if len(promo) > 10 else None
-    used = await promo_use_count(code)
-    pays, income = await promo_income(code)
-    status = "🟢 активен" if active else "🔴 выключен"
-    exp_line = f"📅 Действует до: <b>{expires_at}</b>\n" if expires_at else "📅 Без срока\n"
-    limit_line = (f"🎯 Применений: <b>{used}</b> из <b>{max_uses}</b>\n" if max_uses
-                  else f"👥 Использован: <b>{used}</b> раз\n")
-    if owner:
-        from database import get_user_info
-        u = await get_user_info(owner)
-        owner_line = f"👤 Личный для: {_esc_name(u[1] if u and u[1] else '')} <code>{owner}</code>\n"
-    else:
-        owner_line = "🌍 Общий код — сработает у любого, кто его узнает\n"
-    kb = [[InlineKeyboardButton("🔴 Выключить" if active else "🟢 Включить",
-                                callback_data=f"promo_toggle:{pid}"),
-           InlineKeyboardButton("🗑 Удалить", callback_data=f"promo_delete:{pid}")]]
-    if owner:
-        kb.append([InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{owner}")])
-    kb.append([InlineKeyboardButton("◀️ К промокодам", callback_data="promo_menu")])
-    await query.edit_message_text(
-        f"🎟 <b>Промокод</b> <code>{_esc_name(code)}</code>\n\n"
-        f"<blockquote>🎁 Награда: <b>{reward_text(kind or 'percent', days if kind == 'days' else percent)}</b>\n"
-        f"{owner_line}"
-        f"📌 Статус: <b>{status}</b></blockquote>\n\n"
-        "📊 <b>Использование</b>\n<blockquote>"
-        f"{exp_line}"
-        f"{limit_line}"
-        f"💰 Оплат с ним: <b>{pays}</b> на <b>{income} ₽</b>\n"
-        f"🕐 Создан: {created_at[:16] if created_at else '?'}</blockquote>"
-        + (f"\n\n📝 <i>{_esc_name(note)}</i>" if note else ""),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(kb),
-    )
-
-
-async def handle_promo_create(query, context):
-    from states import AWAITING_PROMO_NEW_CODE
-    context.user_data["state"] = AWAITING_PROMO_NEW_CODE
-    context.user_data.pop("new_promo", None)
-    await query.edit_message_text(
-        "🎟 <b>Новый промокод</b>\n\n"
-        "<i>Пришли текст кода — латиница и цифры, например <code>SUMMER20</code>.</i>",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
-
-
-async def handle_promo_toggle(query, promo_id: int):
-    await toggle_promo(promo_id)
-    await handle_promo_view(query, promo_id)
-
-
-async def handle_promo_delete(query, promo_id: int):
-    await delete_promo(promo_id)
-    await query.answer("Промокод удалён 🗑")
-    await handle_promos_menu(query)
 
 
 async def handle_toggle_auto_trial(query):

@@ -267,9 +267,9 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
             return
         name, pay_seconds, price = t[1], t[2], int(t[3])
     else:
-        # тарифов нет — срок брать неоткуда, продлевать нечем
+        # тарифов нет — срок и цену брать неоткуда, продлевать нечем
         pay_seconds = int(settings["pay_period"] or 0)
-        if not pay_seconds:
+        if not pay_seconds or not int(settings["price"] or 0):
             await query.edit_message_text(
                 "💳 <b>Продление подписки</b>\n\n"
                 "<blockquote>Сейчас нет доступных тарифов.</blockquote>\n\n"
@@ -385,8 +385,11 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
             return
         tariff_name, pay_seconds, price = t[1], t[2], int(t[3])
     else:
-        price = int(settings["price"])
-        pay_seconds = settings["pay_period"]
+        price = int(settings["price"] or 0)
+        pay_seconds = int(settings["pay_period"] or 0)
+        if not price or not pay_seconds:
+            await query.answer("Сейчас нет доступных тарифов", show_alert=True)
+            return
 
     promo_code = None
     pending = await get_pending_promo(user.id)

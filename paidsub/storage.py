@@ -64,9 +64,9 @@ async def get_paid_sub_by_tg_id(tg_id: int) -> tuple | None:
 def sub_settings(row) -> dict:
     """Условия конкретной подписки.
 
-    Значения фиксируются при её создании, поэтому правка общих настроек
-    не меняет условия уже выданных подписок. Общий конфиг — только запасной
-    вариант для старых записей, где снимок ещё не проставлен.
+    Пробный период фиксируется при создании, поэтому правка общих настроек
+    не меняет условия уже выданных подписок. Срок и цену платного периода
+    задают тарифы — в подписке они остались только у старых записей.
 
     Работает и с get_paid_sub, и с get_paid_sub_by_tg_id: в обеих выборках
     ind_*-поля идут с 13-го индекса.
@@ -74,29 +74,16 @@ def sub_settings(row) -> dict:
     from config import load_config
     cfg = load_config()
 
-    def pick(idx: int, key: str, default):
+    def own(idx: int) -> int:
+        """Значение самой подписки: общий конфиг тут не запасной вариант."""
         val = row[idx] if row is not None and len(row) > idx else None
-        return val if val else cfg.get(key, default)
-
-    def pick_zeroable(idx: int, key: str, default):
-        """Как pick, но 0 — осознанный ноль, а не «не задано».
-
-        Нужно окну на продление: его выключают именно нулём, и подстановка
-        общего значения вместо нуля вернула бы окно обратно.
-        """
-        val = row[idx] if row is not None and len(row) > idx else None
-        if val is None:
-            val = cfg.get(key, default)
         return int(val or 0)
 
-    # Период оплаты и окно на продление остались только у старых подписок:
-    # новые берут срок из тарифа, а окна нет вовсе. Поэтому общий конфиг
-    # тут больше не запасной вариант — ноль честнее.
+    trial = row[13] if row is not None and len(row) > 13 else None
     return {
-        "trial_period": pick(13, "paid_trial_period", 86400),
-        "pay_period": int((row[14] if row is not None and len(row) > 14 else 0) or 0),
-        "renew_time": pick_zeroable(15, "", 0),
-        "price": pick(16, "paid_price", 0),
+        "trial_period": int(trial or cfg.get("paid_trial_period", 86400) or 0),
+        "pay_period": own(14),
+        "price": own(16),
     }
 
 
@@ -121,21 +108,10 @@ def parse_sub_date(raw: str):
 
 
 async def set_expire_date(sub_id: int, new_expire: str):
-    """Ставит дату окончания и синхронно двигает конец периода.
-
-    Инвариант: period_end = expire_date − время_на_оплату. Нарушает его
-    только смена самого времени на оплату — там наоборот, period_end
-    зафиксирован, а expire_date пересчитывается от него.
-    """
-    from datetime import timedelta
-    row = await get_paid_sub(sub_id)
+    """Ставит дату окончания. Конец периода совпадает с ней: окна оплаты нет."""
     await update_paid_sub_field(sub_id, "expire_date", new_expire)
-    parsed = parse_sub_date(new_expire)
-    if not parsed or not row:
-        return
-    renew = int(sub_settings(row)["renew_time"])
-    period_end = (parsed - timedelta(seconds=renew)).strftime("%d.%m.%Y %H:%M:%S")
-    await update_paid_sub_field(sub_id, "period_end", period_end)
+    if parse_sub_date(new_expire):
+        await update_paid_sub_field(sub_id, "period_end", new_expire)
     await update_paid_sub_field(sub_id, "remind_stage", 0)
 
 
@@ -146,7 +122,6 @@ async def snapshot_sub_settings(sub_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         for col, key in (
             ("ind_trial_period", "paid_trial_period"),
-            ("ind_price", "paid_price"),
         ):
             val = cfg.get(key)
             if val:
@@ -225,17 +200,6 @@ async def get_pending_request(tg_id: int):
             return await cur.fetchone()
 
 
-async def list_pending_requests() -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT r.tg_id, r.created_at
-            FROM paid_sub_requests r
-            WHERE r.status = 'pending'
-            ORDER BY r.created_at DESC
-        """) as cur:
-            return await cur.fetchall()
-
-
 
 
 async def resolve_request(tg_id: int, status: str):
@@ -266,19 +230,20 @@ async def add_history(tg_id: int, action: str, details: str | None = None):
         await log_activity(tg_id, f"ev:{action}", first_line)
 
 
-async def list_history(page: int = 1) -> tuple[list, int]:
-    offset = (page - 1) * HISTORY_PER_PAGE
+async def list_history(page: int = 1, per_page: int = HISTORY_PER_PAGE) -> tuple[list, int]:
+    offset = (page - 1) * per_page
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT COUNT(*) FROM paid_sub_history") as cur:
             total = (await cur.fetchone())[0]
         async with db.execute("""
-            SELECT h.id, h.tg_id, h.action, h.details, h.created_at
-            FROM paid_sub_history h
-            ORDER BY h.created_at DESC
+            SELECT h.id, h.tg_id, h.action, h.details,
+                   datetime(h.created_at, 'localtime'), u.first_name, u.username
+            FROM paid_sub_history h LEFT JOIN users u ON u.id = h.tg_id
+            ORDER BY h.id DESC
             LIMIT ? OFFSET ?
-        """, (HISTORY_PER_PAGE, offset)) as cur:
+        """, (per_page, offset)) as cur:
             rows = await cur.fetchall()
-    total_pages = max(1, (total + HISTORY_PER_PAGE - 1) // HISTORY_PER_PAGE)
+    total_pages = max(1, (total + per_page - 1) // per_page)
     return rows, total_pages
 
 
@@ -307,39 +272,6 @@ async def get_history_entry(entry_id: int) -> tuple | None:
             (entry_id,),
         ) as cur:
             return await cur.fetchone()
-
-
-# ── Мьют ─────────────────────────────────────────────────────────────────────
-
-async def get_muted_until(tg_id: int) -> str | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT muted_until FROM paid_mutes WHERE tg_id = ?",
-            (tg_id,),
-        ) as cur:
-            row = await cur.fetchone()
-            return row[0] if row and row[0] else None
-
-
-async def set_mute(tg_id: int, muted_until: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT OR REPLACE INTO paid_mutes (tg_id, muted_until) VALUES (?, ?)",
-            (tg_id, muted_until),
-        )
-        await db.commit()
-
-
-async def clear_mute(tg_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM paid_mutes WHERE tg_id = ?", (tg_id,))
-        await db.commit()
-
-
-async def list_muted() -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT tg_id, muted_until FROM paid_mutes ORDER BY muted_until DESC") as cur:
-            return await cur.fetchall()
 
 
 # ── Рефералы ────────────────────────────────────────────────────────────────
@@ -436,19 +368,22 @@ async def get_all_referral_stats() -> dict:
 
 # Новые поля идут в конце выборок: старый код читает промокод по индексам
 _PROMO_COLS = ("id, code, percent, expires_at, active, created_at, "
-               "owner_tg_id, max_uses, kind, days, note, source")
+               "owner_tg_id, max_uses, kind, days, note, source, first_only")
 
 
 async def create_promo(code: str, percent: int, expires_at: str | None,
                        owner_tg_id: int | None = None, max_uses: int = 0,
                        kind: str = "percent", days: int = 0,
-                       note: str | None = None, source: str = "manual") -> bool:
+                       note: str | None = None, source: str = "manual",
+                       first_only: int = 0) -> bool:
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
                 "INSERT INTO promo_codes (code, percent, expires_at, owner_tg_id, "
-                "max_uses, kind, days, note, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (code.upper(), percent, expires_at, owner_tg_id, max_uses, kind, days, note, source),
+                "max_uses, kind, days, note, source, first_only) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (code.upper(), percent, expires_at, owner_tg_id, max_uses, kind, days,
+                 note, source, int(first_only or 0)),
             )
             await db.commit()
         return True
@@ -486,6 +421,121 @@ async def list_promos(owner_tg_id: int | None = None, limit: int = 60) -> list:
     params.append(limit)
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(q, params) as cur:
+            return await cur.fetchall()
+
+
+# Вкладки списка: что считаем «мёртвым» — выключенные и просроченные коды
+_PROMO_DEAD = ("(p.active = 0 OR (p.expires_at IS NOT NULL "
+               "AND date(substr(p.expires_at, 7, 4) || '-' || substr(p.expires_at, 4, 2) "
+               "|| '-' || substr(p.expires_at, 1, 2)) < date('now', 'localtime')))")
+
+_PROMO_TABS = {
+    "all": "1 = 1",
+    "common": "p.owner_tg_id IS NULL AND NOT " + _PROMO_DEAD,
+    "personal": "p.owner_tg_id IS NOT NULL AND NOT " + _PROMO_DEAD,
+    "dead": _PROMO_DEAD,
+}
+
+
+async def list_promos_page(tab: str = "all", page: int = 1, per_page: int = 10) -> tuple:
+    """Страница списка промокодов: строки, всего страниц, всего кодов во вкладке."""
+    where = _PROMO_TABS.get(tab, _PROMO_TABS["all"])
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"SELECT COUNT(*) FROM promo_codes p WHERE {where}") as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute(f"""
+            SELECT p.id, p.code, p.percent, p.expires_at, p.active, p.owner_tg_id,
+                   p.max_uses, p.kind, p.days, p.first_only,
+                   (SELECT COUNT(*) FROM promo_uses u WHERE u.code = p.code)
+            FROM promo_codes p WHERE {where}
+            ORDER BY p.id DESC LIMIT ? OFFSET ?
+        """, (per_page, (page - 1) * per_page)) as cur:
+            rows = await cur.fetchall()
+    return rows, max(1, (total + per_page - 1) // per_page), total
+
+
+async def promo_tab_counts() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        out = {}
+        for tab, where in _PROMO_TABS.items():
+            async with db.execute(f"SELECT COUNT(*) FROM promo_codes p WHERE {where}") as cur:
+                out[tab] = (await cur.fetchone())[0]
+        return out
+
+
+async def promo_stats() -> dict:
+    """Итоги раздела: сколько кодов, применений и денег они принесли."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async def one(q, args=()):
+            async with db.execute(q, args) as cur:
+                return (await cur.fetchone())[0]
+        return {
+            "total": await one("SELECT COUNT(*) FROM promo_codes"),
+            "active": await one("SELECT COUNT(*) FROM promo_codes WHERE active = 1"),
+            "personal": await one("SELECT COUNT(*) FROM promo_codes WHERE owner_tg_id IS NOT NULL"),
+            "uses": await one("SELECT COUNT(*) FROM promo_uses"),
+            "uses_30d": await one("SELECT COUNT(*) FROM promo_uses "
+                                  "WHERE used_at >= datetime('now', '-30 days')"),
+            "pays": await one("SELECT COUNT(*) FROM payments "
+                              "WHERE status = 'paid' AND promo_code IS NOT NULL"),
+            "revenue": await one("SELECT COALESCE(SUM(amount), 0) FROM payments "
+                                 "WHERE status = 'paid' AND promo_code IS NOT NULL"),
+        }
+
+
+async def promo_users(code: str, limit: int = 20) -> list:
+    """Кто применял код: человек, когда и сколько заплатил с этим кодом."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT u.tg_id, us.first_name, us.username,
+                   datetime(u.used_at, 'localtime'),
+                   (SELECT COALESCE(SUM(p.amount), 0) FROM payments p
+                    WHERE p.tg_id = u.tg_id AND p.promo_code = u.code AND p.status = 'paid')
+            FROM promo_uses u LEFT JOIN users us ON us.id = u.tg_id
+            WHERE u.code = ? ORDER BY u.id DESC LIMIT ?
+        """, (code.upper(), int(limit))) as cur:
+            return await cur.fetchall()
+
+
+async def promo_set(promo_id: int, field: str, value):
+    if field not in ("expires_at", "max_uses", "first_only", "note"):
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"UPDATE promo_codes SET {field} = ? WHERE id = ?", (value, promo_id))
+        await db.commit()
+
+
+async def promo_dead_ids() -> list:
+    """Мёртвые коды без применений — их не жалко убрать."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"""
+            SELECT p.id FROM promo_codes p
+            WHERE {_PROMO_DEAD}
+              AND NOT EXISTS (SELECT 1 FROM promo_uses u WHERE u.code = p.code)
+        """) as cur:
+            return [r[0] for r in await cur.fetchall()]
+
+
+async def promo_clean_dead() -> int:
+    ids = await promo_dead_ids()
+    if not ids:
+        return 0
+    marks = ",".join("?" * len(ids))
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"DELETE FROM promo_codes WHERE id IN ({marks})", ids)
+        await db.commit()
+    return len(ids)
+
+
+async def find_promos(needle: str, limit: int = 20) -> list:
+    like = f"%{(needle or '').strip().upper()}%"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT p.id, p.code, p.percent, p.expires_at, p.active, p.owner_tg_id,
+                   p.max_uses, p.kind, p.days, p.first_only,
+                   (SELECT COUNT(*) FROM promo_uses u WHERE u.code = p.code)
+            FROM promo_codes p WHERE p.code LIKE ? ORDER BY p.id DESC LIMIT ?
+        """, (like, int(limit))) as cur:
             return await cur.fetchall()
 
 

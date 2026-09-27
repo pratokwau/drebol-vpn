@@ -115,11 +115,10 @@ async def init_db():
 
         # Фиксируем текущие общие настройки в подписках, созданных до этого механизма.
         # Дальше правка общих настроек не должна менять условия уже выданных подписок.
+        # Срок и цену платного периода теперь задают тарифы, поэтому из общих
+        # настроек переносим только пробный период.
         for _col, _key in (
             ("ind_trial_period", "paid_trial_period"),
-            ("ind_pay_period", "paid_pay_period"),
-            ("ind_renew_time", "paid_renew_time"),
-            ("ind_price", "paid_price"),
         ):
             _val = _cfg.get(_key)
             if _val:
@@ -130,46 +129,26 @@ async def init_db():
                 except Exception:
                     pass
 
-        # Проставляем period_end там, где его ещё нет.
-        # Значение выводится из текущего времени на оплату — если оно менялось
-        # после выдачи подписок, конец периода правится инструментом в админке.
-        try:
-            from datetime import datetime as _dt, timedelta as _td
-            _fallback_renew = int(_cfg.get("paid_renew_time", 86400) or 86400)
-            async with db.execute(
-                "SELECT id, expire_date, ind_renew_time FROM paid_subs WHERE period_end IS NULL"
-            ) as _cur:
-                _rows = await _cur.fetchall()
-            for _id, _exp, _renew in _rows:
-                _parsed = None
-                for _f in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-                    try:
-                        _parsed = _dt.strptime(_exp, _f)
-                        break
-                    except (ValueError, TypeError):
-                        continue
-                if not _parsed:
-                    continue
-                _sec = int(_renew or _fallback_renew)
-                _pe = (_parsed - _td(seconds=_sec)).strftime("%d.%m.%Y %H:%M:%S")
-                await db.execute(
-                    "UPDATE paid_subs SET period_end = ? WHERE id = ?", (_pe, _id)
-                )
-        except Exception:
-            pass
-
-        # Окно на продление выключаем: подписку теперь продлевают в любой
-        # момент, а остаток срока не сгорает — держать доступ после конца
-        # оплаченного периода незачем. Разовая правка: захочет вернуть —
-        # админ поставит окно в настройках, и оно снова заработает.
+        # Окна оплаты больше нет: конец периода совпадает с датой окончания,
+        # а подписки, ждавшие продления, снова считаются активными до своей даты.
+        # Разовая правка — при следующих запусках уже ничего не делает.
         try:
             from config import load_config as _lc, save_config as _sc
             _rc = _lc()
-            if _rc and not _rc.get("renew_window_removed"):
+            if _rc and not _rc.get("pay_window_dropped"):
                 await db.execute("UPDATE paid_subs SET ind_renew_time = 0")
+                await db.execute("UPDATE paid_subs SET period_end = expire_date")
+                await db.execute(
+                    "UPDATE paid_subs SET status = 'active' WHERE status = 'renewal'")
                 _rc["paid_renew_time"] = 0
-                _rc["renew_window_removed"] = True
+                _rc["pay_window_dropped"] = True
                 _sc(_rc)
+        except Exception:
+            pass
+        # У подписок, созданных до этой правки, конец периода тоже равен дате окончания
+        try:
+            await db.execute(
+                "UPDATE paid_subs SET period_end = expire_date WHERE period_end IS NULL")
         except Exception:
             pass
         await db.execute("""
@@ -185,12 +164,6 @@ async def init_db():
             await db.execute("ALTER TABLE paid_sub_history ADD COLUMN details TEXT")
         except Exception:
             pass
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS paid_mutes (
-                tg_id INTEGER PRIMARY KEY,
-                muted_until TEXT NOT NULL
-            )
-        """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS referrals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -233,6 +206,7 @@ async def init_db():
             ("days", "INTEGER NOT NULL DEFAULT 0"),
             ("note", "TEXT"),                    # за что выдан, видит только админ
             ("source", "TEXT NOT NULL DEFAULT 'manual'"),  # manual|personal|segment|winback
+            ("first_only", "INTEGER NOT NULL DEFAULT 0"),  # 1 — только тем, кто ещё не платил
         ):
             try:
                 await db.execute(f"ALTER TABLE promo_codes ADD COLUMN {col} {decl}")
@@ -497,7 +471,6 @@ async def get_dashboard_stats() -> dict:
         paying_total = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE times_renewed > 0")
         paid_other = await _one(db, "SELECT COUNT(*) FROM paid_subs WHERE status NOT IN ('active','renewal','expired')")
 
-        requests_pending = await _one(db, "SELECT COUNT(*) FROM paid_sub_requests WHERE status = 'pending'")
         admin_subs = await _one(db, "SELECT COUNT(*) FROM admin_subs")
 
         ref_total = await _one(db, "SELECT COUNT(*) FROM referrals")
@@ -538,7 +511,7 @@ async def get_dashboard_stats() -> dict:
         "paid_total": paid_total, "paid_active": paid_active, "paid_expired": paid_expired,
         "paid_other": paid_other,
         "trial_active": trial_active, "paying_active": paying_active, "paying_total": paying_total,
-        "requests_pending": requests_pending, "admin_subs": admin_subs,
+        "admin_subs": admin_subs,
         "ref_total": ref_total, "ref_rewarded": ref_rewarded,
         "promos_active": promos_active, "promo_uses": promo_uses,
         "payments_confirmed": payments_confirmed, "payments_today": payments_today,
@@ -546,6 +519,81 @@ async def get_dashboard_stats() -> dict:
         "revenue_total": revenue_total, "revenue_today": revenue_today,
         "revenue_known": revenue_known,
     }
+
+
+async def control_today() -> dict:
+    """Что произошло за сегодня: деньги, люди, подписки, сбои."""
+    today = "date(?1, 'localtime') = date('now', 'localtime')"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async def one(q, args=()):
+            async with db.execute(q, args) as cur:
+                row = await cur.fetchone()
+                return row[0] if row else 0
+
+        pays, amount = 0, 0
+        async with db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
+            f"WHERE status = 'paid' AND {today.replace('?1', 'COALESCE(paid_at, created_at)')}"
+        ) as cur:
+            pays, amount = await cur.fetchone()
+        return {
+            "pays": pays, "amount": amount,
+            "refunds": await one(
+                "SELECT COUNT(*) FROM payments WHERE status = 'refunded' AND "
+                + today.replace("?1", "COALESCE(refunded_at, created_at)")),
+            "failed": await one(
+                "SELECT COUNT(*) FROM payments WHERE status IN ('canceled','expired','error') "
+                "AND " + today.replace("?1", "created_at")),
+            "new_users": await one(
+                "SELECT COUNT(*) FROM users WHERE " + today.replace("?1", "created_at")),
+            "trials": await one(
+                "SELECT COUNT(*) FROM activity_log WHERE action = 'ev:trial_approved' AND "
+                + today.replace("?1", "created_at")),
+            "expired": await one(
+                "SELECT COUNT(*) FROM activity_log WHERE action = 'ev:expired' AND "
+                + today.replace("?1", "created_at")),
+            "tickets": await one(
+                "SELECT COUNT(DISTINCT user_id) FROM support_messages "
+                "WHERE from_admin = 0 AND " + today.replace("?1", "created_at")),
+            "blocked": await one(
+                "SELECT COUNT(*) FROM blacklist_log WHERE action IN ('added','readded','banned') "
+                "AND " + today.replace("?1", "created_at")),
+        }
+
+
+async def search_users(needle: str, limit: int = 12) -> list:
+    """Поиск людей: по ID, @username, имени или имени клиента в панели."""
+    needle = (needle or "").strip().lstrip("@")
+    if not needle:
+        return []
+    like = f"%{needle.lower()}%"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT u.id, u.first_name, u.username,
+                   (SELECT status FROM paid_subs p WHERE p.tg_id = u.id
+                    ORDER BY p.id DESC LIMIT 1)
+            FROM users u
+            WHERE CAST(u.id AS TEXT) LIKE ?
+               OR lower(u.username) LIKE ?
+               OR lower(u.first_name) LIKE ?
+               OR EXISTS (SELECT 1 FROM paid_subs p
+                          WHERE p.tg_id = u.id AND lower(p.email) LIKE ?)
+            ORDER BY (CAST(u.id AS TEXT) = ?) DESC, u.created_at DESC
+            LIMIT ?
+        """, (like, like, like, like, needle, int(limit))) as cur:
+            return await cur.fetchall()
+
+
+async def recent_visitors(limit: int = 6) -> list:
+    """Кто заходил в бота последним — для быстрых кнопок в поиске."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT a.tg_id, u.first_name, u.username, MAX(a.created_at)
+            FROM activity_log a LEFT JOIN users u ON u.id = a.tg_id
+            WHERE a.is_admin = 0
+            GROUP BY a.tg_id ORDER BY MAX(a.id) DESC LIMIT ?
+        """, (int(limit),)) as cur:
+            return await cur.fetchall()
 
 
 async def get_payments_by_day(days: int = 30) -> list[tuple]:
@@ -954,10 +1002,16 @@ async def log_activity(tg_id: int, action: str, details: str | None = None,
 
 
 def _activity_where(scope: str):
+    from config import ADMIN_ID
     if scope == "important":
         return "a.action LIKE 'ev:%'", []
     if scope == "admin":
         return "a.is_admin = 1", []
+    if scope == "helpers":
+        # только помощники: сам админ в этой вкладке не мешает
+        return "a.is_admin = 1 AND a.tg_id != ?", [ADMIN_ID]
+    if scope.startswith("user_important:"):
+        return "a.tg_id = ? AND a.action LIKE 'ev:%'", [int(scope.split(":", 1)[1])]
     if scope.startswith("user:"):
         return "a.tg_id = ?", [int(scope.split(":", 1)[1])]
     return "a.is_admin = 0", []

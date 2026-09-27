@@ -296,6 +296,9 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CallbackQueryHandler(callback_router))
+    # /h123 — открыть запись истории подписок прямо из ленты «Контроля»
+    from handlers.control import hist_command
+    app.add_handler(MessageHandler(filters.Regex(r"^/h\d+$"), hist_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
 

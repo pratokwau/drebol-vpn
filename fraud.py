@@ -189,7 +189,7 @@ async def who_line(tg_id: int) -> str:
         status = row[11] if len(row) > 11 else "active"
         renewed = row[12] if len(row) > 12 else 0
         kind = "платная" if renewed else "пробная"
-        labels = {"active": "активна", "renewal": "ждёт продления", "expired": "истекла"}
+        labels = {"active": "активна", "expired": "истекла"}
         sub = f"{kind}, {labels.get(status, status)}, до {str(row[6])[:16]}"
     else:
         sub = "подписки нет"

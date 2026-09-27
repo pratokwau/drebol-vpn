@@ -24,12 +24,8 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
     create_label = "➕ Создать подписку" if presets_ready else "➕ Создать (сначала настройки)"
     kb.append([InlineKeyboardButton(create_label, callback_data="paid_create_sub")])
     kb.append([
-        InlineKeyboardButton("📬 Запросы", callback_data="paid_requests"),
         InlineKeyboardButton("⚡ Массовые", callback_data="paid_bulk_menu"),
-    ])
-    kb.append([
-        InlineKeyboardButton("📜 История", callback_data="paid_history"),
-        InlineKeyboardButton("🔇 Заглушённые", callback_data="paid_muted_list"),
+        InlineKeyboardButton("📜 История", callback_data="act_feed:subs:1"),
     ])
     kb.append([
         InlineKeyboardButton("🎟 Промокоды", callback_data="promo_menu"),
@@ -41,8 +37,7 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
 
 
 def _money_rows(b) -> list:
-    return [[b("🏷 Тарифы", "tariffs_menu"), b("💵 Сумма", "paid_preset_price")],
-            [b("💳 Платёжка", "pay_provider_menu")]]
+    return [[b("🏷 Тарифы", "tariffs_menu"), b("💳 Платёжка", "pay_provider_menu")]]
 
 
 def _devices_rows(b) -> list:
@@ -112,35 +107,4 @@ def approve_keyboard(tg_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Одобрить", callback_data=f"paid_approve:{tg_id}"),
          InlineKeyboardButton("❌ Отклонить", callback_data=f"paid_reject:{tg_id}")],
-        [InlineKeyboardButton("🔇 Заглушить", callback_data=f"paid_mute_user:{tg_id}")],
     ])
-
-
-
-
-
-
-def paid_history_keyboard(page: int, total_pages: int) -> InlineKeyboardMarkup:
-    """Навигация по истории действий. Одна страница — только кнопка назад."""
-    kb = []
-    nav = []
-    if page > 1:
-        nav.append(InlineKeyboardButton("◀️", callback_data=f"paid_history_page:{page - 1}"))
-    nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
-    if page < total_pages:
-        nav.append(InlineKeyboardButton("▶️", callback_data=f"paid_history_page:{page + 1}"))
-    if total_pages > 1:
-        kb.append(nav)
-    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
-    return InlineKeyboardMarkup(kb)
-
-
-def muted_list_keyboard(muted_rows: list) -> InlineKeyboardMarkup:
-    kb = []
-    for tg_id, muted_until in muted_rows:
-        kb.append([InlineKeyboardButton(
-            f"🔇 {tg_id} · до {muted_until}",
-            callback_data=f"paid_unmute_user:{tg_id}",
-        )])
-    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
-    return InlineKeyboardMarkup(kb)
