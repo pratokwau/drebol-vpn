@@ -218,6 +218,19 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Личный кабинет: вход через Telegram, сессия живёт токеном в браузере
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS web_sessions (
+                token TEXT PRIMARY KEY,
+                tg_id INTEGER NOT NULL,
+                source TEXT NOT NULL DEFAULT 'widget',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(tg_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(tg_id, created_at)")
         # Помощь с подключением: кому уже написали и кто подключался хоть раз.
@@ -506,6 +519,64 @@ async def get_dashboard_stats() -> dict:
         "revenue_total": revenue_total, "revenue_today": revenue_today,
         "revenue_known": revenue_known,
     }
+
+
+async def web_session_new(tg_id: int, source: str = "widget", days: int = 7) -> str:
+    """Заводит сессию кабинета и отдаёт её токен."""
+    import secrets
+    token = secrets.token_urlsafe(32)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO web_sessions (token, tg_id, source, expires_at) "
+            "VALUES (?, ?, ?, datetime('now', ?))",
+            (token, tg_id, source, f"+{int(days)} days"))
+        await db.commit()
+    return token
+
+
+async def web_session_user(token: str) -> int:
+    """Чей это токен. 0 — нет такого или срок вышел."""
+    if not token:
+        return 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT tg_id FROM web_sessions WHERE token = ? AND expires_at > CURRENT_TIMESTAMP",
+            (token,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            await db.execute("UPDATE web_sessions SET seen_at = CURRENT_TIMESTAMP "
+                             "WHERE token = ?", (token,))
+            await db.commit()
+    return row[0] if row else 0
+
+
+async def web_session_drop(token: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM web_sessions WHERE token = ?", (token,))
+        await db.commit()
+
+
+async def web_sessions_purge():
+    """Убирает просроченные сессии — чтобы таблица не росла вечно."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM web_sessions WHERE expires_at <= CURRENT_TIMESTAMP")
+        await db.commit()
+
+
+async def web_sessions_stats() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async def one(q):
+            async with db.execute(q) as cur:
+                return (await cur.fetchone())[0]
+        return {
+            "live": await one("SELECT COUNT(*) FROM web_sessions "
+                              "WHERE expires_at > CURRENT_TIMESTAMP"),
+            "people": await one("SELECT COUNT(DISTINCT tg_id) FROM web_sessions "
+                                "WHERE expires_at > CURRENT_TIMESTAMP"),
+            "today": await one("SELECT COUNT(*) FROM web_sessions "
+                               "WHERE date(created_at, 'localtime') = date('now', 'localtime')"),
+        }
 
 
 async def control_today() -> dict:

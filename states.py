@@ -56,6 +56,9 @@ AWAITING_FIND_USER = "awaiting_find_user"
 # Лог-канал
 AWAITING_LOG_CHANNEL = "awaiting_log_channel"
 AWAITING_SUPPORT_CONTACT = "awaiting_support_contact"
+AWAITING_CABINET_PORT = "awaiting_cabinet_port"
+AWAITING_CABINET_PUBLIC = "awaiting_cabinet_public"
+AWAITING_CABINET_UPSTREAM = "awaiting_cabinet_upstream"
 
 # Winback
 AWAITING_QUICK_REPLY = "awaiting_quick_reply"

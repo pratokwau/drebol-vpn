@@ -277,6 +277,15 @@ async def post_init(app: Application):
         from winback import winback_tick
         app.job_queue.run_repeating(winback_tick, interval=3600, first=600)
 
+        from webapi import sessions_tick
+        app.job_queue.run_repeating(sessions_tick, interval=24 * 3600, first=900)
+
+    # Личный кабинет: http-api для сайта и мини-приложения
+    from webapi import start_server
+    started = await start_server()
+    if started.get("ok"):
+        print(f"Кабинет слушает порт {started.get('port')}")
+
 
 
 def main():

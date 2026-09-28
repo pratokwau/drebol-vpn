@@ -32,6 +32,7 @@ from states import (
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
     AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_CONTACT,
+    AWAITING_CABINET_PORT, AWAITING_CABINET_PUBLIC, AWAITING_CABINET_UPSTREAM,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_WINBACK_DAYS2, AWAITING_WINBACK_PERCENT2, AWAITING_WINBACK_LIFE,
     AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD,
@@ -1055,6 +1056,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Создание промокода ───────────────────────────────────────────────────────
+    # ── Личный кабинет ────────────────────────────────────────────────────────
+    if state in (AWAITING_CABINET_PORT, AWAITING_CABINET_PUBLIC,
+                 AWAITING_CABINET_UPSTREAM) and is_admin:
+        from webapi import handle_cabinet_input
+        await handle_cabinet_input(update, context, state, text)
+        return
+
     # ── Аккаунт поддержки ─────────────────────────────────────────────────────
     if state == AWAITING_SUPPORT_CONTACT and is_admin:
         from handlers.support import handle_support_contact_input

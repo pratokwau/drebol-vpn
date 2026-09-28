@@ -132,6 +132,9 @@ async def handle_my_paid_sub(query):
         pair.append(InlineKeyboardButton("🔁 Новый ключ", callback_data="reissue_key"))
     if pair:
         kb_rows.append(pair)
+    cab = _cabinet_row()
+    if cab:
+        kb_rows.append(cab)
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
@@ -154,6 +157,20 @@ APPS = {
              "ios": "https://apps.apple.com/ru/app/incy/id6756943388",
              "android": "https://play.google.com/store/apps/details?id=llc.itdev.incy"},
 }
+
+
+def _cabinet_row() -> list:
+    """Кнопка личного кабинета: внутри телеграма — мини-приложением."""
+    from telegram import InlineKeyboardButton
+    import site_deploy as site
+    link = site.cabinet_link()
+    if not link:
+        return []
+    try:
+        from telegram import WebAppInfo
+        return [InlineKeyboardButton("🪪 Личный кабинет", web_app=WebAppInfo(url=link))]
+    except ImportError:
+        return [InlineKeyboardButton("🪪 Личный кабинет", url=link)]
 
 
 def _app_rows(sub_url: str) -> list:

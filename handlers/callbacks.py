@@ -443,6 +443,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_dm_user(query, int(data.split(":")[1]), context)
     elif data.startswith("payment_stats:"):
         await handle_payment_stats(query, int(data.split(":")[1]))
+    elif data == "cab_menu":
+        from webapi import handle_cabinet_menu
+        await handle_cabinet_menu(query, context)
+    elif data == "cab_toggle":
+        from webapi import handle_cabinet_toggle
+        await handle_cabinet_toggle(query, context)
+    elif data in ("cab_public", "cab_port", "cab_upstream"):
+        from webapi import handle_cabinet_ask
+        await handle_cabinet_ask(query, context, data.split("_")[1])
     elif data == "support_settings":
         await handle_support_settings(query, context)
     elif data.startswith("support_mode:"):

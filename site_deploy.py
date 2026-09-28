@@ -82,6 +82,197 @@ ADD_PAGE = """<!doctype html>
 """
 
 
+# Кабинет: статическая страница, которая ходит в API бота. Вход двумя путями —
+# кнопка Telegram на сайте и initData, если страницу открыли как мини-приложение.
+CABINET_PAGE = """<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Личный кабинет</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+ :root { color-scheme: dark; }
+ * { box-sizing: border-box; }
+ body { margin:0; background:#0e1117; color:#e7e9ee; padding:24px 16px 48px;
+        font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+ .wrap { max-width:520px; margin:0 auto; }
+ h1 { font-size:22px; margin:0 0 4px; }
+ .muted { color:#8b95a5; font-size:14px; }
+ .card { background:#161b22; border:1px solid #232a35; border-radius:16px;
+         padding:18px; margin:16px 0; }
+ .row { display:flex; justify-content:space-between; gap:12px; padding:7px 0;
+        border-bottom:1px solid #1e242e; font-size:15px; }
+ .row:last-child { border-bottom:0; }
+ .row span:first-child { color:#8b95a5; }
+ .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:13px; }
+ .ok { background:#132c1c; color:#4ade80; }
+ .warn { background:#332a12; color:#fbbf24; }
+ .bad { background:#331a1a; color:#f87171; }
+ a.btn, button.btn { display:block; width:100%; padding:13px 16px; margin:8px 0;
+        border:0; border-radius:12px; background:#2f81f7; color:#fff; font-size:15px;
+        font-weight:600; text-align:center; text-decoration:none; cursor:pointer; }
+ .btn.ghost { background:#1c2128; color:#e7e9ee; }
+ code { display:block; word-break:break-all; background:#0b0f14; color:#8b95a5;
+        padding:12px; border-radius:10px; font-size:12px; margin-top:10px; }
+ #login { text-align:center; padding:40px 0; }
+ .hide { display:none; }
+</style></head>
+<body><div class="wrap">
+ <div id="login">
+   <h1>Личный кабинет</h1>
+   <p class="muted">Войдите через Telegram — увидите срок подписки,<br>ссылку и свои устройства.</p>
+   <div id="widget"></div>
+   <p class="muted" id="loginerr"></p>
+ </div>
+
+ <div id="app" class="hide">
+   <h1 id="hello">Личный кабинет</h1>
+   <div class="muted" id="whoami"></div>
+   <div id="body"></div>
+   <button class="btn ghost" id="out">Выйти</button>
+ </div>
+</div>
+<script>
+ var API = "__API__";
+ var BOT = "__BOT__";
+ var KEY = "drebol_token";
+ var tg = window.Telegram && window.Telegram.WebApp;
+ function esc(s) { return String(s == null ? "" : s).replace(/[<>&]/g, function (c) {
+   return {"<": "&lt;", ">": "&gt;", "&": "&amp;"}[c]; }); }
+ function token() { try { return localStorage.getItem(KEY) || ""; } catch (e) { return ""; } }
+ function setToken(t) { try { t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY); }
+   catch (e) {} }
+
+ function api(path, opts) {
+   opts = opts || {};
+   opts.headers = Object.assign({"Content-Type": "application/json"},
+                                opts.headers || {},
+                                token() ? {"Authorization": "Bearer " + token()} : {});
+   return fetch(API + path, opts).then(function (r) {
+     return r.json().then(function (j) { return {status: r.status, data: j}; });
+   });
+ }
+
+ function login(payload) {
+   return api("/api/auth", {method: "POST", body: JSON.stringify(payload)})
+     .then(function (r) {
+       if (r.status === 200 && r.data.token) { setToken(r.data.token); return load(); }
+       document.getElementById("loginerr").textContent = "Не удалось войти. Попробуйте ещё раз.";
+     });
+ }
+
+ window.onTelegramAuth = function (user) { login({user: user}); };
+
+ function pill(text, kind) { return '<span class="pill ' + kind + '">' + esc(text) + "</span>"; }
+
+ function render(p) {
+   document.getElementById("login").className = "hide";
+   document.getElementById("app").className = "";
+   document.getElementById("hello").textContent = "Здравствуйте, " + (p.user.name || "друг");
+   document.getElementById("whoami").textContent = p.user.username ? "@" + p.user.username : "";
+   var out = [];
+
+   if (p.blocked) {
+     out.push('<div class="card"><div class="row"><span>Статус</span>' +
+              pill("доступ закрыт", "bad") + "</div><div class=\\"row\\"><span>Причина</span><span>" +
+              esc(p.blocked.reason) + "</span></div></div>");
+     document.getElementById("body").innerHTML = out.join("");
+     return;
+   }
+   if (!p.subscription) {
+     out.push('<div class="card"><p>Подписки пока нет.</p>' +
+              '<a class="btn" href="https://t.me/' + BOT + '">Оформить в боте</a></div>');
+     document.getElementById("body").innerHTML = out.join("");
+     return;
+   }
+
+   var s = p.subscription;
+   var mark = s.status === "expired" ? pill("закончилась", "bad")
+            : !s.enabled ? pill("на паузе", "warn") : pill("активна", "ok");
+   var rows = ['<div class="row"><span>Статус</span>' + mark + "</div>",
+               '<div class="row"><span>Тариф</span><span>' +
+               (s.plan === "paid" ? "оплаченный" : "пробный") + "</span></div>",
+               '<div class="row"><span>Действует до</span><span>' + esc(s.until) + "</span></div>"];
+   if (s.left_text) {
+     rows.push('<div class="row"><span>Осталось</span><span>' + esc(s.left_text) + "</span></div>");
+   }
+   rows.push('<div class="row"><span>Устройств</span><span>' +
+             (s.devices_limit ? esc(s.devices_limit) : "без ограничения") + "</span></div>");
+   rows.push('<div class="row"><span>Израсходовано</span><span>' +
+             esc(s.traffic_used_text) +
+             (s.traffic_limit_gb ? " из " + esc(s.traffic_limit_gb) + " ГБ" : "") + "</span></div>");
+   out.push('<div class="card">' + rows.join("") + "</div>");
+
+   out.push('<div class="card"><b>Подключение</b>' +
+            '<a class="btn" href="happ://add/' + encodeURI(s.url) + '">Добавить в Happ</a>' +
+            '<a class="btn ghost" href="incy://add/' + encodeURI(s.url) + '">Добавить в INCY</a>' +
+            "<code>" + esc(s.url) + "</code></div>");
+
+   if (p.devices && p.devices.length) {
+     var d = p.devices.map(function (x) {
+       return '<div class="row"><span>' + esc(x.model) + "</span><span>" +
+              esc(x.seen) + "</span></div>"; }).join("");
+     out.push('<div class="card"><b>Мои устройства</b>' + d + "</div>");
+   }
+   if (p.payments && p.payments.length) {
+     var pay = p.payments.map(function (x) {
+       return '<div class="row"><span>' + esc(x.date) + "</span><span>" +
+              esc(x.amount) + " ₽ · " + esc(x.status) + "</span></div>"; }).join("");
+     out.push('<div class="card"><b>Платежи</b>' + pay + "</div>");
+   }
+   out.push('<a class="btn" href="https://t.me/' + BOT + '">Открыть бота</a>');
+   document.getElementById("body").innerHTML = out.join("");
+ }
+
+ function load() {
+   return api("/api/me").then(function (r) {
+     if (r.status === 200) return render(r.data);
+     setToken("");
+     showLogin();
+   }).catch(showLogin);
+ }
+
+ function showLogin() {
+   document.getElementById("app").className = "hide";
+   document.getElementById("login").className = "";
+   var w = document.createElement("script");
+   w.async = true;
+   w.src = "https://telegram.org/js/telegram-widget.js?22";
+   w.setAttribute("data-telegram-login", BOT);
+   w.setAttribute("data-size", "large");
+   w.setAttribute("data-radius", "12");
+   w.setAttribute("data-onauth", "onTelegramAuth(user)");
+   w.setAttribute("data-request-access", "write");
+   document.getElementById("widget").appendChild(w);
+ }
+
+ document.getElementById("out").onclick = function () {
+   api("/api/logout", {method: "POST"});
+   setToken("");
+   location.reload();
+ };
+
+ if (tg && tg.initData) {
+   tg.ready(); tg.expand();
+   login({initData: tg.initData});
+ } else if (token()) {
+   load();
+ } else {
+   showLogin();
+ }
+</script></body></html>
+"""
+
+
+def cabinet_page(bot_username: str) -> str:
+    """Готовая страница кабинета: подставлены адрес API и имя бота."""
+    from config import load_config
+    api = (load_config().get("webapi_public") or "").rstrip("/")
+    return (CABINET_PAGE.replace("__API__", api or "")
+            .replace("__BOT__", bot_username or ""))
+
+
 def add_ready() -> bool:
     """Страница-переходник уже лежит на сайте — можно давать кнопки в боте."""
     c = creds()
@@ -247,7 +438,8 @@ def _check_sync() -> dict:
         cli.close()
 
 
-def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"") -> dict:
+def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"",
+                 cabinet: str = "") -> dict:
     c = creds()
     try:
         cli = _client()
@@ -277,6 +469,8 @@ chmod 755 {WEB_ROOT}
                 f.write(og_bytes)
             with sftp.open("/tmp/drebol_add.html", "w") as f:
                 f.write(ADD_PAGE)
+            with sftp.open("/tmp/drebol_cabinet.html", "w") as f:
+                f.write(cabinet or "")
             if logo_bytes:
                 with sftp.open("/tmp/drebol_logo", "wb") as f:
                     f.write(logo_bytes)
@@ -285,11 +479,23 @@ chmod 755 {WEB_ROOT}
 
         server_name = c["domain"] or "_"
         cert_domain = c["domain"]
+        # Личный кабинет ходит в бота: если адрес задан, сайт проксирует /api/ к нему
+        upstream = str(load_config().get("webapi_upstream") or "").strip()
+        api_block = ""
+        if upstream:
+            api_block = f"""    location /api/ {{
+        proxy_pass http://{upstream}/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
+    }}"""
         install = f"""set -e
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html
 mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
 mv /tmp/drebol_add.html {WEB_ROOT}/add.html
-chmod 644 {WEB_ROOT}/add.html
+mv /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet.html
+chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
@@ -304,6 +510,7 @@ server {{
     location / {{
         try_files $uri $uri/ =404;
     }}
+{api_block}
     location ~* \\.(webp|svg|ico|css|js)$ {{
         expires 7d;
         add_header Cache-Control "public";
@@ -495,6 +702,17 @@ async def build_current(bot_username: str) -> tuple:
     return page, og_bytes, logo_bytes
 
 
+def cabinet_ready() -> bool:
+    """Кабинет опубликован: есть домен, адрес API и страница уже уехала."""
+    c = creds()
+    cfg = load_config()
+    return bool(c["domain"] and cfg.get("webapi_public") and cfg.get("site_cabinet"))
+
+
+def cabinet_link() -> str:
+    return f"{site_url()}/cabinet.html" if cabinet_ready() else ""
+
+
 def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes) -> str:
     """Отпечаток того, что должно лежать на сервере.
 
@@ -506,18 +724,21 @@ def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes) -> str:
     h.update(page.encode("utf-8"))
     h.update(og_bytes)
     h.update(logo_bytes)
+    # адрес API кабинета тоже часть сайта: сменили — страницу надо перезалить
+    h.update(str(load_config().get("webapi_public") or "").encode("utf-8"))
     return h.hexdigest()
 
 
 async def deploy(bot_username: str) -> dict:
     """Собирает страницу и раскатывает её на сервер."""
     page, og_bytes, logo_bytes = await build_current(bot_username)
-    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes)
+    cabinet = cabinet_page(bot_username)
+    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes, cabinet)
     if res.get("ok"):
         # вместе со страницей уехал и переходник — можно показывать кнопки приложений
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
                    site_page_hash=page_hash(page, og_bytes, logo_bytes),
-                   site_add_page=True)
+                   site_add_page=True, site_cabinet=bool(load_config().get("webapi_public")))
     return res
 
 
