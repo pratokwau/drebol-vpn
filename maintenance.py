@@ -32,7 +32,9 @@ FEATURES = {
                  ("renew_sub", "pay_invoice", "tariff_pick",
                   "enter_promo", "remove_promo")),
     "reissue": ("🔁", "Перевыпуск ключа", ("reissue_key", "reissue_do")),
-    "support": ("💬", "Поддержка", ("support_open", "support_page", "support_files")),
+    "support": ("💬", "Поддержка", ("support_open", "support_page", "support_files",
+                                    "support_topic", "support_write",
+                                    "support_close")),
     "referral": ("👥", "Рефералы", ("referral",)),
 }
 

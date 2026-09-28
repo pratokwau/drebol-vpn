@@ -129,28 +129,21 @@ async def init_db():
                 except Exception:
                     pass
 
-        # Окна оплаты больше нет: конец периода совпадает с датой окончания,
-        # а подписки, ждавшие продления, снова считаются активными до своей даты.
-        # Разовая правка — при следующих запусках уже ничего не делает.
-        try:
-            from config import load_config as _lc, save_config as _sc
-            _rc = _lc()
-            if _rc and not _rc.get("pay_window_dropped"):
-                await db.execute("UPDATE paid_subs SET ind_renew_time = 0")
-                await db.execute("UPDATE paid_subs SET period_end = expire_date")
-                await db.execute(
-                    "UPDATE paid_subs SET status = 'active' WHERE status = 'renewal'")
-                _rc["paid_renew_time"] = 0
-                _rc["pay_window_dropped"] = True
-                _sc(_rc)
-        except Exception:
-            pass
-        # У подписок, созданных до этой правки, конец периода тоже равен дате окончания
-        try:
-            await db.execute(
-                "UPDATE paid_subs SET period_end = expire_date WHERE period_end IS NULL")
-        except Exception:
-            pass
+        # Окна оплаты больше нет: конец периода всегда совпадает с датой
+        # окончания, а подписки, ждавшие продления, снова активны до своей даты.
+        # Правки идемпотентные: гонять их каждый запуск безопасно, зато база
+        # чинится сама, даже если конфиг потеряется или запись делали руками.
+        for _fix in (
+            "UPDATE paid_subs SET ind_renew_time = 0 "
+            "WHERE ind_renew_time IS NOT NULL AND ind_renew_time != 0",
+            "UPDATE paid_subs SET status = 'active' WHERE status = 'renewal'",
+            "UPDATE paid_subs SET period_end = expire_date "
+            "WHERE period_end IS NULL OR period_end != expire_date",
+        ):
+            try:
+                await db.execute(_fix)
+            except Exception:
+                pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS paid_sub_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -439,12 +432,6 @@ async def upsert_user(user_id: int, first_name: str, username: str | None):
         await db.commit()
 
 
-async def get_all_user_ids() -> list[int]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT id FROM users") as cur:
-            return [r[0] for r in await cur.fetchall()]
-
-
 async def get_dashboard_stats() -> dict:
     async def _one(db, q, params=()):
         async with db.execute(q, params) as cur:
@@ -705,12 +692,6 @@ async def delete_tariff(tariff_id: int):
         await db.commit()
 
 
-async def count_active_tariffs() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT COUNT(*) FROM tariffs WHERE active = 1") as cur:
-            return (await cur.fetchone())[0]
-
-
 # ── Платежи ──────────────────────────────────────────────────────────────────
 
 async def add_payment(tg_id: int, provider: str, external_id: str, amount: int,
@@ -724,27 +705,6 @@ async def add_payment(tg_id: int, provider: str, external_id: str, amount: int,
             VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
         """, (tg_id, provider, external_id, amount, period_seconds, promo_code,
               pay_url, kind, int(extra)))
-        await db.commit()
-        return cur.lastrowid
-
-
-async def record_paid_payment(tg_id: int, provider: str, amount: int,
-                              period_seconds: int | None,
-                              promo_code: str | None = None,
-                              external_id: str | None = None) -> int:
-    """Сразу оплаченный счёт — для подтверждений, минующих платёжную систему."""
-    import secrets
-    from datetime import datetime
-    # Случайный хвост: два подтверждения за одну секунду иначе упрутся
-    # в UNIQUE(provider, external_id), и второе молча не запишется
-    ext = external_id or (f"{provider}-{tg_id}-{int(datetime.now().timestamp())}"
-                          f"-{secrets.token_hex(3)}")
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("""
-            INSERT INTO payments (tg_id, provider, external_id, amount,
-                                  period_seconds, promo_code, status, pay_url, paid_at)
-            VALUES (?, ?, ?, ?, ?, ?, 'paid', '', CURRENT_TIMESTAMP)
-        """, (tg_id, provider, ext, amount, period_seconds, promo_code))
         await db.commit()
         return cur.lastrowid
 
@@ -1742,12 +1702,6 @@ async def winback_stats() -> dict:
         """)
     return {"people": people, "sent": sent, "used": used, "returned": returned,
             "percent": round(returned * 100 / people) if people else 0}
-
-
-async def is_winback_sent(tg_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT 1 FROM winback_sent WHERE tg_id = ?", (tg_id,)) as cur:
-            return (await cur.fetchone()) is not None
 
 
 async def mark_winback_sent(tg_id: int, stage: int = 1):

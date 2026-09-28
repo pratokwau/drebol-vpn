@@ -115,7 +115,6 @@ CB_LABELS = {
     "ctl_ch_toggle": "🆘 Помощь с подключением вкл/выкл",
     "ctl_menu": "🛰 Открыл контроль",
     "act_feed": "📜 Смотрел ленту",
-    "ctl_hist": "📜 Открыл запись истории",
     "ctl_online": "🔌 Смотрел, кто онлайн",
     "ctl_traffic": "📊 Смотрел трафик",
     "ctl_digest_now": "📤 Сводка вручную",
@@ -123,7 +122,6 @@ CB_LABELS = {
     "ctl_digest_hour": "🕘 Время сводки",
     "dashboard": "📊 Смотрел статистику",
     "paid_subs": "💳 Список подписок",
-    "paid_subs_page": "💳 Листал подписки",
     "paid_sub_view": "💳 Открыл подписку",
     "paid_sub_extend": "➕ Добавил срок",
     "paid_sub_reduce": "➖ Убавил срок",
@@ -678,7 +676,9 @@ async def handle_online(query):
             lines.append(f"🟢 <code>{_esc(email)}</code>")
     if len(emails) > 60:
         lines.append(f"…и ещё {len(emails) - 60}")
-    await query.edit_message_text("\n".join(lines), parse_mode="HTML", reply_markup=kb)
+    # имена людей длинные: держим сообщение в рамках телеграма
+    await query.edit_message_text("\n".join(_fit(lines, TEXT_BUDGET)), parse_mode="HTML",
+                                  reply_markup=kb)
 
 
 async def handle_traffic(query):

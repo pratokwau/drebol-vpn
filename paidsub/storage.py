@@ -84,6 +84,13 @@ async def all_paid_subs(scope: str = "all", sort: str = "new") -> list:
             return await cur.fetchall()
 
 
+async def paid_emails() -> set:
+    """Имена клиентов всех подписок — для сверки с состояниями панели."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT email FROM paid_subs WHERE email IS NOT NULL") as cur:
+            return {r[0] for r in await cur.fetchall()}
+
+
 async def paid_counts() -> dict:
     """Сколько подписок в каждой вкладке — для цифр на кнопках."""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -94,6 +101,12 @@ async def paid_counts() -> dict:
                 out[scope] = (await cur.fetchone())[0]
         return out
 
+
+# ВНИМАНИЕ: у двух выборок подписки поля совпадают только до 11-го индекса.
+# Дальше они расходятся, и ряд нельзя передавать «куда попало»:
+#   get_paid_sub:          12 payment_pending … 18 period_end
+#   get_paid_sub_by_tg_id: 12 times_renewed   … 18 extra_devices
+# Общее у них — ind_*-поля с 13 по 17, на них и опирается sub_settings().
 
 async def get_paid_sub(sub_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -193,15 +206,6 @@ async def snapshot_sub_settings(sub_id: int):
                     f"UPDATE paid_subs SET {col} = ? WHERE id = ?", (val, sub_id)
                 )
         await db.commit()
-
-
-async def get_paid_sub_status(tg_id: int) -> str:
-    row = await get_paid_sub_by_tg_id(tg_id)
-    if not row:
-        return ""
-    return row[11] if len(row) > 11 else "active"
-
-
 
 
 async def delete_paid_sub(sub_id: int):

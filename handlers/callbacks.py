@@ -1,13 +1,11 @@
-from html import escape
-
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard, subscribe_text
 from handlers.user import (
-    handle_buy, handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub,
-    handle_news, handle_how_to, handle_renew_sub, handle_referral,
+    handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub,
+    handle_how_to, handle_renew_sub, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_qr_code, handle_reissue_key, handle_reissue_do, handle_prices, handle_info,
     handle_pay_invoice, handle_tariff_pick, handle_my_devices, handle_dev_del,
@@ -46,7 +44,7 @@ from site_deploy import (
     handle_site_check, handle_site_auto,
 )
 from handlers.support import (
-    open_support, handle_support_files, show_topics, show_topic_hint,
+    open_support, handle_support_files, show_topic_hint,
     start_writing, handle_support_close,
     handle_support_settings, handle_support_mode, handle_support_contact_ask,
 )
@@ -55,7 +53,7 @@ from maintenance import (
     handle_maintenance_text, handle_feature_toggle,
 )
 from handlers.control import (
-    handle_control_menu, handle_activity_feed, handle_user_activity, handle_hist_entry,
+    handle_control_menu, handle_activity_feed, handle_user_activity,
     handle_online, handle_traffic, handle_digest_toggle,
     handle_digest_hour_menu, handle_digest_set_hour, handle_digest_now,
     handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
@@ -252,14 +250,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                  int(_p[2]) if len(_p) > 2 else None)
     elif data == "my_sub":
         await handle_my_sub(query)
-    elif data == "news":
-        await handle_news(query)
     elif data == "news_no_channel":
         await query.answer("Канал пока не настроен.", show_alert=True)
     elif data == "how_to":
         await handle_how_to(query)
-    elif data == "buy":
-        await handle_buy(query)
     elif data == "about":
         await handle_about(query)
     elif data == "prices":
@@ -285,10 +279,13 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("dev_buy:"):
         await handle_dev_buy(query, context, int(data.split(":")[1]))
     elif data == "support_open":
-        context.user_data["state"] = AWAITING_SUPPORT_MSG
+        # в режиме «аккаунт в телеграме» переписки в боте нет — состояние не ставим
+        from handlers.support import contact_mode
+        if contact_mode():
+            context.user_data.pop("state", None)
+        else:
+            context.user_data["state"] = AWAITING_SUPPORT_MSG
         await open_support(query, update.effective_user.id)
-    elif data == "support_topics":
-        await show_topics(query)
     elif data.startswith("support_topic:"):
         await show_topic_hint(query, context, data.split(":")[1])
     elif data.startswith("support_write:"):
@@ -297,7 +294,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         await handle_support_close(query, update.effective_user.id)
     elif data == "support_files":
-        context.user_data["state"] = AWAITING_SUPPORT_MSG
+        if not contact_mode():
+            context.user_data["state"] = AWAITING_SUPPORT_MSG
         await handle_support_files(query, update.effective_user.id)
     elif data.startswith("support_page:"):
         page = int(data.split(":")[1])
@@ -347,8 +345,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("act_feed:"):
         _, scope, pg = data.split(":")
         await handle_activity_feed(query, scope, int(pg))
-    elif data.startswith("ctl_hist:"):
-        await handle_hist_entry(query, int(data.split(":")[1]))
     elif data.startswith("user_feed:"):
         _, uid, scope, pg = data.split(":")
         await handle_user_activity(query, int(uid), int(pg), scope)
@@ -649,8 +645,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("paid_subs:"):
         _, scope, sort, pg = data.split(":")
         await handle_paid_subs_menu(query, int(pg), scope, sort)
-    elif data.startswith("paid_subs_page:"):
-        await handle_paid_subs_menu(query, int(data.split(":")[1]))
     elif data == "paid_create_sub":
         await handle_paid_create_sub(query, context)
     elif data.startswith("paid_create_type:"):

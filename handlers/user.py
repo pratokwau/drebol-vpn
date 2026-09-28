@@ -430,7 +430,7 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
         return
 
     await query.edit_message_text("⏳ Готовлю счёт…")
-    desc = f"Подписка Drebol VPN"
+    desc = "Подписка Drebol VPN"
     if tariff_name:
         desc += f" · {tariff_name}"
     if devices:
@@ -535,15 +535,6 @@ async def handle_remove_promo(query, context):
 
 
 
-async def handle_news(query):
-    await query.edit_message_text(
-        "📰 <b>Новости</b>\n\n"
-        "<blockquote>Новостей пока нет — загляните позже.</blockquote>",
-        parse_mode="HTML",
-        reply_markup=back_main(),
-    )
-
-
 async def handle_how_to(query):
     await query.edit_message_text(
         "❓ <b>Как подключиться</b>\n"
@@ -571,14 +562,6 @@ async def handle_how_to(query):
         parse_mode="HTML",
         reply_markup=back_info(),
         disable_web_page_preview=True,
-    )
-
-
-async def handle_buy(query):
-    await query.edit_message_text(
-        "🛒 <b>Покупка VPN</b>\n\n<blockquote>Раздел скоро появится.</blockquote>",
-        parse_mode="HTML",
-        reply_markup=back_main(),
     )
 
 
@@ -689,7 +672,6 @@ async def handle_copy_sub(query, context):
 
 
 async def handle_qr_code(query, context):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import get_paid_sub_by_tg_id
     user_id = query.from_user.id
     row = await get_paid_sub_by_tg_id(user_id)
@@ -1181,9 +1163,8 @@ async def ensure_trial(user, context, on_start=None) -> bool:
     from staff import is_helper
     if user.id == ADMIN_ID or is_helper(user.id):
         return False
-    from paidsub.storage import (get_paid_sub_by_tg_id, get_muted_until,
-                                 get_pending_request, add_request, resolve_request,
-                                 add_history, parse_sub_date)
+    from paidsub.storage import (get_paid_sub_by_tg_id, get_pending_request,
+                                 add_request, resolve_request, add_history)
     if await get_paid_sub_by_tg_id(user.id):
         return False
     cfg = load_config()
@@ -1195,12 +1176,6 @@ async def ensure_trial(user, context, on_start=None) -> bool:
     from paidsub.handlers import _paid_presets_ready, do_create_paid_sub, _process_referral_bonus
     if not _paid_presets_ready(cfg):
         return False
-    muted = await get_muted_until(user.id)
-    if muted:
-        from datetime import datetime
-        until = parse_sub_date(muted)
-        if until and datetime.now() < until:
-            return False
     if user.id in _ISSUING:
         return False
 

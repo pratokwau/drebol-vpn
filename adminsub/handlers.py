@@ -3,7 +3,7 @@ from html import escape
 from telegram import Bot
 from telegram.ext import ContextTypes
 
-from config import load_config, save_config
+from config import load_config
 from keyboards import back_admin
 
 
@@ -745,9 +745,3 @@ async def handle_subs_names_sync(query, context):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К настройкам", callback_data="sub_presets")]]),
     )
-
-
-def save_preset(key: str, value):
-    cfg = load_config()
-    cfg[key] = value
-    save_config(cfg)

@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 
 from telegram import Bot
-from telegram.ext import ContextTypes
 
 from config import ADMIN_ID, load_config, save_config
 from keyboards import back_admin, back_main
@@ -130,7 +129,9 @@ def _sub_mark(row, states: dict) -> str:
 async def handle_paid_subs_menu(query, page: int = 1, scope: str = "all", sort: str = "new"):
     """Список подписок с вкладками: активные, скоро, истёкшие, выключенные и прочие."""
     from paidsub.keyboards import PAID_TABS, SORT_LABELS
-    from paidsub.storage import SUBS_PER_PAGE, all_paid_subs, list_paid_subs, paid_counts
+    from paidsub.storage import (
+        SUBS_PER_PAGE, all_paid_subs, list_paid_subs, paid_counts, paid_emails,
+    )
     if scope not in PAID_TABS:
         scope = "all"
     if sort not in SORT_LABELS:
@@ -151,8 +152,7 @@ async def handle_paid_subs_menu(query, page: int = 1, scope: str = "all", sort: 
     else:
         rows, total_pages = await list_paid_subs(page, scope, sort)
         page = min(max(1, page), total_pages)
-        counts["off"] = (sum(1 for r in await all_paid_subs("all", "new") if r[2] in off_emails)
-                         if panel["ok"] else None)
+        counts["off"] = (len(off_emails & await paid_emails()) if panel["ok"] else None)
 
     marks = {r[0]: _sub_mark(r, states) for r in rows}
     cfg = load_config()
@@ -1359,7 +1359,6 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
         async with db.execute("SELECT id FROM paid_subs") as cur:
             all_ids = [r[0] for r in await cur.fetchall()]
 
-    cfg = load_config()
     updated = 0
     errors = 0
     # подписки людей из ЧС не трогаем: добавление срока включило бы их обратно
@@ -1783,7 +1782,6 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     email = row[2]
 
     full_row = await get_paid_sub(sub_id)
-    cfg = load_config()
     from paidsub.storage import sub_settings
     settings = sub_settings(full_row)
     pay_seconds = int(period_seconds or settings["pay_period"] or 0)
@@ -2012,9 +2010,3 @@ async def handle_toggle_auto_trial(query):
     cfg["auto_approve_trial"] = not cfg.get("auto_approve_trial", False)
     save_config(cfg)
     await handle_paid_presets_menu(query)
-
-
-def save_paid_preset(key: str, value):
-    cfg = load_config()
-    cfg[key] = value
-    save_config(cfg)

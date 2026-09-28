@@ -9,7 +9,6 @@ from html import escape
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from config import load_config
 from keyboards import back_admin
 from database import (
     add_tariff, list_tariffs, get_tariff, update_tariff_field, delete_tariff,
@@ -36,7 +35,6 @@ async def handle_tariffs_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
         context.user_data.pop("state", None)
         context.user_data.pop("new_tariff", None)
     rows = await list_tariffs()
-    cfg = load_config()
 
     lines = ["🏷 <b>Тарифы</b>", ""]
     if not rows:
