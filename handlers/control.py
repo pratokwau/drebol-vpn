@@ -120,6 +120,7 @@ CB_LABELS = {
     "ctl_digest_hour": "🕘 Время сводки",
     "dashboard": "📊 Смотрел статистику",
     "paid_subs": "💳 Список подписок",
+    "paid_subs_page": "💳 Листал подписки",
     "paid_sub_view": "💳 Открыл подписку",
     "paid_sub_extend": "➕ Добавил срок",
     "paid_sub_reduce": "➖ Убавил срок",

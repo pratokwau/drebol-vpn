@@ -378,6 +378,20 @@ async def count_panel_clients() -> dict:
     return {"success": True, "total": total, "paid": paid, "other": total - paid}
 
 
+async def get_client_states() -> dict:
+    """Имя клиента → его состояние в панели: ACTIVE, DISABLED, EXPIRED, LIMITED."""
+    import remnawave as rw
+    users = await rw.all_users()
+    if not users:
+        return {"ok": False, "states": {}}
+    states = {}
+    for u in users:
+        name = u.get("username")
+        if name:
+            states[name] = str(u.get("status") or "").upper()
+    return {"ok": True, "states": states}
+
+
 async def get_online_emails(window_seconds: int = 180) -> dict:
     """Кто сейчас на VPN. У панели есть только отметка последнего обращения,
     поэтому «сейчас» — это последние минуты."""

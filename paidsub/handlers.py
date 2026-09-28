@@ -7,7 +7,7 @@ from config import ADMIN_ID, load_config, save_config
 from keyboards import back_admin, back_main
 
 from paidsub.storage import (
-    list_paid_subs, add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
+    add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
     add_request, get_pending_request, resolve_request,
     update_paid_sub_field, get_expired_paid_subs, set_expire_date,
     add_history,
@@ -94,19 +94,87 @@ def _presets_text(trial_str, pay_line, hwid, traf, panel_block) -> str:
 
 # ── Список подписок ──────────────────────────────────────────────────────────
 
-async def handle_paid_subs_menu(query, page: int = 1):
-    rows, total_pages = await list_paid_subs(page)
+# Состояния клиентов в панели меняются редко, а список листают часто —
+# держим ответ панели минуту, чтобы не дёргать её на каждой странице
+_PANEL_STATES = {"at": 0.0, "states": {}, "ok": False}
+STATES_TTL = 60
+
+
+async def panel_states(force: bool = False) -> dict:
+    import time
+    from panel import get_client_states
+    if not force and _PANEL_STATES["ok"] and time.time() - _PANEL_STATES["at"] < STATES_TTL:
+        return _PANEL_STATES
+    got = await get_client_states()
+    if got.get("ok"):
+        _PANEL_STATES.update(at=time.time(), states=got["states"], ok=True)
+    else:
+        _PANEL_STATES.update(ok=False, states={})
+    return _PANEL_STATES
+
+
+def _sub_mark(row, states: dict) -> str:
+    """Значок подписки в списке: что с ней прямо сейчас."""
+    from paidsub.storage import SOON_DAYS, parse_sub_date
+    email, status = row[2], (row[6] if len(row) > 6 else "active")
+    if states.get(email) == "DISABLED":
+        return "⏸"
+    if status == "expired":
+        return "🔴"
+    end = parse_sub_date(row[3])
+    if end and (end - datetime.now()).total_seconds() <= SOON_DAYS * 86400:
+        return "⏳"
+    return "🟢"
+
+
+async def handle_paid_subs_menu(query, page: int = 1, scope: str = "all", sort: str = "new"):
+    """Список подписок с вкладками: активные, скоро, истёкшие, выключенные и прочие."""
+    from paidsub.keyboards import PAID_TABS, SORT_LABELS
+    from paidsub.storage import SUBS_PER_PAGE, all_paid_subs, list_paid_subs, paid_counts
+    if scope not in PAID_TABS:
+        scope = "all"
+    if sort not in SORT_LABELS:
+        sort = "new"
+
+    counts = await paid_counts()
+    panel = await panel_states()
+    states = panel["states"]
+    off_emails = {e for e, st in states.items() if st == "DISABLED"}
+
+    if scope == "off":
+        # выключенных знает только панель: фильтруем уже выбранные строки
+        picked = [r for r in await all_paid_subs("all", sort) if r[2] in off_emails]
+        total_pages = max(1, (len(picked) + SUBS_PER_PAGE - 1) // SUBS_PER_PAGE)
+        page = min(max(1, page), total_pages)
+        rows = picked[(page - 1) * SUBS_PER_PAGE:page * SUBS_PER_PAGE]
+        counts["off"] = len(picked)
+    else:
+        rows, total_pages = await list_paid_subs(page, scope, sort)
+        page = min(max(1, page), total_pages)
+        counts["off"] = (sum(1 for r in await all_paid_subs("all", "new") if r[2] in off_emails)
+                         if panel["ok"] else None)
+
+    marks = {r[0]: _sub_mark(r, states) for r in rows}
     cfg = load_config()
     ready = _paid_presets_ready(cfg)
-    header = "💳 <b>Платные подписки</b>"
-    body = ("\n\n<blockquote>Подписок пока нет.</blockquote>" if not rows
-            else f"\n<i>Страница {page} из {total_pages} · нажми на подписку, чтобы открыть</i>")
+    icon, label = PAID_TABS[scope]
+
+    lines = ["💳 <b>Платные подписки</b>", "",
+             "<blockquote>🟢 работает · ⏳ скоро кончится · 🔴 истекла · ⏸ выключена в панели\n"
+             "🆓 пробные · ⭐ платящие · 📋 все</blockquote>",
+             f"\n{icon} <b>{label}</b> · сортировка: <b>{SORT_LABELS[sort]}</b> · "
+             f"стр. {page} из {total_pages}"]
+    lines.append("<blockquote>Здесь пусто.</blockquote>" if not rows
+                 else "<i>Нажми на подписку, чтобы открыть.</i>")
+    if not panel["ok"]:
+        lines.append("\n⚠️ <i>Панель не ответила — не знаю, кто выключен.</i>")
     if not ready:
-        body += "\n\n⚠️ <i>Задай настройки, чтобы создавать подписки.</i>"
+        lines.append("\n⚠️ <i>Задай настройки, чтобы создавать подписки.</i>")
+
     await query.edit_message_text(
-        header + body,
-        parse_mode="HTML",
-        reply_markup=paid_subs_list_keyboard(rows, page, total_pages, ready),
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=paid_subs_list_keyboard(rows, page, total_pages, ready,
+                                             scope, sort, counts, marks),
     )
 
 

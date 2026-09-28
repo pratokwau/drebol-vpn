@@ -1,25 +1,58 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
-def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bool) -> InlineKeyboardMarkup:
+# Вкладки списка: код → (значок, подпись). Подписи расшифрованы на экране
+PAID_TABS = {
+    "all": ("📋", "Все"),
+    "active": ("🟢", "Активные"),
+    "soon": ("⏳", "Скоро кончатся"),
+    "expired": ("🔴", "Истёкшие"),
+    "off": ("⏸", "Выключены в панели"),
+    "trial": ("🆓", "Пробные"),
+    "paying": ("⭐", "Платящие"),
+}
+
+SORT_LABELS = {"new": "новые сверху", "expire": "по сроку", "name": "по имени"}
+# Кнопка сортировки переключает по кругу
+SORT_NEXT = {"new": "expire", "expire": "name", "name": "new"}
+
+
+def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bool,
+                            scope: str = "all", sort: str = "new",
+                            counts: dict = None, marks: dict = None) -> InlineKeyboardMarkup:
+    counts = counts or {}
+    marks = marks or {}
     kb = []
     for row in rows:
-        sub_id, tg_id, email, expire, total_gb, _ = row
+        sub_id, email, expire, total_gb = row[0], row[2], row[3], row[4]
         traffic = f"{total_gb} ГБ" if total_gb > 0 else "∞"
-        # в кнопку влезает мало: имя клиента и дата без секунд
+        # в кнопку влезает мало: значок состояния, имя клиента и дата без секунд
         name = str(email or "").removeprefix("paid_")
         kb.append([InlineKeyboardButton(
-            f"👤 {name} · до {str(expire)[:10]} · {traffic}",
+            f"{marks.get(sub_id, '•')} {name} · до {str(expire)[:10]} · {traffic}",
             callback_data=f"paid_sub_view:{sub_id}",
         )])
     if total_pages > 1:
         nav = []
         if page > 1:
-            nav.append(InlineKeyboardButton("◀️", callback_data=f"paid_subs_page:{page - 1}"))
+            nav.append(InlineKeyboardButton("◀️", callback_data=f"paid_subs:{scope}:{sort}:{page - 1}"))
         nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
         if page < total_pages:
-            nav.append(InlineKeyboardButton("▶️", callback_data=f"paid_subs_page:{page + 1}"))
+            nav.append(InlineKeyboardButton("▶️", callback_data=f"paid_subs:{scope}:{sort}:{page + 1}"))
         kb.append(nav)
+
+    def tab(key):
+        icon, _label = PAID_TABS[key]
+        count = counts.get(key)
+        text = f"{icon} {count}" if count is not None else icon
+        return InlineKeyboardButton(("• " if key == scope else "") + text,
+                                    callback_data=f"paid_subs:{key}:{sort}:1")
+
+    keys = list(PAID_TABS)
+    kb.append([tab(k) for k in keys[:4]])
+    kb.append([tab(k) for k in keys[4:]])
+    kb.append([InlineKeyboardButton(f"🔀 Сортировка: {SORT_LABELS.get(sort, sort)}",
+                                    callback_data=f"paid_subs:{scope}:{SORT_NEXT.get(sort, 'new')}:1")])
 
     create_label = "➕ Создать подписку" if presets_ready else "➕ Создать (сначала настройки)"
     kb.append([InlineKeyboardButton(create_label, callback_data="paid_create_sub")])

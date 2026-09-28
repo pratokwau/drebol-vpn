@@ -15,20 +15,84 @@ async def add_paid_sub(tg_id: int, email: str, uuid_val: str, sub_id: str, sub_u
         return cur.lastrowid
 
 
-async def list_paid_subs(page: int = 1) -> tuple[list, int]:
-    offset = (page - 1) * SUBS_PER_PAGE
+# Срок хранится текстом «дд.мм.гггг чч:мм:сс» — для сравнений и сортировки
+# собираем из него ключ «ггггммдд чч:мм:сс»: по нему строки сортируются как даты
+_EXP_KEY = ("substr(expire_date, 7, 4) || substr(expire_date, 4, 2) || "
+            "substr(expire_date, 1, 2) || substr(expire_date, 11)")
+
+# Вкладки списка подписок. Выключенных в панели здесь нет: это состояние знает
+# только панель, поэтому такую вкладку собирает уже сам экран.
+PAID_SCOPES = {
+    "all": "1 = 1",
+    "active": "status = 'active'",
+    "soon": f"status = 'active' AND {_EXP_KEY} <= ?soon",
+    "expired": "status = 'expired'",
+    "trial": "times_renewed = 0",
+    "paying": "times_renewed > 0",
+}
+
+PAID_SORTS = {
+    "new": "created_at DESC, id DESC",
+    "expire": f"{_EXP_KEY} ASC",
+    "name": "email ASC",
+}
+
+# Сколько дней считаем «скоро кончится»
+SOON_DAYS = 3
+
+_PAID_LIST_COLS = ("id, tg_id, email, expire_date, total_gb, created_at, "
+                   "status, times_renewed")
+
+
+def _soon_key() -> str:
+    from datetime import datetime, timedelta
+    return (datetime.now() + timedelta(days=SOON_DAYS)).strftime("%Y%m%d %H:%M:%S")
+
+
+def _scope_where(scope: str) -> tuple:
+    raw = PAID_SCOPES.get(scope, PAID_SCOPES["all"])
+    if "?soon" in raw:
+        return raw.replace("?soon", "?"), [_soon_key()]
+    return raw, []
+
+
+async def list_paid_subs(page: int = 1, scope: str = "all", sort: str = "new",
+                         per_page: int = SUBS_PER_PAGE) -> tuple[list, int]:
+    """Страница списка: строки (id, tg_id, email, срок, ГБ, создана, статус, продлений)."""
+    where, params = _scope_where(scope)
+    order = PAID_SORTS.get(sort, PAID_SORTS["new"])
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT COUNT(*) FROM paid_subs") as cur:
+        async with db.execute(f"SELECT COUNT(*) FROM paid_subs WHERE {where}", params) as cur:
             total = (await cur.fetchone())[0]
-        async with db.execute("""
-            SELECT id, tg_id, email, expire_date, total_gb, created_at
-            FROM paid_subs
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-        """, (SUBS_PER_PAGE, offset)) as cur:
+        async with db.execute(
+            f"SELECT {_PAID_LIST_COLS} FROM paid_subs WHERE {where} "
+            f"ORDER BY {order} LIMIT ? OFFSET ?",
+            params + [per_page, (page - 1) * per_page],
+        ) as cur:
             rows = await cur.fetchall()
-    total_pages = max(1, (total + SUBS_PER_PAGE - 1) // SUBS_PER_PAGE)
-    return rows, total_pages
+    return rows, max(1, (total + per_page - 1) // per_page)
+
+
+async def all_paid_subs(scope: str = "all", sort: str = "new") -> list:
+    """Все строки вкладки без пагинации — нужно, когда фильтр знает только панель."""
+    where, params = _scope_where(scope)
+    order = PAID_SORTS.get(sort, PAID_SORTS["new"])
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"SELECT {_PAID_LIST_COLS} FROM paid_subs WHERE {where} ORDER BY {order}", params
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def paid_counts() -> dict:
+    """Сколько подписок в каждой вкладке — для цифр на кнопках."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        out = {}
+        for scope in PAID_SCOPES:
+            where, params = _scope_where(scope)
+            async with db.execute(f"SELECT COUNT(*) FROM paid_subs WHERE {where}", params) as cur:
+                out[scope] = (await cur.fetchone())[0]
+        return out
 
 
 async def get_paid_sub(sub_id: int) -> tuple | None:

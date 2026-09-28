@@ -639,6 +639,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Платные подписки
     elif data == "paid_subs":
         await handle_paid_subs_menu(query)
+    elif data.startswith("paid_subs:"):
+        _, scope, sort, pg = data.split(":")
+        await handle_paid_subs_menu(query, int(pg), scope, sort)
     elif data.startswith("paid_subs_page:"):
         await handle_paid_subs_menu(query, int(data.split(":")[1]))
     elif data == "paid_create_sub":
