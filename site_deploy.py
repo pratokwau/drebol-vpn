@@ -743,8 +743,11 @@ async def build_current(bot_username: str) -> tuple:
     cfg = load_config()
     og_bytes = _asset("og.webp")
     logo_bytes = _asset(LOGO_NAME)
+    # кабинет лежит рядом со страницей — ссылка относительная
+    cabinet = "cabinet.html" if cfg.get("webapi_public") else ""
     page = build_page(
         bot_username=bot_username,
+        cabinet_url=cabinet,
         privacy_url=cfg.get("privacy_url", "") or "",
         terms_url=cfg.get("terms_url", "") or "",
         channel_url=cfg.get("channel_url", "") or "",

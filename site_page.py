@@ -42,6 +42,9 @@ _ICONS = {
     "card": _icon('<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6.5 15h4"/>'),
     "shield": _icon('<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6L12 3z"/>'
                     '<path d="m8.8 12.2 2.3 2.3 4.3-4.6"/>'),
+    "cabinet": _icon('<rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/>'
+                     '<circle cx="9" cy="11" r="2.2"/>'
+                     '<path d="M5.5 16.5a3.8 3.8 0 0 1 7 0M15 10h4M15 14h2.5"/>'),
 }
 _CHECK = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
           'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -171,6 +174,7 @@ main, header, footer { position: relative; z-index: 1; }
 .nav { display: flex; gap: 34px; font-size: 15px; font-weight: 600; }
 .nav a { color: rgba(255,255,255,.66); transition: color .2s; }
 .nav a:hover { color: #fff; }
+.head-actions { display: flex; align-items: center; gap: 10px; }
 
 /* Кнопки */
 .btn {
@@ -388,6 +392,9 @@ h2 {
   .brand img { height: 26px; }
   .top .btn-sm { height: 44px; padding: 0 16px; font-size: 14px; }
   .top .btn-sm .long { display: none; }
+  .head-actions { gap: 8px; }
+  .head-actions .btn-sm:first-child span { display: none; }
+  .head-actions .btn-sm:first-child { padding: 0 14px; }
   .hero-text { gap: 20px; }
   .pill { font-size: 13px; }
   .actions { flex-direction: column; width: 100%; }
@@ -474,7 +481,8 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
                privacy_url: str = "", terms_url: str = "",
                channel_url: str = "", logo_file: str = "",
                tariffs: list | None = None,
-               poster_file: str = "og.webp") -> str:
+               poster_file: str = "og.webp",
+               cabinet_url: str = "") -> str:
     """Собирает страницу.
 
     logo_file — имя файла с настоящим логотипом рядом со страницей. Если его
@@ -485,6 +493,9 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 
     poster_file — фирменная картинка для первого экрана (по умолчанию og.webp,
     её и так кладёт деплой). Пустая строка — первый экран без картинки.
+
+    cabinet_url — адрес личного кабинета. Пустая строка — кабинета на сайте нет,
+    и кнопки на него не появляются.
     """
     handle = bot_username.lstrip("@")
     bot_url = escape(f"https://t.me/{handle}" if handle else "https://t.me/")
@@ -536,6 +547,12 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     perks_html = "".join(f"<li>{_CHECK}{escape(p)}</li>" for p in TARIFF_PERKS)
 
     pricing_html = ""
+    cab = escape(cabinet_url) if cabinet_url else ""
+    cab_nav = (f'<a class="btn btn-ghost btn-sm" href="{cab}">{_ICONS["cabinet"]}'
+               '<span>Кабинет</span></a>' if cab else "")
+    cab_cta = (f'<a class="btn btn-ghost" href="{cab}">{_ICONS["cabinet"]}Личный кабинет</a>'
+               if cab else "")
+
     nav_pricing = ""
     hero_second = ""
     if tariffs:
@@ -633,7 +650,10 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
       {nav_pricing}
       <a href="#faq">Вопросы</a>
     </nav>
-    <a class="btn btn-ghost btn-sm" href="{bot_url}">{_TG}<span>Открыть<span class="long"> бота</span></span></a>
+    <div class="head-actions">
+      {cab_nav}
+      <a class="btn btn-ghost btn-sm" href="{bot_url}">{_TG}<span>Открыть<span class="long"> бота</span></span></a>
+    </div>
   </div>
 </header>
 
@@ -699,6 +719,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
       <p class="sub">Пробный доступ — сразу после запуска бота. Без регистрации на сайтах.</p>
       <div class="actions">
         <a class="btn btn-main" href="{bot_url}">{_TG}Открыть в Telegram</a>
+        {cab_cta}
         {channel_btn}
       </div>
     </div>
