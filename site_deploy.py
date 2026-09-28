@@ -21,307 +21,6 @@ NGINX_CONF = "/etc/nginx/sites-available/drebol"
 LOGO_NAME = "logo.png"
 
 
-# Страница-переходник: Telegram пускает в кнопки только http(s), а приложения
-# ловят свои схемы (happ://, incy://). Открывается по ссылке из бота и сразу
-# уводит в приложение; если оно не установлено, остаётся ссылка и инструкция.
-ADD_PAGE = """<!doctype html>
-<html lang="ru"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>Добавляем подписку</title>
-<style>
- :root { color-scheme: dark; }
- body { margin:0; min-height:100vh; display:flex; align-items:center;
-        justify-content:center; background:#0e1117; color:#e7e9ee;
-        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
- .card { max-width:420px; padding:28px 22px; text-align:center; }
- h1 { font-size:20px; margin:0 0 10px; }
- p { color:#9aa4b2; margin:0 0 18px; }
- a.btn { display:block; padding:14px 18px; margin:10px 0; border-radius:12px;
-         background:#2f81f7; color:#fff; text-decoration:none; font-weight:600; }
- a.ghost { background:#1c2128; color:#e7e9ee; }
- code { display:block; word-break:break-all; background:#1c2128; color:#9aa4b2;
-        padding:12px; border-radius:10px; font-size:13px; margin-top:16px; }
-</style></head>
-<body><div class="card">
- <h1 id="head">Открываем приложение…</h1>
- <p id="hint">Если ничего не произошло — нажмите кнопку ниже.</p>
- <a class="btn" id="go" href="#">Добавить подписку</a>
- <a class="ghost btn" id="store" href="#" style="display:none">Установить приложение</a>
- <code id="raw"></code>
-</div>
-<script>
- var q = new URLSearchParams(location.search);
- var app = (q.get("app") || "happ").toLowerCase();
- var sub = q.get("u") || "";
- var apps = {
-   happ: {name: "Happ", scheme: "happ://add/",
-          store: "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"},
-   incy: {name: "INCY", scheme: "incy://add/",
-          store: "https://apps.apple.com/ru/app/incy/id6756943388"}
- };
- var cfg = apps[app] || apps.happ;
- var link = sub ? cfg.scheme + sub : "";
- document.getElementById("head").textContent = "Добавляем подписку в " + cfg.name;
- var go = document.getElementById("go");
- go.textContent = "Открыть " + cfg.name;
- go.href = link || "#";
- var store = document.getElementById("store");
- store.href = cfg.store;
- store.textContent = "Установить " + cfg.name;
- document.getElementById("raw").textContent = sub;
- if (link) {
-   setTimeout(function () { location.href = link; }, 100);
-   setTimeout(function () { store.style.display = "block"; }, 2500);
- } else {
-   document.getElementById("head").textContent = "Ссылка не передана";
-   document.getElementById("hint").textContent = "Вернитесь в бот и нажмите кнопку ещё раз.";
- }
-</script></body></html>
-"""
-
-
-# Кабинет: статическая страница, которая ходит в API бота. Вход двумя путями —
-# кнопка Telegram на сайте и initData, если страницу открыли как мини-приложение.
-CABINET_PAGE = """<!doctype html>
-<html lang="ru"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>Личный кабинет</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
-<style>
- :root { color-scheme: dark; }
- * { box-sizing: border-box; }
- body { margin:0; background:#0e1117; color:#e7e9ee; padding:24px 16px 48px;
-        font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
- .wrap { max-width:520px; margin:0 auto; }
- h1 { font-size:22px; margin:0 0 4px; }
- .muted { color:#8b95a5; font-size:14px; }
- .card { background:#161b22; border:1px solid #232a35; border-radius:16px;
-         padding:18px; margin:16px 0; }
- .row { display:flex; justify-content:space-between; gap:12px; padding:7px 0;
-        border-bottom:1px solid #1e242e; font-size:15px; }
- .row:last-child { border-bottom:0; }
- .row span:first-child { color:#8b95a5; }
- .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:13px; }
- .ok { background:#132c1c; color:#4ade80; }
- .warn { background:#332a12; color:#fbbf24; }
- .bad { background:#331a1a; color:#f87171; }
- a.btn, button.btn { display:block; width:100%; padding:13px 16px; margin:8px 0;
-        border:0; border-radius:12px; background:#2f81f7; color:#fff; font-size:15px;
-        font-weight:600; text-align:center; text-decoration:none; cursor:pointer; }
- .btn.ghost { background:#1c2128; color:#e7e9ee; }
- code { display:block; word-break:break-all; background:#0b0f14; color:#8b95a5;
-        padding:12px; border-radius:10px; font-size:12px; margin-top:10px; }
- #login { text-align:center; padding:40px 0; }
- .hide { display:none; }
-</style></head>
-<body><div class="wrap">
- <div id="login">
-   <h1>Личный кабинет</h1>
-   <p class="muted">Войдите через Telegram — увидите срок подписки,<br>ссылку и свои устройства.</p>
-   <div id="widget"></div>
-   <p class="muted" id="loginerr"></p>
- </div>
-
- <div id="app" class="hide">
-   <h1 id="hello">Личный кабинет</h1>
-   <div class="muted" id="whoami"></div>
-   <div id="body"></div>
-   <button class="btn ghost" id="out">Выйти</button>
- </div>
-</div>
-<script>
- var API = "__API__";
- var BOT = "__BOT__";
- var KEY = "drebol_token";
- var tg = window.Telegram && window.Telegram.WebApp;
- function esc(s) { return String(s == null ? "" : s).replace(/[<>&]/g, function (c) {
-   return {"<": "&lt;", ">": "&gt;", "&": "&amp;"}[c]; }); }
- var memToken = "";
- function token() {
-   if (memToken) { return memToken; }
-   try { return localStorage.getItem(KEY) || ""; } catch (e) { return ""; }
- }
- function setToken(t) {
-   memToken = t || "";
-   try { t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY); } catch (e) {}
- }
- function say(msg) { document.getElementById("loginerr").innerHTML = msg || ""; }
-
- function api(path, opts) {
-   opts = opts || {};
-   opts.headers = Object.assign({"Content-Type": "application/json"},
-                                opts.headers || {},
-                                token() ? {"Authorization": "Bearer " + token()} : {});
-   return fetch(API + path, opts).then(function (r) {
-     return r.text().then(function (body) {
-       var data = {};
-       try { data = JSON.parse(body); } catch (e) { data = {raw: body}; }
-       return {status: r.status, data: data};
-     });
-   });
- }
-
- // Причину видно сразу: иначе вход «проходит», а страница молча остаётся формой
- function fail(where, err) {
-   var addr = API || location.origin;
-   say("Не получилось " + where + ".<br>Адрес: <code>" + esc(addr) +
-       "</code><br>" + esc(err && err.message ? err.message : err || "нет ответа"));
- }
-
- function login(payload) {
-   say("Входим…");
-   return api("/api/auth", {method: "POST", body: JSON.stringify(payload)})
-     .then(function (r) {
-       if (r.status === 200 && r.data.token) { setToken(r.data.token); return load(); }
-       if (r.status === 401) { say("Телеграм не подтвердил вход. Попробуйте ещё раз."); return; }
-       fail("войти", "ответ " + r.status);
-     })
-     .catch(function (e) { fail("связаться с кабинетом", e); });
- }
-
- window.onTelegramAuth = function (user) { login({user: user}); };
-
- function pill(text, kind) { return '<span class="pill ' + kind + '">' + esc(text) + "</span>"; }
-
- function render(p) {
-   document.getElementById("login").className = "hide";
-   document.getElementById("app").className = "";
-   document.getElementById("hello").textContent = "Здравствуйте, " + (p.user.name || "друг");
-   document.getElementById("whoami").textContent = p.user.username ? "@" + p.user.username : "";
-   var out = [];
-
-   if (p.blocked) {
-     out.push('<div class="card"><div class="row"><span>Статус</span>' +
-              pill("доступ закрыт", "bad") + "</div><div class=\\"row\\"><span>Причина</span><span>" +
-              esc(p.blocked.reason) + "</span></div></div>");
-     document.getElementById("body").innerHTML = out.join("");
-     return;
-   }
-   if (!p.subscription) {
-     out.push('<div class="card"><p>Подписки пока нет.</p>' +
-              '<a class="btn" href="https://t.me/' + BOT + '">Оформить в боте</a></div>');
-     document.getElementById("body").innerHTML = out.join("");
-     return;
-   }
-
-   var s = p.subscription;
-   var mark = s.status === "expired" ? pill("закончилась", "bad")
-            : !s.enabled ? pill("на паузе", "warn") : pill("активна", "ok");
-   var rows = ['<div class="row"><span>Статус</span>' + mark + "</div>",
-               '<div class="row"><span>Тариф</span><span>' +
-               (s.plan === "paid" ? "оплаченный" : "пробный") + "</span></div>",
-               '<div class="row"><span>Действует до</span><span>' + esc(s.until) + "</span></div>"];
-   if (s.left_text) {
-     rows.push('<div class="row"><span>Осталось</span><span>' + esc(s.left_text) + "</span></div>");
-   }
-   rows.push('<div class="row"><span>Устройств</span><span>' +
-             (s.devices_limit ? esc(s.devices_limit) : "без ограничения") + "</span></div>");
-   rows.push('<div class="row"><span>Израсходовано</span><span>' +
-             esc(s.traffic_used_text) +
-             (s.traffic_limit_gb ? " из " + esc(s.traffic_limit_gb) + " ГБ" : "") + "</span></div>");
-   out.push('<div class="card">' + rows.join("") + "</div>");
-
-   out.push('<div class="card"><b>Подключение</b>' +
-            '<a class="btn" href="happ://add/' + encodeURI(s.url) + '">Добавить в Happ</a>' +
-            '<a class="btn ghost" href="incy://add/' + encodeURI(s.url) + '">Добавить в INCY</a>' +
-            "<code>" + esc(s.url) + "</code></div>");
-
-   if (p.devices && p.devices.length) {
-     var d = p.devices.map(function (x) {
-       return '<div class="row"><span>' + esc(x.model) + "</span><span>" +
-              esc(x.seen) + "</span></div>"; }).join("");
-     out.push('<div class="card"><b>Мои устройства</b>' + d + "</div>");
-   }
-   if (p.payments && p.payments.length) {
-     var pay = p.payments.map(function (x) {
-       return '<div class="row"><span>' + esc(x.date) + "</span><span>" +
-              esc(x.amount) + " ₽ · " + esc(x.status) + "</span></div>"; }).join("");
-     out.push('<div class="card"><b>Платежи</b>' + pay + "</div>");
-   }
-   out.push('<a class="btn" href="https://t.me/' + BOT + '">Открыть бота</a>');
-   document.getElementById("body").innerHTML = out.join("");
- }
-
- function load() {
-   return api("/api/me").then(function (r) {
-     if (r.status === 200) { say(""); return render(r.data); }
-     setToken("");
-     showLogin();
-     if (r.status !== 401) { fail("получить данные", "ответ " + r.status); }
-   }).catch(function (e) { showLogin(); fail("связаться с кабинетом", e); });
- }
-
- var widgetShown = false;
- function showLogin() {
-   document.getElementById("app").className = "hide";
-   document.getElementById("login").className = "";
-   if (!API) {
-     say("Кабинет ещё не настроен: не задан адрес API.");
-     return;
-   }
-   if (widgetShown) { return; }
-   widgetShown = true;
-   var w = document.createElement("script");
-   w.async = true;
-   w.src = "https://telegram.org/js/telegram-widget.js?22";
-   w.setAttribute("data-telegram-login", BOT);
-   w.setAttribute("data-size", "large");
-   w.setAttribute("data-radius", "12");
-   w.setAttribute("data-onauth", "onTelegramAuth(user)");
-   w.setAttribute("data-request-access", "write");
-   document.getElementById("widget").appendChild(w);
- }
-
- document.getElementById("out").onclick = function () {
-   api("/api/logout", {method: "POST"});
-   setToken("");
-   location.reload();
- };
-
- if (tg && tg.initData) {
-   tg.ready(); tg.expand();
-   login({initData: tg.initData});
- } else if (token()) {
-   load();
- } else {
-   showLogin();
- }
-</script></body></html>
-"""
-
-
-def cabinet_page(bot_username: str) -> str:
-    """Готовая страница кабинета: подставлены адрес API и имя бота."""
-    from config import load_config
-    api = (load_config().get("webapi_public") or "").rstrip("/")
-    return (CABINET_PAGE.replace("__API__", api or "")
-            .replace("__BOT__", bot_username or ""))
-
-
-def add_ready() -> bool:
-    """Страница-переходник уже лежит на сайте — можно давать кнопки в боте."""
-    c = creds()
-    return bool(c["domain"] and load_config().get("site_add_page"))
-
-
-def add_url(app: str, sub_url: str) -> str:
-    """Ссылка, которая уведёт человека прямо в приложение."""
-    from urllib.parse import quote
-    if not add_ready() or not sub_url:
-        return ""
-    return f"{site_url()}/add.html?app={quote(app)}&u={quote(sub_url, safe='')}"
-
-
-def deeplink(app: str, sub_url: str) -> str:
-    """Схема приложения — её можно скопировать и вставить в импорт."""
-    scheme = {"happ": "happ://add/", "incy": "incy://add/"}.get(app, "happ://add/")
-    return f"{scheme}{sub_url}" if sub_url else ""
-
-
 def _asset(name: str) -> bytes:
     """Файл из папки assets. Нет файла — пустые байты, не падаем."""
     try:
@@ -451,30 +150,6 @@ def _run(cli, script: str) -> tuple:
     return code, out, err
 
 
-def _probe_targets_sync(targets: list) -> dict:
-    """Проверяет с сервера сайта, достучится ли он до бота по этим адресам."""
-    out = {}
-    try:
-        cli = _client()
-    except Exception as e:
-        return {"error": f"не подключиться к серверу сайта: {type(e).__name__}: {e}"}
-    try:
-        for target in targets:
-            script = (f"curl -s -o /dev/null -m 6 -w '%{{http_code}}' "
-                      f"http://{target}/api/health 2>/dev/null || echo 000")
-            code, res, err = _run(cli, script)
-            out[target] = (res or "").strip()[-3:] or "000"
-    except Exception as e:
-        return {"error": f"{type(e).__name__}: {e}"}
-    finally:
-        cli.close()
-    return out
-
-
-async def probe_targets(targets: list) -> dict:
-    return await asyncio.to_thread(_probe_targets_sync, targets)
-
-
 def _check_sync() -> dict:
     try:
         cli = _client()
@@ -491,8 +166,7 @@ def _check_sync() -> dict:
         cli.close()
 
 
-def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"",
-                 cabinet: str = "") -> dict:
+def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"") -> dict:
     c = creds()
     try:
         cli = _client()
@@ -520,10 +194,6 @@ chmod 755 {WEB_ROOT}
                 f.write(page)
             with sftp.open("/tmp/drebol_og.webp", "wb") as f:
                 f.write(og_bytes)
-            with sftp.open("/tmp/drebol_add.html", "w") as f:
-                f.write(ADD_PAGE)
-            with sftp.open("/tmp/drebol_cabinet.html", "w") as f:
-                f.write(cabinet or "")
             if logo_bytes:
                 with sftp.open("/tmp/drebol_logo", "wb") as f:
                     f.write(logo_bytes)
@@ -531,24 +201,9 @@ chmod 755 {WEB_ROOT}
             sftp.close()
 
         server_name = c["domain"] or "_"
-        cert_domain = c["domain"]
-        # Личный кабинет ходит в бота: если адрес задан, сайт проксирует /api/ к нему
-        upstream = str(load_config().get("webapi_upstream") or "").strip()
-        api_block = ""
-        if upstream:
-            api_block = f"""    location /api/ {{
-        proxy_pass http://{upstream}/api/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 30s;
-    }}"""
         install = f"""set -e
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html
 mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
-mv /tmp/drebol_add.html {WEB_ROOT}/add.html
-mv /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet.html
-chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
@@ -563,7 +218,6 @@ server {{
     location / {{
         try_files $uri $uri/ =404;
     }}
-{api_block}
     location ~* \\.(webp|svg|ico|css|js)$ {{
         expires 7d;
         add_header Cache-Control "public";
@@ -578,14 +232,6 @@ systemctl reload nginx 2>/dev/null || systemctl restart nginx
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
   ufw allow 80/tcp >/dev/null 2>&1 || true
   ufw allow 443/tcp >/dev/null 2>&1 || true
-fi
-# Конфиг мы переписали с нуля, поэтому блок HTTPS, который добавлял certbot,
-# пропал бы вместе с ним. Сертификат на месте — просто прописываем его заново
-if [ -n "{cert_domain}" ] && [ -d "/etc/letsencrypt/live/{cert_domain}" ] \
-   && command -v certbot >/dev/null 2>&1; then
-  certbot --nginx -d {cert_domain} --agree-tos --register-unsafely-without-email \
-          --non-interactive --redirect --reinstall >/dev/null 2>&1 || true
-  systemctl reload nginx 2>/dev/null || true
 fi
 echo DEPLOY_OK
 """
@@ -624,68 +270,6 @@ echo CERT_OK
         return {"ok": True}
     finally:
         cli.close()
-
-
-DIAG_SCRIPT = """
-D="__DOMAIN__"
-echo "domain=$D"
-echo "ip=$(curl -s -m 5 https://api.ipify.org 2>/dev/null || echo '?')"
-if [ -n "$D" ]; then
-  if command -v dig >/dev/null 2>&1; then
-    echo "dns=$(dig +short A "$D" | tr '\n' ' ')"
-  elif command -v getent >/dev/null 2>&1; then
-    echo "dns=$(getent ahostsv4 "$D" | awk '{print $1}' | sort -u | tr '\n' ' ')"
-  else
-    echo "dns=?"
-  fi
-  [ -d "/etc/letsencrypt/live/$D" ] && echo "cert=yes" || echo "cert=no"
-  echo "https=$(curl -s -o /dev/null -w '%{http_code}' -m 8 "https://$D/" 2>/dev/null || echo '-')"
-fi
-echo "nginx443=$(grep -c 'listen 443' /etc/nginx/sites-available/drebol 2>/dev/null || echo 0)"
-echo "listen443=$( (ss -lnt 2>/dev/null || netstat -lnt 2>/dev/null) | grep -c ':443 ' )"
-echo "http=$(curl -s -o /dev/null -w '%{http_code}' -m 5 http://127.0.0.1/ 2>/dev/null || echo '-')"
-echo "certbot=$(command -v certbot >/dev/null 2>&1 && echo yes || echo no)"
-echo DIAG_OK
-"""
-
-
-def _diagnose_sync() -> dict:
-    """Собирает с сервера всё, что объясняет, почему сайт не на HTTPS."""
-    c = creds()
-    try:
-        cli = _client()
-    except Exception as e:
-        return {"ok": False, "error": f"не подключиться: {type(e).__name__}: {e}"}
-    try:
-        code, out, err = _run(cli, DIAG_SCRIPT.replace("__DOMAIN__", c["domain"]))
-        if "DIAG_OK" not in out:
-            return {"ok": False, "error": (err or out)[-300:]}
-        data = {}
-        for line in out.splitlines():
-            if "=" in line:
-                k, _, v = line.partition("=")
-                data[k.strip()] = v.strip()
-        return {"ok": True, "data": data}
-    finally:
-        cli.close()
-
-
-async def diagnose() -> dict:
-    res = await asyncio.to_thread(_diagnose_sync)
-    # Галочку HTTPS поправляем, только когда проверка дала ясный ответ:
-    # молчание сервера бывает от случайной сети, и снимать из-за него
-    # уже работающий HTTPS неправильно
-    if res.get("ok"):
-        data = res["data"]
-        code = data.get("https", "")
-        if code in ("200", "301", "302"):
-            if not creds()["https"]:
-                save_creds(site_https=True)
-        elif code not in ("", "-") and creds()["https"]:
-            # «000» и прочие коды — сервер ответил внятным отказом,
-            # а пустое значение или «-» значит, что проверить не вышло
-            save_creds(site_https=False)
-    return res
 
 
 def _remove_sync() -> dict:
@@ -728,26 +312,24 @@ async def site_tariffs(cfg: dict) -> list:
         rows = await list_tariffs()
         tariffs = [{"name": name, "price": price, "period": fmt_duration(period)}
                    for _, name, period, price, is_active, _ in rows if is_active]
+        if not tariffs:
+            price = cfg.get("paid_price", 0)
+            period = cfg.get("paid_pay_period")
+            if price and period:
+                tariffs = [{"name": fmt_duration(period), "price": price}]
         return tariffs
     except Exception:
         return []
 
 
-async def build_current(bot_username: str) -> tuple:
-    """Страница по текущим данным бота и файлы, которые едут вместе с ней.
-
-    Одна сборка на всех: и кнопка «Обновить», и автообновление смотрят
-    ровно на то, что окажется на сервере.
-    """
+async def deploy(bot_username: str) -> dict:
+    """Собирает страницу и раскатывает её на сервер."""
     from site_page import build_page
     cfg = load_config()
     og_bytes = _asset("og.webp")
     logo_bytes = _asset(LOGO_NAME)
-    # кабинет лежит рядом со страницей — ссылка относительная
-    cabinet = "cabinet.html" if cfg.get("webapi_public") else ""
     page = build_page(
         bot_username=bot_username,
-        cabinet_url=cabinet,
         privacy_url=cfg.get("privacy_url", "") or "",
         terms_url=cfg.get("terms_url", "") or "",
         channel_url=cfg.get("channel_url", "") or "",
@@ -755,81 +337,10 @@ async def build_current(bot_username: str) -> tuple:
         tariffs=await site_tariffs(cfg),
         poster_file="og.webp" if og_bytes else "",
     )
-    return page, og_bytes, logo_bytes
-
-
-def cabinet_ready() -> bool:
-    """Кабинет опубликован: есть домен, адрес API и страница уже уехала."""
-    c = creds()
-    cfg = load_config()
-    return bool(c["domain"] and cfg.get("webapi_public") and cfg.get("site_cabinet"))
-
-
-def cabinet_link() -> str:
-    return f"{site_url()}/cabinet.html" if cabinet_ready() else ""
-
-
-def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes) -> str:
-    """Отпечаток того, что должно лежать на сервере.
-
-    По нему автообновление понимает, поменялось ли хоть что-нибудь: цена
-    тарифа, ссылка на канал, документы, логотип. Не поменялось — не трогаем.
-    """
-    import hashlib
-    h = hashlib.sha256()
-    h.update(page.encode("utf-8"))
-    h.update(og_bytes)
-    h.update(logo_bytes)
-    # адрес API кабинета тоже часть сайта: сменили — страницу надо перезалить
-    h.update(str(load_config().get("webapi_public") or "").encode("utf-8"))
-    return h.hexdigest()
-
-
-async def deploy(bot_username: str) -> dict:
-    """Собирает страницу и раскатывает её на сервер."""
-    page, og_bytes, logo_bytes = await build_current(bot_username)
-    cabinet = cabinet_page(bot_username)
-    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes, cabinet)
-    if res.get("ok"):
-        # вместе со страницей уехал и переходник — можно показывать кнопки приложений
-        save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
-                   site_page_hash=page_hash(page, og_bytes, logo_bytes),
-                   site_add_page=True, site_cabinet=bool(load_config().get("webapi_public")))
-    return res
-
-
-async def site_sync_tick(context):
-    """Сам обновляет сайт, когда в боте что-то поменялось.
-
-    Поменял цену тарифа, ссылку на канал или логотип — через пару минут это
-    же окажется на сайте, нажимать «Обновить» не нужно.
-    """
-    cfg = load_config()
-    if not cfg.get("site_auto", True) or not configured():
-        return
-    # сайт ещё ни разу не разворачивали — сами этого не делаем
-    if not cfg.get("site_deployed_at"):
-        return
-    try:
-        me = await context.bot.get_me()
-        page, og_bytes, logo_bytes = await build_current(me.username)
-    except Exception:
-        return
-    fresh = page_hash(page, og_bytes, logo_bytes)
-    if fresh == cfg.get("site_page_hash"):
-        return
-
     res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes)
-    from log_channel import send_log
     if res.get("ok"):
-        save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
-                   site_page_hash=fresh)
-        await send_log(context.bot, "🌐 Сайт обновлён автоматически: данные изменились")
-    else:
-        # молчать нельзя: на сайте остались старые цены
-        await send_log(context.bot,
-            "⚠️ Сайт не обновился автоматически\n"
-            f"<code>{escape(str(res.get('error'))[:300])}</code>")
+        save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"))
+    return res
 
 
 async def issue_cert() -> dict:
@@ -842,7 +353,7 @@ async def issue_cert() -> dict:
 async def remove_site() -> dict:
     res = await asyncio.to_thread(_remove_sync)
     if res.get("ok"):
-        save_creds(site_deployed_at="", site_https=False, site_add_page=False)
+        save_creds(site_deployed_at="", site_https=False)
     return res
 
 
@@ -879,17 +390,17 @@ async def handle_site_menu(query):
 
     if not ready:
         await query.edit_message_text(
-            "🌐 <b>Сайт</b>\n\n"
+            "🌐 <b>Сайт-визитка</b>\n\n"
             "Нужна библиотека для SSH. Ставить её надо в тот же Python, "
             "из которого работает бот:\n\n"
-            f"<blockquote><code>{escape(pip_path())} install paramiko</code>\n"
-            "<code>systemctl restart drebol-vpn</code></blockquote>\n\n"
+            f"<code>{escape(pip_path())} install paramiko</code>\n"
+            "<code>systemctl restart drebol-vpn</code>\n\n"
             "<i>Обычный «pip install» ставит в системный Python, "
             "а бот живёт в своём venv — поэтому и не видит библиотеку.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Проверить снова", callback_data="site_menu"),
-                 InlineKeyboardButton("◀️ В админку", callback_data="admin_panel")],
+                [InlineKeyboardButton("🔄 Проверить снова", callback_data="site_menu")],
+                [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
             ]),
         )
         return
@@ -897,46 +408,31 @@ async def handle_site_menu(query):
     server = (f"<code>{escape(c['host'])}</code> · {escape(c['user'])}"
               if c["host"] else "не задан")
     domain = f"<code>{escape(c['domain'])}</code>" if c["domain"] else "не задан"
-    state = (f"🟢 развёрнут {c['deployed_at']}" if c["deployed_at"]
-             else "⚪️ ещё не разворачивали")
+    state = f"развёрнут {c['deployed_at']}" if c["deployed_at"] else "ещё не разворачивали"
     url = site_url()
 
-    card = [f"🚀 Статус: <b>{state}</b>",
-            f"🖥 Сервер: {server}",
-            f"🌍 Домен: {domain}" + ("  ·  🔒 HTTPS" if c.get("https") else ""),
-            f"🖼 Логотип: {'свой' if has_logo() else 'нарисованный'}",
-            "⚡ Автообновление: "
-            + ("вкл" if load_config().get("site_auto", True) else "выкл")]
+    lines = ["🌐 <b>Сайт-визитка</b>", "",
+             f"🖥 Сервер: {server}",
+             f"🌍 Домен: {domain}",
+             f"🖼 Логотип: {'свой' if has_logo() else 'нарисованный'}",
+             f"🚀 Статус: {state}"]
     if url and c["deployed_at"]:
-        card.append(f"🔗 {escape(url)}")
-    lines = ["🌐 <b>Сайт</b>", "", "<blockquote>" + "\n".join(card) + "</blockquote>",
-             "", "<i>Лендинг Drebol VPN: разделы, тарифы из бота, кнопка в Telegram. "
-             "Живёт на втором сервере и бота не трогает. Цены и ссылки подставляются "
-             "при каждом обновлении.</i>"]
+        lines.append(f"🔗 {escape(url)}")
+    lines += ["", "<i>Страница с логотипом, анимацией и кнопкой в Telegram. "
+              "Разворачивается на втором сервере, бота не трогает.</i>"]
 
-    kb = []
+    kb = [[InlineKeyboardButton("🖥 Данные сервера", callback_data="site_server"),
+           InlineKeyboardButton("🌍 Домен", callback_data="site_domain")],
+          [InlineKeyboardButton("🖼 Логотип", callback_data="site_logo")]]
     if configured():
-        # главное действие — первым и во всю ширину
         kb.append([InlineKeyboardButton(
             "🔄 Обновить сайт" if c["deployed_at"] else "🚀 Развернуть сайт",
             callback_data="site_deploy")])
-    kb.append([InlineKeyboardButton("🖥 Сервер", callback_data="site_server"),
-               InlineKeyboardButton("🌍 Домен", callback_data="site_domain"),
-               InlineKeyboardButton("🖼 Логотип", callback_data="site_logo")])
-    if configured():
-        extra = []
         if c["domain"] and c["deployed_at"] and not c["https"]:
-            extra.append(InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert"))
-        if c["deployed_at"]:
-            extra.append(InlineKeyboardButton("🩺 Проверить", callback_data="site_check"))
-            extra.append(InlineKeyboardButton(
-                "⚡ Авто: вкл" if load_config().get("site_auto", True) else "💤 Авто: выкл",
-                callback_data="site_auto"))
-        if extra:
-            kb.append(extra)
+            kb.append([InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert")])
         if c["deployed_at"] and url:
-            kb.append([InlineKeyboardButton("🔗 Открыть сайт", url=url),
-                       InlineKeyboardButton("🗑 Удалить", callback_data="site_delete")])
+            kb.append([InlineKeyboardButton("🔗 Открыть сайт", url=url)])
+            kb.append([InlineKeyboardButton("🗑 Удалить сайт", callback_data="site_delete")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
 
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
@@ -949,9 +445,9 @@ async def handle_site_server(query, context):
     from states import AWAITING_SITE_HOST
     context.user_data["state"] = AWAITING_SITE_HOST
     await query.edit_message_text(
-        "🖥 <b>Сервер для сайта</b>  ·  <i>шаг 1 из 3</i>\n\n"
-        "Пришли IP второго сервера.\n\n"
-        "<i>Если SSH на другом порту — <code>1.2.3.4:2222</code></i>",
+        "🖥 <b>Сервер для сайта</b> · шаг 1 из 3\n\n"
+        "Пришли IP второго сервера.\n"
+        "Если SSH на другом порту — <code>1.2.3.4:2222</code>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Отмена", callback_data="site_menu")],
@@ -966,10 +462,10 @@ async def handle_site_domain(query, context):
     cur = creds()["domain"]
     await query.edit_message_text(
         "🌍 <b>Домен сайта</b>\n\n"
-        f"<blockquote>Сейчас: <b>{escape(cur) if cur else 'не задан'}</b></blockquote>\n\n"
-        "Пришли домен без http, например <code>drbl.tech</code>.\n\n"
-        "<i>A-запись домена должна смотреть на IP этого сервера. "
-        "<code>-</code> — убрать домен.</i>",
+        f"Сейчас: <b>{escape(cur) if cur else 'не задан'}</b>\n\n"
+        "Пришли домен без http, например <code>drbl.tech</code>.\n"
+        "A-запись домена должна смотреть на IP этого сервера.\n"
+        "<code>-</code> — убрать домен.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
@@ -981,11 +477,11 @@ async def handle_site_logo(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from states import AWAITING_SITE_LOGO
     context.user_data["state"] = AWAITING_SITE_LOGO
-    cur = "стоит твой файл" if has_logo() else "нарисованный знак"
+    cur = "сейчас стоит твой файл" if has_logo() else "сейчас нарисованный знак"
     await query.edit_message_text(
         "🖼 <b>Логотип сайта</b>\n\n"
-        f"<blockquote>Сейчас: <b>{cur}</b></blockquote>\n\n"
-        "Пришли картинку — лучше PNG с прозрачным фоном. "
+        f"{cur}.\n\n"
+        "Пришли картинку — лучше PNG с прозрачным фоном.\n"
         "Тёмную подложку уберу сам, если её видно.\n\n"
         "<i>После замены нажми «Обновить сайт».</i>",
         parse_mode="HTML",
@@ -1000,18 +496,17 @@ async def handle_site_deploy(query, context):
     if not configured():
         await query.answer("Сначала данные сервера", show_alert=True)
         return
-    await query.edit_message_text("🚀 <b>Разворачиваю сайт…</b>\n\n<i>Это займёт до минуты.</i>",
-                                  parse_mode="HTML")
+    await query.edit_message_text("🚀 Разворачиваю сайт… это займёт до минуты.")
     me = await context.bot.get_me()
     res = await deploy(me.username)
     if not res.get("ok"):
         await query.edit_message_text(
-            "❌ <b>Не получилось развернуть</b>\n\n"
-            f"<blockquote><code>{escape(str(res.get('error'))[:500])}</code></blockquote>",
+            "❌ <b>Не получилось</b>\n\n"
+            f"<code>{escape(str(res.get('error'))[:500])}</code>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_deploy"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
+                [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_deploy")],
+                [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
             ]),
         )
         return
@@ -1019,115 +514,34 @@ async def handle_site_deploy(query, context):
     from log_channel import send_log
     await send_log(context.bot, f"🌐 Сайт развёрнут: {escape(url)}")
     await query.edit_message_text(
-        f"✅ <b>Сайт развёрнут</b>\n\n<blockquote>🔗 {escape(url)}</blockquote>",
+        f"✅ <b>Сайт развёрнут</b>\n\n🔗 {escape(url)}",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔗 Открыть", url=url),
-             InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
+            [InlineKeyboardButton("🔗 Открыть", url=url)],
+            [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
         ]),
         disable_web_page_preview=True,
     )
 
 
-async def handle_site_auto(query, context):
-    cfg = load_config()
-    cfg["site_auto"] = not cfg.get("site_auto", True)
-    save_config(cfg)
-    await query.answer("Сайт будет обновляться сам" if cfg["site_auto"]
-                       else "Теперь только вручную")
-    await handle_site_menu(query)
-
-
-async def handle_site_check(query, context):
-    """Почему сайт не на HTTPS — по фактам с самого сервера."""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text("🩺 Проверяю сервер…")
-    res = await diagnose()
-    if not res.get("ok"):
-        await query.edit_message_text(
-            f"❌ <b>Не получилось проверить</b>\n\n"
-            f"<blockquote><code>{escape(str(res.get('error'))[:300])}</code></blockquote>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")]]),
-        )
-        return
-
-    d = res["data"]
-    domain = d.get("domain", "")
-    ip = d.get("ip", "?")
-    dns = d.get("dns", "")
-    cert = d.get("cert") == "yes"
-    conf443 = d.get("nginx443", "0") != "0"
-    listen443 = d.get("listen443", "0") != "0"
-    https_code = d.get("https", "-")
-    http_code = d.get("http", "-")
-    dns_ok = bool(dns) and ip != "?" and ip in dns.split()
-
-    def mark(ok):
-        return "✅" if ok else "❌"
-
-    lines = ["🩺 <b>Проверка сайта</b>", ""]
-    if not domain:
-        lines += ["❌ <b>Домен не задан</b>", "",
-                  "По IP сертификат не выпустить — HTTPS бывает только с доменом.",
-                  "Задай домен, направь его A-запись на "
-                  f"<code>{escape(ip)}</code> и включи HTTPS."]
-    else:
-        lines += [f"🌍 <code>{escape(domain)}</code>  ·  🖥 <code>{escape(ip)}</code>", "",
-                  "<blockquote>"
-                  f"{mark(dns_ok)} A-запись: <code>{escape(dns or 'не найдена')}</code>\n"
-                  f"{mark(cert)} Сертификат на сервере\n"
-                  f"{mark(conf443)} 443 в конфиге nginx\n"
-                  f"{mark(listen443)} nginx слушает 443\n"
-                  f"🌐 Ответ: http <b>{escape(http_code)}</b> · https <b>{escape(https_code)}</b>"
-                  "</blockquote>", ""]
-        # первая же невыполненная причина и объясняет всё остальное
-        if not dns_ok:
-            lines += ["<b>Причина: домен не смотрит на этот сервер.</b>",
-                      "Поправь A-запись у регистратора на IP выше и подожди "
-                      "до часа — потом включи HTTPS."]
-        elif not cert:
-            lines += ["<b>Причина: сертификата нет.</b>",
-                      "Нажми «🔒 Включить HTTPS» — теперь домен смотрит куда надо."]
-        elif not conf443 or not listen443:
-            lines += ["<b>Причина: сертификат есть, но nginx его не подхватил.</b>",
-                      "Нажми «🔒 Включить HTTPS» — конфиг пропишется заново."]
-        elif https_code in ("200", "301", "302"):
-            lines += ["<b>HTTPS работает.</b>",
-                      "Если открывается по http — проверь, что заходишь "
-                      f"на <code>https://{escape(domain)}</code>, а не по IP."]
-        else:
-            lines += ["<b>Сертификат и конфиг на месте, но сайт по https молчит.</b>",
-                      "Обычно мешает закрытый 443 порт у хостера или фаервол."]
-
-    kb = [[InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert")]] if domain else []
-    kb.append([InlineKeyboardButton("🔄 Проверить снова", callback_data="site_check"),
-               InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")])
-    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
-                                  reply_markup=InlineKeyboardMarkup(kb),
-                                  disable_web_page_preview=True)
-
-
 async def handle_site_cert(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text("🔒 <b>Выпускаю сертификат…</b>\n\n<i>Это займёт до минуты.</i>",
-                                  parse_mode="HTML")
+    await query.edit_message_text("🔒 Выпускаю сертификат… до минуты.")
     res = await issue_cert()
     if not res.get("ok"):
         await query.edit_message_text(
             "❌ <b>Сертификат не выпустился</b>\n\n"
-            f"<blockquote><code>{escape(str(res.get('error'))[:500])}</code></blockquote>\n\n"
-            "<i>Обычно причина одна: домен ещё не смотрит на этот сервер.</i>",
+            f"<code>{escape(str(res.get('error'))[:500])}</code>\n\n"
+            "Обычно причина одна: домен ещё не смотрит на этот сервер.",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_cert"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
+                [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_cert")],
+                [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
             ]),
         )
         return
     await query.answer("HTTPS включён")
-    await handle_site_check(query, context)
+    await handle_site_menu(query)
 
 
 async def handle_site_delete(query, context):
@@ -1136,8 +550,7 @@ async def handle_site_delete(query, context):
     res = await remove_site()
     if not res.get("ok"):
         await query.edit_message_text(
-            f"❌ <b>Не получилось удалить</b>\n\n"
-            f"<blockquote><code>{escape(str(res.get('error'))[:400])}</code></blockquote>",
+            f"❌ <b>Не получилось</b>\n\n<code>{escape(str(res.get('error'))[:400])}</code>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
