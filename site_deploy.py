@@ -21,6 +21,87 @@ NGINX_CONF = "/etc/nginx/sites-available/drebol"
 LOGO_NAME = "logo.png"
 
 
+# Страница-переходник: Telegram пускает в кнопки только http(s), а приложения
+# ловят свои схемы (happ://, incy://). Открывается по ссылке из бота и сразу
+# уводит в приложение; если оно не установлено, остаётся ссылка и инструкция.
+ADD_PAGE = """<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Добавляем подписку</title>
+<style>
+ :root { color-scheme: dark; }
+ body { margin:0; min-height:100vh; display:flex; align-items:center;
+        justify-content:center; background:#0e1117; color:#e7e9ee;
+        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+ .card { max-width:420px; padding:28px 22px; text-align:center; }
+ h1 { font-size:20px; margin:0 0 10px; }
+ p { color:#9aa4b2; margin:0 0 18px; }
+ a.btn { display:block; padding:14px 18px; margin:10px 0; border-radius:12px;
+         background:#2f81f7; color:#fff; text-decoration:none; font-weight:600; }
+ a.ghost { background:#1c2128; color:#e7e9ee; }
+ code { display:block; word-break:break-all; background:#1c2128; color:#9aa4b2;
+        padding:12px; border-radius:10px; font-size:13px; margin-top:16px; }
+</style></head>
+<body><div class="card">
+ <h1 id="head">Открываем приложение…</h1>
+ <p id="hint">Если ничего не произошло — нажмите кнопку ниже.</p>
+ <a class="btn" id="go" href="#">Добавить подписку</a>
+ <a class="ghost btn" id="store" href="#" style="display:none">Установить приложение</a>
+ <code id="raw"></code>
+</div>
+<script>
+ var q = new URLSearchParams(location.search);
+ var app = (q.get("app") || "happ").toLowerCase();
+ var sub = q.get("u") || "";
+ var apps = {
+   happ: {name: "Happ", scheme: "happ://add/",
+          store: "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"},
+   incy: {name: "INCY", scheme: "incy://add/",
+          store: "https://apps.apple.com/ru/app/incy/id6756943388"}
+ };
+ var cfg = apps[app] || apps.happ;
+ var link = sub ? cfg.scheme + sub : "";
+ document.getElementById("head").textContent = "Добавляем подписку в " + cfg.name;
+ var go = document.getElementById("go");
+ go.textContent = "Открыть " + cfg.name;
+ go.href = link || "#";
+ var store = document.getElementById("store");
+ store.href = cfg.store;
+ store.textContent = "Установить " + cfg.name;
+ document.getElementById("raw").textContent = sub;
+ if (link) {
+   setTimeout(function () { location.href = link; }, 100);
+   setTimeout(function () { store.style.display = "block"; }, 2500);
+ } else {
+   document.getElementById("head").textContent = "Ссылка не передана";
+   document.getElementById("hint").textContent = "Вернитесь в бот и нажмите кнопку ещё раз.";
+ }
+</script></body></html>
+"""
+
+
+def add_ready() -> bool:
+    """Страница-переходник уже лежит на сайте — можно давать кнопки в боте."""
+    c = creds()
+    return bool(c["domain"] and load_config().get("site_add_page"))
+
+
+def add_url(app: str, sub_url: str) -> str:
+    """Ссылка, которая уведёт человека прямо в приложение."""
+    from urllib.parse import quote
+    if not add_ready() or not sub_url:
+        return ""
+    return f"{site_url()}/add.html?app={quote(app)}&u={quote(sub_url, safe='')}"
+
+
+def deeplink(app: str, sub_url: str) -> str:
+    """Схема приложения — её можно скопировать и вставить в импорт."""
+    scheme = {"happ": "happ://add/", "incy": "incy://add/"}.get(app, "happ://add/")
+    return f"{scheme}{sub_url}" if sub_url else ""
+
+
 def _asset(name: str) -> bytes:
     """Файл из папки assets. Нет файла — пустые байты, не падаем."""
     try:
@@ -194,6 +275,8 @@ chmod 755 {WEB_ROOT}
                 f.write(page)
             with sftp.open("/tmp/drebol_og.webp", "wb") as f:
                 f.write(og_bytes)
+            with sftp.open("/tmp/drebol_add.html", "w") as f:
+                f.write(ADD_PAGE)
             if logo_bytes:
                 with sftp.open("/tmp/drebol_logo", "wb") as f:
                     f.write(logo_bytes)
@@ -205,6 +288,8 @@ chmod 755 {WEB_ROOT}
         install = f"""set -e
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html
 mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
+mv /tmp/drebol_add.html {WEB_ROOT}/add.html
+chmod 644 {WEB_ROOT}/add.html
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
@@ -429,8 +514,10 @@ async def deploy(bot_username: str) -> dict:
     page, og_bytes, logo_bytes = await build_current(bot_username)
     res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes)
     if res.get("ok"):
+        # вместе со страницей уехал и переходник — можно показывать кнопки приложений
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
-                   site_page_hash=page_hash(page, og_bytes, logo_bytes))
+                   site_page_hash=page_hash(page, og_bytes, logo_bytes),
+                   site_add_page=True)
     return res
 
 
@@ -478,7 +565,7 @@ async def issue_cert() -> dict:
 async def remove_site() -> dict:
     res = await asyncio.to_thread(_remove_sync)
     if res.get("ok"):
-        save_creds(site_deployed_at="", site_https=False)
+        save_creds(site_deployed_at="", site_https=False, site_add_page=False)
     return res
 
 

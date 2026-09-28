@@ -115,6 +115,9 @@ async def handle_my_paid_sub(query):
         copy_btn = InlineKeyboardButton("📋 Скопировать ссылку", copy_text=CopyTextButton(text=sub_url))
     except (ImportError, TypeError):
         copy_btn = InlineKeyboardButton("📋 Скопировать ссылку", callback_data="copy_sub")
+    # подключение в один тап — первым делом, дальше ручные способы
+    if _on("subscription"):
+        kb_rows += _app_rows(sub_url)
     kb_rows.append([copy_btn, InlineKeyboardButton("🔳 QR-код", callback_data="qr_code")])
     # продлевать можно в любой момент: остаток срока при оплате не сгорает
     if _on("payments"):
@@ -137,6 +140,73 @@ async def handle_my_paid_sub(query):
         "<i>Скопируйте ссылку, продлите подписку или управляйте устройствами.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb_rows),
+        disable_web_page_preview=True,
+    )
+
+
+# ── Добавление подписки в приложение ─────────────────────────────────────────
+
+APPS = {
+    "happ": {"name": "Happ", "emoji": "📲",
+             "ios": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+             "android": "https://play.google.com/store/apps/details?id=com.happproxy"},
+    "incy": {"name": "INCY", "emoji": "📲",
+             "ios": "https://apps.apple.com/ru/app/incy/id6756943388",
+             "android": "https://play.google.com/store/apps/details?id=llc.itdev.incy"},
+}
+
+
+def _app_rows(sub_url: str) -> list:
+    """Кнопки «добавить в приложение».
+
+    Телеграм пускает в кнопки только http(s), а приложения ловят свои схемы
+    (happ://, incy://). Поэтому, когда развёрнут сайт, ведём через его
+    страницу-переходник — это один тап. Без сайта копируем ссылку схемой:
+    приложения умеют импорт из буфера обмена.
+    """
+    from telegram import InlineKeyboardButton
+    import site_deploy as site
+    if not sub_url:
+        return []
+    row = []
+    for key, app in APPS.items():
+        label = f"{app['emoji']} Добавить в {app['name']}"
+        url = site.add_url(key, sub_url)
+        if url:
+            row.append(InlineKeyboardButton(label, url=url))
+            continue
+        try:
+            from telegram import CopyTextButton
+            row.append(InlineKeyboardButton(
+                label, copy_text=CopyTextButton(text=site.deeplink(key, sub_url))))
+        except ImportError:
+            row.append(InlineKeyboardButton(label, callback_data=f"app_add:{key}"))
+    return [row] if row else []
+
+
+async def handle_app_add(query, app_key: str):
+    """Запасной экран: ссылка схемой и что с ней делать."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    import site_deploy as site
+    from paidsub.storage import get_paid_sub_by_tg_id
+    app = APPS.get(app_key) or APPS["happ"]
+    row = await get_paid_sub_by_tg_id(query.from_user.id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    link = site.deeplink(app_key, row[5])
+    await query.edit_message_text(
+        f"📲 <b>Добавить подписку в {app['name']}</b>\n\n"
+        f"<blockquote>1. Установите {app['name']}, если ещё не стоит\n"
+        "2. Скопируйте ссылку ниже — нажмите на неё\n"
+        f"3. Откройте {app['name']} → «Добавить» → «Из буфера обмена»</blockquote>\n\n"
+        f"<code>{escape(link)}</code>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🍏 App Store", url=app["ios"]),
+             InlineKeyboardButton("🤖 Google Play", url=app["android"])],
+            [InlineKeyboardButton("◀️ К подписке", callback_data="my_paid_sub")],
+        ]),
         disable_web_page_preview=True,
     )
 

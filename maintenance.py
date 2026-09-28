@@ -27,7 +27,7 @@ DEFAULT_TEXT = (
 # кнопку my_paid_sub роутер относит к subscription или trial сам.
 FEATURES = {
     "trial": ("🆓", "Выдача пробного периода", ()),
-    "subscription": ("👤", "Моя подписка", ("qr_code", "copy_sub")),
+    "subscription": ("👤", "Моя подписка", ("qr_code", "copy_sub", "app_add")),
     "payments": ("💳", "Оплата и продление",
                  ("renew_sub", "pay_invoice", "tariff_pick",
                   "enter_promo", "remove_promo")),

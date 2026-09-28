@@ -4,7 +4,7 @@ from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard, subscribe_text
 from handlers.user import (
-    handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub,
+    handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_app_add,
     handle_how_to, handle_renew_sub, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_qr_code, handle_reissue_key, handle_reissue_do, handle_prices, handle_info,
@@ -264,6 +264,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_copy_sub(query, context)
     elif data == "info":
         await handle_info(query)
+    elif data.startswith("app_add:"):
+        await handle_app_add(query, data.split(":")[1])
     elif data == "qr_code":
         await handle_qr_code(query, context)
     elif data == "reissue_key":

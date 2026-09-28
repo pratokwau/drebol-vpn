@@ -10,9 +10,9 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
     channel_url = cfg.get("channel_url")
 
     news_btn = (
-        InlineKeyboardButton("📰 Новости", url=channel_url)
+        InlineKeyboardButton("📣 Новости", url=channel_url)
         if channel_url
-        else InlineKeyboardButton("📰 Новости", callback_data="news_no_channel")
+        else InlineKeyboardButton("📣 Новости", callback_data="news_no_channel")
     )
 
     # выключенные в техработах функции прячем от пользователей; админ видит всё
@@ -22,9 +22,10 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
         return is_admin or mnt.feature_enabled(key)
 
     rows = []
-    # у кого подписка есть — заходит в действия с ней, у кого нет — оформляет
+    # Эмодзи подобраны в одну «семью»: ключи и замок — про доступ, карта и люди —
+    # про действия, дальше служебное. Разнобой в меню сильнее всего бросается в глаза.
     rows.append([InlineKeyboardButton(
-        "⛓️‍💥 Моя подписка" if paid_sub_status else "🆓 Получить подписку",
+        "🔐 Моя подписка" if paid_sub_status else "🎁 Получить подписку",
         callback_data="my_paid_sub")])
     # вторым рядом — то, за чем приходят чаще всего; парой, чтобы меню было короче
     pair = []
@@ -36,7 +37,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
     if pair:
         rows.append(pair)
     if has_sub:
-        rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
+        rows.append([InlineKeyboardButton("🔑 Админская подписка", callback_data="my_sub")])
     info_btn = InlineKeyboardButton("ℹ️ Инфо", callback_data="info")
     if on("support"):
         # в режиме «аккаунт в телеграме» кнопка уводит прямо в личку поддержки
@@ -46,9 +47,9 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
         rows.append([info_btn])
     rows.append([news_btn])
     if is_admin:
-        rows.append([InlineKeyboardButton("🛠 Админка", callback_data="admin_panel")])
+        rows.append([InlineKeyboardButton("⚙️ Админка", callback_data="admin_panel")])
     elif is_helper:
-        rows.append([InlineKeyboardButton("🛡 Панель поддержки", callback_data="admin_panel")])
+        rows.append([InlineKeyboardButton("🧰 Панель поддержки", callback_data="admin_panel")])
     return InlineKeyboardMarkup(rows)
 
 
