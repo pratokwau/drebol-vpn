@@ -446,6 +446,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "cab_menu":
         from webapi import handle_cabinet_menu
         await handle_cabinet_menu(query, context)
+    elif data == "cab_find":
+        from webapi import handle_cabinet_find
+        await handle_cabinet_find(query, context)
     elif data == "cab_check":
         from webapi import handle_cabinet_check
         await handle_cabinet_check(query, context)

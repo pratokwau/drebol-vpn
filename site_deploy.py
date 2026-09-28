@@ -451,6 +451,30 @@ def _run(cli, script: str) -> tuple:
     return code, out, err
 
 
+def _probe_targets_sync(targets: list) -> dict:
+    """Проверяет с сервера сайта, достучится ли он до бота по этим адресам."""
+    out = {}
+    try:
+        cli = _client()
+    except Exception as e:
+        return {"error": f"не подключиться к серверу сайта: {type(e).__name__}: {e}"}
+    try:
+        for target in targets:
+            script = (f"curl -s -o /dev/null -m 6 -w '%{{http_code}}' "
+                      f"http://{target}/api/health 2>/dev/null || echo 000")
+            code, res, err = _run(cli, script)
+            out[target] = (res or "").strip()[-3:] or "000"
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+    finally:
+        cli.close()
+    return out
+
+
+async def probe_targets(targets: list) -> dict:
+    return await asyncio.to_thread(_probe_targets_sync, targets)
+
+
 def _check_sync() -> dict:
     try:
         cli = _client()

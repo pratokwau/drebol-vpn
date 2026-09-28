@@ -341,13 +341,14 @@ async def handle_cabinet_menu(query, context=None, note: str = ""):
     lines.append(
         "\n<i>Кабинет только показывает: срок, ссылку подписки, устройства и платежи. "
         "Менять что-либо можно только в боте.\n\n"
-        "Порядок такой: «🔀 Через сайт» (адрес бота вида <code>1.2.3.4:8088</code>) → "
+        "Порядок такой: «🔎 Найти адрес бота» (бот подберёт его сам) → "
         "«🟢 Включить API» → развернуть сайт заново. И скажи @BotFather команду "
         "/setdomain с доменом сайта — без неё кнопка входа не появится.</i>")
 
     kb = [[InlineKeyboardButton("🔴 Выключить API" if s["enabled"] else "🟢 Включить API",
                                 callback_data="cab_toggle"),
            InlineKeyboardButton("🩺 Проверить", callback_data="cab_check")],
+          [InlineKeyboardButton("🔎 Найти адрес бота", callback_data="cab_find")],
           [InlineKeyboardButton("🔀 Через сайт", callback_data="cab_upstream"),
            InlineKeyboardButton("🔗 Адрес API", callback_data="cab_public"),
            InlineKeyboardButton("🔌 Порт", callback_data="cab_port")]]
@@ -447,19 +448,39 @@ async def handle_cabinet_input(update, context, state: str, text: str):
             return
         host, _, port = target.partition(":")
         if not host or not port.isdigit():
-            await msg.reply_text("❌ <b>Нужен адрес вида <code>1.2.3.4:8088</code></b>",
+            await msg.reply_text("❌ <b>Нужен адрес вида <code>10.0.0.5:8088</code></b>\n\n"
+                                 "<i>Или нажми «🔎 Найти адрес бота» — подберу сам.</i>",
                                  parse_mode="HTML", reply_markup=back)
             return
+        if host in SAMPLE_HOSTS:
+            await msg.reply_text(
+                f"❌ <b>{html.escape(host)} — это адрес из примера</b>\n\n"
+                "<i>Нужен настоящий адрес сервера с ботом. Проще всего нажать "
+                "«🔎 Найти адрес бота» — бот подберёт его сам.</i>",
+                parse_mode="HTML", reply_markup=back)
+            return
+        # спрашиваем сам сервер сайта: дойдёт ли он туда
+        probe_res = await site.probe_targets([target])
+        code = probe_res.get(target) if "error" not in probe_res else None
         cfg["webapi_upstream"] = target
         # раз сайт сам отдаёт /api/, кабинету достаточно адреса сайта
         if site.creds()["domain"]:
             cfg["webapi_public"] = site.site_url()
         save_config(cfg)
         context.user_data.pop("state", None)
+        if code == "200":
+            tail = "<i>Сервер сайта туда дозвонился. Осталось развернуть сайт заново.</i>"
+        elif code and code != "000":
+            tail = (f"⚠️ <i>Сервер сайта получил оттуда ответ {html.escape(code)} — "
+                    "похоже, это не бот. Проверь адрес или нажми «🔎 Найти адрес бота».</i>")
+        else:
+            tail = ("⚠️ <i>Сервер сайта туда не дозвонился: закрыт порт или не тот адрес. "
+                    "Нажми «🔎 Найти адрес бота» — подберу сам.</i>")
         await msg.reply_text(
             f"✅ <b>Сайт будет слать /api/ на {html.escape(target)}</b>\n\n"
-            f"<i>Адрес API: {html.escape(cfg.get('webapi_public') or 'задай вручную')}.\n"
-            "Теперь разверни сайт заново.</i>", parse_mode="HTML", reply_markup=back)
+            f"<blockquote>🔗 Адрес API: "
+            f"{html.escape(cfg.get('webapi_public') or 'задай вручную')}</blockquote>\n\n"
+            + tail, parse_mode="HTML", reply_markup=back)
         return
 
     url = text.strip().rstrip("/")
@@ -490,7 +511,7 @@ async def probe() -> dict:
     public = str(cfg.get("webapi_public") or "").rstrip("/")
     out = {"enabled": s["enabled"], "running": is_running(), "public": public,
            "upstream": str(cfg.get("webapi_upstream") or ""),
-           "local": None, "outside": None, "advice": []}
+           "local": None, "outside": None, "from_site": None, "advice": []}
 
     async def ping(url: str) -> dict:
         try:
@@ -518,6 +539,17 @@ async def probe() -> dict:
     out["outside"] = await ping(f"{public}/api/health")
     if out["outside"]["ok"]:
         return out
+    if out["upstream"]:
+        import site_deploy as site
+        checked = await site.probe_targets([out["upstream"]])
+        out["from_site"] = checked.get(out["upstream"]) if "error" not in checked else None
+        if out["from_site"] != "200":
+            got = str(out.get("from_site") or "")
+            how = ("связи нет" if got in ("", "000") else f"ответ {got}")
+            out["advice"].append(
+                f"Сервер сайта не достучался до <code>{html.escape(out['upstream'])}</code> "
+                f"({how}). Нажми «🔎 Найти адрес бота» — подберу рабочий сам.")
+            return out
     if out["outside"]["status"] in (404, 403):
         out["advice"].append("Адрес отвечает, но не тем: сайт не пересылает <code>/api/</code>. "
                              "Нажми «🔀 Через сайт», укажи адрес бота и разверни сайт заново.")
@@ -563,3 +595,91 @@ async def handle_cabinet_check(query, context):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Ещё раз", callback_data="cab_check"),
              InlineKeyboardButton("◀️ К кабинету", callback_data="cab_menu")]]))
+
+
+# Адреса из примеров: если такой ввели, значит скопировали подсказку как есть
+SAMPLE_HOSTS = {"1.2.3.4", "0.0.0.0", "8.8.8.8", "example.com", "host", "ip"}
+
+
+async def my_public_ip() -> str:
+    """Внешний адрес сервера бота — чтобы не искать его руками."""
+    import aiohttp
+    for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
+        try:
+            timeout = aiohttp.ClientTimeout(total=6)
+            async with aiohttp.ClientSession(timeout=timeout) as sess:
+                async with sess.get(url) as r:
+                    ip = (await r.text()).strip()
+                    if ip and len(ip) < 46 and " " not in ip:
+                        return ip
+        except Exception:
+            continue
+    return ""
+
+
+async def find_upstream() -> dict:
+    """Сам ищет адрес, по которому сайт достучится до бота.
+
+    Пробует по очереди: тот же сервер, внешний адрес бота, адрес сервера сайта.
+    Проверку делает сам сервер сайта — именно ему потом ходить к боту.
+    """
+    import site_deploy as site
+    s = settings()
+    port = s["port"]
+    candidates = [f"127.0.0.1:{port}"]
+    ip = await my_public_ip()
+    if ip:
+        candidates.append(f"{ip}:{port}")
+    host = site.creds()["host"]
+    if host and f"{host}:{port}" not in candidates:
+        candidates.append(f"{host}:{port}")
+
+    res = await site.probe_targets(candidates)
+    if "error" in res:
+        return {"ok": False, "error": res["error"], "tried": candidates}
+    for target in candidates:
+        if res.get(target) == "200":
+            return {"ok": True, "target": target, "tried": res, "ip": ip}
+    return {"ok": False, "tried": res, "ip": ip,
+            "error": "ни один адрес не ответил"}
+
+
+async def handle_cabinet_find(query, context):
+    """Кнопка «Найти адрес»: бот подбирает его сам и сохраняет."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from config import load_config, save_config
+    import site_deploy as site
+    await query.edit_message_text("🔎 Ищу адрес, по которому сайт достучится до бота…",
+                                  parse_mode="HTML")
+    r = await find_upstream()
+    back = InlineKeyboardMarkup([[InlineKeyboardButton("🪪 К кабинету", callback_data="cab_menu")]])
+    if not r.get("ok"):
+        tried = r.get("tried")
+        lines = ["🔎 <b>Адрес не нашёлся</b>", ""]
+        if isinstance(tried, dict):
+            lines.append("<blockquote>" + "\n".join(
+                f"<code>{html.escape(t)}</code> — ответ {html.escape(str(code))}"
+                for t, code in tried.items()) + "</blockquote>")
+        lines.append(f"<i>{html.escape(str(r.get('error')))}</i>")
+        lines.append("\n<i>Чаще всего мешает файрвол: открой порт "
+                     f"{settings()['port']} на сервере бота для адреса сервера сайта. "
+                     "Например: <code>ufw allow from АДРЕС_САЙТА to any port "
+                     f"{settings()['port']}</code></i>")
+        await query.edit_message_text("\n".join(lines), parse_mode="HTML", reply_markup=back)
+        return
+
+    cfg = load_config()
+    cfg["webapi_upstream"] = r["target"]
+    if site.creds()["domain"]:
+        cfg["webapi_public"] = site.site_url()
+    save_config(cfg)
+    await query.edit_message_text(
+        f"✅ <b>Нашёл: {html.escape(r['target'])}</b>\n\n"
+        f"<blockquote>🔀 Сайт будет слать <code>/api/</code> туда\n"
+        f"🔗 Адрес API: <b>{html.escape(cfg.get('webapi_public') or '—')}</b></blockquote>\n\n"
+        "<i>Осталось развернуть сайт заново — и кабинет заработает.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🌐 К сайту", callback_data="site_menu"),
+             InlineKeyboardButton("🩺 Проверить", callback_data="cab_check")],
+            [InlineKeyboardButton("🪪 К кабинету", callback_data="cab_menu")]]))
