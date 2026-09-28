@@ -48,6 +48,7 @@ CB_LABELS = {
     "site_menu": "🌐 Сайт",
     "cab_menu": "🪪 Личный кабинет",
     "cab_toggle": "🪪 API кабинета вкл/выкл",
+    "cab_check": "🩺 Проверил кабинет",
     "cab_public": "🔗 Адрес API кабинета",
     "cab_port": "🔌 Порт API кабинета",
     "backup_menu": "💾 Бэкап",

@@ -140,9 +140,16 @@ CABINET_PAGE = """<!doctype html>
  var tg = window.Telegram && window.Telegram.WebApp;
  function esc(s) { return String(s == null ? "" : s).replace(/[<>&]/g, function (c) {
    return {"<": "&lt;", ">": "&gt;", "&": "&amp;"}[c]; }); }
- function token() { try { return localStorage.getItem(KEY) || ""; } catch (e) { return ""; } }
- function setToken(t) { try { t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY); }
-   catch (e) {} }
+ var memToken = "";
+ function token() {
+   if (memToken) { return memToken; }
+   try { return localStorage.getItem(KEY) || ""; } catch (e) { return ""; }
+ }
+ function setToken(t) {
+   memToken = t || "";
+   try { t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY); } catch (e) {}
+ }
+ function say(msg) { document.getElementById("loginerr").innerHTML = msg || ""; }
 
  function api(path, opts) {
    opts = opts || {};
@@ -150,16 +157,30 @@ CABINET_PAGE = """<!doctype html>
                                 opts.headers || {},
                                 token() ? {"Authorization": "Bearer " + token()} : {});
    return fetch(API + path, opts).then(function (r) {
-     return r.json().then(function (j) { return {status: r.status, data: j}; });
+     return r.text().then(function (body) {
+       var data = {};
+       try { data = JSON.parse(body); } catch (e) { data = {raw: body}; }
+       return {status: r.status, data: data};
+     });
    });
  }
 
+ // Причину видно сразу: иначе вход «проходит», а страница молча остаётся формой
+ function fail(where, err) {
+   var addr = API || location.origin;
+   say("Не получилось " + where + ".<br>Адрес: <code>" + esc(addr) +
+       "</code><br>" + esc(err && err.message ? err.message : err || "нет ответа"));
+ }
+
  function login(payload) {
+   say("Входим…");
    return api("/api/auth", {method: "POST", body: JSON.stringify(payload)})
      .then(function (r) {
        if (r.status === 200 && r.data.token) { setToken(r.data.token); return load(); }
-       document.getElementById("loginerr").textContent = "Не удалось войти. Попробуйте ещё раз.";
-     });
+       if (r.status === 401) { say("Телеграм не подтвердил вход. Попробуйте ещё раз."); return; }
+       fail("войти", "ответ " + r.status);
+     })
+     .catch(function (e) { fail("связаться с кабинетом", e); });
  }
 
  window.onTelegramAuth = function (user) { login({user: user}); };
@@ -227,15 +248,23 @@ CABINET_PAGE = """<!doctype html>
 
  function load() {
    return api("/api/me").then(function (r) {
-     if (r.status === 200) return render(r.data);
+     if (r.status === 200) { say(""); return render(r.data); }
      setToken("");
      showLogin();
-   }).catch(showLogin);
+     if (r.status !== 401) { fail("получить данные", "ответ " + r.status); }
+   }).catch(function (e) { showLogin(); fail("связаться с кабинетом", e); });
  }
 
+ var widgetShown = false;
  function showLogin() {
    document.getElementById("app").className = "hide";
    document.getElementById("login").className = "";
+   if (!API) {
+     say("Кабинет ещё не настроен: не задан адрес API.");
+     return;
+   }
+   if (widgetShown) { return; }
+   widgetShown = true;
    var w = document.createElement("script");
    w.async = true;
    w.src = "https://telegram.org/js/telegram-widget.js?22";

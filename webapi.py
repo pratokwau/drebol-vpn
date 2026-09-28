@@ -346,7 +346,8 @@ async def handle_cabinet_menu(query, context=None, note: str = ""):
         "/setdomain с доменом сайта — без неё кнопка входа не появится.</i>")
 
     kb = [[InlineKeyboardButton("🔴 Выключить API" if s["enabled"] else "🟢 Включить API",
-                                callback_data="cab_toggle")],
+                                callback_data="cab_toggle"),
+           InlineKeyboardButton("🩺 Проверить", callback_data="cab_check")],
           [InlineKeyboardButton("🔀 Через сайт", callback_data="cab_upstream"),
            InlineKeyboardButton("🔗 Адрес API", callback_data="cab_public"),
            InlineKeyboardButton("🔌 Порт", callback_data="cab_port")]]
@@ -478,3 +479,87 @@ async def handle_cabinet_input(update, context, state: str, text: str):
          "<i>Теперь разверни сайт заново — страница кабинета уедет с новым адресом.</i>")
         if saved else "✅ <b>Адрес API убран</b>",
         parse_mode="HTML", reply_markup=back)
+
+
+async def probe() -> dict:
+    """Проверяет кабинет так же, как это делает браузер человека."""
+    import aiohttp
+    from config import load_config
+    cfg = load_config()
+    s = settings()
+    public = str(cfg.get("webapi_public") or "").rstrip("/")
+    out = {"enabled": s["enabled"], "running": is_running(), "public": public,
+           "upstream": str(cfg.get("webapi_upstream") or ""),
+           "local": None, "outside": None, "advice": []}
+
+    async def ping(url: str) -> dict:
+        try:
+            timeout = aiohttp.ClientTimeout(total=8)
+            async with aiohttp.ClientSession(timeout=timeout) as sess:
+                async with sess.get(url) as r:
+                    body = (await r.text())[:200]
+                    return {"ok": r.status == 200 and '"ok"' in body,
+                            "status": r.status, "body": body}
+        except Exception as ex:
+            return {"ok": False, "status": 0, "body": f"{type(ex).__name__}: {ex}"}
+
+    if not s["enabled"]:
+        out["advice"].append("API выключен — включи его кнопкой выше.")
+        return out
+    out["local"] = await ping(f"http://127.0.0.1:{s['port']}/api/health")
+    if not out["local"]["ok"]:
+        out["advice"].append("Бот не отвечает сам себе: порт занят другим сервисом "
+                             "или API не поднялся — посмотри journalctl.")
+        return out
+
+    if not public:
+        out["advice"].append("Не задан адрес API — нажми «🔀 Через сайт» или «🔗 Адрес API».")
+        return out
+    out["outside"] = await ping(f"{public}/api/health")
+    if out["outside"]["ok"]:
+        return out
+    if out["outside"]["status"] in (404, 403):
+        out["advice"].append("Адрес отвечает, но не тем: сайт не пересылает <code>/api/</code>. "
+                             "Нажми «🔀 Через сайт», укажи адрес бота и разверни сайт заново.")
+    elif out["outside"]["status"]:
+        out["advice"].append(f"Адрес ответил кодом {out['outside']['status']} — "
+                             "проверь, что путь ведёт к боту, а не к панели или сайту.")
+    else:
+        out["advice"].append("Снаружи бот недоступен: закрыт порт "
+                             f"{s['port']} или указан не тот адрес. "
+                             "Открой порт для сервера сайта и проверь адрес.")
+    if public.startswith("http://"):
+        out["advice"].append("Адрес по http — браузер не пустит такие запросы со "
+                             "страницы по https. Нужен https или пересылка через сайт.")
+    return out
+
+
+async def handle_cabinet_check(query, context):
+    """Кнопка «Проверить»: бот сам стучится в кабинет и объясняет, что не так."""
+    await query.edit_message_text("🩺 Проверяю кабинет…", parse_mode="HTML")
+    r = await probe()
+    lines = ["🩺 <b>Проверка кабинета</b>", ""]
+    rows = [("🔌 API включён", r["enabled"]),
+            ("🛰 Сервер поднят", r["running"])]
+    if r["local"] is not None:
+        rows.append((f"🏠 Отвечает себе ({settings()['port']})", r["local"]["ok"]))
+    if r["outside"] is not None:
+        rows.append(("🌍 Отвечает снаружи", r["outside"]["ok"]))
+    lines.append("<blockquote>" + "\n".join(
+        ("✅ " if ok else "❌ ") + name for name, ok in rows) + "</blockquote>")
+    if r["public"]:
+        lines.append(f"<blockquote>🔗 Проверял: <code>{html.escape(r['public'])}/api/health</code>"
+                     + (f"\n📨 Ответ: <code>{html.escape(str((r['outside'] or {}).get('body'))[:120])}</code>"
+                        if r["outside"] else "") + "</blockquote>")
+    if r["advice"]:
+        lines.append("<blockquote>" + "\n\n".join("⚠️ " + a for a in r["advice"]) + "</blockquote>")
+    elif r["outside"] and r["outside"]["ok"]:
+        lines.append("<i>Кабинет отвечает. Если страница всё равно просит вход — "
+                     "скажи @BotFather команду /setdomain с доменом сайта и "
+                     "разверни сайт заново, чтобы уехала свежая страница.</i>")
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Ещё раз", callback_data="cab_check"),
+             InlineKeyboardButton("◀️ К кабинету", callback_data="cab_menu")]]))
