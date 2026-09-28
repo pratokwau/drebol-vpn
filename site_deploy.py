@@ -395,12 +395,6 @@ CABINET_PAGE = r"""<!doctype html>
               '<p class="card-sub">Подключено: ' + p.devices.length +
               (s.devices_limit ? " из " + esc(s.devices_limit) : "") + "</p>" + d + "</div>");
    }
-   if (p.payments && p.payments.length) {
-     var pay = p.payments.map(function (x) {
-       return row(esc(x.date), "<b style=\"color:#fff\">" + esc(x.amount) + " ₽</b> · " + esc(x.status));
-     }).join("");
-     out.push('<div class="card">' + title("card", "Платежи") + pay + "</div>");
-   }
    out.push('<div class="stack" style="margin-top:6px"><a class="btn btn-ghost" href="' + botUrl() + '">' +
             ICON.tg + "Открыть бота</a></div>");
    document.getElementById("body").innerHTML = out.join("");
