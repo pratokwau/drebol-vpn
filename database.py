@@ -669,6 +669,18 @@ async def list_tariffs(only_active: bool = False) -> list[tuple]:
             return await cur.fetchall()
 
 
+async def last_paid_period(tg_id: int) -> int:
+    """Срок из последней удачной оплаты — чтобы подсветить привычный тариф."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT period_seconds FROM payments WHERE tg_id = ? AND status = 'paid' "
+            "AND period_seconds IS NOT NULL AND period_seconds > 0 "
+            "ORDER BY COALESCE(paid_at, created_at) DESC LIMIT 1", (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    return int(row[0]) if row else 0
+
+
 async def get_tariff(tariff_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(

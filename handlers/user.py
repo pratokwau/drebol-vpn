@@ -160,15 +160,55 @@ async def _sub_end(row):
     return end, int((end - now).total_seconds())
 
 
-async def _left_line(row) -> str:
-    """Строка про текущий остаток. Пусто, если переносить нечего."""
-    _end, left = await _sub_end(row)
-    if left < 60:
+MONTH = 30 * 86400
+
+
+def _per_month(price: int, seconds: int) -> int:
+    """Во сколько обходится месяц по этому тарифу."""
+    months = max(1, round(seconds / MONTH))
+    return round(price / months)
+
+
+def _tariff_extras(tariffs, discount=None):
+    """Для каждого тарифа: цена со скидкой, цена за месяц и выгода к самому короткому."""
+    from paidsub.handlers import apply_discount
+    out = {}
+    base = None
+    for t_id, _name, seconds, price, _a, _s in tariffs:
+        final = apply_discount(price, discount) if discount else price
+        per = _per_month(final, seconds)
+        out[t_id] = {"final": final, "per_month": per, "seconds": seconds, "save": 0}
+        if base is None or seconds < base[0]:
+            base = (seconds, per)
+    if base:
+        for t_id, data in out.items():
+            months = max(1, round(data["seconds"] / MONTH))
+            data["save"] = max(0, base[1] * months - data["final"])
+    return out
+
+
+async def _sub_state_block(row) -> str:
+    """Что с подпиской прямо сейчас — первым делом на экране продления."""
+    from datetime import datetime
+    from paidsub.storage import parse_sub_date
+    from paidsub.time_parser import fmt_duration_precise
+    if not row:
         return ""
-    return "<i>Остаток не сгорит — дни прибавятся.</i>"
+    end, left = await _sub_end(row)
+    status = row[11] if len(row) > 11 else "active"
+    if left >= 60:
+        return ("<blockquote>📅 Работает до: <b>{}</b>\n⏳ Осталось: <b>{}</b></blockquote>"
+                .format(end.strftime("%d.%m.%Y %H:%M"), fmt_duration_precise(left)))
+    gone = parse_sub_date(row[6])
+    when = f" {gone.strftime('%d.%m.%Y')}" if gone else ""
+    if status == "expired" or (gone and gone <= datetime.now()):
+        return ("<blockquote>🔴 Подписка закончилась{}\n"
+                "Доступ включится сразу после оплаты</blockquote>".format(when))
+    return ""
 
 
 async def handle_renew_sub(query):
+    """Выбор срока: что с подпиской сейчас, сколько стоит месяц и где выгоднее."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     user = query.from_user
 
@@ -177,50 +217,75 @@ async def handle_renew_sub(query):
 
     # Применённый промокод (если валиден)
     from paidsub.storage import get_pending_promo, update_paid_sub_field
-    from paidsub.handlers import validate_promo, apply_discount
+    from paidsub.handlers import validate_promo
     promo_line = ""
     promo_btn_row = [InlineKeyboardButton("🎟 Ввести промокод", callback_data="enter_promo")]
+    discount = None
     pending = await get_pending_promo(user.id)
     if pending:
-        promo, err = await validate_promo(pending, user.id)
+        promo, _err = await validate_promo(pending, user.id)
         if promo:
-            percent = promo[2]
-            promo_line = f"🎟 Промокод <b>{escape(str(promo[1]))}</b> · скидка <b>−{percent}%</b>"
-            promo_btn_row = [InlineKeyboardButton("❌ Убрать промокод", callback_data="remove_promo")]
-        else:
+            discount = promo[2]
+            promo_line = (f"🎟 Промокод <b>{escape(str(promo[1]))}</b> · "
+                          f"скидка <b>−{discount}%</b>")
+            promo_btn_row = [InlineKeyboardButton("❌ Убрать промокод",
+                                                  callback_data="remove_promo")]
+        elif row:
             # промокод стал невалидным — снимаем
-            if row:
-                await update_paid_sub_field(row[0], "pending_promo", None)
+            await update_paid_sub_field(row[0], "pending_promo", None)
 
     # Счёт выставляет бот, оплата засчитывается автоматически
     import platega_api as pg
     if pg.is_configured():
-        from database import list_tariffs
+        from database import last_paid_period, list_tariffs
         tariffs = await list_tariffs(only_active=True)
 
         # Есть тарифы — клиент выбирает срок сам
         if tariffs:
-            discount = None
-            if pending:
-                promo_ok, _ = await validate_promo(pending, user.id)
-                if promo_ok:
-                    discount = promo_ok[2]
+            extras = _tariff_extras(tariffs, discount)
+            # привычный срок — наверх, и «выгодный» отмечаем по цене за месяц
+            usual = await last_paid_period(user.id)
+            best = min(extras, key=lambda tid: extras[tid]["per_month"]) if extras else None
+            ordered = sorted(
+                tariffs,
+                key=lambda t: (0 if usual and t[2] == usual else 1, t[2]))
 
             kb = []
-            for t_id, name, t_period, t_price, _a, _s in tariffs:
-                final = apply_discount(t_price, discount) if discount else t_price
-                label = f"{name}  ·  {final} ₽"
-                if discount:
-                    label += f" (−{discount}%)"
-                kb.append([InlineKeyboardButton(label, callback_data=f"tariff_pick:{t_id}")])
+            for t_id, name, t_period, t_price, _a, _s in ordered:
+                data = extras[t_id]
+                label = f"{name} · {data['final']} ₽"
+                if data["seconds"] >= 2 * MONTH:
+                    label += f" · {data['per_month']}/мес"
+                marks = ""
+                if usual and t_period == usual:
+                    marks += " ↻"
+                if t_id == best and len(tariffs) > 1 and data["save"]:
+                    marks += " 🔥"
+                kb.append([InlineKeyboardButton((label + marks)[:64],
+                                                callback_data=f"tariff_pick:{t_id}")])
             kb.append(promo_btn_row)
             kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
 
-            notes = [x for x in (promo_line, await _left_line(row)) if x]
+            hints = []
+            if usual and any(t[2] == usual for t in tariffs):
+                hints.append("↻ — ваш прошлый выбор")
+            if best is not None and len(tariffs) > 1 and extras[best]["save"]:
+                hints.append(f"🔥 — выгоднее всего: экономия {extras[best]['save']} ₽")
+            _end, left = await _sub_end(row)
+            tail = ("Остаток не сгорит — новые дни прибавятся к нынешним."
+                    if left >= 60 else "Доступ включится сразу после оплаты.")
+
+            body = [await _sub_state_block(row)]
+            if promo_line:
+                body.append(promo_line)
+            body.append("<b>Выберите срок</b>")
+            if hints:
+                body.append("<blockquote>" + "\n".join(hints) + "</blockquote>")
+            body.append(f"<i>{tail} Оплата проходит здесь, в боте.</i>")
+
             await query.edit_message_text(
                 "💳 <b>Продление подписки</b>\n\n"
-                "Выберите срок — оплата пройдёт прямо здесь, в боте."
-                + ("\n\n" + "\n".join(notes) if notes else ""),
+                + "\n\n".join(x for x in body if x),
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(kb),
             )
@@ -320,13 +385,17 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
     end, _left = await _sub_end(row)
     new_end = end + timedelta(seconds=pay_seconds)
 
-    price_line = (f"💵 Цена: <s>{price} ₽</s> <b>{period_price} ₽</b>  (−{discount}%)"
+    price_line = (f"💵 Цена: <s>{price} ₽</s> <b>{period_price} ₽</b>  "
+                  f"(−{discount}% · минус {price - period_price} ₽)"
                   if discount else f"💵 Цена: <b>{price} ₽</b>")
-    card = [
-        f"⏱ Срок: <b>{fmt_duration(pay_seconds)}</b>",
-        price_line,
-        f"📅 Продлится до: <b>{new_end.strftime('%d.%m.%Y')}</b>",
-    ]
+    card = [f"⏱ Срок: <b>{fmt_duration(pay_seconds)}</b>", price_line]
+    if pay_seconds >= 2 * MONTH:
+        card.append(f"📊 Выходит <b>{_per_month(period_price, pay_seconds)} ₽</b> в месяц")
+    if _left >= 60:
+        card.append(f"📅 Сейчас до <b>{end.strftime('%d.%m.%Y')}</b> → "
+                    f"станет до <b>{new_end.strftime('%d.%m.%Y')}</b>")
+    else:
+        card.append(f"📅 Заработает до: <b>{new_end.strftime('%d.%m.%Y')}</b>")
     lines = []
 
     kb = []
@@ -349,10 +418,13 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
         if row_btns:
             kb.append(row_btns)
 
+    total_line = f"💰 К оплате: <b>{total} ₽</b>"
+    if dev_sum:
+        total_line += f"  <i>({period_price} ₽ подписка + {dev_sum} ₽ устройства)</i>"
     lines = ([f"💳 <b>Тариф «{escape(str(name))}»</b>", "",
               "<blockquote>" + "\n".join(card) + "</blockquote>", ""]
              + lines + ([""] if lines else [])
-             + [f"💰 К оплате: <b>{total} ₽</b>"])
+             + [total_line])
 
     kb.append(promo_btn)
     kb.append([InlineKeyboardButton(f"💳 Оплатить {total} ₽",
