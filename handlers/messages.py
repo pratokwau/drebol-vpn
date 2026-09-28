@@ -31,7 +31,7 @@ from states import (
     AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
     AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
-    AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
+    AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_CONTACT,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_WINBACK_DAYS2, AWAITING_WINBACK_PERCENT2, AWAITING_WINBACK_LIFE,
     AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD,
@@ -47,6 +47,18 @@ from states import (
     AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK, AWAITING_BL_UNTIL,
     AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
 )
+
+
+def _support_row() -> list:
+    """Ряд с кнопкой поддержки: ссылка на аккаунт или переписка в боте."""
+    from handlers.support import support_row
+    return support_row()
+
+
+def _kb(*rows):
+    """Клавиатура без пустых рядов — поддержку могут выключить совсем."""
+    from telegram import InlineKeyboardMarkup
+    return InlineKeyboardMarkup([r for r in rows if r])
 
 
 def _save(key: str, value):
@@ -88,6 +100,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Юзер пишет в поддержку ───────────────────────────────────────────────
     if state == AWAITING_SUPPORT_MSG and not is_admin:
+        from handlers.support import contact_mode, contact_screen
+        if contact_mode():
+            # режим сменили, пока человек набирал: переписки в боте больше нет
+            context.user_data.pop("state", None)
+            note, kb = contact_screen()
+            await update.message.reply_text(note, parse_mode="HTML", reply_markup=kb,
+                                            disable_web_page_preview=True)
+            return
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         from database import get_unread_tickets_count, ticket_opened, count_support_files
         from handlers.support import topic_label
@@ -195,9 +215,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "😕 <b>Не получилось начислить дни</b>\n\n"
                     "<i>Промокод не сгорел — напишите в поддержку, начислим вручную.</i>",
                     parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")]
-                    ]),
+                    reply_markup=_kb(_support_row()),
                 )
                 return
             await record_promo_use(promo[1], user.id)
@@ -1037,6 +1055,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Создание промокода ───────────────────────────────────────────────────────
+    # ── Аккаунт поддержки ─────────────────────────────────────────────────────
+    if state == AWAITING_SUPPORT_CONTACT and is_admin:
+        from handlers.support import handle_support_contact_input
+        await handle_support_contact_input(update, context, text)
+        return
+
     # ── Найти юзера ───────────────────────────────────────────────────────────
     if state == AWAITING_FIND_USER:
         from handlers.admin import handle_user_search
@@ -1213,6 +1237,14 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if state == AWAITING_SUPPORT_MSG and not mnt.feature_enabled("support"):
             context.user_data.pop("state", None)
             await mnt.show_feature_off("support", message=msg)
+            return
+    if state == AWAITING_SUPPORT_MSG and not is_admin:
+        from handlers.support import contact_mode, contact_screen
+        if contact_mode():
+            context.user_data.pop("state", None)
+            note, kb = contact_screen()
+            await msg.reply_text(note, parse_mode="HTML", reply_markup=kb,
+                                 disable_web_page_preview=True)
             return
 
     if msg.photo:

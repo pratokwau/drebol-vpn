@@ -37,11 +37,13 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
         rows.append(pair)
     if has_sub:
         rows.append([InlineKeyboardButton("📋 Админская подписка", callback_data="my_sub")])
+    info_btn = InlineKeyboardButton("ℹ️ Инфо", callback_data="info")
     if on("support"):
-        rows.append([InlineKeyboardButton("💬 Поддержка", callback_data="support_open"),
-                     InlineKeyboardButton("ℹ️ Инфо", callback_data="info")])
+        # в режиме «аккаунт в телеграме» кнопка уводит прямо в личку поддержки
+        from handlers.support import support_button
+        rows.append([support_button(force=is_admin), info_btn])
     else:
-        rows.append([InlineKeyboardButton("ℹ️ Инфо", callback_data="info")])
+        rows.append([info_btn])
     rows.append([news_btn])
     if is_admin:
         rows.append([InlineKeyboardButton("🛠 Админка", callback_data="admin_panel")])
@@ -78,7 +80,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         # инфраструктура
         [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Сайт", "site_menu")],
         [b("💾 Бэкап и перенос", "backup_menu"), b("📄 Документы", "documents_menu")],
-        [b("🧾 Лог-канал", "log_channel_settings")],
+        [b("💬 Поддержка", "support_settings"), b("🧾 Лог-канал", "log_channel_settings")],
         [b(mnt_label, "mnt_menu")],
         [b("🔄 Обновиться с GitHub", "git_update")],
         [b("◀️ Главное меню", "back_start")],

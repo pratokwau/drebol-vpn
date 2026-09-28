@@ -121,16 +121,17 @@ def user_may(data: str) -> bool:
 
 
 def blocked_view(reason: str | None, until_local: str | None = None):
-    import maintenance as mnt
     text = ("⛔ <b>Доступ к сервису закрыт</b>\n\n"
             f"<blockquote>Причина: {html.escape(public_reason(reason))}</blockquote>")
     if until_local:
         text += (f"\n\n<blockquote>⏳ Доступ вернётся сам: "
                  f"<b>{fmt_until(until_local)}</b></blockquote>")
-    if not mnt.feature_enabled("support"):
+    from handlers.support import support_button
+    btn = support_button()
+    if not btn:
         return text, None
     return (text + "\n\n<i>Если это ошибка — напишите в поддержку.</i>",
-            InlineKeyboardMarkup([[InlineKeyboardButton("💬 Поддержка", callback_data="support_open")]]))
+            InlineKeyboardMarkup([[btn]]))
 
 
 async def show_blocked(e: dict, query=None, message=None):

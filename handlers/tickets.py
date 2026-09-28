@@ -20,6 +20,20 @@ from database import (
 from keyboards import ticket_list_keyboard, ticket_view_keyboard, cancel_admin
 from states import AWAITING_ADMIN_REPLY
 
+
+def _support_row() -> list:
+    """Ряд с кнопкой поддержки: ссылка на аккаунт или переписка в боте."""
+    from handlers.support import support_row
+    return support_row()
+
+
+def _kb(*rows):
+    """Клавиатура без пустых рядов — поддержку могут выключить совсем."""
+    from telegram import InlineKeyboardMarkup
+    return InlineKeyboardMarkup([r for r in rows if r])
+
+
+
 SEP = "━" * 14
 
 # Заготовки ответов. Админ правит их в «⚡ Шаблоны» — там же и добавляет свои.
@@ -268,14 +282,11 @@ async def handle_ticket_close(query, user_id: int, context):
     """Закрывает переписку и говорит об этом человеку."""
     await ticket_closed(user_id)
     try:
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         await context.bot.send_message(
             chat_id=user_id,
             text="✅ <b>Вопрос закрыт</b>\nЕсли что — пишите снова.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
-            ]),
+            reply_markup=_kb(_support_row()),
         )
     except Exception:
         pass

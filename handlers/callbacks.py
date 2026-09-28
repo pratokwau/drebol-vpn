@@ -48,6 +48,7 @@ from site_deploy import (
 from handlers.support import (
     open_support, handle_support_files, show_topics, show_topic_hint,
     start_writing, handle_support_close,
+    handle_support_settings, handle_support_mode, handle_support_contact_ask,
 )
 from maintenance import (
     handle_maintenance_menu, handle_maintenance_toggle,
@@ -444,6 +445,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_dm_user(query, int(data.split(":")[1]), context)
     elif data.startswith("payment_stats:"):
         await handle_payment_stats(query, int(data.split(":")[1]))
+    elif data == "support_settings":
+        await handle_support_settings(query, context)
+    elif data.startswith("support_mode:"):
+        await handle_support_mode(query, context, data.split(":")[1])
+    elif data == "support_contact":
+        await handle_support_contact_ask(query, context)
     elif data == "log_channel_settings":
         await handle_log_channel_settings(query)
     elif data == "set_log_channel":

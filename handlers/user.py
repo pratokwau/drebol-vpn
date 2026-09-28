@@ -4,6 +4,18 @@ from config import ADMIN_ID, load_config
 from keyboards import main_keyboard, back_main, back_info
 
 
+def _support_row() -> list:
+    """Ряд с кнопкой поддержки: ссылка на аккаунт или переписка в боте."""
+    from handlers.support import support_row
+    return support_row()
+
+
+def _kb(*rows):
+    """Клавиатура без пустых рядов — поддержку могут выключить совсем."""
+    from telegram import InlineKeyboardMarkup
+    return InlineKeyboardMarkup([r for r in rows if r])
+
+
 async def handle_my_sub(query):
     user_id = query.from_user.id
     from adminsub.storage import get_sub_by_tg_id
@@ -226,10 +238,8 @@ async def handle_renew_sub(query):
         "<i>Напишите в поддержку: подскажем, когда всё заработает, "
         "и не дадим подписке закончиться.</i>",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
-            [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
-        ]),
+        reply_markup=_kb(_support_row(),
+                         [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")]),
     )
 
 
@@ -276,10 +286,8 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
                 "<i>Напишите в поддержку — подскажем, когда появятся, "
                 "и не дадим подписке закончиться.</i>",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
-                    [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
-                ]),
+                reply_markup=_kb(_support_row(),
+                                 [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")]),
             )
             return
         name, price = "Подписка", int(settings["price"])
@@ -361,7 +369,7 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
 async def handle_pay_invoice(query, context, tariff_id: int | None = None,
                              devices=None):
     """Создаёт счёт в Platega и отдаёт ссылку на оплату."""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from telegram import InlineKeyboardButton
     import platega_api as pg
     from database import add_payment, get_active_payment, get_tariff
     from paidsub.storage import get_paid_sub_by_tg_id, sub_settings, get_pending_promo
@@ -439,12 +447,11 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
             "<blockquote>Платёжная система не ответила. Деньги не списаны.</blockquote>\n\n"
             "<i>Попробуйте ещё раз через минуту или напишите нам.</i>",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Попробовать ещё раз",
-                                      callback_data=f"pay_invoice:{tariff_id or 0}:{devices}")],
-                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")],
-            ]),
+            reply_markup=_kb([InlineKeyboardButton(
+                                 "🔁 Попробовать ещё раз",
+                                 callback_data=f"pay_invoice:{tariff_id or 0}:{devices}")],
+                             _support_row()
+                             + [InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")]),
         )
         from config import ADMIN_ID
         try:
@@ -757,10 +764,8 @@ async def handle_reissue_do(query, context):
             "<blockquote>Ничего не сломалось — старая ссылка продолжает работать.</blockquote>\n\n"
             "<i>Попробуйте чуть позже или напишите в поддержку.</i>",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")],
-            ]),
+            reply_markup=_kb(_support_row()
+                             + [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")]),
         )
         return
 
@@ -1119,10 +1124,8 @@ async def handle_dev_buy(query, context, count: int):
             "➕ <b>Оплата сейчас недоступна</b>\n\n"
             "<blockquote>Напишите в поддержку — добавим устройства вручную.</blockquote>",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
-                [InlineKeyboardButton("◀️ Назад", callback_data="my_devices")],
-            ]),
+            reply_markup=_kb(_support_row(),
+                             [InlineKeyboardButton("◀️ Назад", callback_data="my_devices")]),
         )
         return
 
@@ -1137,10 +1140,9 @@ async def handle_dev_buy(query, context, count: int):
             "😕 <b>Не получилось создать счёт</b>\n\n"
             "<blockquote>Платёжная система не ответила. Деньги не списаны.</blockquote>",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Попробовать ещё раз", callback_data="dev_buy_menu")],
-                [InlineKeyboardButton("💬 Поддержка", callback_data="support_open")],
-            ]),
+            reply_markup=_kb([InlineKeyboardButton("🔁 Попробовать ещё раз",
+                                                   callback_data="dev_buy_menu")],
+                             _support_row()),
         )
         return
     await add_payment(
