@@ -44,10 +44,11 @@ PER_PAGE = 10
 USER_ALLOWED = {"support_open", "support_files"}
 USER_ALLOWED_PREFIXES = ("support_page:",)
 
-LIST_TABS = {"manual": "Вручную", "allow": "Исключения"}
+LIST_TABS = {"manual": "Вручную", "allow": "Исключения", "people": "Люди в ЧС"}
 LIST_TITLES = {
     "manual": "✍️ Добавлены вручную",
     "allow": "✅ Исключения из общего списка",
+    "people": "👥 Люди в чёрном списке",
 }
 
 
@@ -735,6 +736,7 @@ async def handle_bl_menu(query, context=None, note: str = ""):
          InlineKeyboardButton("🔍 Проверить ID", callback_data="bl_check")],
         [InlineKeyboardButton("✍️ Вручную", callback_data="bl_list:manual:1"),
          InlineKeyboardButton("✅ Исключения", callback_data="bl_list:allow:1")],
+        [InlineKeyboardButton("👥 Люди в ЧС", callback_data="bl_list:people:1")],
         [InlineKeyboardButton("🔄 Обновить общий", callback_data="bl_sync"),
          InlineKeyboardButton(f"🌐 Общий · {'вкл ✅' if on else 'выкл'}",
                               callback_data="bl_remote_toggle")],
