@@ -40,6 +40,8 @@ def _fmt_presets(cfg: dict, squad_names: dict | None = None) -> str:
         traf = "безлимит"
     else:
         traf = f"{traf_raw} ГБ"
+    lte_raw = cfg.get("preset_lte")
+    lte = f"{lte_raw} ГБ" if lte_raw is not None else "30 ГБ (по умолчанию)"
 
     names = squad_names or {}
     chosen = [names.get(u, u) for u in (cfg.get("rw_squads") or [])]
@@ -49,7 +51,8 @@ def _fmt_presets(cfg: dict, squad_names: dict | None = None) -> str:
         "<i>Одна на все выдаваемые подписки</i></blockquote>\n\n"
         "📊 <b>Лимиты</b>\n<blockquote>"
         f"🖥 Устройств: <b>{hwid}</b>\n"
-        f"📶 Трафик: <b>{traf}</b></blockquote>\n\n"
+        f"📶 Трафик: <b>{traf}</b>\n"
+        f"🌐 LTE-трафик: <b>{lte}</b></blockquote>\n\n"
         "👥 <b>Сквады Remnawave</b>\n<blockquote>"
         + ("Выдаём: <b>{}</b>".format(", ".join(escape(str(c)) for c in chosen))
            if chosen else "Выдаём: <b>не выбраны</b>")
@@ -86,7 +89,8 @@ async def handle_presets_menu(query):
         "⚙️ <b>Настройки админских подписок</b>\n\n"
         + _fmt_presets(cfg, squad_names)
         + "\n\n<i>Применяются только к новым подпискам. У выданных условия "
-          "зафиксированы при создании — меняются в самой подписке.</i>",
+          "зафиксированы при создании — меняются в самой подписке. "
+          "Исключение: LTE-пресет подхватывают и старые подписки без своего лимита.</i>",
         parse_mode="HTML",
         reply_markup=presets_keyboard(),
     )
@@ -117,6 +121,23 @@ async def handle_preset_traffic(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_PRESET_TRAFFIC
     await query.edit_message_text(
         "📶 <b>Трафик (ГБ)</b>\n\nВведи число в ГБ или <code>-</code> для безлимита:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_preset_lte(query, context: ContextTypes.DEFAULT_TYPE):
+    from states import AWAITING_PRESET_LTE
+    context.user_data["state"] = AWAITING_PRESET_LTE
+    cfg = load_config()
+    cur = cfg.get("preset_lte")
+    cur_str = f"{cur} ГБ" if cur is not None else "30 ГБ (по умолчанию)"
+    await query.edit_message_text(
+        "🌐 <b>LTE-трафик новых подписок (ГБ в месяц)</b>\n\n"
+        f"<blockquote>Сейчас: <b>{cur_str}</b></blockquote>\n\n"
+        "Введи число в ГБ или <code>-</code>, чтобы вернуться к 30 ГБ по умолчанию. "
+        "Подписки без своего лимита подхватят новый пресет автоматически, "
+        "а со своим — нет, он правится в самой подписке.",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -212,6 +233,12 @@ def _fmt_bytes(b: int) -> str:
     return f"{b / 1024 ** 3:.2f} ГБ"
 
 
+def _lte_label(row) -> str:
+    from remnawave import lte_limit_label
+    sub_lte = row[11] if len(row) > 11 else None
+    return lte_limit_label(sub_lte, load_config().get("preset_lte"))
+
+
 async def handle_sub_view(query, sub_id: int):
     from datetime import datetime
     from paidsub.storage import parse_sub_date
@@ -272,6 +299,7 @@ async def handle_sub_view(query, sub_id: int):
         "📊 <b>Лимиты</b>\n<blockquote>"
         f"🖥 Устройств: <b>{limit_hwid or 'без ограничения'}</b>\n"
         f"{traffic_line}\n"
+        f"🌐 LTE-трафик в месяц: <b>{_lte_label(row)}</b>\n"
         f"🕐 Создана: {created_at}"
         "</blockquote>\n"
         "\n🔧 <b>Технические данные</b>\n<blockquote expandable>"
@@ -351,16 +379,21 @@ async def handle_sub_settings(query, sub_id: int):
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    _, tg_id, email, _, _, _, expire, _limit_ip, limit_hwid, total_gb, _ = row
+    _, tg_id, email, _, _, _, expire, _limit_ip, limit_hwid, total_gb, _ = row[:11]
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
     hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
+    from remnawave import lte_limit_label
+    sub_lte = row[11] if len(row) > 11 else None
+    lte_str = lte_limit_label(sub_lte, load_config().get("preset_lte"))
     await query.edit_message_text(
         f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
         "<blockquote>"
         f"📅 Действует до: <b>{expire}</b>\n"
         f"🖥 Лимит устройств: <b>{hwid_str}</b>\n"
-        f"📶 Трафик: <b>{traffic}</b></blockquote>\n\n"
-        "<i>Правки уходят и в базу, и в панель.</i>",
+        f"📶 Трафик: <b>{traffic}</b>\n"
+        f"🌐 LTE-трафик в месяц: <b>{lte_str}</b></blockquote>\n\n"
+        "<i>Правки уходят и в базу, и в панель. LTE-лимит — счётчик в боте, "
+        "в панель он не уходит.</i>",
         parse_mode="HTML",
         reply_markup=sub_settings_keyboard(sub_id),
     )
@@ -395,6 +428,24 @@ async def handle_sub_edit_traffic(query, sub_id: int, context):
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
         f"📶 <b>Трафик подписки #{sub_id}</b>\n\nВведи число ГБ или <code>-</code> для безлимита:",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_sub_edit_lte(query, sub_id: int, context):
+    from states import AWAITING_SUB_EDIT_LTE
+    context.user_data["state"] = AWAITING_SUB_EDIT_LTE
+    context.user_data["edit_sub_id"] = sub_id
+    row = await get_sub(sub_id)
+    sub_lte = row[11] if row and len(row) > 11 else None
+    from remnawave import lte_limit_label
+    cur = lte_limit_label(sub_lte, load_config().get("preset_lte"))
+    await query.edit_message_text(
+        f"🌐 <b>LTE-трафик подписки #{sub_id} (ГБ в месяц)</b>\n\n"
+        f"<blockquote>Сейчас: <b>{cur}</b></blockquote>\n\n"
+        "Введи число в ГБ (0 — LTE закрыт для этой подписки) или "
+        "<code>-</code>, чтобы вернуться к лимиту по умолчанию.",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )

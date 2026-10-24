@@ -97,6 +97,7 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         [b("🖥 Лимит устройств", "paid_preset_hwid")],
         *_devices_rows(b),
         [b("📶 Трафик (ГБ)", "paid_preset_traffic")],
+        [b("🌐 LTE-трафик (ГБ/мес)", "paid_preset_lte")],
         # панель
         [b("👥 Сквады Remnawave", "rw_squads")],
         [b("◀️ Назад к подпискам", "paid_subs")],
@@ -132,6 +133,7 @@ def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
         [b("📅 Дата окончания", "paid_sub_edit_expire")],
         [b("🖥 Лимит устройств", "paid_sub_edit_hwid")],
         [b("📶 Трафик (ГБ)", "paid_sub_edit_traffic"), b("🆓 Пробный период", "paid_sub_edit_trial")],
+        [b("🌐 LTE-трафик (ГБ/мес)", "paid_sub_edit_lte")],
         [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"paid_sub_view:{sub_id}")],
     ])
 

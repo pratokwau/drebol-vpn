@@ -72,11 +72,15 @@ def _fmt_presets(cfg: dict, squad_names=None) -> str:
            if chosen else "Выдаём: <b>не выбраны</b>")
         + "</blockquote>"
     )
-    return _presets_text(trial_str, provider_line(), hwid, traf, panel_block)
+    # LTE-лимит новых подписок: свой пресет или 30 ГБ по умолчанию
+    lte_raw = cfg.get("paid_preset_lte")
+    lte = f"{lte_raw} ГБ" if lte_raw is not None else "30 ГБ (по умолчанию)"
+    return _presets_text(trial_str, provider_line(), hwid, traf, panel_block, lte)
 
 
-def _presets_text(trial_str, pay_line, hwid, traf, panel_block) -> str:
+def _presets_text(trial_str, pay_line, hwid, traf, panel_block, lte=None) -> str:
     """Общий вид экрана настроек: сроки, оплата, лимиты, доступ."""
+    lte_line = (f"\n🌐 LTE-трафик: <b>{lte}</b>" if lte is not None else "")
     return (
         "⏱ <b>Сроки</b>\n<blockquote>"
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
@@ -86,7 +90,7 @@ def _presets_text(trial_str, pay_line, hwid, traf, panel_block) -> str:
         "<i>Цену платного периода задают тарифы</i></blockquote>\n\n"
         "📊 <b>Лимиты</b>\n<blockquote>"
         f"🖥 Устройств: <b>{hwid}</b>\n"
-        f"📶 Трафик: <b>{traf}</b></blockquote>\n\n"
+        f"📶 Трафик: <b>{traf}</b>{lte_line}</blockquote>\n\n"
         + panel_block
     )
 
@@ -193,7 +197,8 @@ async def handle_paid_presets_menu(query):
         "⚙️ <b>Настройки подписок</b>\n\n"
         + _fmt_presets(cfg, squad_names)
         + "\n\n<i>Применяются только к новым подпискам. У выданных условия "
-          "зафиксированы при создании — меняются в самой подписке.</i>",
+          "зафиксированы при создании — меняются в самой подписке. "
+          "Исключение: LTE-пресет подхватывают и старые подписки без своего лимита.</i>",
         parse_mode="HTML",
         reply_markup=paid_presets_keyboard(),
     )
@@ -242,6 +247,23 @@ async def handle_paid_preset_traffic(query, context):
     context.user_data["state"] = AWAITING_PAID_PRESET_TRAFFIC
     await query.edit_message_text(
         "📶 <b>Трафик (ГБ)</b>\n\n<i>Пришли число в ГБ или <code>-</code> для безлимита.</i>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_preset_lte(query, context):
+    from states import AWAITING_PAID_PRESET_LTE
+    context.user_data["state"] = AWAITING_PAID_PRESET_LTE
+    cfg = load_config()
+    cur = cfg.get("paid_preset_lte")
+    cur_str = f"{cur} ГБ" if cur is not None else "30 ГБ (по умолчанию)"
+    await query.edit_message_text(
+        "🌐 <b>LTE-трафик новых подписок (ГБ в месяц)</b>\n\n"
+        f"<blockquote>Сейчас: <b>{cur_str}</b></blockquote>\n\n"
+        "<i>Пришли число в ГБ или <code>-</code>, чтобы вернуться к 30 ГБ по умолчанию. "
+        "Подписки без своего лимита подхватят новый пресет автоматически, "
+        "а со своим — нет, он правится в самой подписке.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
@@ -664,6 +686,13 @@ def _fmt_bytes(b: int) -> str:
     return f"{b / 1024 ** 3:.2f} ГБ"
 
 
+def _lte_view_line(row) -> str:
+    """Строка LTE-лимита для карточки подписки: свой или по умолчанию."""
+    from remnawave import lte_limit_label
+    sub_lte = row[19] if len(row) > 19 else None
+    return f"🌐 LTE-трафик в месяц: <b>{lte_limit_label(sub_lte, load_config().get('paid_preset_lte'))}</b>\n"
+
+
 async def handle_paid_sub_view(query, sub_id: int):
     row = await get_paid_sub(sub_id)
     if not row:
@@ -770,7 +799,8 @@ async def handle_paid_sub_view(query, sub_id: int):
         "📊 <b>Лимиты</b>\n<blockquote>"
         f"🖥 Устройств: <b>{limit_hwid or 'без ограничения'}</b>\n"
         f"{traffic_line}\n"
-        f"🕐 Создана: {created_at}"
+        + _lte_view_line(row)
+        + f"🕐 Создана: {created_at}"
         "</blockquote>\n"
         + (f"\n{extra_lines}\n" if extra_lines else "")
         + ind_block
@@ -938,6 +968,7 @@ async def handle_paid_bulk_menu(query):
             [InlineKeyboardButton("➕ Добавить срок", callback_data="paid_bulk_extend"),
              InlineKeyboardButton("➖ Убавить срок", callback_data="paid_bulk_reduce")],
             [InlineKeyboardButton("🔑 Лимит устройств всем", callback_data="paid_bulk_hwid")],
+            [InlineKeyboardButton("🌐 LTE-трафик всем", callback_data="paid_bulk_lte")],
             [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
         ]),
     )
@@ -1240,10 +1271,28 @@ async def handle_paid_bulk_hwid(query, context):
 
 
 # что именно правим оптом: подпись для экрана и колонка в базе
-LIMIT_KINDS = {"hwid": ("🔑", "устройств", "limit_hwid")}
+LIMIT_KINDS = {"hwid": ("🔑", "устройств", "limit_hwid"),
+               "lte": ("🌐", "LTE-трафика", "lte_gb")}
 
 
-async def preview_bulk_limits(message, context, kind: str, value: int):
+async def handle_paid_bulk_lte(query, context):
+    from states import AWAITING_PAID_BULK_LTE
+    context.user_data["state"] = AWAITING_PAID_BULK_LTE
+    cfg = load_config()
+    cur = cfg.get("paid_preset_lte")
+    cur_str = f"{cur} ГБ" if cur is not None else "30 ГБ (по умолчанию)"
+    await query.edit_message_text(
+        "🌐 <b>LTE-трафик для всех подписок (ГБ в месяц)</b>\n\n"
+        f"<blockquote>Пресет для новых: <b>{cur_str}</b></blockquote>\n\n"
+        "Сколько LTE-трафика дать каждой подписке в месяц?\n"
+        "Введи число в ГБ (0 — LTE закрыт для всех) или <code>-</code>, "
+        "чтобы вернуть всем лимит по умолчанию. "
+        "В панель это не уходит — LTE считается только ботом.",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def preview_bulk_limits(message, context, kind: str, value: int | None):
     """Показывает, кого затронет смена лимита, и спрашивает подтверждение."""
     import aiosqlite
     from blacklist import blacklisted_ids
@@ -1261,18 +1310,32 @@ async def preview_bulk_limits(message, context, kind: str, value: int):
     # 0 в лимите — это «без ограничения», поэтому переход с нуля тоже ужесточение
     def _target(ex):
         return value + int(ex or 0) if (kind == "hwid" and value) else value
-    tighter = sum(1 for _tg, old, ex in targets
-                  if _target(ex) and (not old or _target(ex) < old))
+    if kind == "lte":
+        # NULL у подписки — это пресет (или 30 ГБ по умолчанию): сравниваем
+        # с действующим лимитом, а не с NULL, иначе предпросмотр врёт
+        from remnawave import lte_limit_gb
+        preset = load_config().get("paid_preset_lte")
+        default = lte_limit_gb(None, preset)
+        new_eff = default if value is None else value
+        tighter = sum(1 for _tg, old, _ex in targets
+                      if new_eff < lte_limit_gb(old, preset))
+        value_label = "по умолчанию" if value is None else f"{value} ГБ"
+        panel_note = "Меняем только в базе бота: панель о LTE-лимите не знает. "
+    else:
+        tighter = sum(1 for _tg, old, ex in targets
+                      if _target(ex) and (not old or _target(ex) < old))
+        value_label = value or "без ограничения"
+        panel_note = "Меняем и в базе, и в панели. "
     context.user_data["bulk_limits"] = {"kind": kind, "value": value}
     await message.reply_text(
-        f"{emoji} <b>Поставить лимит {label} = {value or 'без ограничения'} всем?</b>\n\n"
+        f"{emoji} <b>Поставить лимит {label} = {value_label} всем?</b>\n\n"
         f"👥 Затронет подписок: <b>{len(targets)}</b>"
         + (f" · пропустим из ЧС: {len(rows) - len(targets)}\n" if len(rows) != len(targets) else "\n")
         + (f"⚠️ У <b>{tighter}</b> лимит станет строже — им придёт уведомление.\n" if tighter else "")
         + (f"📱 У <b>{with_extra}</b> есть оплаченные устройства — им добавим сверх этого числа.\n"
            if with_extra else "")
-        + "\nМеняем и в базе, и в панели. "
-          "Пресет для новых подписок остаётся прежним.",
+        + "\n" + panel_note
+        + "Пресет для новых подписок остаётся прежним.",
         parse_mode="HTML",
         reply_markup=confirm_keyboard("✅ Да, применить", "paid_bulk_limits_apply",
                                       "paid_bulk_menu", "paid_subs"),
@@ -1288,9 +1351,13 @@ async def handle_paid_bulk_limits_apply(query, context):
     emoji, label, _field = LIMIT_KINDS[kind]
     await query.edit_message_text(f"{emoji} Меняю лимит {label} у всех подписок…")
     r = await bulk_set_limits(kind, value, context)
+    if kind == "lte":
+        value_label = "по умолчанию" if value is None else f"{value} ГБ"
+    else:
+        value_label = value or "без ограничения"
     await query.edit_message_text(
         f"✅ <b>Готово</b>\n\n"
-        f"{emoji} Лимит {label}: <b>{value or 'без ограничения'}</b>\n"
+        f"{emoji} Лимит {label}: <b>{value_label}</b>\n"
         f"📊 Обновлено подписок: <b>{r['updated']}</b>\n"
         + (f"⛔ Пропущено — в чёрном списке: <b>{r['skipped']}</b>\n" if r["skipped"] else "")
         + (f"⚠️ Панель не приняла: <b>{r['panel_fail']}</b>\n" if r["panel_fail"] else "")
@@ -1299,8 +1366,9 @@ async def handle_paid_bulk_limits_apply(query, context):
     )
 
 
-async def bulk_set_limits(kind: str, value: int, context) -> dict:
-    """Ставит лимит устройств всем платным подпискам: в базе и в панели."""
+async def bulk_set_limits(kind: str, value: int | None, context) -> dict:
+    """Ставит лимит всем платным подпискам: устройства — в базе и в панели,
+    LTE — только в базе (панель о LTE-лимите не знает)."""
     import aiosqlite
     from blacklist import blacklisted_ids
     from database import DB_PATH
@@ -1316,6 +1384,10 @@ async def bulk_set_limits(kind: str, value: int, context) -> dict:
     bot = context.bot if hasattr(context, "bot") else None
     updated = panel_fail = skipped = 0
     tightened = []
+    if kind == "lte":
+        from remnawave import lte_limit_gb
+        preset = load_config().get("paid_preset_lte")
+        new_eff = lte_limit_gb(None, preset) if value is None else value
     for sub_id, tg_id, email, old, extra in rows:
         if tg_id in skip_ids:
             skipped += 1
@@ -1324,27 +1396,42 @@ async def bulk_set_limits(kind: str, value: int, context) -> dict:
         # лимита, иначе массовая правка молча отбирала бы купленное
         target = value + int(extra or 0) if (kind == "hwid" and value) else value
         await update_paid_sub_field(sub_id, field, target)
-        res = await update_client_limits(
-            email, limit_hwid=target)
-        if not res.get("success"):
-            panel_fail += 1
+        if kind == "hwid":
+            res = await update_client_limits(
+                email, limit_hwid=target)
+            if not res.get("success"):
+                panel_fail += 1
         updated += 1
         if tg_id:
+            if kind == "lte":
+                hist_label = "по умолчанию" if target is None else f"{target} ГБ"
+            else:
+                hist_label = target or "без ограничения"
             await add_history(tg_id, "settings_changed",
-                              f"Массово: лимит {label} → {target or 'без ограничения'}"
+                              f"Массово: лимит {label} → {hist_label}"
                               + (f" (в т.ч. докуплено {extra})" if target != value else ""))
             # пишем только тем, кому стало строже: остальным это не новость.
             # old == 0 значит «было без ограничения» — любой лимит строже
-            if target and (not old or target < old):
+            if kind == "lte":
+                if new_eff < lte_limit_gb(old, preset):
+                    tightened.append((tg_id, new_eff))
+            elif target and (not old or target < old):
                 tightened.append((tg_id, target))
 
     if bot:
         for tg_id, target in tightened:
-            await _notify_user(bot, tg_id,
-                f"📱 <b>Изменён лимит устройств</b>\n\n"
-                f"<blockquote>Теперь можно подключить: <b>{target}</b></blockquote>\n\n"
-                f"<i>Лишние устройства перестанут подключаться.</i>"
-            )
+            if kind == "lte":
+                await _notify_user(bot, tg_id,
+                    "🌐 <b>Изменён лимит LTE-трафика</b>\n\n"
+                    f"<blockquote>Теперь в месяц: <b>{target} ГБ</b></blockquote>\n\n"
+                    "<i>Остаток смотри в «Моя подписка».</i>"
+                )
+            else:
+                await _notify_user(bot, tg_id,
+                    "📱 <b>Изменён лимит устройств</b>\n\n"
+                    f"<blockquote>Теперь можно подключить: <b>{target}</b></blockquote>\n\n"
+                    "<i>Лишние устройства перестанут подключаться.</i>"
+                )
     return {"updated": updated, "panel_fail": panel_fail,
             "skipped": skipped, "tightened": len(tightened)}
 
@@ -1456,12 +1543,16 @@ async def handle_paid_sub_settings(query, sub_id: int):
     trial_str = fmt_duration(eff["trial_period"])
     from handlers.payprovider import provider_label
     pay_line = f"💳 Оплата: <b>{provider_label()}</b> — счёт выставляет бот\n"
+    from remnawave import lte_limit_label
+    sub_lte = row[19] if len(row) > 19 else None
+    lte_str = lte_limit_label(sub_lte, load_config().get("paid_preset_lte"))
 
     await query.edit_message_text(
         f"⚙️ <b>Настройки подписки #{sub_id}</b>\n\n"
         f"📅 Действует до: <b>{period_end_line}</b>\n"
         f"🖥 Лимит устройств: <b>{hwid_str}</b>\n"
         f"📶 Трафик: <b>{traffic}</b>\n"
+        f"🌐 LTE-трафик в месяц: <b>{lte_str}</b>\n"
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
         f"{pay_line}\n"
         "Выбери параметр для изменения:",
@@ -1501,6 +1592,25 @@ async def handle_paid_sub_edit_traffic(query, sub_id: int, context):
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
         f"📶 <b>Трафик подписки #{sub_id}</b>\n\n<i>Пришли число ГБ или <code>-</code> для безлимита.</i>",
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def handle_paid_sub_edit_lte(query, sub_id: int, context):
+    from states import AWAITING_PAID_SUB_EDIT_LTE
+    context.user_data["state"] = AWAITING_PAID_SUB_EDIT_LTE
+    context.user_data["edit_sub_id"] = sub_id
+    row = await get_paid_sub(sub_id)
+    sub_lte = row[19] if row and len(row) > 19 else None
+    from remnawave import lte_limit_label
+    cur = lte_limit_label(sub_lte, load_config().get("paid_preset_lte"))
+    await query.edit_message_text(
+        f"🌐 <b>LTE-трафик подписки #{sub_id} (ГБ в месяц)</b>\n\n"
+        f"<blockquote>Сейчас: <b>{cur}</b></blockquote>\n\n"
+        "<i>Пришли число в ГБ (0 — LTE закрыт для этой подписки) или "
+        "<code>-</code>, чтобы вернуться к лимиту по умолчанию. "
+        "Это только счётчик в боте: панель о LTE-лимите не знает, "
+        "доступ он сам по себе не закрывает.</i>",
         parse_mode="HTML", reply_markup=back_admin(),
     )
 

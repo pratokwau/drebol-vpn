@@ -32,6 +32,7 @@ def presets_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📅 Дата окончания", callback_data="preset_expire")],
         [InlineKeyboardButton("🖥 Лимит устройств", callback_data="preset_hwid")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data="preset_traffic")],
+        [InlineKeyboardButton("🌐 LTE-трафик (ГБ/мес)", callback_data="preset_lte")],
         # доступ к серверам задают сквады панели
         [InlineKeyboardButton("👥 Сквады Remnawave", callback_data="rw_squads")],
         [InlineKeyboardButton("🔄 Обновить ники в панели", callback_data="subs_names_sync")],
@@ -67,5 +68,6 @@ def sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📅 Дата окончания", callback_data=f"sub_edit_expire:{sub_id}")],
         [InlineKeyboardButton("🖥 Лимит устройств", callback_data=f"sub_edit_hwid:{sub_id}")],
         [InlineKeyboardButton("📶 Трафик (ГБ)", callback_data=f"sub_edit_traffic:{sub_id}")],
+        [InlineKeyboardButton("🌐 LTE-трафик (ГБ/мес)", callback_data=f"sub_edit_lte:{sub_id}")],
         [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"sub_view:{sub_id}")],
     ])
