@@ -27,7 +27,7 @@ async def handle_my_sub(query):
             reply_markup=back_main(),
         )
         return
-    _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
+    _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row[:11]
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
     from panel import get_client_info
@@ -38,13 +38,16 @@ async def handle_my_sub(query):
     else:
         status_line = "⚪ Статус: <b>неизвестен</b>"
 
-    cdn = await _cdn_block(email)
+    from config import load_config as _lc
+    from remnawave import lte_limit_gb as _lte_limit
+    sub_lte = row[11] if len(row) > 11 else None
+    lte = await _lte_block(email, _lte_limit(sub_lte, _lc().get("preset_lte")))
     await query.edit_message_text(
         "📋 <b>Админская подписка</b>\n\n"
         f"📅 Действует до: <b>{expire}</b>\n"
         f"📶 Трафик: <b>{traffic}</b>\n"
         f"{status_line}\n\n"
-        + (cdn + "\n\n" if cdn else "")
+        + (lte + "\n\n" if lte else "")
         + f"🔗 <b>Ссылка подписки:</b>\n<code>{sub_url}</code>\n\n"
         "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)",
         parse_mode="HTML",
@@ -71,31 +74,32 @@ def _progress_bar(used_gb: float, total_gb: int) -> str:
     return f"[{bar}] {pct}%"
 
 
-async def _cdn_block(email: str) -> str:
-    """Блок CDN-трафика для экрана подписки: использовано/осталось
-    из месячных 30 ГБ и разбивка по CDN-узлам.
+async def _lte_block(email: str, limit_gb: int | None = None) -> str:
+    """Блок LTE-трафика для экрана подписки: использовано/осталось
+    из месячного лимита и разбивка по LTE-узлам (в панели — [CDN]).
 
-    Пустая строка, если панель не настроена, CDN-узлов нет или
+    Пустая строка, если панель не настроена, LTE-узлов нет или
     статистика недоступна: экран подписки из-за этого ломаться
     не должен — это дополнительная информация, а не основная.
     """
     try:
-        from remnawave import (CDN_MONTHLY_GB, is_configured,
+        from remnawave import (LTE_MONTHLY_GB, is_configured,
                                make_username, user_cdn_usage)
         if not is_configured():
             return ""
+        limit = int(limit_gb) if limit_gb is not None else LTE_MONTHLY_GB
         r = await user_cdn_usage(make_username(email or "", 0))
     except Exception:
         return ""
     if not r.get("ok") or not r.get("cdn_nodes"):
         return ""
     used_gb = r["used_bytes"] / 1024 ** 3
-    left_gb = max(0.0, CDN_MONTHLY_GB - used_gb)
-    lines = ["🌐 <b>CDN-трафик в этом месяце</b>",
+    left_gb = max(0.0, limit - used_gb)
+    lines = ["🌐 <b>LTE-трафик в этом месяце</b>",
              f"Использовано: <b>{used_gb:.2f} ГБ</b> "
-             f"из <b>{CDN_MONTHLY_GB} ГБ</b>",
+             f"из <b>{limit} ГБ</b>",
              f"Осталось: <b>{left_gb:.2f} ГБ</b>"]
-    bar = _progress_bar(used_gb, CDN_MONTHLY_GB)
+    bar = _progress_bar(used_gb, limit)
     if bar:
         lines.append(bar)
     spent = [(name, b) for name, b in r["per_node"] if b > 0]
@@ -104,10 +108,10 @@ async def _cdn_block(email: str) -> str:
             f"{escape(name)}: <b>{_fmt_bytes_user(b)}</b>"
             for name, b in spent) + "</blockquote>")
     else:
-        lines.append("<i>В этом месяце на CDN-узлах трафика пока нет.</i>")
-    lines.append("<i>Лимит 30 ГБ на CDN-узлы обновляется каждый месяц.</i>")
+        lines.append("<i>В этом месяце на LTE-узлах трафика пока нет.</i>")
+    lines.append(f"<i>Лимит {limit} ГБ на LTE-узлы обновляется каждый месяц.</i>")
     if r.get("failed"):
-        lines.append("<i>Часть CDN-узлов не ответила — "
+        lines.append("<i>Часть LTE-узлов не ответила — "
                      "цифра может быть неполной.</i>")
     return "\n".join(lines)
 
@@ -180,11 +184,14 @@ async def handle_my_paid_sub(query):
         kb_rows.append(cab)
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
-    cdn = await _cdn_block(email)
+    from config import load_config as _lc2
+    from remnawave import lte_limit_gb as _lte_limit2
+    sub_lte = row[19] if len(row) > 19 else None
+    lte = await _lte_block(email, _lte_limit2(sub_lte, _lc2().get("paid_preset_lte")))
     await query.edit_message_text(
         "⚙️ <b>Моя подписка</b>\n\n"
         f"<blockquote>{plan}  ·  {mark}</blockquote>\n\n"
-        + (cdn + "\n\n" if cdn else "")
+        + (lte + "\n\n" if lte else "")
         + "<i>Скопируйте ссылку, продлите подписку или управляйте устройствами.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb_rows),
