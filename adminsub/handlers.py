@@ -737,35 +737,18 @@ async def handle_sub_reissue(query, context, sub_id: int):
 # ── Ники в панели ─────────────────────────────────────────────────────────────
 
 async def refresh_panel_names() -> dict:
-    """Приводит подписи клиентов в панели к текущим никам из Telegram.
+    """Приводит подписи админских клиентов в панели к текущим никам
+    из Telegram — тот же единый формат, что и общая актуализация
+    (см. panel.refresh_panel_descriptions).
 
     Имя клиента и ссылку подписки не трогаем: они связаны, и переименование
     сломало бы ключ у человека. Обновляем описание и TG ID — то, по чему
     клиента узнаёшь в панели.
     """
-    import asyncio
-    import aiosqlite
-    from database import DB_PATH
-    from panel import sync_client_note
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT s.id, s.tg_id, s.email, u.username
-            FROM admin_subs s LEFT JOIN users u ON u.id = s.tg_id
-            ORDER BY s.id
-        """) as cur:
-            rows = await cur.fetchall()
-
-    checked, updated, errors = 0, 0, []
-    for _sub_id, tg_id, email, uname in rows:
-        checked += 1
-        r = await sync_client_note(email, f"@{uname}" if uname else "", tg_id)
-        if r.get("success"):
-            updated += bool(r.get("changed"))
-        else:
-            errors.append(f"{email}: {r.get('error')}")
-        await asyncio.sleep(0.08)
-    return {"ok": True, "checked": checked, "updated": updated, "errors": errors}
+    from panel import refresh_panel_descriptions
+    res = await refresh_panel_descriptions(("admin_subs",))
+    return {"ok": True, "checked": res["checked"], "updated": res["updated"],
+            "errors": res["errors"]}
 
 
 async def handle_subs_names_sync(query, context):

@@ -1186,16 +1186,85 @@ async def handle_rw_menu(query, context=None):
                    InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("📊 Потребление ГБ", callback_data="rw_usage")])
-        kb.append([InlineKeyboardButton("🔄 Точечная синхронизация",
-                                        callback_data="panel_sync")])
-        kb.append([InlineKeyboardButton("⏰ Расписание синхронизации",
-                                        callback_data="panel_sync_schedule")])
+        kb.append([InlineKeyboardButton("🔄 Синхронизация",
+                                        callback_data="panel_sync_menu")])
         kb.append([InlineKeyboardButton("📨 Разослать ссылки клиентам",
                                         callback_data="rw_notify")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
                                   disable_web_page_preview=True)
+
+
+async def handle_panel_sync_menu(query, context=None):
+    """Меню «Синхронизация»: всё, что сверяет бота с панелью, в одном месте."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if context:
+        context.user_data.pop("state", None)
+    cfg = load_config()
+    lines = ["🔄 <b>Синхронизация</b>", "",
+             "<blockquote>"
+             f"Расписание: <b>{panel_sync_schedule_text(cfg)}</b></blockquote>", "",
+             "🔄 <b>Точечная синхронизация</b> — сверяет базу бота с панелью: "
+             "ключи, ссылки, сроки, лимиты устройств и трафика.",
+             "⏰ <b>Расписание</b> — когда сверка запускается сама.",
+             "👤 <b>Актуализация юзернеймов и ников</b> — переписывает описание "
+             "каждого клиента в панели по текущим данным из базы бота:",
+             "<code>Drebol VPN · @юзернейм · Ник · TG ID · "
+             "Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС</code>"]
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Точечная синхронизация",
+                                  callback_data="panel_sync")],
+            [InlineKeyboardButton("⏰ Расписание синхронизации",
+                                  callback_data="panel_sync_schedule")],
+            [InlineKeyboardButton("👤 Актуализация юзернеймов и ников",
+                                  callback_data="panel_names_sync")],
+            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
+
+
+async def handle_panel_names_sync(query, context=None):
+    """Актуализация: юзернеймы и ники платных и админских подписок —
+    в описание каждого клиента панели, единым форматом со штампом времени."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if not is_configured():
+        await query.answer("Сначала задай адрес панели и токен", show_alert=True)
+        return
+    await query.edit_message_text(
+        "👤 Сверяю юзернеймы и ники с базой и переписываю описания в панели…")
+    from panel import refresh_panel_descriptions
+    res = await refresh_panel_descriptions()
+    errors = res.get("errors") or []
+    by_table = res.get("by_table") or {}
+    paid = by_table.get("paid_subs", {})
+    admin = by_table.get("admin_subs", {})
+    lines = ["👤 <b>Юзернеймы и ники актуализированы</b>", "",
+             "<blockquote>"
+             f"Проверено подписок: <b>{res['checked']}</b> "
+             f"(платных: {paid.get('checked', 0)}, "
+             f"админских: {admin.get('checked', 0)})\n"
+             f"Обновлено описаний: <b>{res['updated']}</b>\n"
+             f"С ошибкой: <b>{len(errors)}</b></blockquote>"]
+    if errors:
+        shown = "\n".join(escape(e[:120]) for e in errors[:5])
+        lines += ["", "⚠️ <b>Не получилось</b>", f"<blockquote>{shown}</blockquote>"]
+        if len(errors) > 5:
+            lines.append(f"<i>…и ещё {len(errors) - 5}</i>")
+    lines += ["", "<i>Формат описания в панели:</i>",
+              "<code>Drebol VPN · @юзернейм · Ник · TG ID · "
+              "Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС</code>",
+              "<i>Ники берутся из базы бота — она узнаёт новый ник, когда "
+              "человек пишет боту. Если человек сменил ник, но боту ещё не "
+              "писал, бот о новом нике пока не знает. Имя клиента и ссылка "
+              "подписки при этом не меняются.</i>"]
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("👤 Ещё раз", callback_data="panel_names_sync"),
+             InlineKeyboardButton("🔄 К синхронизации",
+                                  callback_data="panel_sync_menu")],
+            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
 
 
 async def handle_panel_sync(query, context=None):
@@ -1219,7 +1288,8 @@ async def handle_panel_sync(query, context=None):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Ещё раз", callback_data="panel_sync"),
              InlineKeyboardButton("⏰ Расписание", callback_data="panel_sync_schedule")],
-            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
+            [InlineKeyboardButton("◀️ К синхронизации",
+                                  callback_data="panel_sync_menu")]]))
 
 
 def _panel_sync_schedule_keyboard():
@@ -1233,7 +1303,8 @@ def _panel_sync_schedule_keyboard():
         [InlineKeyboardButton("🔁 Каждую неделю", callback_data="panel_sync_set:interval:168")],
         [InlineKeyboardButton("📅 Каждый день в …", callback_data="panel_sync_daily"),
          InlineKeyboardButton("✏️ Свой интервал", callback_data="panel_sync_interval")],
-        [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]])
+        [InlineKeyboardButton("◀️ К синхронизации",
+                              callback_data="panel_sync_menu")]])
 
 
 async def handle_panel_sync_schedule(query, context=None):

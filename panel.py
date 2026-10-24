@@ -219,15 +219,36 @@ async def update_client_traffic(email: str, total_gb: int) -> dict:
     return {"success": True} if r["ok"] else _fail(str(r.get("error")))
 
 
-async def sync_client_note(email: str, note: str = "", tg_id=None) -> dict:
-    """Обновляет подпись клиента в панели: ник и TG ID.
+def panel_description(username, first_name, tg_id, now=None) -> str:
+    """Подпись клиента в панели в едином формате:
 
-    Имя клиента менять нельзя — оно вшито в ссылку подписки, — поэтому ник
-    живёт в описании. Если в панели уже то же самое, запрос не отправляем.
+    Drebol VPN · @username · Ник · TG ID · Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС
+
+    Пустые места не пропускаем, чтобы формат у всех был одинаковым:
+    нет юзернейма — «без юзернейма», нет ника — «без ника»,
+    нет TG ID — «без TG ID» (такое бывает у админских подписок без человека).
+    """
+    uname = f"@{username}" if username else "без юзернейма"
+    nick = first_name or "без ника"
+    tid = str(tg_id) if tg_id else "без TG ID"
+    stamp = (now or datetime.now()).strftime("%d.%m.%Y - %H.%M.%S")
+    return f"Drebol VPN · {uname} · {nick} · {tid} · Актуализировано {stamp}"
+
+
+async def sync_client_note(email: str, username=None, first_name=None,
+                           tg_id=None, now=None) -> dict:
+    """Обновляет подпись клиента в панели по единому формату
+    panel_description().
+
+    Имя клиента менять нельзя — оно вшито в ссылку подписки, — поэтому
+    ник, юзернейм и TG ID живут в описании. Если в панели уже то же
+    самое, запрос не отправляем. Штамп времени в описании меняется при
+    каждой актуализации, поэтому прогон актуализации всегда перезаписывает
+    описание — это и есть подтверждение свежести.
     """
     import remnawave as rw
     name = _name(email)
-    want = f"Drebol VPN · {note}" if note else "Создано ботом Drebol VPN"
+    want = panel_description(username, first_name, tg_id, now)
     r = await rw.user_by_name(name)
     if not r["ok"]:
         return _fail(str(r.get("error")))
@@ -244,6 +265,46 @@ async def sync_client_note(email: str, note: str = "", tg_id=None) -> dict:
     if not upd["ok"]:
         return _fail(str(upd.get("error")))
     return {"success": True, "changed": True}
+
+
+async def refresh_panel_descriptions(tables=("paid_subs", "admin_subs")) -> dict:
+    """Актуализация подписей в панели для платных и админских подписок.
+
+    Для каждой подписки берёт из базы бота текущие юзернейм и ник
+    человека (они обновляются в таблице users, когда человек пишет боту)
+    и пишет в описание клиента панели единый формат panel_description()
+    со штампом времени прогона. Возвращает {ok, checked, updated,
+    errors, by_table}.
+    """
+    import aiosqlite
+    from database import DB_PATH
+    stamp = datetime.now()
+    checked = updated = 0
+    errors = []
+    by_table = {}
+    for table in tables:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(f"""
+                SELECT s.tg_id, s.email, u.username, u.first_name
+                FROM {table} s LEFT JOIN users u ON u.id = s.tg_id
+                ORDER BY s.id
+            """) as cur:
+                rows = await cur.fetchall()
+        t_checked = t_updated = 0
+        for tg_id, email, uname, first_name in rows:
+            t_checked += 1
+            r = await sync_client_note(email, uname, first_name, tg_id,
+                                       now=stamp)
+            if r.get("success"):
+                t_updated += bool(r.get("changed"))
+            else:
+                errors.append(f"{email}: {r.get('error')}")
+            await asyncio.sleep(0.08)
+        by_table[table] = {"checked": t_checked, "updated": t_updated}
+        checked += t_checked
+        updated += t_updated
+    return {"ok": True, "checked": checked, "updated": updated,
+            "errors": errors, "by_table": by_table}
 
 
 async def toggle_client(email: str, enable: bool) -> dict:

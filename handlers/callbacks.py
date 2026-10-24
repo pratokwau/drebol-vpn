@@ -38,6 +38,7 @@ from remnawave import (
     handle_rw_usage_period, handle_rw_usage_set, handle_rw_usage_custom,
     handle_panel_sync, handle_panel_sync_schedule, handle_panel_sync_set,
     handle_panel_sync_off, handle_panel_sync_daily, handle_panel_sync_interval,
+    handle_panel_sync_menu, handle_panel_names_sync,
 )
 from backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
@@ -515,6 +516,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("rw_usage_all:"):
         await handle_rw_usage_all(query, context,
                                   int(data.split(":", 1)[1] or 1))
+    elif data == "panel_sync_menu":
+        await handle_panel_sync_menu(query, context)
+    elif data == "panel_names_sync":
+        await handle_panel_names_sync(query, context)
     elif data == "panel_sync":
         await handle_panel_sync(query, context)
     elif data == "panel_sync_schedule":
