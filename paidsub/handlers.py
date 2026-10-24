@@ -75,12 +75,21 @@ def _fmt_presets(cfg: dict, squad_names=None) -> str:
     # LTE-лимит новых подписок: свой пресет или 30 ГБ по умолчанию
     lte_raw = cfg.get("paid_preset_lte")
     lte = f"{lte_raw} ГБ" if lte_raw is not None else "30 ГБ (по умолчанию)"
-    return _presets_text(trial_str, provider_line(), hwid, traf, panel_block, lte)
+    # Сквад после конца LTE: имя из того же справочника сквадов, что и выше
+    fb = cfg.get("paid_lte_fallback_squad")
+    if not fb:
+        fb_label = "не переключать"
+    else:
+        fb_label = (squad_names or {}).get(fb) or f"сквад {str(fb)[:8]}…"
+    return _presets_text(trial_str, provider_line(), hwid, traf, panel_block, lte, fb_label)
 
 
-def _presets_text(trial_str, pay_line, hwid, traf, panel_block, lte=None) -> str:
+def _presets_text(trial_str, pay_line, hwid, traf, panel_block, lte=None,
+                  lte_fallback=None) -> str:
     """Общий вид экрана настроек: сроки, оплата, лимиты, доступ."""
     lte_line = (f"\n🌐 LTE-трафик: <b>{lte}</b>" if lte is not None else "")
+    fb_line = (f"\n🔀 После конца LTE: <b>{lte_fallback}</b>"
+               if lte_fallback is not None else "")
     return (
         "⏱ <b>Сроки</b>\n<blockquote>"
         f"🆓 Пробный период: <b>{trial_str}</b>\n"
@@ -90,7 +99,7 @@ def _presets_text(trial_str, pay_line, hwid, traf, panel_block, lte=None) -> str
         "<i>Цену платного периода задают тарифы</i></blockquote>\n\n"
         "📊 <b>Лимиты</b>\n<blockquote>"
         f"🖥 Устройств: <b>{hwid}</b>\n"
-        f"📶 Трафик: <b>{traf}</b>{lte_line}</blockquote>\n\n"
+        f"📶 Трафик: <b>{traf}</b>{lte_line}{fb_line}</blockquote>\n\n"
         + panel_block
     )
 
@@ -267,6 +276,177 @@ async def handle_paid_preset_lte(query, context):
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
+
+
+# ── Сквад после конца LTE ────────────────────────────────────────────────────
+# Внутренний сквад в Remnawave — это набор инбаундов. Когда у подписки
+# кончается месячный LTE-трафик, бот переводит её на выбранный здесь
+# сквад: LTE-серверы пропадают из подписки, обычные остаются. В новом
+# месяце, когда счётчик обнуляется, бот возвращает обычные сквады.
+
+async def handle_paid_lte_fallback(query, context):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    import remnawave as rw
+    await query.edit_message_text("👥 Загружаю сквады…")
+    r = await rw.list_squads()
+    if not r["ok"]:
+        await query.edit_message_text(
+            f"❌ <b>Не получить список сквадов</b>\n\n<code>{r.get('error', '?')}</code>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+    cfg = load_config()
+    current = cfg.get("paid_lte_fallback_squad")
+    rows = []
+    for sq in r["squads"]:
+        mark = "✅ " if sq["uuid"] == current else ""
+        rows.append([InlineKeyboardButton(
+            f"{mark}{sq['name']} · {sq['inbounds']} инб · {sq['members']} чел",
+            callback_data=f"paid_lte_fallback:{sq['uuid']}")])
+    rows.append([InlineKeyboardButton("🚫 Не переключать",
+                                      callback_data="paid_lte_fallback_off")])
+    rows.append([InlineKeyboardButton("▶️ Проверить LTE сейчас",
+                                      callback_data="paid_lte_check_now")])
+    rows.append([InlineKeyboardButton("◀️ Назад к настройкам",
+                                      callback_data="paid_sub_presets")])
+    cur_name = ""
+    if current:
+        cur_name = next((s["name"] for s in r["squads"] if s["uuid"] == current),
+                        "выбранный сквад")
+    await query.edit_message_text(
+        "🔀 <b>Сквад после конца LTE</b>\n\n"
+        + (f"<blockquote>Сейчас: <b>{_esc_name(cur_name)}</b></blockquote>\n\n"
+           if cur_name else "")
+        + "Выбери внутренний сквад панели — его инбаунды получит подписка, "
+          "когда её месячный LTE-трафик закончится. Проверка идёт каждые "
+          "30 минут, а в новом месяце бот вернёт обычные сквады сам.\n\n"
+          "<i>Если выбрать «Не переключать», LTE просто считается в боте, "
+          "а доступ не меняется — как раньше.</i>",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def handle_paid_lte_fallback_set(query, context, uuid: str | None):
+    cfg = load_config()
+    if uuid:
+        cfg["paid_lte_fallback_squad"] = uuid
+        note = "выбран"
+    else:
+        cfg.pop("paid_lte_fallback_squad", None)
+        note = "выключен"
+    save_config(cfg)
+    await query.answer(f"Сквад после LTE: {note}")
+    await handle_paid_presets_menu(query)
+
+
+async def handle_paid_lte_check_now(query, context):
+    await query.edit_message_text("⏳ Проверяю LTE у всех подписок…")
+    r = await lte_fallback_tick(context)
+    if not r.get("ok"):
+        await query.edit_message_text(
+            f"⚠️ <b>Проверка не прошла</b>\n\n<code>{r.get('error', '?')}</code>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+    await query.edit_message_text(
+        "✅ <b>Проверка LTE завершена</b>\n\n"
+        f"🔀 Переведено на fallback-сквад: <b>{r['switched']}</b>\n"
+        f"↩️ Возвращено на обычные сквады: <b>{r['restored']}</b>\n"
+        f"👥 Проверено подписок: <b>{r['checked']}</b>"
+        + (f"\n⚠️ Панель не приняла: <b>{r['panel_fail']}</b>" if r["panel_fail"] else ""),
+        parse_mode="HTML", reply_markup=back_admin(),
+    )
+
+
+async def lte_fallback_tick(context) -> dict:
+    """Фоновая проверка LTE: переводит подписки без LTE на fallback-сквад
+    и возвращает их обратно, когда месяц сменился или лимит вырос.
+
+    Состояние — колонка paid_subs.lte_fallback_month («ГГГГ-ММ:uuid»):
+    месяц перевода и сквад, на который перевели. Если админ сменил
+    fallback-сквад посреди месяца, переведённых переведём на новый
+    при следующей проверке, а не только в новом месяце.
+    Возвращает счётчики {ok, checked, switched, restored, panel_fail}.
+    """
+    import logging
+    from datetime import datetime
+    from blacklist import blacklisted_ids
+    from panel import update_client_squads
+    from paidsub.storage import lte_watch_subs, update_paid_sub_field, add_history
+    import remnawave as rw
+    cfg = load_config()
+    fallback = cfg.get("paid_lte_fallback_squad")
+    month = datetime.now().strftime("%Y-%m")
+    if not rw.is_configured():
+        return {"ok": False, "error": "панель не настроена"}
+    usage_r = await rw.all_lte_usage()
+    if not usage_r["ok"]:
+        return {"ok": False, "error": usage_r.get("error")}
+    usage = usage_r["usage"]
+    normal = rw.settings()["squads"]
+    skip = await blacklisted_ids()
+    bot = context.bot if hasattr(context, "bot") else None
+    checked = switched = restored = panel_fail = 0
+    for sub_id, tg_id, email, sub_lte, fb_raw in await lte_watch_subs():
+        if tg_id in skip:
+            continue
+        checked += 1
+        fb_m, _, fb_sq = (fb_raw or "").partition(":")
+        switched_this_month = fb_m == month
+        used_gb = usage.get(rw.make_username(email or "", 0), 0) / 1024 ** 3
+        limit = rw.lte_limit_gb(sub_lte, cfg.get("paid_preset_lte"))
+        exhausted = used_gb >= limit
+        if exhausted and fallback and not (switched_this_month and fb_sq == fallback):
+            res = await update_client_squads(email, [fallback])
+            if not res.get("success"):
+                panel_fail += 1
+                logging.error("LTE fallback: панель не приняла %s: %s",
+                              email, res.get("error"))
+                continue
+            await update_paid_sub_field(sub_id, "lte_fallback_month",
+                                        f"{month}:{fallback}")
+            await add_history(tg_id, "settings_changed",
+                              f"LTE закончился ({used_gb:.2f} ГБ из {limit} ГБ) — "
+                              "перевод на fallback-сквад")
+            switched += 1
+            if bot and tg_id and not switched_this_month:
+                await _notify_user(
+                    bot, tg_id,
+                    "🌐 <b>LTE-трафик на этот месяц закончился</b>\n\n"
+                    f"<blockquote>Использовано: <b>{used_gb:.2f} ГБ</b> из {limit} ГБ</blockquote>\n\n"
+                    "<i>До 1-го числа доступны обычные серверы — "
+                    "LTE вернётся в новом месяце.</i>")
+        elif fb_m and fb_m != month and normal:
+            # новый месяц: счётчик обнулся — возвращаем обычные сквады
+            res = await update_client_squads(email, normal)
+            if not res.get("success"):
+                panel_fail += 1
+                logging.error("LTE restore: панель не приняла %s: %s",
+                              email, res.get("error"))
+                continue
+            await update_paid_sub_field(sub_id, "lte_fallback_month", None)
+            await add_history(tg_id, "settings_changed",
+                              "Новый месяц — возврат с fallback-сквада на обычные")
+            restored += 1
+            if bot and tg_id:
+                await _notify_user(
+                    bot, tg_id,
+                    "🌐 <b>Новый месяц — LTE-трафик снова доступен</b>\n\n"
+                    f"<blockquote>Лимит на месяц: <b>{limit} ГБ</b></blockquote>")
+        elif switched_this_month and not exhausted:
+            # лимит подняли (или пресет вырос) — возвращаем досрочно
+            if not normal:
+                continue
+            res = await update_client_squads(email, normal)
+            if not res.get("success"):
+                panel_fail += 1
+                continue
+            await update_paid_sub_field(sub_id, "lte_fallback_month", None)
+            await add_history(tg_id, "settings_changed",
+                              "LTE-лимит увеличен — возврат с fallback-сквада")
+            restored += 1
+    return {"ok": True, "checked": checked, "switched": switched,
+            "restored": restored, "panel_fail": panel_fail}
 
 
 # ── Ручное создание подписки (админ) ─────────────────────────────────────────
