@@ -152,8 +152,8 @@ CABINET_PAGE = r"""<!doctype html>
     безопасной зоны отдают не все клиенты — поэтому в полном экране
     опускаем нашу шапку фиксированным отступом, ни от чего не зависящим.
     В обычном раскрытом виде и в браузере это правило не действует. */
- body.tg-fullscreen .wrap { padding-top:76px; }
- body.tg-fullscreen .tabs { top:56px; }
+ body.tg-fullscreen .wrap { padding-top:124px; }
+ body.tg-fullscreen .tabs { top:104px; }
  .brand { display:flex; align-items:center; min-height:44px; }
  .brand img { height:26px; width:auto; display:block; }
  .logo { display:none; align-items:center; gap:10px; font-weight:800; font-size:22px; letter-spacing:-.02em; }
