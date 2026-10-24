@@ -11,6 +11,10 @@
 • каждый синк банит в боте всех известных боту людей из списков
   (причина — из списка, источник бана помечается) и снимает авто-бан,
   когда человек из списков ушёл. Ручные баны синк не трогает;
+• внести в ЧС = забанить: ручное внесение (и возврат из исключения)
+  ставит и бан с той же причиной и сроком, а снятие из ЧС снимает
+  бан, пришедший из ЧС или из синка. У ЧС приоритет над баном в
+  проверках входа, поэтому бан из ЧС не закрывает поддержку;
 • админ добавляет своих и снимает любых. Снятие человека из общего списка
   запоминается исключением — иначе следующее обновление вернуло бы его;
 • блокировка бывает срочной: бот снимет её сам, когда срок выйдет, и вернёт
@@ -403,9 +407,18 @@ def _passed(local_raw: str | None) -> bool:
 
 async def blacklist_add(bot, tg_id: int, reason: str, until: str | None = None,
                         by_id: int | None = None) -> dict:
-    from database import bl_add_manual, bl_log
+    """Внести в ЧС = забанить: та же причина и тот же срок ложатся и в бан.
+
+    Тихо, без отдельного сообщения: человеку уже уходит «доступ закрыт»
+    с кнопкой поддержки, а бан-текст («бот закрыт целиком») для него
+    неверен — поддержка у людей из ЧС остаётся открытой.
+    """
+    from database import ban_user, bl_add_manual, bl_log
     await bl_add_manual(tg_id, reason, until, by_id)
     await bl_log(tg_id, "added", reason, by_id)
+    if tg_id != ADMIN_ID:
+        await ban_user(tg_id, reason, until, by_id, "blacklist")
+        await bl_log(tg_id, "banned", reason, by_id)
     res = await stop_subs(tg_id, reason)
     await _notify_blocked(bot, tg_id, reason, _to_local(until))
     await _log(bot, f"⛔ В чёрный список: <code>{tg_id}</code> — {html.escape(reason[:200])}"
@@ -415,10 +428,19 @@ async def blacklist_add(bot, tg_id: int, reason: str, until: str | None = None,
 
 async def blacklist_remove(bot, tg_id: int, by_id: int | None = None,
                            auto: bool = False) -> dict:
-    from database import bl_log, bl_remove
+    from database import ban_entry, bl_log, bl_remove, unban_user
     await bl_remove(tg_id)
     await bl_log(tg_id, "expired" if auto else "removed",
                  "срок блокировки вышел" if auto else None, by_id)
+    # Снятие из ЧС снимает и бан, который пришёл вместе с ЧС (из ручного
+    # внесения или из синка). Чистые ручные баны не трогаем: их ставили
+    # отдельно, снимать их — кнопкой «Разбанить». Тихо, без второго
+    # сообщения: человеку уже уходит «доступ восстановлен».
+    if not await entry(tg_id):
+        b = await ban_entry(tg_id)
+        if b and b.get("src") in ("blacklist", "list"):
+            await unban_user(tg_id)
+            await bl_log(tg_id, "unbanned", None, by_id)
     res = await restore_subs(tg_id)
     await _notify_restored(bot, tg_id, res)
     await _log(bot, ("⏳ Срок в ЧС вышел, доступ вернул сам: " if auto
@@ -434,6 +456,11 @@ async def blacklist_readd(bot, tg_id: int, by_id: int | None = None) -> dict | N
     if not e:
         return None
     await bl_log(tg_id, "readded", e["reason"], by_id)
+    # Возврат в ЧС — снова и бан, как при обычном внесении
+    from database import ban_user
+    if tg_id != ADMIN_ID:
+        await ban_user(tg_id, e["reason"], None, by_id, "blacklist")
+        await bl_log(tg_id, "banned", e["reason"], by_id)
     res = await stop_subs(tg_id, e["reason"])
     await _notify_blocked(bot, tg_id, e["reason"])
     await _log(bot, f"⛔ Снова в чёрном списке: <code>{tg_id}</code>")
@@ -928,8 +955,10 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
 
     ban_card = []
     if b:
-        ban_card.append("🚫 Бан в боте: <b>стоит</b> — бот для человека закрыт целиком"
-                        + (" (авто-бан из чёрного списка)" if b.get("src") == "list" else ""))
+        if b.get("src") in ("list", "blacklist"):
+            ban_card.append("🚫 Бан в боте: <b>стоит</b> — через чёрный список, поддержка открыта")
+        else:
+            ban_card.append("🚫 Бан в боте: <b>стоит</b> — бот для человека закрыт целиком")
         if b["reason"]:
             ban_card.append(f"📝 Причина: {html.escape(b['reason'])}")
         ban_card.append(f"⏳ Срок: <b>{fmt_until(b['until'])}</b>")

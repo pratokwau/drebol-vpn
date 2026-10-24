@@ -186,23 +186,24 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await mnt.show_feature_off(feat, query=query)
             return
 
-    # Проверка бана
-    if not adm and data != "check_sub":
-        from database import is_banned
-        if await is_banned(update.effective_user.id):
-            await query.edit_message_text(
-                "🚫 <b>Аккаунт заблокирован</b>\n\n"
-                "<i>Если это ошибка — свяжитесь с администратором.</i>", parse_mode="HTML")
-            return
-
-    # Чёрный список: остаётся только поддержка — чтобы можно было оспорить
-    if not adm and not staff_cb:
+    # Чёрный список: остаётся только поддержка — чтобы можно было оспорить.
+    # У ЧС приоритет над баном: внесение в ЧС само ставит бан, и этот бан
+    # не должен закрывать поддержку. Чистый бан (без записи в ЧС) по-прежнему
+    # закрывает всё — он проверяется в ветке elif.
+    if not adm:
         from blacklist import entry as bl_entry, user_may, show_blocked
-        if not user_may(data):
-            ble = await bl_entry(update.effective_user.id)
-            if ble:
+        ble = await bl_entry(update.effective_user.id) if not staff_cb else None
+        if ble:
+            if not user_may(data):
                 context.user_data.pop("state", None)
                 await show_blocked(ble, query=query)
+                return
+        elif data != "check_sub":
+            from database import is_banned
+            if await is_banned(update.effective_user.id):
+                await query.edit_message_text(
+                    "🚫 <b>Аккаунт заблокирован</b>\n\n"
+                    "<i>Если это ошибка — свяжитесь с администратором.</i>", parse_mode="HTML")
                 return
 
     # Проверка подписки для не-админов

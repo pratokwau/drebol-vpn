@@ -160,21 +160,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
         return
 
-    # ── Бан-чек ───────────────────────────────────────────────────────────────
-    if not is_admin:
-        from database import is_banned
-        if await is_banned(user.id):
-            from blacklist import banned_view
-            await update.message.reply_text(await banned_view(user.id), parse_mode="HTML")
-            return
-
     # ── Чёрный список: писать можно только в поддержку (она выше) ────────────
+    # У ЧС приоритет над баном: внесение в ЧС само ставит бан, и этот
+    # бан не должен закрывать поддержку. Чистый бан проверяется следом.
     if not is_admin and not helper_input:
         from blacklist import entry as bl_entry, show_blocked
         ble = await bl_entry(user.id)
         if ble:
             context.user_data.pop("state", None)
             await show_blocked(ble, message=update.message)
+            return
+
+    # ── Бан-чек ───────────────────────────────────────────────────────────────
+    if not is_admin:
+        from database import is_banned
+        if await is_banned(user.id):
+            from blacklist import banned_view
+            await update.message.reply_text(await banned_view(user.id), parse_mode="HTML")
             return
 
     # ── Юзер вводит промокод ─────────────────────────────────────────────────
