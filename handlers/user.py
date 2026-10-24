@@ -1506,7 +1506,8 @@ async def ensure_trial(user, context, on_start=None) -> bool:
 
 
 async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
-    """Карточка подписки для главного экрана — цитатой, чтобы читалась блоком.
+    """Карточка подписки для главного экрана: статус сверху, цифры ниже,
+    разделители вместо цитаты — так экран читается с первого взгляда.
 
     extra — строки с трафиком и устройствами из _sub_facts (могут быть пустыми).
     Ссылку сюда не кладём: она идёт отдельным блоком под карточкой.
@@ -1518,7 +1519,7 @@ async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
     from paidsub.time_parser import fmt_duration_precise
     status = row[11] if len(row) > 11 else "active"
     renewed = row[12] if len(row) > 12 else 0
-    plan = "⭐️ <b>Премиум</b>" if renewed else "🆓 <b>Пробный период</b>"
+    plan = "⭐️ Премиум" if renewed else "🆓 Пробный период"
 
     full = await get_paid_sub(row[0])
     end = parse_sub_date(full[18]) if full and len(full) > 18 and full[18] else None
@@ -1526,8 +1527,8 @@ async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
     left = int((end - datetime.now()).total_seconds()) if end else 0
 
     if status == "expired" or (left <= 0 and status != "renewal"):
-        return (f"<blockquote>{plan}  ·  🔴 Закончилась\n"
-                "Продлите — доступ вернётся сразу.</blockquote>"), False
+        return (f"{plan}  ·  🔴 <b>Закончилась</b>\n"
+                "Продлите — доступ вернётся сразу."), False
 
     if frozen:
         mark = "❄️ Заморожена"
@@ -1536,11 +1537,12 @@ async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
     else:
         mark = "🟢 Активна"
     until = end.strftime("%d.%m.%Y, %H:%M") if end else escape(str(row[6]))
-    lines = [f"{plan}  ·  {mark}", "",
+    lines = [f"{plan}  ·  <b>{mark}</b>",
+             "━━━━━━━━━━━━━━━━━━",
              f"⏳ Осталось: <b>{fmt_duration_precise(max(left, 0))}</b>",
              f"📅 Действует до: <b>{until}</b>"]
     lines += extra or []
-    return "<blockquote>" + "\n".join(lines) + "</blockquote>", True
+    return "\n".join(lines), True
 
 
 async def _sub_facts(row) -> list:
@@ -1605,17 +1607,19 @@ async def start_screen(user, fresh: bool = False):
                     "2️⃣ Откройте приложение INCY и вставьте её\n"
                     "3️⃣ Включите VPN — готово ✅")
         else:
-            text = (f"👋 Привет, {name}!\n"
-                    "Ваша подписка <b>Drebol VPN</b>:\n\n"
+            text = (f"👋 Привет, {name}!\n\n"
+                    "🛡 <b>Drebol VPN</b> — ваша подписка\n\n"
                     f"{card}"
-                    + (f"\n\n{_link_block(row[5])}" if alive else ""))
+                    + (f"\n\n━━━━━━━━━━━━━━━━━━\n\n{_link_block(row[5])}" if alive else "")
+                    + "\n\n👇 Выберите действие:")
     else:
-        text = (f"👋 Привет, {name}!\n"
-                "Это <b>Drebol VPN</b> — быстрый VPN без логов 🔒\n\n"
-                "<blockquote>⚡ Подключение за минуту\n"
+        text = (f"👋 Привет, {name}!\n\n"
+                "⚡ <b>Drebol VPN</b> — быстрый VPN без логов 🔒\n\n"
+                "✨ <b>Что внутри</b>\n"
+                "⚡ Подключение за минуту\n"
                 "📱 iOS · Android · Windows · macOS\n"
-                "💬 Поддержка прямо в боте</blockquote>\n\n"
-                "Выберите, что сделать 👇")
+                "💬 Поддержка прямо в боте\n\n"
+                "👇 Выберите, что сделать:")
     return text, main_keyboard(is_admin, has_sub, paid_status, is_helper(user.id))
 
 
