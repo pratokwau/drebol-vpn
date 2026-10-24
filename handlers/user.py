@@ -48,7 +48,7 @@ async def handle_my_sub(query):
         "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🌐 LTE интернет", callback_data="my_lte_admin")],
+            [InlineKeyboardButton("🌐 LTE-интернет", callback_data="my_lte_admin")],
             [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
         ]),
     )
@@ -73,56 +73,37 @@ def _progress_bar(used_gb: float, total_gb: int) -> str:
     return f"[{bar}] {pct}%"
 
 
-def _format_lte(result: dict, limit: int) -> str:
-    """Текст блока LTE-трафика по уже полученному результату статистики."""
+# Название месяца в предложном падеже: «в октябре», «в ноябре»…
+_MONTH_PREP = ("", "январе", "феврале", "марте", "апреле", "мае", "июне",
+               "июле", "августе", "сентябре", "октябре", "ноябре", "декабре")
+
+
+def _format_lte(result: dict, limit: int, month: int | None = None) -> str:
+    """Текст блока LTE-трафика по уже полученному результату статистики.
+
+    Разбивки по узлам здесь нет сознательно: человеку важен только
+    итог за месяц и остаток. Заголовок — с названием текущего месяца.
+    """
+    from datetime import datetime
+    month_name = _MONTH_PREP[month or datetime.now().month]
     used_gb = result["used_bytes"] / 1024 ** 3
     left_gb = max(0.0, limit - used_gb)
-    lines = ["🌐 <b>LTE-трафик в этом месяце</b>",
+    lines = [f"🌐 <b>LTE-трафик в {month_name}</b>",
              f"Использовано: <b>{used_gb:.2f} ГБ</b> "
              f"из <b>{limit} ГБ</b>",
              f"Осталось: <b>{left_gb:.2f} ГБ</b>"]
     bar = _progress_bar(used_gb, limit)
     if bar:
         lines.append(bar)
-    spent = [(name, b) for name, b in result["per_node"] if b > 0]
-    if spent:
-        lines.append("<blockquote>" + "\n".join(
-            f"{escape(name)}: <b>{_fmt_bytes_user(b)}</b>"
-            for name, b in spent) + "</blockquote>")
-    else:
-        lines.append("<i>В этом месяце на LTE-узлах трафика пока нет.</i>")
-    lines.append(f"<i>Лимит {limit} ГБ на LTE-узлы обновляется каждый месяц.</i>")
+    lines.append(f"<i>Лимит {limit} ГБ на LTE-серверы обновляется каждый месяц.</i>")
     if result.get("failed"):
-        lines.append("<i>Часть LTE-узлов не ответила — "
+        lines.append("<i>Часть LTE-серверов не ответила — "
                      "цифра может быть неполной.</i>")
     return "\n".join(lines)
 
 
-async def _lte_block(email: str, limit_gb: int | None = None) -> str:
-    """Блок LTE-трафика: использовано/осталось из месячного лимита
-    и разбивка по LTE-узлам (в панели — [CDN]).
-
-    Пустая строка, если панель не настроена, LTE-узлов нет или
-    статистика недоступна. Отдельный экран LTE сам объясняет причину,
-    а здесь блок — дополнительная информация, и экран подписки
-    из-за неё ломаться не должен.
-    """
-    try:
-        from remnawave import (LTE_MONTHLY_GB, is_configured,
-                               make_username, user_cdn_usage)
-        if not is_configured():
-            return ""
-        limit = int(limit_gb) if limit_gb is not None else LTE_MONTHLY_GB
-        r = await user_cdn_usage(make_username(email or "", 0))
-    except Exception:
-        return ""
-    if not r.get("ok") or not r.get("cdn_nodes"):
-        return ""
-    return _format_lte(r, limit)
-
-
 async def handle_my_lte(query, kind: str = "paid"):
-    """Отдельный экран «🌐 LTE интернет»: вся LTE-информация и кнопка назад.
+    """Отдельный экран «🌐 LTE-интернет»: вся LTE-информация и кнопка назад.
 
     kind="paid" — платная подписка (назад в «Моя подписка»),
     kind="admin" — админская (назад в «Админская подписка»).
@@ -136,7 +117,7 @@ async def handle_my_lte(query, kind: str = "paid"):
         row = await get_sub_by_tg_id(user_id)
         if not row:
             await query.edit_message_text(
-                "🌐 <b>LTE интернет</b>\n\n<blockquote>Админской подписки пока нет.</blockquote>",
+                "🌐 <b>LTE-интернет</b>\n\n<blockquote>Админской подписки пока нет.</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("◀️ Назад", callback_data="back_start")]]),
@@ -152,7 +133,7 @@ async def handle_my_lte(query, kind: str = "paid"):
         row = await get_paid_sub_by_tg_id(user_id)
         if not row:
             await query.edit_message_text(
-                "🌐 <b>LTE интернет</b>\n\n<blockquote>Подписки пока нет.</blockquote>",
+                "🌐 <b>LTE-интернет</b>\n\n<blockquote>Подписки пока нет.</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("◀️ Назад", callback_data="back_start")]]),
@@ -181,11 +162,10 @@ async def handle_my_lte(query, kind: str = "paid"):
         body = "⚠️ <i>Не удалось получить статистику LTE. Попробуй обновить через минуту.</i>"
 
     await query.edit_message_text(
-        "🌐 <b>LTE интернет</b>\n\n"
+        "🌐 <b>LTE-интернет</b>\n\n"
         + body + "\n\n"
-        "<i>LTE — быстрый трафик через узлы [CDN] в панели. "
-        "Лимит считается только ботом и доступ сам по себе не закрывает: "
-        "обычный трафик подписки живёт отдельно.</i>",
+        "<i>LTE-серверы — используйте только тогда, когда в вашем городе "
+        "включают ограничения интернета.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Обновить", callback_data=refresh_cb)],
@@ -261,7 +241,7 @@ async def handle_my_paid_sub(query):
     cab = _cabinet_row()
     if cab:
         kb_rows.append(cab)
-    kb_rows.append([InlineKeyboardButton("🌐 LTE интернет", callback_data="my_lte")])
+    kb_rows.append([InlineKeyboardButton("🌐 LTE-интернет", callback_data="my_lte")])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
@@ -1506,8 +1486,7 @@ async def ensure_trial(user, context, on_start=None) -> bool:
 
 
 async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
-    """Карточка подписки для главного экрана: статус сверху, цифры ниже,
-    разделители вместо цитаты — так экран читается с первого взгляда.
+    """Карточка подписки для главного экрана — цитатой, чтобы читалась блоком.
 
     extra — строки с трафиком и устройствами из _sub_facts (могут быть пустыми).
     Ссылку сюда не кладём: она идёт отдельным блоком под карточкой.
@@ -1519,7 +1498,7 @@ async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
     from paidsub.time_parser import fmt_duration_precise
     status = row[11] if len(row) > 11 else "active"
     renewed = row[12] if len(row) > 12 else 0
-    plan = "⭐️ Премиум" if renewed else "🆓 Пробный период"
+    plan = "⭐️ <b>Премиум</b>" if renewed else "🆓 <b>Пробный период</b>"
 
     full = await get_paid_sub(row[0])
     end = parse_sub_date(full[18]) if full and len(full) > 18 and full[18] else None
@@ -1527,8 +1506,8 @@ async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
     left = int((end - datetime.now()).total_seconds()) if end else 0
 
     if status == "expired" or (left <= 0 and status != "renewal"):
-        return (f"{plan}  ·  🔴 <b>Закончилась</b>\n"
-                "Продлите — доступ вернётся сразу."), False
+        return (f"<blockquote>{plan}  ·  🔴 Закончилась\n"
+                "Продлите — доступ вернётся сразу.</blockquote>"), False
 
     if frozen:
         mark = "❄️ Заморожена"
@@ -1537,12 +1516,11 @@ async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
     else:
         mark = "🟢 Активна"
     until = end.strftime("%d.%m.%Y, %H:%M") if end else escape(str(row[6]))
-    lines = [f"{plan}  ·  <b>{mark}</b>",
-             "━━━━━━━━━━━━━━━━━━",
+    lines = [f"{plan}  ·  {mark}", "",
              f"⏳ Осталось: <b>{fmt_duration_precise(max(left, 0))}</b>",
              f"📅 Действует до: <b>{until}</b>"]
     lines += extra or []
-    return "\n".join(lines), True
+    return "<blockquote>" + "\n".join(lines) + "</blockquote>", True
 
 
 async def _sub_facts(row) -> list:
@@ -1607,19 +1585,17 @@ async def start_screen(user, fresh: bool = False):
                     "2️⃣ Откройте приложение INCY и вставьте её\n"
                     "3️⃣ Включите VPN — готово ✅")
         else:
-            text = (f"👋 Привет, {name}!\n\n"
-                    "🛡 <b>Drebol VPN</b> — ваша подписка\n\n"
+            text = (f"👋 Привет, {name}!\n"
+                    "Ваша подписка <b>Drebol VPN</b>:\n\n"
                     f"{card}"
-                    + (f"\n\n━━━━━━━━━━━━━━━━━━\n\n{_link_block(row[5])}" if alive else "")
-                    + "\n\n👇 Выберите действие:")
+                    + (f"\n\n{_link_block(row[5])}" if alive else ""))
     else:
-        text = (f"👋 Привет, {name}!\n\n"
-                "⚡ <b>Drebol VPN</b> — быстрый VPN без логов 🔒\n\n"
-                "✨ <b>Что внутри</b>\n"
-                "⚡ Подключение за минуту\n"
+        text = (f"👋 Привет, {name}!\n"
+                "Это <b>Drebol VPN</b> — быстрый VPN без логов 🔒\n\n"
+                "<blockquote>⚡ Подключение за минуту\n"
                 "📱 iOS · Android · Windows · macOS\n"
-                "💬 Поддержка прямо в боте\n\n"
-                "👇 Выберите, что сделать:")
+                "💬 Поддержка прямо в боте</blockquote>\n\n"
+                "Выберите, что сделать 👇")
     return text, main_keyboard(is_admin, has_sub, paid_status, is_helper(user.id))
 
 
