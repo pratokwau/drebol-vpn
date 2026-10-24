@@ -156,7 +156,14 @@ async def handle_payment_view(query, payment_id: int):
     if status == "pending" and pay_url:
         kb.append([InlineKeyboardButton("🔗 Ссылка на оплату", url=pay_url)])
     if provider == "platega" and status == "paid" and ext_id:
+        from database import get_partial_refunded
+        partial = await get_partial_refunded(p_id)
+        if partial:
+            lines.append(f"↩️ Частично возвращено: <b>{partial} ₽</b> "
+                         f"(ещё можно вернуть <b>{amount - partial} ₽</b>)")
         kb.append([InlineKeyboardButton("💸 Вернуть деньги", callback_data=f"refund_start:{p_id}")])
+        kb.append([InlineKeyboardButton("💸 Вернуть часть",
+                                        callback_data=f"refund_partial_start:{p_id}")])
     kb.append([InlineKeyboardButton("◀️ К оплатам", callback_data="payments:paid:1")])
 
     await query.edit_message_text(
@@ -281,6 +288,153 @@ async def handle_refund_do(query, context: ContextTypes.DEFAULT_TYPE,
         f"⏳ <b>Возврат принят в обработку</b>\n\n{msg}\n\n"
         "Как только Platega его проведёт, бот сам обновит платёж"
         + (" и отзовёт срок." if revoke else "."),
+        parse_mode="HTML", reply_markup=back)
+
+
+# ── Частичный возврат ─────────────────────────────────────────────────────
+
+async def handle_refund_partial_start(query, context, payment_id: int):
+    """Частичный возврат: проверяет поддержку в Platega и просит сумму.
+
+    В отличие от полного возврата, срок подписки не трогается, а платёж
+    остаётся «оплачен» — возвращается только часть денег. Подтверждённые
+    части суммируются в payments.partial_refunded, чтобы было видно,
+    сколько ещё можно вернуть (Platega и сама не даст превысить остаток:
+    AMOUNT_EXCEEDS_REFUNDABLE).
+    """
+    import platega_api as pg
+    from database import get_partial_refunded
+    p = await get_payment_full(payment_id)
+    if not p:
+        await query.answer("Платёж не найден", show_alert=True)
+        return
+    (p_id, tg_id, provider, ext_id, amount, period, promo,
+     status, _url, _err, _created, _paid, first_name, username) = p
+    if provider != "platega" or status != "paid" or not ext_id:
+        await query.answer("Частичный возврат доступен только для оплаченных через Platega",
+                           show_alert=True)
+        return
+
+    back = InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ К платежу", callback_data=f"payment_view:{p_id}")],
+    ])
+    await query.edit_message_text("🔎 Проверяю возможность частичного возврата...")
+    chk = await pg.refund_supported(ext_id)
+    if not chk["ok"]:
+        await query.edit_message_text(
+            f"❌ Не удалось проверить возврат:\n<code>{chk['error']}</code>",
+            parse_mode="HTML", reply_markup=back)
+        return
+    if not chk["supported"]:
+        reason = chk.get("block_reason") or "Platega не сообщила причину"
+        await query.edit_message_text(
+            f"⛔ <b>Возврат недоступен</b>\n\nПричина: <code>{reason}</code>",
+            parse_mode="HTML", reply_markup=back)
+        return
+    if chk.get("partial_supported") is False:
+        await query.edit_message_text(
+            "⛔ <b>Частичный возврат не поддерживается</b>\n\n"
+            "Для этой транзакции Platega разрешает только полный возврат.",
+            parse_mode="HTML", reply_markup=back)
+        return
+
+    partial = await get_partial_refunded(p_id)
+    remaining = amount - partial
+    if remaining <= 0:
+        await query.edit_message_text(
+            "⛔ <b>Возвращать больше нечего</b>\n\n"
+            f"По платежу уже возвращено частями <b>{partial} ₽</b> из <b>{amount} ₽</b>.",
+            parse_mode="HTML", reply_markup=back)
+        return
+
+    from states import AWAITING_REFUND_PARTIAL
+    if context is not None:
+        context.user_data["state"] = AWAITING_REFUND_PARTIAL
+        context.user_data["refund_partial_payment"] = p_id
+    lines = [
+        f"💸 <b>Частичный возврат платежа #{p_id}</b>\n",
+        f"👤 {_who(first_name, username, tg_id)}",
+        f"💵 Сумма платежа: <b>{amount} ₽</b>",
+    ]
+    if partial:
+        lines.append(f"↩️ Уже возвращено частями: <b>{partial} ₽</b>")
+    lines += [
+        f"✅ Можно вернуть ещё: <b>{remaining} ₽</b>\n",
+        "Пришли сумму возврата в рублях — целым числом, например <code>500</code>.\n",
+        "<i>Срок подписки при частичном возврате не меняется, платёж "
+        "остаётся «оплачен».</i>",
+    ]
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML", reply_markup=back)
+
+
+async def handle_refund_partial_do(query, context, payment_id: int, amount: int):
+    import platega_api as pg
+    from database import add_partial_refunded, get_partial_refunded
+    from log_channel import send_log
+    from config import ADMIN_ID
+
+    p = await get_payment_full(payment_id)
+    if not p or p[7] != "paid":
+        await query.answer("Платёж уже не в статусе «оплачен»", show_alert=True)
+        return
+    remaining = p[4] - await get_partial_refunded(payment_id)
+    if amount < 1 or amount > remaining:
+        await query.answer(f"Сумма должна быть от 1 до {remaining} ₽",
+                           show_alert=True)
+        return
+
+    back = InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ К платежу", callback_data=f"payment_view:{payment_id}")],
+    ])
+    await query.edit_message_text("⏳ Отправляю частичный возврат в Platega...")
+    res = await pg.refund_partial(p[3], amount)
+    if not res["ok"]:
+        await query.edit_message_text(
+            f"❌ Частичный возврат не прошёл:\n<code>{res['error']}</code>",
+            parse_mode="HTML", reply_markup=back)
+        return
+
+    if not res["accepted"]:
+        # Platega приняла в ручную обработку: сумма ещё не возвращена,
+        # поэтому в базу её не пишем — засчитается только подтверждённый возврат
+        msg = res.get("message") or "Возврат в обработке"
+        await query.edit_message_text(
+            f"⏳ <b>Частичный возврат принят в обработку</b>\n\n{msg}\n\n"
+            "Platega проведёт его вручную. Пока он не подтверждён, бот "
+            "сумму не засчитывает: проверь итог в кабинете Platega.",
+            parse_mode="HTML", reply_markup=back)
+        return
+
+    await add_partial_refunded(payment_id, amount)
+    total_partial = await get_partial_refunded(payment_id)
+    (p_id, tg_id, _prov, _ext, full, _period, _promo,
+     _status, _url, _err, _created, _paid, first_name, username) = p
+    admin_text = (
+        f"↩️ <b>Частичный возврат по платежу #{p_id}</b>\n\n"
+        f"👤 {_who(first_name, username, tg_id)} (<code>{tg_id}</code>)\n"
+        f"💵 Возвращено: <b>{amount} ₽</b> из <b>{full} ₽</b> "
+        f"(всего частями: <b>{total_partial} ₽</b>)\n"
+        "📅 Срок подписки не менялся"
+    )
+    try:
+        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="HTML")
+    except Exception:
+        pass
+    await send_log(context.bot, admin_text)
+    user_text = (
+        f"↩️ <b>Частичный возврат {amount} ₽ оформлен.</b>\n\n"
+        "Деньги вернутся плательщику — срок зачисления зависит от банка.\n"
+        "Подписка продолжает действовать как раньше."
+    )
+    try:
+        await context.bot.send_message(chat_id=tg_id, text=user_text, parse_mode="HTML")
+    except Exception:
+        pass
+    await query.edit_message_text(
+        f"✅ <b>Частично возвращено {amount} ₽</b>\n\n"
+        f"Всего возвращено частями: <b>{total_partial} ₽</b> из <b>{full} ₽</b>\n"
+        "Срок подписки не менялся.",
         parse_mode="HTML", reply_markup=back)
 
 

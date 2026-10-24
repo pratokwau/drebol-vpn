@@ -389,8 +389,11 @@ async def init_db():
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)"
         )
-        # поля возврата: отзывать ли срок и когда возврат завершился
-        for _col in ("refund_revoke INTEGER", "refunded_at TIMESTAMP"):
+        # поля возврата: отзывать ли срок и когда возврат завершился;
+        # partial_refunded — сколько уже вернули частями (платёж при этом
+        # остаётся «оплачен», срок не трогается)
+        for _col in ("refund_revoke INTEGER", "refunded_at TIMESTAMP",
+                     "partial_refunded INTEGER NOT NULL DEFAULT 0"):
             try:
                 await db.execute(f"ALTER TABLE payments ADD COLUMN {_col}")
             except Exception:
@@ -1010,6 +1013,26 @@ async def claim_refund(payment_id: int) -> bool:
         )
         await db.commit()
         return (cur.rowcount or 0) > 0
+
+
+async def get_partial_refunded(payment_id: int) -> int:
+    """Сколько по платежу уже вернули частями (подтверждённых ботом)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COALESCE(partial_refunded, 0) FROM payments WHERE id = ?",
+            (payment_id,)) as cur:
+            r = await cur.fetchone()
+    return int(r[0]) if r else 0
+
+
+async def add_partial_refunded(payment_id: int, amount: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE payments SET partial_refunded = COALESCE(partial_refunded, 0) + ? "
+            "WHERE id = ?",
+            (int(amount), payment_id),
+        )
+        await db.commit()
 
 
 async def get_refund_revoke(payment_id: int):

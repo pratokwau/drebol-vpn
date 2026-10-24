@@ -43,7 +43,7 @@ from states import (
     AWAITING_RW_URL, AWAITING_RW_TOKEN, AWAITING_RW_USAGE_PERIOD,
     AWAITING_PANEL_SYNC_DAILY, AWAITING_PANEL_SYNC_INTERVAL,
     AWAITING_DM_USER,
-    AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
+    AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET, AWAITING_REFUND_PARTIAL,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
     AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
@@ -1362,6 +1362,46 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         field = ("platega_merchant_id" if state == AWAITING_PLATEGA_MERCHANT
                  else "platega_secret")
         await apply_credential(update.message, context, field, text)
+        return
+
+    # ── Частичный возврат ──────────────────────────────────────────────────
+    if state == AWAITING_REFUND_PARTIAL:
+        pid = context.user_data.get("refund_partial_payment")
+        context.user_data.pop("state", None)
+        context.user_data.pop("refund_partial_payment", None)
+        if not pid:
+            return
+        raw = text.replace(" ", "").replace("₽", "")
+        try:
+            amt = int(raw)
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Пришли сумму целым числом в рублях, например <code>500</code>.",
+                parse_mode="HTML")
+            return
+        from database import get_payment_full, get_partial_refunded
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        p = await get_payment_full(pid)
+        if not p or p[7] != "paid":
+            await update.message.reply_text("❌ Платёж уже не в статусе «оплачен».")
+            return
+        remaining = p[4] - await get_partial_refunded(pid)
+        if amt < 1 or amt > remaining:
+            await update.message.reply_text(
+                f"❌ Сумма должна быть от 1 до {remaining} ₽.")
+            return
+        await update.message.reply_text(
+            f"💸 Частичный возврат платежа #{pid}\n\n"
+            f"Вернуть клиенту: <b>{amt} ₽</b> из <b>{p[4]} ₽</b>\n"
+            "<i>Срок подписки не меняется.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"✅ Вернуть {amt} ₽",
+                                      callback_data=f"refund_partial_do:{pid}:{amt}")],
+                [InlineKeyboardButton("❌ Отмена",
+                                      callback_data=f"payment_view:{pid}")],
+            ]),
+        )
         return
 
     # ── Сообщение юзеру из профиля ─────────────────────────────────────────────

@@ -101,6 +101,7 @@ AWAITING_TARIFF_EDIT_PRICE = "awaiting_tariff_edit_price"
 
 # Платёжная система
 AWAITING_PLATEGA_MERCHANT = "awaiting_platega_merchant"
+AWAITING_REFUND_PARTIAL = "awaiting_refund_partial"
 AWAITING_PLATEGA_SECRET = "awaiting_platega_secret"
 
 # Сообщение юзеру из профиля

@@ -87,6 +87,8 @@ CB_LABELS = {
     "paid_approve": "✅ Одобрил триал",
     "paid_reject": "❌ Отклонил триал",
     "refund_do": "💸 Возврат",
+    "refund_partial_start": "💸 Частичный возврат (начало)",
+    "refund_partial_do": "💸 Частичный возврат",
     # бан, удаления, вкл/выкл подписок и техработ идут через «Точно?» —
     # их подписи в handlers/confirm.py (CONFIRM_TITLES)
     "unban_user": "✅ Разбан",
