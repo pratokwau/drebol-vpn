@@ -72,7 +72,7 @@ def _fmt_presets(cfg: dict, squad_names=None) -> str:
            if chosen else "Выдаём: <b>не выбраны</b>")
         + "</blockquote>"
     )
-    # LTE живёт на отдельном экране «LTE-настройки»: здесь его не дублируем
+    # LTE-настройки живут на экране «Сквады Remnawave»: здесь их не дублируем
     return _presets_text(trial_str, provider_line(), hwid, traf, panel_block)
 
 
@@ -266,14 +266,16 @@ async def handle_paid_preset_lte(query, context):
     )
 
 
-# ── LTE-настройки ─────────────────────────────────────────────────────────────
-# Модель такая. У подписки есть обычные сквады и сквад LTE-серверов —
-# оба выдаются при создании через «Сквады Remnawave». Когда месячный
-# LTE-трафик кончается, бот отключает сквад LTE-серверов и включает
-# сквад после конца LTE. В новом месяце всё возвращается обратно:
-# LTE-сквад снова включается, fallback — отключается.
+# ── Сквады Remnawave (платные) ──────────────────────────────────────────────
+# Один экран вместо двух кнопок: здесь настраиваются два параметра.
+# 1) Выдаваемые сквады (rw_squads): их получают все новые подписки —
+#    в их число должен входить и сквад LTE-серверов.
+# 2) LTE: месячный лимит ГБ, какой из выданных сквадов считать LTE
+#    (его бот отключит при конце трафика) и какой сквад включить вместо
+#    него. В новом месяце всё возвращается обратно: LTE-сквад снова
+#    включается, fallback — отключается.
 
-async def handle_paid_lte_settings(query, context):
+async def handle_paid_squads_menu(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     import remnawave as rw
     cfg = load_config()
@@ -281,18 +283,22 @@ async def handle_paid_lte_settings(query, context):
     lte_str = f"{lte_raw} ГБ" if lte_raw is not None else "30 ГБ (по умолчанию)"
     fb = cfg.get("paid_lte_fallback_squad")
     lte_squads = list(cfg.get("paid_lte_squads") or [])
+    issued = list(cfg.get("rw_squads") or [])
     names = {}
     r = await rw.list_squads()
     if r["ok"]:
         names = {sq["uuid"]: sq["name"] for sq in r["squads"]}
     fb_label = "не переключать" if not fb else names.get(fb) or f"сквад {str(fb)[:8]}…"
-    if not lte_squads:
-        lte_label = "не выбраны"
-    else:
-        lte_label = ", ".join(names.get(u) or f"{str(u)[:8]}…" for u in lte_squads)
+    lte_label = ("не выбраны" if not lte_squads else
+                 ", ".join(names.get(u) or f"{str(u)[:8]}…" for u in lte_squads))
+    issued_label = ("не выбраны" if not issued else
+                    ", ".join(names.get(u) or f"{str(u)[:8]}…" for u in issued))
     await query.edit_message_text(
-        "🌐 <b>LTE-настройки</b>\n\n"
-        "<blockquote>"
+        "👥 <b>Сквады Remnawave</b>\n\n"
+        "👥 <b>Выдаваемые сквады</b>\n<blockquote>"
+        f"Новые подписки получают: <b>{_esc_name(issued_label)}</b>"
+        "</blockquote>\n\n"
+        "🌐 <b>LTE</b>\n<blockquote>"
         f"📶 LTE-трафик в месяц: <b>{lte_str}</b>\n"
         f"📡 Сквад LTE-серверов: <b>{_esc_name(lte_label)}</b>\n"
         f"🔀 Сквад после конца LTE: <b>{_esc_name(fb_label)}</b>"
@@ -301,18 +307,69 @@ async def handle_paid_lte_settings(query, context):
         "сквады и сквад LTE-серверов. Как только месячный LTE-трафик "
         "кончается, сквад LTE-серверов отключается, а включается сквад "
         "после конца LTE. В новом месяце бот возвращает всё обратно.\n\n"
-        "<i>Сквад LTE-серверов должен быть также выбран в «Сквады "
-        "Remnawave» — именно оттуда новые подписки его получают. "
-        "Здесь мы только помечаем, какой из выданных сквадов отключать.</i>",
+        "<i>Сквад LTE-серверов должен быть также выбран в выдаваемых "
+        "сквадах — именно оттуда новые подписки его получают. "
+        "В настройках LTE мы только помечаем, какой из выданных "
+        "сквадов отключать.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🌐 ГБ трафика", callback_data="paid_preset_lte")],
+            [InlineKeyboardButton("👥 Выдаваемые сквады",
+                                  callback_data="paid_issued_squads")],
+            [InlineKeyboardButton(f"🌐 LTE-трафик: {lte_str}",
+                                  callback_data="paid_preset_lte")],
             [InlineKeyboardButton("📡 Сквад LTE-серверов", callback_data="paid_lte_squads")],
             [InlineKeyboardButton("🔀 Сквад после конца LTE", callback_data="paid_lte_fallback")],
             [InlineKeyboardButton("▶️ Проверить LTE сейчас", callback_data="paid_lte_check_now")],
             [InlineKeyboardButton("◀️ Назад к настройкам", callback_data="paid_sub_presets")],
         ]),
     )
+
+
+async def handle_paid_issued_squads(query, context):
+    """Выдаваемые сквады (платные): какие сквады получают новые подписки.
+
+    Отдельный экран, а не общий из remnawave: у того возврат ведёт
+    в меню Remnawave, а здесь надо вернуться в «Сквады Remnawave»
+    платных настроек.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    import remnawave as rw
+    await query.edit_message_text("👥 Загружаю сквады…")
+    r = await rw.list_squads()
+    if not r["ok"]:
+        await query.edit_message_text(
+            f"❌ <b>Не получить список сквадов</b>\n\n<code>{r.get('error', '?')}</code>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+    chosen = set(load_config().get("rw_squads") or [])
+    rows = []
+    for sq in r["squads"]:
+        mark = "✅ " if sq["uuid"] in chosen else ""
+        rows.append([InlineKeyboardButton(
+            f"{mark}{sq['name']} · {sq['inbounds']} инб · {sq['members']} чел",
+            callback_data=f"paid_issued_squad:{sq['uuid']}")])
+    rows.append([InlineKeyboardButton("◀️ Назад к сквадам",
+                                      callback_data="paid_squads_menu")])
+    await query.edit_message_text(
+        "👥 <b>Выдаваемые сквады</b>\n\n"
+        "Отметь, какие сквады выдавать новым платным подпискам. "
+        "В их число должен входить и сквад LTE-серверов — иначе "
+        "у подписок не будет LTE-доступа.",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def handle_paid_issued_squad_toggle(query, context, uuid: str):
+    chosen = list(load_config().get("rw_squads") or [])
+    if uuid in chosen:
+        chosen.remove(uuid)
+    else:
+        chosen.append(uuid)
+    cfg = load_config()
+    cfg["rw_squads"] = chosen
+    save_config(cfg)
+    await handle_paid_issued_squads(query, context)
 
 
 async def handle_paid_lte_squads(query, context):
@@ -333,8 +390,8 @@ async def handle_paid_lte_squads(query, context):
         rows.append([InlineKeyboardButton(
             f"{mark}{sq['name']} · {sq['inbounds']} инб · {sq['members']} чел",
             callback_data=f"paid_lte_squad:{sq['uuid']}")])
-    rows.append([InlineKeyboardButton("◀️ Назад к LTE-настройкам",
-                                      callback_data="paid_lte_settings")])
+    rows.append([InlineKeyboardButton("◀️ Назад к сквадам",
+                                      callback_data="paid_squads_menu")])
     await query.edit_message_text(
         "📡 <b>Сквад LTE-серверов</b>\n\n"
         "Отметь сквады, которые дают доступ к LTE-серверам. Именно их "
@@ -385,8 +442,8 @@ async def handle_paid_lte_fallback(query, context):
                                       callback_data="paid_lte_fallback_off")])
     rows.append([InlineKeyboardButton("▶️ Проверить LTE сейчас",
                                       callback_data="paid_lte_check_now")])
-    rows.append([InlineKeyboardButton("◀️ Назад к LTE-настройкам",
-                                      callback_data="paid_lte_settings")])
+    rows.append([InlineKeyboardButton("◀️ Назад к сквадам",
+                                      callback_data="paid_squads_menu")])
     cur_name = ""
     if current:
         cur_name = next((s["name"] for s in r["squads"] if s["uuid"] == current),
@@ -415,7 +472,7 @@ async def handle_paid_lte_fallback_set(query, context, uuid: str | None):
         note = "выключен"
     save_config(cfg)
     await query.answer(f"Сквад после LTE: {note}")
-    await handle_paid_lte_settings(query, context)
+    await handle_paid_squads_menu(query, context)
 
 
 async def handle_paid_lte_check_now(query, context):

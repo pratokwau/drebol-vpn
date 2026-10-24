@@ -97,9 +97,8 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         [b("🖥 Лимит устройств", "paid_preset_hwid")],
         *_devices_rows(b),
         [b("📶 Трафик (ГБ)", "paid_preset_traffic")],
-        [b("🌐 LTE-настройки", "paid_lte_settings")],
-        # панель
-        [b("👥 Сквады Remnawave", "rw_squads")],
+        # панель: выдаваемые сквады и LTE — одним экраном «Сквады Remnawave»
+        [b("👥 Сквады Remnawave", "paid_squads_menu")],
         [b("◀️ Назад к подпискам", "paid_subs")],
     ])
 

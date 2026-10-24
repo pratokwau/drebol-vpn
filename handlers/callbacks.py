@@ -125,7 +125,8 @@ from paidsub.handlers import (
     handle_paid_preset_hwid, handle_paid_preset_traffic,
     handle_paid_preset_lte, handle_paid_lte_fallback,
     handle_paid_lte_fallback_set, handle_paid_lte_check_now,
-    handle_paid_lte_settings, handle_paid_lte_squads,
+    handle_paid_squads_menu, handle_paid_issued_squads,
+    handle_paid_issued_squad_toggle, handle_paid_lte_squads,
     handle_paid_lte_squad_toggle,
     handle_paid_preset_trial,
     handle_paid_create_sub, handle_paid_create_type,
@@ -758,8 +759,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_preset_traffic(query, context)
     elif data == "paid_preset_lte":
         await handle_paid_preset_lte(query, context)
-    elif data == "paid_lte_settings":
-        await handle_paid_lte_settings(query, context)
+    elif data == "paid_squads_menu" or data == "paid_lte_settings":
+        # paid_lte_settings — старый колбэк, на случай открытых сообщений
+        # со старыми кнопками: ведёт на тот же объединённый экран
+        await handle_paid_squads_menu(query, context)
+    elif data == "paid_issued_squads":
+        await handle_paid_issued_squads(query, context)
+    elif data.startswith("paid_issued_squad:"):
+        await handle_paid_issued_squad_toggle(query, context, data.split(":")[1])
     elif data == "paid_lte_squads":
         await handle_paid_lte_squads(query, context)
     elif data.startswith("paid_lte_squad:"):
