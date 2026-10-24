@@ -203,6 +203,26 @@ CABINET_PAGE = r"""<!doctype html>
  .row span:first-child { color:rgba(255,255,255,.88); min-width:0; overflow-wrap:anywhere; }
  .row span:last-child { color:var(--soft); text-align:right; }
 
+ /* полоска расхода: трафик и LTE */
+ .bar { height:10px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:14px; }
+ .bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, var(--accent), #7fb0ff); }
+ .bar-fill.full { background:linear-gradient(90deg, #fbbf24, #f87171); }
+ .bar-note { display:flex; justify-content:space-between; gap:12px; margin-top:8px; font-size:13px; color:var(--soft); }
+
+ /* устройство: название слева, кнопка отключения справа */
+ .dev { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 0;
+        border-top:1px solid var(--line); }
+ .dev:first-of-type { border-top:0; }
+ .dev b { display:block; font-size:15px; overflow-wrap:anywhere; }
+ .dev small { color:var(--soft); font-size:13px; }
+ .btn-mini { flex:none; min-height:38px; padding:0 14px; border-radius:999px;
+             border:1px solid rgba(248,113,113,.4); background:transparent; color:#fca5a5;
+             font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+ .btn-mini:hover { background:rgba(248,113,113,.12); }
+ .btn-mini:disabled { opacity:.5; }
+ .btn-danger { border-color:rgba(248,113,113,.45); color:#fca5a5; }
+ .btn-danger:hover { background:rgba(248,113,113,.10); border-color:rgba(248,113,113,.6); }
+
  /* вход */
  #login { text-align:center; padding:6vh 0 0; }
  #login .card { padding:30px 22px; }
@@ -240,7 +260,7 @@ CABINET_PAGE = r"""<!doctype html>
    <div class="card">
      <span class="eyebrow">Личный кабинет</span>
      <h1>Войдите через Telegram</h1>
-     <p class="muted">Увидите срок подписки, ссылку для подключения<br>и свои устройства.</p>
+     <p class="muted">Увидите срок и трафик подписки, остаток LTE,<br>свои устройства, платежи и рефералку.</p>
      <div id="widget"></div>
      <p class="muted" id="loginerr"></p>
      <div class="perks"><span>Без паролей</span><span>Данные только ваши</span><span>Вход за секунду</span></div>
@@ -350,7 +370,9 @@ CABINET_PAGE = r"""<!doctype html>
      out.push('<div class="card hero">' + title("key", "Подписки пока нет") +
               '<p class="card-sub">Оформите её в боте — пробный период выдаётся сразу.</p>' +
               '<a class="btn btn-main" href="' + botUrl() + '">' + ICON.tg + "Оформить в боте</a></div>");
+     out.push(referralCard(p));
      document.getElementById("body").innerHTML = out.join("");
+     bindActions();
      return;
    }
 
@@ -363,6 +385,13 @@ CABINET_PAGE = r"""<!doctype html>
    var bigSub = s.status === "expired" ? "Продлите в боте — доступ вернётся сразу."
               : (s.left_text ? "осталось · до " + esc(s.until) : "действует");
    var traffic = esc(s.traffic_used_text) + (s.traffic_limit_gb ? " / " + esc(s.traffic_limit_gb) + " ГБ" : "");
+   var trafficBar = "";
+   if (s.traffic_limit_gb) {
+     var pct = Math.min(100, Math.round(s.traffic_used / (s.traffic_limit_gb * 1024 * 1024 * 1024) * 100));
+     trafficBar = '<div class="bar"><div class="bar-fill' + (pct >= 100 ? " full" : "") +
+                  '" style="width:' + pct + '%"></div></div>' +
+                  '<div class="bar-note"><span>Использовано ' + pct + "%</span><span>" + traffic + "</span></div>";
+   }
 
    // Главная карточка: статус и сколько осталось
    out.push('<div class="card hero">' +
@@ -373,10 +402,39 @@ CABINET_PAGE = r"""<!doctype html>
               stat(esc(s.until), "действует до") +
               stat(s.devices_limit ? "до " + esc(s.devices_limit) : "∞", "устройств") +
               stat(traffic || "—", s.traffic_limit_gb ? "трафик" : "трафик · безлимит") +
-            "</div>" +
+            "</div>" + trafficBar +
             '<div class="stack" style="margin-top:16px"><a class="btn btn-main" href="' + botUrl() + '">' +
             ICON.card + (s.status === "expired" ? "Продлить в боте" : "Продлить подписку") + "</a></div>" +
             "</div>");
+
+   // Детали подписки: что не влезло в главную карточку
+   var details = [row("Продлений", esc(s.renewed))];
+   if (s.created_at) { details.push(row("Подписка с", esc(s.created_at))); }
+   if (s.devices_extra) { details.push(row("Докуплено мест", "+" + esc(s.devices_extra))); }
+   out.push('<div class="card">' + title("key", "О подписке") +
+            '<p class="card-sub">Цифры на сейчас — кнопка «Обновить» внизу пересчитает их.</p>' +
+            details.join("") + "</div>");
+
+   // LTE: остаток за текущий месяц, как в боте на экране «LTE-интернет»
+   if (p.lte && p.lte.available) {
+     var lteBody;
+     if (p.lte.closed) {
+       lteBody = '<p class="card-sub">LTE-серверы для этой подписки закрыты.</p>';
+     } else {
+       var lpct = Math.min(100, Math.round(p.lte.used / (p.lte.limit_gb * 1024 * 1024 * 1024) * 100));
+       lteBody = '<p class="card-sub">Использовано ' + esc(p.lte.used_text) + " из " +
+                 esc(p.lte.limit_gb) + " ГБ · осталось <b style=\"color:#fff\">" +
+                 esc(p.lte.left_gb) + " ГБ</b></p>" +
+                 '<div class="bar"><div class="bar-fill' + (lpct >= 100 ? " full" : "") +
+                 '" style="width:' + lpct + '%"></div></div>' +
+                 '<div class="bar-note"><span>Лимит обновляется каждый месяц</span><span>' + lpct + "%</span></div>" +
+                 (p.lte.fallback_active
+                   ? '<p class="card-sub" style="margin-top:12px">⚠️ LTE на этот месяц закончился — ' +
+                     "сейчас работают обычные серверы, в новом месяце LTE вернётся.</p>"
+                   : "");
+     }
+     out.push('<div class="card">' + title("lock", "LTE-интернет") + lteBody + "</div>");
+   }
 
    // Подключение: приложение в одно нажатие и ссылка с копированием
    out.push('<div class="card">' + title("key", "Подключение") +
@@ -389,15 +447,100 @@ CABINET_PAGE = r"""<!doctype html>
             '<button class="copy" type="button" data-copy="' + esc(s.url) + '">Скопировать</button></div>' +
             "</div>");
 
-   if (p.devices && p.devices.length) {
-     var d = p.devices.map(function (x) { return row(esc(x.model), esc(x.seen)); }).join("");
-     out.push('<div class="card">' + title("dev", "Мои устройства") +
-              '<p class="card-sub">Подключено: ' + p.devices.length +
-              (s.devices_limit ? " из " + esc(s.devices_limit) : "") + "</p>" + d + "</div>");
+   // Устройства: каждое можно отключить прямо здесь
+   var devList = (p.devices || []).map(function (x) {
+     return '<div class="dev"><div><b>' + esc(x.model) + "</b><small>" +
+            esc(x.seen || "был недавно") + "</small></div>" +
+            '<button class="btn-mini" type="button" data-del="' + esc(x.id) +
+            '" data-name="' + esc(x.model) + '">Отключить</button></div>';
+   }).join("");
+   out.push('<div class="card">' + title("dev", "Мои устройства") +
+            '<p class="card-sub">Подключено: ' + (p.devices ? p.devices.length : 0) +
+            (s.devices_limit ? " из " + esc(s.devices_limit) : "") +
+            (s.devices_limit && p.devices && p.devices.length >= s.devices_limit
+              ? " · все места заняты" : "") + "</p>" +
+            (devList || '<p class="card-sub">Пока ни одного — подключитесь в приложении.</p>') + "</div>");
+
+   // Действия: перевыпуск ключа — как кнопка «Новый ключ» в боте
+   if ((s.status === "active" || s.status === "renewal") && s.enabled) {
+     out.push('<div class="card">' + title("key", "Действия") +
+              '<p class="card-sub">Старая ссылка перестанет работать на всех устройствах — ' +
+              "пригодится, если она попала в чужие руки.</p>" +
+              '<button class="btn btn-ghost btn-danger" type="button" id="reissue">🔁 Новый ключ</button></div>');
    }
-   out.push('<div class="stack" style="margin-top:6px"><a class="btn btn-ghost" href="' + botUrl() + '">' +
+
+   // Платежи: история уже приходила с сервера, но не показывалась
+   if (p.payments && p.payments.length) {
+     var payRows = p.payments.map(function (x) {
+       var st = x.status === "paid" ? "оплачено" : esc(x.status);
+       return row(esc(x.amount) + " ₽ · " + st, esc(x.date));
+     }).join("");
+     var total = p.payments_total
+       ? '<p class="card-sub">Всего оплачено: <b style="color:#fff">' + esc(p.payments_total.sum) +
+         " ₽</b> · оплат: " + esc(p.payments_total.count) + "</p>" : "";
+     out.push('<div class="card">' + title("card", "Платежи") + total + payRows + "</div>");
+   }
+
+   out.push(referralCard(p));
+
+   out.push('<div class="stack" style="margin-top:6px">' +
+            '<button class="btn btn-ghost" type="button" onclick="load()">🔄 Обновить данные</button>' +
+            '<a class="btn btn-ghost" href="' + botUrl() + '">' +
             ICON.tg + "Открыть бота</a></div>");
    document.getElementById("body").innerHTML = out.join("");
+   bindActions();
+ }
+
+ // Рефералка: статистика и ссылка — имя бота страница уже знает (BOT)
+ function referralCard(p) {
+   if (!p.referral) { return ""; }
+   var r = p.referral;
+   var link = "https://t.me/" + BOT + "?start=ref_" + p.user.id;
+   var share = "https://t.me/share/url?url=" + encodeURIComponent(link) +
+               "&text=" + encodeURIComponent("Попробуй Drebol VPN — быстрый и безопасный VPN!");
+   return '<div class="card">' + title("tg", "Приглашайте друзей") +
+     '<p class="card-sub">Приглашено: <b style="color:#fff">' + esc(r.invited) + "</b>" +
+     " · бонус получили: <b style=\"color:#fff\">" + esc(r.rewarded) + "</b>" +
+     (r.bonus_text ? " · вам начислено: <b style=\"color:#fff\">+" + esc(r.bonus_text) + "</b>" : "") + "</p>" +
+     '<div class="link"><code id="reflink">' + esc(link) + "</code>" +
+     '<button class="copy" type="button" data-copy="' + esc(link) + '">Скопировать</button></div>' +
+     '<div class="stack" style="margin-top:12px"><a class="btn btn-ghost" href="' + share +
+     '">📤 Поделиться ссылкой</a></div></div>';
+ }
+
+ // Кнопки действий после отрисовки: отключение устройства и перевыпуск
+ function bindActions() {
+   document.querySelectorAll("[data-del]").forEach(function (btn) {
+     btn.onclick = function () {
+       var name = btn.getAttribute("data-name") || "это устройство";
+       if (!confirm("Отключить " + name + "? Оно потеряет доступ, слот освободится.")) { return; }
+       btn.disabled = true; btn.textContent = "Отключаем…";
+       api("/api/device/delete", {method: "POST",
+           body: JSON.stringify({hwid: btn.getAttribute("data-del")})})
+         .then(function (r) {
+           if (r.status === 200) { return load(); }
+           alert(r.data && r.data.error === "already_gone"
+             ? "Это устройство уже отключено." : "Не получилось — попробуйте позже.");
+           load();
+         })
+         .catch(function () { alert("Не получилось — попробуйте позже."); load(); });
+     };
+   });
+   var re = document.getElementById("reissue");
+   if (re) {
+     re.onclick = function () {
+       if (!confirm("Перевыпустить ключ? Старая ссылка перестанет работать на всех устройствах, " +
+                    "новую нужно будет заново вставить в приложение.")) { return; }
+       re.disabled = true; re.textContent = "Перевыпускаем…";
+       api("/api/reissue", {method: "POST", body: "{}"})
+         .then(function (r) {
+           if (r.status === 200) { alert("Готово — новая ссылка уже в карточке «Подключение»."); }
+           else { alert("Не получилось — попробуйте позже."); }
+           load();
+         })
+         .catch(function () { alert("Не получилось — попробуйте позже."); load(); });
+     };
+   }
  }
 
  // Копирование ссылки. Где буфер недоступен — просто выделяем её

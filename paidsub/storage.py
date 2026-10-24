@@ -105,7 +105,8 @@ async def paid_counts() -> dict:
 # ВНИМАНИЕ: у двух выборок подписки поля совпадают только до 11-го индекса.
 # Дальше они расходятся, и ряд нельзя передавать «куда попало»:
 #   get_paid_sub:          12 payment_pending … 18 period_end, 19 lte_gb
-#   get_paid_sub_by_tg_id: 12 times_renewed   … 18 extra_devices, 19 lte_gb
+#   get_paid_sub_by_tg_id: 12 times_renewed   … 18 extra_devices, 19 lte_gb,
+#                            20 lte_fallback_month (добавлен в конец — старые индексы не трогаем)
 # Общее у них — ind_*-поля с 13 по 17, на них и опирается sub_settings().
 
 async def get_paid_sub(sub_id: int) -> tuple | None:
@@ -131,7 +132,7 @@ async def get_paid_sub_by_tg_id(tg_id: int) -> tuple | None:
         async with db.execute("""
             SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at, status, times_renewed,
                    ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url,
-                   extra_devices, lte_gb
+                   extra_devices, lte_gb, lte_fallback_month
             FROM paid_subs WHERE tg_id = ?
             ORDER BY created_at DESC LIMIT 1
         """, (tg_id,)) as cur:

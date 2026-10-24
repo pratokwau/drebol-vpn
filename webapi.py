@@ -11,8 +11,10 @@
 себя и шлёт в заголовке. Никаких паролей, куки и чужих данных: по токену
 видно только одного человека — того, кто вошёл.
 
-Кабинет только показывает. Менять что-либо через него нельзя: все действия
-остались в боте, где их видно в журнале.
+Кабинет показывает срок, трафик, LTE, устройства, платежи и рефералку.
+Действий всего два, и оба — те же, что уже есть в боте для самого человека:
+отключить своё устройство и перевыпустить свой ключ. Всё остальное
+(оплата, тарифы, лимиты) — только в боте, где это видно в журнале.
 """
 
 from __future__ import annotations
@@ -122,7 +124,20 @@ async def profile(tg_id: int) -> dict:
     out = {
         "user": {"id": tg_id, "name": (u[1] if u else "") or "", "username": (u[2] if u else "") or ""},
         "blocked": None, "subscription": None, "devices": [], "payments": [],
+        "referral": None, "lte": None,
     }
+    # Рефералка не зависит от подписки: её видно и без неё
+    try:
+        from paidsub.storage import get_referral_stats
+        from paidsub.time_parser import fmt_duration
+        rs = await get_referral_stats(tg_id)
+        out["referral"] = {
+            "invited": int(rs["total"] or 0),
+            "rewarded": int(rs["rewarded"] or 0),
+            "bonus_text": fmt_duration(rs["total_bonus"]) if rs["total_bonus"] else "",
+        }
+    except Exception:
+        pass
     if await is_banned(tg_id):
         out["blocked"] = {"kind": "ban", "reason": "Доступ к сервису закрыт"}
         return out
@@ -156,6 +171,7 @@ async def profile(tg_id: int) -> dict:
         "left": max(0, left),
         "left_text": fmt_duration_precise(max(0, left)) if left > 0 else "",
         "url": sub_url,
+        "created_at": str(row[10] or "")[:16],
         "devices_limit": int(limit_hwid or 0),
         "devices_own": base_hwid(limit_hwid, extra),
         "devices_extra": int(extra or 0),
@@ -165,10 +181,37 @@ async def profile(tg_id: int) -> dict:
         "renewed": int(renewed or 0),
     }
 
+    # LTE: остаток за текущий месяц и переведён ли человек на fallback-сквад.
+    # Панель может не ответить — тогда карточку просто не показываем.
+    try:
+        from config import load_config
+        from remnawave import (is_configured, lte_limit_gb,
+                               make_username, user_cdn_usage)
+        lte_limit = lte_limit_gb(row[19] if len(row) > 19 else None,
+                                 load_config().get("paid_preset_lte"))
+        fb_raw = row[20] if len(row) > 20 else ""
+        fb_month = (fb_raw or "").partition(":")[0]
+        if lte_limit == 0:
+            out["lte"] = {"available": True, "closed": True, "limit_gb": 0}
+        elif is_configured():
+            r = await user_cdn_usage(make_username(email or "", 0))
+            if r.get("ok") and r.get("cdn_nodes"):
+                lte_used = int(r["used_bytes"] or 0)
+                out["lte"] = {
+                    "available": True, "closed": False,
+                    "limit_gb": int(lte_limit),
+                    "used": lte_used, "used_text": _fmt_bytes(lte_used),
+                    "left_gb": round(max(0.0, lte_limit - lte_used / 1024 ** 3), 2),
+                    "fallback_active": bool(fb_month) and fb_month == datetime.now().strftime("%Y-%m"),
+                }
+    except Exception:
+        pass
+
     hw = await get_client_hwids(email)
     if hw.get("ok"):
         for d in hw.get("items", [])[:20]:
             out["devices"].append({
+                "id": str(d.get("id") or ""),
                 "model": d.get("deviceModel") or d.get("platform") or "Устройство",
                 "platform": d.get("platform") or "",
                 "seen": str(d.get("lastSeen") or "")[:16].replace("T", " "),
@@ -235,11 +278,15 @@ def build_app():
         token = await web_session_new(who["id"], source, SESSION_DAYS)
         return web.json_response({"token": token, "days": SESSION_DAYS})
 
-    async def me(request):
+    async def session_user(request):
+        """tg_id по токену сессии — или None, если сессии нет."""
         from database import web_session_user
         token = (request.headers.get("Authorization", "").replace("Bearer ", "").strip()
                  or request.query.get("token", ""))
-        tg_id = await web_session_user(token)
+        return await web_session_user(token)
+
+    async def me(request):
+        tg_id = await session_user(request)
         if not tg_id:
             return web.json_response({"error": "no_session"}, status=401)
         return web.json_response(await profile(tg_id))
@@ -250,11 +297,74 @@ def build_app():
         await web_session_drop(token)
         return web.json_response({"ok": True})
 
+    async def device_delete(request):
+        """Человек отключает своё устройство — то же, что кнопка в боте."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ref = str(body.get("hwid") or "")
+        if not ref:
+            return web.json_response({"error": "no_device"}, status=400)
+        from paidsub.storage import add_history, get_paid_sub_by_tg_id
+        from panel import delete_client_hwid, get_client_hwids, resolve_hwid
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        hwid_id = await resolve_hwid(row[2], ref)
+        if hwid_id is None:
+            return web.json_response({"error": "already_gone"}, status=404)
+        model = ""
+        hw = await get_client_hwids(row[2])
+        if hw.get("ok"):
+            for d in hw.get("items", []):
+                if str(d.get("id")) == str(hwid_id):
+                    model = d.get("deviceModel") or d.get("platform") or ""
+        res = await delete_client_hwid(row[2], hwid_id)
+        if not res.get("success"):
+            return web.json_response({"error": "panel"}, status=502)
+        await add_history(tg_id, "device_removed",
+                          f"Устройство отключено из кабинета: {model or hwid_id}")
+        return web.json_response({"ok": True})
+
+    async def reissue(request):
+        """Перевыпуск ключа — та же операция, что кнопка «Новый ключ» в боте.
+
+        Старая ссылка перестаёт работать на всех устройствах, поэтому
+        фронт спрашивает подтверждение до запроса.
+        """
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from paidsub.storage import add_history, get_paid_sub_by_tg_id, update_paid_sub_field
+        from panel import get_client_info, reissue_subscription
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        status = row[11] if len(row) > 11 else "active"
+        info = await get_client_info(row[2])
+        enabled = info.get("enabled", True) if info.get("success") else True
+        if status not in ("active", "renewal") or not enabled:
+            return web.json_response({"error": "not_available"}, status=409)
+        res = await reissue_subscription(row[2])
+        if not res.get("success"):
+            return web.json_response({"error": "panel"}, status=502)
+        await update_paid_sub_field(row[0], "uuid", res["new_uuid"])
+        await update_paid_sub_field(row[0], "sub_id", res["sub_id"])
+        await update_paid_sub_field(row[0], "sub_url", res["sub_url"])
+        await add_history(tg_id, "key_reissued", "Ключ перевыпущен из кабинета")
+        return web.json_response({"ok": True, "url": res["sub_url"]})
+
     app = web.Application(middlewares=[web.middleware(guard)])
     app.router.add_get("/api/health", health)
     app.router.add_post("/api/auth", auth)
     app.router.add_get("/api/me", me)
     app.router.add_post("/api/logout", logout)
+    app.router.add_post("/api/device/delete", device_delete)
+    app.router.add_post("/api/reissue", reissue)
     return app
 
 
