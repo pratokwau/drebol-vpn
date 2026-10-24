@@ -1470,18 +1470,18 @@ async def bl_list(scope: str, use_remote: bool, page: int = 1, per_page: int = 1
         cols = "a.tg_id, u.first_name, u.username, r.reason, 'allow'"
         order, params = "a.created_at DESC", []
     elif scope == "people":
-        # Все, у кого есть действующая запись в ЧС: вручную (сначала) и
-        # из общих списков (потом). Ручная запись побеждает удалённую,
-        # просроченная ручная не считается, исключение убирает из списка.
-        # Включает и людей без строки в users (голый ID из списков).
+        # Только те, кто уже был в боте (есть строка в users): вручную
+        # (сначала) и из общих списков (потом). Ручная запись побеждает
+        # удалённую, просроченная ручная не считается, исключение убирает
+        # из списка. Чужие ID из списков, не открывавшие бота, не показываем.
         base = ("(SELECT m.tg_id AS tg_id, u.first_name AS first_name, "
                 "u.username AS username, m.reason AS reason, 'manual' AS src, "
                 "m.created_at AS ord "
-                "FROM blacklist_manual m LEFT JOIN users u ON u.id = m.tg_id "
+                "FROM blacklist_manual m JOIN users u ON u.id = m.tg_id "
                 "WHERE m.until IS NULL OR m.until > CURRENT_TIMESTAMP "
                 "UNION ALL "
                 "SELECT r.tg_id, u.first_name, u.username, r.reason, 'remote', NULL "
-                "FROM blacklist_remote r LEFT JOIN users u ON u.id = r.tg_id "
+                "FROM blacklist_remote r JOIN users u ON u.id = r.tg_id "
                 "WHERE ? = 1 AND r.tg_id NOT IN (SELECT tg_id FROM blacklist_allow) "
                 "AND r.tg_id NOT IN (SELECT tg_id FROM blacklist_manual "
                 "WHERE until IS NULL OR until > CURRENT_TIMESTAMP))")
