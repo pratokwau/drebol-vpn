@@ -73,6 +73,7 @@ async def init_db():
                 limit_hwid INTEGER NOT NULL DEFAULT 0,
                 total_gb INTEGER NOT NULL DEFAULT 0,
                 lte_gb INTEGER,
+                lte_fallback_month TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -114,6 +115,12 @@ async def init_db():
                 await db.execute(f"ALTER TABLE {_table} ADD COLUMN lte_gb INTEGER")
             except Exception:
                 pass
+        # lte_fallback_month — месяц «ГГГГ-ММ», в котором подписку уже
+        # перевели на fallback-сквад из-за конца LTE. Пусто — не переводили.
+        try:
+            await db.execute("ALTER TABLE paid_subs ADD COLUMN lte_fallback_month TEXT")
+        except Exception:
+            pass
 
         from config import load_config as _load_cfg
         try:

@@ -22,6 +22,11 @@ async def post_init(app: Application):
         from paidsub.handlers import expiry_reminder_tick
         app.job_queue.run_repeating(expiry_reminder_tick, interval=1800, first=180)
 
+        # LTE: раз в 30 минут переводим подписки без LTE на fallback-сквад
+        # и возвращаем их, когда месяц сменился или лимит вырос
+        from paidsub.handlers import lte_fallback_tick
+        app.job_queue.run_repeating(lte_fallback_tick, interval=1800, first=300)
+
         async def _healthcheck_job(ctx):
             """Следит за панелью, выдачей подписок и узлами.
 

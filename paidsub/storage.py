@@ -227,11 +227,25 @@ async def live_paid_subs() -> list:
             return await cur.fetchall()
 
 
+async def lte_watch_subs() -> list:
+    """Платные подписки для проверки LTE: живые, со своим лимитом
+    и отметкой о переводе на fallback-сквад.
+    Возвращает (id, tg_id, email, lte_gb, lte_fallback_month)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, email, lte_gb, lte_fallback_month
+            FROM paid_subs
+            WHERE tg_id IS NOT NULL AND status IN ('active', 'renewal')
+            ORDER BY id
+        """) as cur:
+            return await cur.fetchall()
+
+
 async def update_paid_sub_field(sub_id: int, field: str, value):
     allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending",
                 "ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url",
                 "times_renewed", "pending_promo", "uuid", "period_end", "extra_devices",
-                "sub_id", "sub_url", "remind_stage", "lte_gb"}
+                "sub_id", "sub_url", "remind_stage", "lte_gb", "lte_fallback_month"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:

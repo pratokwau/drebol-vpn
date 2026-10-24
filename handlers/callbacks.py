@@ -120,7 +120,9 @@ from adminsub.handlers import (
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
     handle_paid_preset_hwid, handle_paid_preset_traffic,
-    handle_paid_preset_lte, handle_paid_preset_trial,
+    handle_paid_preset_lte, handle_paid_lte_fallback,
+    handle_paid_lte_fallback_set, handle_paid_lte_check_now,
+    handle_paid_preset_trial,
     handle_paid_create_sub, handle_paid_create_type,
     handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
     handle_approve, handle_reject, handle_request_sub,
@@ -733,6 +735,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_preset_traffic(query, context)
     elif data == "paid_preset_lte":
         await handle_paid_preset_lte(query, context)
+    elif data == "paid_lte_fallback":
+        await handle_paid_lte_fallback(query, context)
+    elif data == "paid_lte_fallback_off":
+        await handle_paid_lte_fallback_set(query, context, None)
+    elif data.startswith("paid_lte_fallback:"):
+        await handle_paid_lte_fallback_set(query, context, data.split(":", 1)[1])
+    elif data == "paid_lte_check_now":
+        await handle_paid_lte_check_now(query, context)
     elif data.startswith("paid_sub_view:"):
         await handle_paid_sub_view(query, int(data.split(":")[1]))
     elif data.startswith("paid_devices:"):

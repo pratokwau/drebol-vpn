@@ -98,6 +98,7 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         *_devices_rows(b),
         [b("📶 Трафик (ГБ)", "paid_preset_traffic")],
         [b("🌐 LTE-трафик (ГБ/мес)", "paid_preset_lte")],
+        [b("🔀 Сквад после конца LTE", "paid_lte_fallback")],
         # панель
         [b("👥 Сквады Remnawave", "rw_squads")],
         [b("◀️ Назад к подпискам", "paid_subs")],

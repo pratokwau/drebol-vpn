@@ -439,6 +439,29 @@ async def user_cdn_usage(panel_username: str, start=None, end=None) -> dict:
             "failed": failed, "period": period}
 
 
+async def all_lte_usage() -> dict:
+    """Расход всех пользователей панели по LTE-узлам за текущий месяц.
+
+    Одним запросом (панель сама агрегирует по узлам), а не по одному
+    на узел: фоновой проверке это нужно для всех подписок сразу.
+    Возвращает {ok, usage: {panel_username: bytes}, cdn_nodes}
+    или {ok: False, error}.
+    """
+    start, end, period = current_month_dates()
+    nodes_r = await nodes()
+    if not nodes_r["ok"]:
+        return {"ok": False, "error": nodes_r.get("error")}
+    cdn = [n for n in _parse_nodes(nodes_r["data"])
+           if is_cdn_node(n["name"])]
+    if not cdn:
+        return {"ok": True, "usage": {}, "cdn_nodes": [], "period": period}
+    r = await nodes_users_usage([n["uuid"] for n in cdn], start, end)
+    if not r["ok"]:
+        return {"ok": False, "error": r.get("error")}
+    return {"ok": True, "usage": dict(_usage_items(r["data"])),
+            "cdn_nodes": [n["name"] for n in cdn], "period": period}
+
+
 def _parse_nodes(data) -> list:
     """Узлы панели в виде [{uuid, name, disabled}]."""
     if isinstance(data, dict):

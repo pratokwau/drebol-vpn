@@ -204,6 +204,14 @@ async def update_client_limits(email: str, limit_ip: int = None,
     return {"success": True} if r["ok"] else _fail(str(r.get("error")))
 
 
+async def update_client_squads(email: str, squads: list) -> dict:
+    """Меняет внутренние сквады клиента в панели — то есть набор
+    инбаундов, которые ему доступны. Список заменяется целиком."""
+    import remnawave as rw
+    r = await rw.patch(_name(email), activeInternalSquads=list(squads))
+    return {"success": True} if r["ok"] else _fail(str(r.get("error")))
+
+
 async def update_client_traffic(email: str, total_gb: int) -> dict:
     """Лимит трафика. 0 — безлимит."""
     import remnawave as rw
