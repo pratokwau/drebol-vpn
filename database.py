@@ -262,7 +262,18 @@ async def init_db():
         # ручные записи админа и исключения из общего. Удержания — остаток
         # срока подписки, остановленной из-за ЧС, чтобы вернуть его при снятии.
         await db.execute(
-            "CREATE TABLE IF NOT EXISTS blacklist_remote (tg_id INTEGER PRIMARY KEY, reason TEXT)")
+            "CREATE TABLE IF NOT EXISTS blacklist_remote (tg_id INTEGER PRIMARY KEY, reason TEXT, "
+            "src TEXT NOT NULL DEFAULT 'main')")
+        try:
+            await db.execute(
+                "ALTER TABLE blacklist_remote ADD COLUMN src TEXT NOT NULL DEFAULT 'main'")
+        except Exception:
+            pass  # на свежих базах колонка уже есть в CREATE TABLE
+        # Доп. источник общего списка (ban-vpn): кэшируется отдельно и
+        # обновляется раз в неделю, а в blacklist_remote вливается вместе
+        # с основным — чтобы основной синк не вымывал его записи
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS blacklist_remote_extra (tg_id INTEGER PRIMARY KEY, reason TEXT)")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS blacklist_manual (
                 tg_id INTEGER PRIMARY KEY,
@@ -1293,25 +1304,47 @@ async def bl_lookup(tg_id: int) -> dict:
             (tg_id,),
         ) as cur:
             manual = await cur.fetchone()
-        async with db.execute("SELECT reason FROM blacklist_remote WHERE tg_id = ?", (tg_id,)) as cur:
+        async with db.execute("SELECT reason, src FROM blacklist_remote WHERE tg_id = ?", (tg_id,)) as cur:
             remote = await cur.fetchone()
         async with db.execute("SELECT 1 FROM blacklist_allow WHERE tg_id = ?", (tg_id,)) as cur:
             allowed = await cur.fetchone() is not None
     return {"manual": manual, "remote_listed": remote is not None,
-            "remote": remote[0] if remote else None, "allowed": allowed}
+            "remote": remote[0] if remote else None,
+            "remote_src": remote[1] if remote else None, "allowed": allowed}
 
 
 async def bl_replace_remote(entries: dict) -> tuple[set, set]:
-    """Перезаписывает общий список одной транзакцией: (новые ID, пропавшие ID)."""
+    """Перезаписывает общий список одной транзакцией: (новые ID, пропавшие ID).
+
+    entries: {tg_id: (reason, src)} — src 'main' (основной список) или
+    'extra' (доп. источник). Источник нужен карточке человека: показать,
+    откуда именно он прилетел.
+    """
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT tg_id FROM blacklist_remote") as cur:
             old = {r[0] for r in await cur.fetchall()}
         await db.execute("DELETE FROM blacklist_remote")
-        await db.executemany("INSERT INTO blacklist_remote (tg_id, reason) VALUES (?, ?)",
-                             list(entries.items()))
+        await db.executemany("INSERT INTO blacklist_remote (tg_id, reason, src) VALUES (?, ?, ?)",
+                             [(tg_id, reason, src) for tg_id, (reason, src) in entries.items()])
         await db.commit()
     new = set(entries)
     return new - old, old - new
+
+
+async def bl_replace_extra(entries: dict) -> None:
+    """Перезаписывает кэш доп. источника целиком (он обновляется раз в неделю)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM blacklist_remote_extra")
+        await db.executemany("INSERT INTO blacklist_remote_extra (tg_id, reason) VALUES (?, ?)",
+                             list(entries.items()))
+        await db.commit()
+
+
+async def bl_extra_entries() -> dict:
+    """Кэш доп. источника: {tg_id: reason}."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT tg_id, reason FROM blacklist_remote_extra") as cur:
+            return {r[0]: r[1] for r in await cur.fetchall()}
 
 
 async def bl_add_manual(tg_id: int, reason: str, until: str | None = None,
@@ -1404,6 +1437,7 @@ async def bl_counts(use_remote: bool) -> dict:
                 return (await cur.fetchone())[0]
         return {
             "remote": await one("SELECT COUNT(*) FROM blacklist_remote"),
+            "extra": await one("SELECT COUNT(*) FROM blacklist_remote_extra"),
             "manual": await one("SELECT COUNT(*) FROM blacklist_manual"),
             "allow": await one("SELECT COUNT(*) FROM blacklist_allow"),
             "ours": await one(_BL_CTE + "SELECT COUNT(*) FROM users u JOIN bl ON bl.tg_id = u.id", flag),

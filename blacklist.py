@@ -4,6 +4,10 @@
 показывает причину и оставляет только поддержку, чтобы можно было оспорить.
 
 • общий список BEDOLAGA-DEV/VPN-BLACKLIST бот обновляет сам;
+• второй общий список Blin4ickUSE/ban-vpn (JSON) бот подмешивает туда же,
+  но обновляет только раз в неделю — кэш живёт отдельно, чтобы обычный
+  синк не вымывал его записи. Если человек есть в обоих — побеждает
+  причина основного списка;
 • админ добавляет своих и снимает любых. Снятие человека из общего списка
   запоминается исключением — иначе следующее обновление вернуло бы его;
 • блокировка бывает срочной: бот снимет её сам, когда срок выйдет, и вернёт
@@ -30,6 +34,8 @@ from states import (
 )
 
 DEFAULT_URL = "https://raw.githubusercontent.com/BEDOLAGA-DEV/VPN-BLACKLIST/main/blacklist.txt"
+DEFAULT_EXTRA_URL = "https://raw.githubusercontent.com/Blin4ickUSE/ban-vpn/refs/heads/main/blacklist.json"
+EXTRA_INTERVAL_DAYS = 7
 DEFAULT_REASON = "Нарушение правил сервиса"
 DATE_FMT = "%d.%m.%Y %H:%M:%S"
 PER_PAGE = 10
@@ -52,11 +58,31 @@ def remote_on() -> bool:
     return bool(load_config().get("blacklist_remote_enabled", True))
 
 
-def source_url() -> str:
-    url = (load_config().get("blacklist_url") or DEFAULT_URL).strip()
+def _to_raw(url: str) -> str:
     # ссылку на страницу файла в GitHub превращаем в ссылку на сам файл
     m = re.match(r"https://github\.com/([^/]+)/([^/]+)/blob/(.+)", url)
     return f"https://raw.githubusercontent.com/{m[1]}/{m[2]}/{m[3]}" if m else url
+
+
+def source_url() -> str:
+    return _to_raw((load_config().get("blacklist_url") or DEFAULT_URL).strip())
+
+
+def extra_url() -> str:
+    return _to_raw((load_config().get("blacklist_extra_url") or DEFAULT_EXTRA_URL).strip())
+
+
+def extra_due(cfg: dict | None = None) -> bool:
+    """Пора ли обновлять доп. список: прошло 7 дней или ещё ни разу."""
+    cfg = cfg if cfg is not None else load_config()
+    raw = cfg.get("blacklist_extra_synced_at")
+    if not raw:
+        return True
+    try:
+        last = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return True
+    return (datetime.now() - last).total_seconds() >= EXTRA_INTERVAL_DAYS * 86400
 
 
 def parse_list(text: str) -> dict[int, str]:
@@ -73,6 +99,42 @@ def parse_list(text: str) -> dict[int, str]:
         tg_id = int(parts[0])
         if not out.get(tg_id):
             out[tg_id] = reason.strip()[:500]
+    return out
+
+
+def parse_list_json(text: str) -> dict[int, str]:
+    """JSON доп. списка: [{"telegram_id": 123, "username": "Шаринг"}, ...].
+
+    Поле называется username, но лежит там причина — юзернейма в файле
+    нет, TG ID — единственный ключ. На будущее принимаем и "reason",
+    если такое поле появится. Дубли: первый выигрывает.
+    """
+    import json
+    data = json.loads(text)
+    if isinstance(data, dict):
+        for key in ("blacklist", "users", "data", "items"):
+            if isinstance(data.get(key), list):
+                data = data[key]
+                break
+        else:
+            raise ValueError("в JSON нет списка")
+    if not isinstance(data, list):
+        raise ValueError("в JSON нет списка")
+    out: dict[int, str] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        raw_id = item.get("telegram_id")
+        if isinstance(raw_id, bool):
+            continue
+        try:
+            tg_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if tg_id in out:
+            continue
+        reason = item.get("reason") or item.get("username") or ""
+        out[tg_id] = str(reason).strip()[:500]
     return out
 
 
@@ -98,7 +160,8 @@ async def entry(tg_id: int) -> dict | None:
             return {"source": "manual", "reason": reason, "since": since,
                     "until": until, "by_id": by_id}
     elif info["remote_listed"] and not info["allowed"] and remote_on():
-        return {"source": "remote", "reason": info["remote"] or "",
+        return {"source": "remote", "remote_src": info.get("remote_src") or "main",
+                "reason": info["remote"] or "",
                 "since": None, "until": None, "by_id": None}
     return None
 
@@ -436,18 +499,65 @@ async def blacklist_expire_tick(context):
 
 # ── Обновление общего списка ─────────────────────────────────────────────────
 
-async def sync_remote(bot, full_scan: bool = False) -> dict:
+async def sync_extra(session, force: bool = False) -> dict:
+    """Обновляет кэш доп. списка (ban-vpn) не чаще раза в неделю.
+
+    force — ручное обновление из админки, срок не смотрит. Ошибка не
+    роняет общий синк: кэш остаётся прежним, ошибка пишется в конфиг
+    и показывается в меню ЧС. Пустой или битый файл кэш не затирает.
+    """
+    import aiohttp
+    from database import bl_extra_entries, bl_replace_extra
+    res = {"ok": False, "fetched": False, "total": 0, "error": None}
+    cached = await bl_extra_entries()
+    if not force and not extra_due():
+        res.update(ok=True, total=len(cached))
+        return res
+    try:
+        async with session.get(extra_url(), timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            if resp.status != 200:
+                raise RuntimeError(f"HTTP {resp.status}")
+            text = await resp.text()
+        entries = parse_list_json(text)
+        if not entries:
+            raise RuntimeError("в файле не нашлось ни одного ID")
+    except Exception as ex:
+        res["error"] = (str(ex) if isinstance(ex, RuntimeError) else f"{type(ex).__name__}: {ex}")[:200]
+        res["total"] = len(cached)
+        cfg = load_config()
+        cfg["blacklist_extra_last_error"] = res["error"]
+        save_config(cfg)
+        return res
+    await bl_replace_extra(entries)
+    cfg = load_config()
+    cfg["blacklist_extra_synced_at"] = datetime.now().isoformat(timespec="seconds")
+    cfg.pop("blacklist_extra_last_error", None)
+    save_config(cfg)
+    res.update(ok=True, fetched=True, total=len(entries))
+    return res
+
+
+async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -> dict:
     """Скачивает общий список и применяет его к своим пользователям.
 
     full_scan — считать новыми все записи (после включения списка).
+    force_extra — обновить доп. список вне недельного срока (ручная кнопка).
+
+    В общую таблицу вливается и доп. список из кэша: основной синк ходит
+    каждые несколько часов, а доп. — раз в неделю, и без кэша каждый
+    синк вымывал бы его записи. При совпадении ID побеждает основной.
     """
     import aiohttp
-    from database import bl_remote_subs, bl_replace_remote
+    from database import bl_extra_entries, bl_remote_subs, bl_replace_remote
 
     report = {"ok": False, "error": None, "total": 0, "added": 0, "removed": 0,
-              "trials_stopped": [], "paid_found": [], "restored": []}
+              "trials_stopped": [], "paid_found": [], "restored": [],
+              "extra_total": 0, "extra_fetched": False, "extra_error": None}
     try:
         async with aiohttp.ClientSession() as s:
+            extra_res = await sync_extra(s, force=force_extra)
+            report["extra_fetched"] = extra_res["fetched"]
+            report["extra_error"] = extra_res["error"]
             async with s.get(source_url(), timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status != 200:
                     raise RuntimeError(f"HTTP {resp.status}")
@@ -463,14 +573,19 @@ async def sync_remote(bot, full_scan: bool = False) -> dict:
         save_config(cfg)
         return report
 
-    added, removed = await bl_replace_remote(entries)
+    extra = await bl_extra_entries()
+    report["extra_total"] = len(extra)
+    merged = {tg_id: (reason, "main") for tg_id, reason in entries.items()}
+    for tg_id, reason in extra.items():
+        merged.setdefault(tg_id, (reason, "extra"))
+    added, removed = await bl_replace_remote(merged)
     if full_scan:
-        added = set(entries)
+        added = set(merged)
     cfg = load_config()
     cfg["blacklist_synced_at"] = datetime.now().strftime("%d.%m.%Y %H:%M")
     cfg.pop("blacklist_last_error", None)
     save_config(cfg)
-    report.update(ok=True, total=len(entries), added=len(added), removed=len(removed))
+    report.update(ok=True, total=len(merged), added=len(added), removed=len(removed))
     if not remote_on():
         return report
 
@@ -503,6 +618,12 @@ async def send_report(bot, r: dict):
     from database import get_user_info
     lines = ["🌐 <b>Общий чёрный список обновлён</b>\n",
              f"Записей: {r['total']} (+{r['added']} / −{r['removed']})"]
+    if r.get("extra_total"):
+        lines.append(f"🌐 Доп. список ban-vpn: <b>{r['extra_total']}</b> записей"
+                     + (" (обновлён сейчас)" if r.get("extra_fetched")
+                        else " (кэш, обновление раз в неделю)"))
+    if r.get("extra_error"):
+        lines.append(f"⚠️ Доп. список не обновился: <code>{r['extra_error']}</code>")
     if r["trials_stopped"]:
         lines.append(f"⛔ Остановлены триалы твоих пользователей: <b>{len(r['trials_stopped'])}</b>")
     if r["restored"]:
@@ -592,6 +713,9 @@ async def handle_bl_menu(query, context=None, note: str = ""):
     if note:
         lines += [note, ""]
     synced = cfg.get("blacklist_synced_at") or "ещё не обновлялся"
+    extra_raw = cfg.get("blacklist_extra_synced_at") or ""
+    extra_synced = (extra_raw.replace("T", " ")[:16] if extra_raw
+                    else "ещё не обновлялся")
     who = [
         f"👥 Твоих пользователей в ЧС: <b>{c['ours']}</b>"
         + (f"  ·  с подпиской: <b>{c['ours_active']}</b>" if c["ours_active"] else ""),
@@ -601,8 +725,12 @@ async def handle_bl_menu(query, context=None, note: str = ""):
         + (f" (со сроком <b>{st['banned_temp']}</b>)" if st["banned_temp"] else ""),
         f"🌐 Общий список: <b>{'вкл' if on else 'выкл'}</b>  ·  записей: <b>{c['remote']}</b>",
         f"🔄 Обновлён: {synced}",
+        f"🌐 Доп. список ban-vpn: <b>{c['extra']}</b> записей  ·  обновлён: {extra_synced} (раз в неделю)",
     ]
     lines.append("<blockquote>" + "\n".join(who) + "</blockquote>")
+    if cfg.get("blacklist_extra_last_error"):
+        lines.append(f"\n⚠️ Доп. список не обновился: "
+                     f"<code>{html.escape(cfg['blacklist_extra_last_error'])}</code>")
     month = [f"📆 За 30 дней: заблокировано <b>{st['added_30d']}</b> · "
              f"снято <b>{st['removed_30d']}</b>"]
     if st["held"]:
@@ -713,7 +841,9 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
         card.append("📌 Статус: <b>в чёрном списке</b>")
         card.append(f"📝 Причина: {html.escape(e['reason'] or '—')}")
         if e["source"] == "remote":
-            card.append("🌐 Источник: общий список")
+            card.append("🌐 Источник: "
+                        + ("доп. список ban-vpn" if e.get("remote_src") == "extra"
+                           else "общий список"))
         else:
             card.append(f"⏳ Срок: <b>{fmt_until(e.get('until'))}</b>")
             card.append("✍️ Внёс: " + _by_line(e.get("by_id"))
@@ -1059,7 +1189,8 @@ async def handle_bl_input(update, context, state: str, text: str):
 
 async def handle_bl_sync_now(query, context):
     await query.edit_message_text("🔄 Обновляю общий список…")
-    r = await sync_remote(context.bot)
+    # ручная кнопка обновляет и доп. список сразу, не дожидаясь недели
+    r = await sync_remote(context.bot, force_extra=True)
     if r["ok"]:
         note = f"<i>✅ Обновлено: {r['total']} записей (+{r['added']} / −{r['removed']}).</i>"
         await send_report(context.bot, r)
@@ -1075,7 +1206,7 @@ async def handle_bl_remote_toggle(query, context):
     save_config(cfg)
     if turn_on:
         await query.edit_message_text("🔄 Включаю и обновляю общий список…")
-        r = await sync_remote(context.bot, full_scan=True)
+        r = await sync_remote(context.bot, full_scan=True, force_extra=True)
         await send_report(context.bot, r)
         note = ("<i>🌐 Общий список включён и обновлён.</i>" if r["ok"]
                 else f"<i>🌐 Включён, но обновить не удалось: {html.escape(r['error'] or '?')}</i>")
