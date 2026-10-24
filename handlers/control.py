@@ -461,7 +461,7 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
                 if cfg.get("connect_help_enabled", True) else "выключена")
     lines.append("\n⚙️ <b>Автоматика</b>")
     lines.append("<blockquote>"
-                 f"📨 Сводка в личку: <b>{f'каждый день в {hour}:00' if digest_on else 'выключена'}</b>\n"
+                 f"📨 Сводка в личку: <b>{f'каждый день в {hour}:00, с бэкапом' if digest_on else 'выключена'}</b>\n"
                  f"🆘 Помощь с подключением: <b>{ch_label}</b>\n"
                  f"🗄 Журнал хранится <b>{int(cfg.get('activity_retention_days', 90))}</b> дней"
                  "</blockquote>")
@@ -763,7 +763,14 @@ async def digest_tick(context):
 
     Не планируем задачу на точное время — так сводка не потеряется, если в
     назначенный час бот лежал: уйдёт, как только он поднимется.
+
+    Сводка уходит одним сообщением вместе со свежим бэкапом дня: архив
+    собирается в момент отправки (тот же make_archive, что и в «Бэкапе»),
+    а текст сводки становится подписью к файлу. Если архив не собрался
+    или подпись не влезла в лимит Telegram (1024 символа) — сводка всё
+    равно уйдёт обычным текстовым сообщением, без файла.
     """
+    import io
     from config import ADMIN_ID
     cfg = load_config()
     if not cfg.get("digest_enabled", True):
@@ -775,10 +782,25 @@ async def digest_tick(context):
     cfg["digest_last"] = today
     save_config(cfg)
     try:
-        await context.bot.send_message(chat_id=ADMIN_ID, text=await build_digest(1),
-                                       parse_mode="HTML")
+        text = await build_digest(1)
     except Exception:
-        pass
+        return
+    caption = (text + "\n\n💾 К сводке приложен свежий бэкап дня "
+               "(внутри ключи — не пересылай).")
+    try:
+        from backup import make_archive
+        blob, name, _counts = make_archive()
+        if len(caption) > 1024:
+            raise ValueError("подпись длиннее 1024 символов")
+        await context.bot.send_document(
+            chat_id=ADMIN_ID, document=io.BytesIO(blob), filename=name,
+            caption=caption, parse_mode="HTML")
+    except Exception:
+        try:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=text,
+                                           parse_mode="HTML")
+        except Exception:
+            pass
 
 
 async def purge_tick(context):
