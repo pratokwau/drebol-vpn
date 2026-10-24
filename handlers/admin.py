@@ -379,7 +379,7 @@ async def handle_user_search(target, context, needle: str, edit: bool = False):
 
 
 async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
-    from database import get_user_info, is_banned
+    from database import get_user_info
     from paidsub.storage import (
         get_paid_sub_by_tg_id, get_referral_stats,
     )
@@ -401,7 +401,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     # имя человек задаёт сам — экранируем, иначе карточка не откроется
     first_name = escape(str(first_name or tg_id))
     uname = escape(f"@{username}" if username else f"id{tg_id}")
-    banned = await is_banned(tg_id)
     # помощнику карточка без денег и без управления подпиской
     from staff import is_helper
     viewer = getattr(query_or_msg, "from_user", None)
@@ -412,13 +411,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         f"{uname}  ·  <code>{tg_id}</code>",
     ]
 
-    if banned:
-        from blacklist import fmt_until
-        from database import ban_entry
-        b = await ban_entry(tg_id) or {}
-        lines.append("\n🚫 <b>Забанен</b> · " + fmt_until(b.get("until")))
-        if b.get("reason"):
-            lines.append(f"<i>{escape(str(b['reason'])[:150])}</i>")
     from blacklist import entry as bl_entry, public_reason
     ble = await bl_entry(tg_id)
     if ble:
@@ -495,8 +487,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         kb_rows.append([InlineKeyboardButton("📌 Написать", callback_data=f"dm_user:{tg_id}")])
         kb_rows.append([InlineKeyboardButton("◀️ В панель поддержки", callback_data="admin_panel")])
     else:
-        if banned:
-            kb_rows.append([InlineKeyboardButton("🔓 Разбанить", callback_data=f"unban_user:{tg_id}")])
         kb_rows.append([
             InlineKeyboardButton("🎁 Выдать промокод", callback_data=f"promo_give_for:{tg_id}"),
             InlineKeyboardButton("⛔ Чёрный список", callback_data=f"bl_view:{tg_id}"),
@@ -510,14 +500,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         await query_or_msg.edit_message_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
     else:
         await query_or_msg.reply_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
-
-
-async def handle_unban_user(query, context, tg_id: int):
-    """Бан ставится через «Чёрный список» (причина и срок), снимается отсюда."""
-    from blacklist import unban
-    await unban(context.bot, tg_id, getattr(query.from_user, "id", None))
-    await query.answer("✅ Разбанен", show_alert=True)
-    await handle_user_profile(query, tg_id)
 
 
 # ── Лог-канал ────────────────────────────────────────────────────────────────

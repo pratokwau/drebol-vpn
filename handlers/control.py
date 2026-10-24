@@ -89,9 +89,8 @@ CB_LABELS = {
     "refund_do": "💸 Возврат",
     "refund_partial_start": "💸 Частичный возврат (начало)",
     "refund_partial_do": "💸 Частичный возврат",
-    # бан, удаления, вкл/выкл подписок и техработ идут через «Точно?» —
+    # удаления, вкл/выкл подписок и техработ идут через «Точно?» —
     # их подписи в handlers/confirm.py (CONFIRM_TITLES)
-    "unban_user": "✅ Разбан",
     "bcast_send": "📣 Отправил рассылку",
     "paid_bulk_apply": "📦 Массовое изменение срока",
     "paid_bulk_limits_apply": "📱 Массовая смена лимита устройств",
@@ -115,7 +114,6 @@ CB_LABELS = {
     "sub_hwid_del": "📱 Отключил устройство (админская)",
     "bl_add_apply": "⛔ Внёс в ЧС",
     "bl_sync": "🔄 Обновил общий ЧС",
-    "bl_bans": "🚫 Смотрел баны",
     "promo_give_do": "🎁 Выдал промокод",
     "promo_seg_do": "📤 Раздал промокоды",
     "promo_income": "📊 Что принесли промокоды",
@@ -171,7 +169,6 @@ CB_LABELS = {
     "bl_menu": "⛔ Чёрный список",
     "bl_view": "⛔ Открыл карточку блокировок",
     "bl_new": "⛔ Начал блокировку",
-    "bl_unban": "✅ Разбан",
     "bl_reason": "📝 Выбрал причину блокировки",
     "bl_term": "⏳ Выбрал срок блокировки",
     "bl_check": "🔍 Проверка в ЧС",
@@ -999,7 +996,7 @@ async def connect_help_tick(context):
     from config import ADMIN_ID
     import maintenance as mnt
     from database import (
-        recent_subs_for_connect_help, mark_connect_help, log_activity, is_banned,
+        recent_subs_for_connect_help, mark_connect_help, log_activity,
     )
     from blacklist import is_blacklisted
     from panel import get_last_online
@@ -1048,7 +1045,7 @@ async def connect_help_tick(context):
     )
 
     for tg_id in due - seen:
-        if tg_id == ADMIN_ID or await is_banned(tg_id) or await is_blacklisted(tg_id):
+        if tg_id == ADMIN_ID or await is_blacklisted(tg_id):
             continue
         if not await mark_connect_help(tg_id, "sent"):
             continue

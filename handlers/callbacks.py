@@ -16,7 +16,7 @@ from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
     handle_set_privacy_url, handle_set_terms_url, handle_documents_menu,
     handle_channel_menu, handle_dashboard, handle_healthcheck,
-    handle_find_user, handle_user_profile, handle_unban_user,
+    handle_find_user, handle_user_profile,
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
     handle_remind_settings, handle_toggle_remind, handle_set_remind,
     handle_toggle_remind_trials, handle_remind_test, handle_set_remind_quiet,
@@ -73,7 +73,6 @@ from blacklist import (
     handle_bl_menu, handle_bl_list, handle_bl_view, handle_bl_add_start, handle_bl_new,
     handle_bl_check_start, handle_bl_add_apply, handle_bl_del, handle_bl_stop, handle_bl_readd,
     handle_bl_sync_now, handle_bl_remote_toggle, handle_bl_reason, handle_bl_term,
-    handle_bl_bans, handle_bl_unban,
 )
 from promos import (
     handle_promo_give_start, handle_promo_give_for, handle_promo_give_custom,
@@ -186,24 +185,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await mnt.show_feature_off(feat, query=query)
             return
 
-    # Чёрный список: остаётся только поддержка — чтобы можно было оспорить.
-    # У ЧС приоритет над баном: внесение в ЧС само ставит бан, и этот бан
-    # не должен закрывать поддержку. Чистый бан (без записи в ЧС) по-прежнему
-    # закрывает всё — он проверяется в ветке elif.
-    if not adm:
+    # Чёрный список: остаётся только поддержка — чтобы можно было оспорить
+    if not adm and not staff_cb:
         from blacklist import entry as bl_entry, user_may, show_blocked
-        ble = await bl_entry(update.effective_user.id) if not staff_cb else None
-        if ble:
-            if not user_may(data):
+        if not user_may(data):
+            ble = await bl_entry(update.effective_user.id)
+            if ble:
                 context.user_data.pop("state", None)
                 await show_blocked(ble, query=query)
-                return
-        elif data != "check_sub":
-            from database import is_banned
-            if await is_banned(update.effective_user.id):
-                await query.edit_message_text(
-                    "🚫 <b>Аккаунт заблокирован</b>\n\n"
-                    "<i>Если это ошибка — свяжитесь с администратором.</i>", parse_mode="HTML")
                 return
 
     # Проверка подписки для не-админов
@@ -417,14 +406,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_bl_check_start(query, context)
     elif data.startswith("bl_add_for:"):
         await handle_bl_new(query, context, int(data.split(":")[1]))
-    elif data.startswith("bl_unban:"):
-        await handle_bl_unban(query, context, int(data.split(":")[1]))
     elif data.startswith("bl_reason:"):
         await handle_bl_reason(query, context, data.split(":")[1])
     elif data.startswith("bl_term:"):
         await handle_bl_term(query, context, data.split(":")[1])
-    elif data.startswith("bl_bans:"):
-        await handle_bl_bans(query, int(data.split(":")[1]))
     elif data == "bl_add_apply":
         await handle_bl_add_apply(query, context)
     elif data.startswith("bl_del:"):
@@ -460,8 +445,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_find_user(query, context)
     elif data.startswith("user_profile:"):
         await handle_user_profile(query, int(data.split(":")[1]))
-    elif data.startswith("unban_user:"):
-        await handle_unban_user(query, context, int(data.split(":")[1]))
     elif data.startswith("dm_user:"):
         await handle_dm_user(query, int(data.split(":")[1]), context)
     elif data.startswith("payment_stats:"):

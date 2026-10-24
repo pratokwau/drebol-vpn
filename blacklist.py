@@ -8,23 +8,16 @@
   но обновляет только раз в неделю — кэш живёт отдельно, чтобы обычный
   синк не вымывал его записи. Если человек есть в обоих — побеждает
   причина основного списка;
-• каждый синк банит в боте всех известных боту людей из списков
-  (причина — из списка, источник бана помечается) и снимает авто-бан,
-  когда человек из списков ушёл. Ручные баны синк не трогает;
-• внести в ЧС = забанить: ручное внесение (и возврат из исключения)
-  ставит и бан с той же причиной и сроком, а снятие из ЧС снимает
-  бан, пришедший из ЧС или из синка. У ЧС приоритет над баном в
-  проверках входа, поэтому бан из ЧС не закрывает поддержку;
 • админ добавляет своих и снимает любых. Снятие человека из общего списка
   запоминается исключением — иначе следующее обновление вернуло бы его;
 • блокировка бывает срочной: бот снимет её сам, когда срок выйдет, и вернёт
   подписку с сохранённым остатком;
 • при внесении подписка останавливается сразу, остаток срока запоминается
   и возвращается, если человека убрать из списка;
-• найденным в общем списке триал останавливается сам, а оплаченную подписку
-  бот не трогает — пишет админу: человек заплатил, решать ему;
-• рядом живёт бан в боте — он закрывает бота целиком, тоже с причиной,
-  сроком и автором. Всё, что ставили и снимали, видно в карточке человека.
+• найденным в общем списке подписка останавливается сама — триал,
+  оплаченная и админская, — а выход из списка возвращает остаток срока;
+• бана в боте больше нет: только чёрный список. Всё, что ставили
+  и снимали, видно в карточке человека.
 """
 
 from __future__ import annotations
@@ -407,18 +400,9 @@ def _passed(local_raw: str | None) -> bool:
 
 async def blacklist_add(bot, tg_id: int, reason: str, until: str | None = None,
                         by_id: int | None = None) -> dict:
-    """Внести в ЧС = забанить: та же причина и тот же срок ложатся и в бан.
-
-    Тихо, без отдельного сообщения: человеку уже уходит «доступ закрыт»
-    с кнопкой поддержки, а бан-текст («бот закрыт целиком») для него
-    неверен — поддержка у людей из ЧС остаётся открытой.
-    """
-    from database import ban_user, bl_add_manual, bl_log
+    from database import bl_add_manual, bl_log
     await bl_add_manual(tg_id, reason, until, by_id)
     await bl_log(tg_id, "added", reason, by_id)
-    if tg_id != ADMIN_ID:
-        await ban_user(tg_id, reason, until, by_id, "blacklist")
-        await bl_log(tg_id, "banned", reason, by_id)
     res = await stop_subs(tg_id, reason)
     await _notify_blocked(bot, tg_id, reason, _to_local(until))
     await _log(bot, f"⛔ В чёрный список: <code>{tg_id}</code> — {html.escape(reason[:200])}"
@@ -428,19 +412,10 @@ async def blacklist_add(bot, tg_id: int, reason: str, until: str | None = None,
 
 async def blacklist_remove(bot, tg_id: int, by_id: int | None = None,
                            auto: bool = False) -> dict:
-    from database import ban_entry, bl_log, bl_remove, unban_user
+    from database import bl_log, bl_remove
     await bl_remove(tg_id)
     await bl_log(tg_id, "expired" if auto else "removed",
                  "срок блокировки вышел" if auto else None, by_id)
-    # Снятие из ЧС снимает и бан, который пришёл вместе с ЧС (из ручного
-    # внесения или из синка). Чистые ручные баны не трогаем: их ставили
-    # отдельно, снимать их — кнопкой «Разбанить». Тихо, без второго
-    # сообщения: человеку уже уходит «доступ восстановлен».
-    if not await entry(tg_id):
-        b = await ban_entry(tg_id)
-        if b and b.get("src") in ("blacklist", "list"):
-            await unban_user(tg_id)
-            await bl_log(tg_id, "unbanned", None, by_id)
     res = await restore_subs(tg_id)
     await _notify_restored(bot, tg_id, res)
     await _log(bot, ("⏳ Срок в ЧС вышел, доступ вернул сам: " if auto
@@ -456,11 +431,6 @@ async def blacklist_readd(bot, tg_id: int, by_id: int | None = None) -> dict | N
     if not e:
         return None
     await bl_log(tg_id, "readded", e["reason"], by_id)
-    # Возврат в ЧС — снова и бан, как при обычном внесении
-    from database import ban_user
-    if tg_id != ADMIN_ID:
-        await ban_user(tg_id, e["reason"], None, by_id, "blacklist")
-        await bl_log(tg_id, "banned", e["reason"], by_id)
     res = await stop_subs(tg_id, e["reason"])
     await _notify_blocked(bot, tg_id, e["reason"])
     await _log(bot, f"⛔ Снова в чёрном списке: <code>{tg_id}</code>")
@@ -477,54 +447,11 @@ async def blacklist_stop(bot, tg_id: int) -> dict | None:
     return res
 
 
-# ── Бан в боте ───────────────────────────────────────────────────────────────
-
-def ban_view(reason: str | None, until_local: str | None = None) -> str:
-    text = "🚫 <b>Аккаунт заблокирован</b>"
-    if reason:
-        text += f"\n\n<blockquote>Причина: {html.escape(public_reason(reason))}</blockquote>"
-    if until_local:
-        text += f"\n\n<blockquote>⏳ Блокировка снимется сама: <b>{fmt_until(until_local)}</b></blockquote>"
-    return text + "\n\n<i>Если это ошибка — свяжитесь с администратором.</i>"
-
-
-async def banned_view(tg_id: int) -> str:
-    """Текст для забаненного: с причиной и сроком, если они заданы."""
-    from database import ban_entry
-    b = await ban_entry(tg_id) or {}
-    return ban_view(b.get("reason"), b.get("until"))
-
-
-async def ban(bot, tg_id: int, reason: str | None = None, until: str | None = None,
-              by_id: int | None = None, source: str = "manual"):
-    """Бан в боте: человек вообще не может пользоваться ботом."""
-    from database import ban_user, bl_log
-    await ban_user(tg_id, reason, until, by_id, source)
-    await bl_log(tg_id, "banned", reason, by_id)
-    await _tell(bot, tg_id, ban_view(reason, _to_local(until)))
-    await _log(bot, f"🚫 Забанен в боте{' (чёрный список)' if source == 'list' else ''}: "
-                    f"<code>{tg_id}</code>"
-                    + (f" — {html.escape(reason[:200])}" if reason else "")
-                    + f" · {term_line(until)}")
-
-
-async def unban(bot, tg_id: int, by_id: int | None = None, auto: bool = False):
-    from database import bl_log, unban_user
-    await unban_user(tg_id)
-    await bl_log(tg_id, "unbanned", "срок бана вышел" if auto else None, by_id)
-    await _tell(bot, tg_id, "✅ <b>Блокировка снята</b>\n\n"
-                            "<i>Бот снова работает — откройте /start.</i>")
-    await _log(bot, ("⏳ Срок бана вышел, разбанил сам: " if auto
-                     else "✅ Разбанен в боте: ") + f"<code>{tg_id}</code>")
-
-
 async def blacklist_expire_tick(context):
     """Снимает временные блокировки, у которых вышел срок."""
-    from database import bans_expired_now, bl_expired_now
+    from database import bl_expired_now
     for tg_id, _reason in await bl_expired_now():
         await blacklist_remove(context.bot, tg_id, auto=True)
-    for tg_id in await bans_expired_now():
-        await unban(context.bot, tg_id, auto=True)
 
 
 # ── Обновление общего списка ─────────────────────────────────────────────────
@@ -583,7 +510,6 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
 
     report = {"ok": False, "error": None, "total": 0, "added": 0, "removed": 0,
               "trials_stopped": [], "paid_stopped": [], "admin_stopped": [], "restored": [],
-              "banned": [], "unbanned": [],
               "extra_total": 0, "extra_fetched": False, "extra_error": None}
     try:
         async with aiohttp.ClientSession() as s:
@@ -658,31 +584,6 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
         await _notify_blocked(bot, tg_id, e["reason"])
         report["admin_stopped"].append(tg_id)
 
-    # Все из списков — в «Баны в боте» с причиной из списка: одно место,
-    # где видно, кто закрыт и за что. Банятся только известные боту люди
-    # (таблица users) — чужие ID из списков банить бессмысленно. Уже
-    # забаненных пропускаем, админа — никогда. Ручной разбан при этом
-    # не вечен: пока человек в списке, следующий синк вернёт бан —
-    # снять навсегда можно только исключением (кнопка в карточке).
-    # Подписки бан не трогает: они останавливаются проходом выше.
-    from database import ban_entry, banned_ids, bl_listed_users
-    already = await banned_ids()
-    for tg_id, reason in await bl_listed_users():
-        if tg_id in already or tg_id == ADMIN_ID:
-            continue
-        await ban(bot, tg_id, reason, source="list")
-        report["banned"].append(tg_id)
-
-    # Ушёл из списков — авто-бан снимается сам. Ручные баны не трогаем:
-    # их админ ставил сам, списки тут ни при чём.
-    for tg_id in removed:
-        if await entry(tg_id):
-            continue
-        b = await ban_entry(tg_id)
-        if b and b.get("src") == "list":
-            await unban(bot, tg_id)
-            report["unbanned"].append(tg_id)
-
     report["restored"] = await restore_unlisted(bot)
     return report
 
@@ -690,8 +591,7 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
 async def send_report(bot, r: dict):
     """Сообщение админу — только если обновление что-то поменяло у своих."""
     if not r.get("ok") or not (r["trials_stopped"] or r.get("paid_stopped")
-                               or r.get("admin_stopped") or r["restored"]
-                               or r.get("banned") or r.get("unbanned")):
+                               or r.get("admin_stopped") or r["restored"]):
         return
     from database import get_user_info
     lines = ["🌐 <b>Общий чёрный список обновлён</b>\n",
@@ -709,15 +609,11 @@ async def send_report(bot, r: dict):
                      "остаток срока сохранён, вернётся при выходе из списка")
     if r.get("admin_stopped"):
         lines.append(f"👑 Остановлены админские подписки: <b>{len(r['admin_stopped'])}</b>")
-    if r.get("banned"):
-        lines.append(f"🚫 Забанены в боте из списков: <b>{len(r['banned'])}</b>")
-    if r.get("unbanned"):
-        lines.append(f"✅ Бан снят (ушли из списков): <b>{len(r['unbanned'])}</b>")
     if r["restored"]:
         lines.append(f"✅ Ушли из общего списка, остаток срока возвращён: <b>{len(r['restored'])}</b>")
     kb = []
-    # кнопки на карточки: триалы, оплаченные, прочие забаненные — без
-    # дублей, один человек одной кнопкой, даже если он в двух группах
+    # кнопки на карточки — без дублей, один человек одной кнопкой,
+    # даже если он в двух группах
     seen = set()
 
     async def _btn(tg_id, emoji):
@@ -733,8 +629,6 @@ async def send_report(bot, r: dict):
         await _btn(tg_id, "💳")
     for tg_id in r.get("admin_stopped", [])[:8]:
         await _btn(tg_id, "👑")
-    for tg_id in r.get("banned", [])[:8]:
-        await _btn(tg_id, "🚫")
     kb.append([InlineKeyboardButton("⛔ К чёрному списку", callback_data="bl_menu")])
     try:
         await bot.send_message(chat_id=ADMIN_ID, text="\n".join(lines), parse_mode="HTML",
@@ -807,7 +701,7 @@ async def handle_bl_menu(query, context=None, note: str = ""):
     on = remote_on()
     c = await bl_counts(on)
     st = await bl_stats()
-    lines = ["⛔ <b>Чёрный список и баны</b>", ""]
+    lines = ["⛔ <b>Чёрный список</b>", ""]
     if note:
         lines += [note, ""]
     synced = cfg.get("blacklist_synced_at") or "ещё не обновлялся"
@@ -817,8 +711,6 @@ async def handle_bl_menu(query, context=None, note: str = ""):
     who = [
         f"✍️ Вручную: <b>{c['manual']}</b> (бессрочно <b>{st['forever']}</b> · "
         f"со сроком <b>{st['temporary']}</b>)  ·  исключений: <b>{c['allow']}</b>",
-        f"🚫 Забанены в боте: <b>{st['banned']}</b>"
-        + (f" (со сроком <b>{st['banned_temp']}</b>)" if st["banned_temp"] else ""),
         f"🌐 Общий список: <b>{'вкл' if on else 'выкл'}</b>  ·  записей: <b>{c['remote']}</b>",
         f"🔄 Обновлён: {synced}",
         f"🌐 Доп. список ban-vpn: <b>{c['extra']}</b> записей  ·  обновлён: {extra_synced} (раз в неделю)",
@@ -837,14 +729,12 @@ async def handle_bl_menu(query, context=None, note: str = ""):
         lines.append(f"\n⚠️ Последнее обновление не удалось: "
                      f"<code>{html.escape(cfg['blacklist_last_error'])}</code>")
     lines.append("\n<i>ЧС закрывает покупки и подписку, оставляя поддержку. "
-                 "Бан закрывает бота целиком. Оба можно поставить на срок — "
-                 "снимутся сами.</i>")
+                 "Запись можно поставить на срок — снимется сама.</i>")
     kb = [
         [InlineKeyboardButton("➕ Внести в ЧС", callback_data="bl_add"),
          InlineKeyboardButton("🔍 Проверить ID", callback_data="bl_check")],
         [InlineKeyboardButton("✍️ Вручную", callback_data="bl_list:manual:1"),
          InlineKeyboardButton("✅ Исключения", callback_data="bl_list:allow:1")],
-        [InlineKeyboardButton(f"🚫 Баны в боте · {st['banned']}", callback_data="bl_bans:1")],
         [InlineKeyboardButton("🔄 Обновить общий", callback_data="bl_sync"),
          InlineKeyboardButton(f"🌐 Общий · {'вкл ✅' if on else 'выкл'}",
                               callback_data="bl_remote_toggle")],
@@ -884,44 +774,15 @@ async def handle_bl_list(query, scope: str, page: int = 1):
                                   reply_markup=InlineKeyboardMarkup(kb))
 
 
-async def handle_bl_bans(query, page: int = 1):
-    """Кто закрыт в боте целиком."""
-    from database import bans_list
-    rows, pages, total = await bans_list(page, PER_PAGE)
-    page = min(max(1, page), pages)
-    lines = ["🚫 <b>Баны в боте</b>",
-             f"<i>всего {total} · стр. {page} из {pages} · нажми, чтобы открыть</i>"]
-    if not rows:
-        lines = [lines[0], "", "<blockquote>Никто не забанен.</blockquote>"]
-    kb = []
-    for tg_id, fn, _un, reason, until in rows:
-        term = "♾ навсегда" if not until else ("⏳ " + fmt_until(until).split(" · ")[0])
-        label = f"👤 {fn or tg_id} · {term}" + (f" · {public_reason(reason)}" if reason else "")
-        kb.append([InlineKeyboardButton(label[:60], callback_data=f"bl_view:{tg_id}")])
-    nav = []
-    if page > 1:
-        nav.append(InlineKeyboardButton("◀️", callback_data=f"bl_bans:{page - 1}"))
-    if pages > 1:
-        nav.append(InlineKeyboardButton(f"{page}/{pages}", callback_data="noop"))
-    if page < pages:
-        nav.append(InlineKeyboardButton("▶️", callback_data=f"bl_bans:{page + 1}"))
-    if nav:
-        kb.append(nav)
-    kb.append([InlineKeyboardButton("◀️ К чёрному списку", callback_data="bl_menu")])
-    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
-                                  reply_markup=InlineKeyboardMarkup(kb))
-
-
 async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
     from database import (
-        ban_entry, bl_history, bl_holds, bl_lookup, bl_times_listed, get_user_info,
+        bl_history, bl_holds, bl_lookup, bl_times_listed, get_user_info,
     )
     from paidsub.storage import get_paid_sub_by_tg_id
     from paidsub.time_parser import fmt_duration
     u = await get_user_info(tg_id)
     info = await bl_lookup(tg_id)
     e = await entry(tg_id)
-    b = await ban_entry(tg_id)
     holds = {h[1]: h[3] for h in await bl_holds(tg_id)}
     sub = await get_paid_sub_by_tg_id(tg_id)
     sub_live = bool(sub) and sub[11] in ("active", "renewal")
@@ -952,21 +813,6 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
     else:
         card.append("📌 Статус: <b>не в чёрном списке</b>")
     lines += ["", "<blockquote>" + "\n".join(card) + "</blockquote>"]
-
-    ban_card = []
-    if b:
-        if b.get("src") in ("list", "blacklist"):
-            ban_card.append("🚫 Бан в боте: <b>стоит</b> — через чёрный список, поддержка открыта")
-        else:
-            ban_card.append("🚫 Бан в боте: <b>стоит</b> — бот для человека закрыт целиком")
-        if b["reason"]:
-            ban_card.append(f"📝 Причина: {html.escape(b['reason'])}")
-        ban_card.append(f"⏳ Срок: <b>{fmt_until(b['until'])}</b>")
-        ban_card.append("✍️ Забанил: " + _by_line(b["by_id"])
-                        + (f" · {b['since'][:16]}" if b.get("since") else ""))
-    else:
-        ban_card.append("🚫 Бан в боте: <b>нет</b>")
-    lines += ["", "<blockquote>" + "\n".join(ban_card) + "</blockquote>"]
 
     sub_card = []
     if "paid" in holds:
@@ -1001,8 +847,6 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
         kb.append([InlineKeyboardButton("⛔ Вернуть в ЧС", callback_data=f"bl_readd:{tg_id}")])
     else:
         kb.append([InlineKeyboardButton("⛔ Внести в ЧС", callback_data=f"bl_add_for:{tg_id}")])
-    if b:
-        kb.append([InlineKeyboardButton("✅ Разбанить", callback_data=f"bl_unban:{tg_id}")])
     tail = [InlineKeyboardButton("◀️ К списку", callback_data="bl_menu")]
     if u:
         tail.insert(0, InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{tg_id}"))
@@ -1181,12 +1025,6 @@ async def handle_bl_readd(query, context, tg_id: int):
     head = ("⛔ Снова в чёрном списке." if res is not None
             else "В общем списке его уже нет — вносить нечего.")
     await handle_bl_view(query, tg_id, note=_result_note(head, res))
-
-
-async def handle_bl_unban(query, context, tg_id: int):
-    by_id = getattr(getattr(query, "from_user", None), "id", None)
-    await unban(context.bot, tg_id, by_id)
-    await handle_bl_view(query, tg_id, note="<i>✅ Разбанен — бот снова ему отвечает.</i>")
 
 
 # ── Ввод текстом ─────────────────────────────────────────────────────────────

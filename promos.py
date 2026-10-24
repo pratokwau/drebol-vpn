@@ -292,16 +292,10 @@ async def handle_promo_seg_preview(query, context, kind: str, value: int, segmen
 
 
 async def _skip_ids(ids: list) -> set:
-    """Кому не раздаём: админ, забаненные и те, кто в чёрном списке."""
+    """Кому не раздаём: админ и те, кто в чёрном списке."""
     from blacklist import blacklisted_ids
-    from database import is_banned
     skip = {ADMIN_ID} & set(ids)
     skip |= set(ids) & await blacklisted_ids()
-    for tg_id in ids:
-        if tg_id in skip:
-            continue
-        if await is_banned(tg_id):
-            skip.add(tg_id)
     return skip
 
 

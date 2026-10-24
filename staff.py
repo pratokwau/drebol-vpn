@@ -97,7 +97,7 @@ PERMS = {
         "hint": "добавлять и снимать из чёрного списка",
         "exact": {"bl_menu", "bl_list", "bl_add_start", "bl_add", "bl_check", "bl_add_apply"},
         "prefix": ("bl_view:", "bl_add_for:", "bl_del:", "bl_readd:", "bl_list:",
-                   "bl_reason:", "bl_term:", "bl_bans:", "bl_unban:"),
+                   "bl_reason:", "bl_term:"),
         "states": {AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK,
                    AWAITING_BL_UNTIL},
         "button": ("⛔ Чёрный список", "bl_menu"),

@@ -47,22 +47,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await mnt.show_maintenance(message=update.message)
             return
 
-    # Чёрный список: вместо меню — причина и кнопка поддержки.
-    # У ЧС приоритет над баном: внесение в ЧС само ставит бан, и этот
-    # бан не должен закрывать поддержку. Чистый бан (без записи в ЧС)
-    # по-прежнему закрывает всё — он проверяется следом.
+    # Чёрный список: вместо меню — причина и кнопка поддержки
     if user.id != ADMIN_ID and not helper:
         from blacklist import entry as bl_entry, show_blocked
         ble = await bl_entry(user.id)
         if ble:
             await show_blocked(ble, message=update.message)
             return
-
-    from database import is_banned
-    if user.id != ADMIN_ID and await is_banned(user.id):
-        from blacklist import banned_view
-        await update.message.reply_text(await banned_view(user.id), parse_mode="HTML")
-        return
 
     if not helper and not await is_subscribed(context.bot, user.id):
         await update.message.reply_text(

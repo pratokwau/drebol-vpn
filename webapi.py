@@ -116,7 +116,7 @@ def _fmt_bytes(value) -> str:
 async def profile(tg_id: int) -> dict:
     """Всё, что кабинет показывает человеку о нём самом."""
     from blacklist import entry as bl_entry, public_reason
-    from database import get_user_info, is_banned, user_payments
+    from database import get_user_info, user_payments
     from paidsub.storage import base_hwid, get_paid_sub_by_tg_id, parse_sub_date
     from paidsub.time_parser import fmt_duration_precise
 
@@ -138,9 +138,6 @@ async def profile(tg_id: int) -> dict:
         }
     except Exception:
         pass
-    if await is_banned(tg_id):
-        out["blocked"] = {"kind": "ban", "reason": "Доступ к сервису закрыт"}
-        return out
     ble = await bl_entry(tg_id)
     if ble:
         out["blocked"] = {"kind": "blacklist", "reason": public_reason(ble["reason"])}

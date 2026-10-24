@@ -409,19 +409,6 @@ async def init_db():
                 await db.execute(f"ALTER TABLE payments ADD COLUMN {_col}")
             except Exception:
                 pass
-        # Баны. until — временный бан, снимется сам; by — кто забанил
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS bans (
-                tg_id INTEGER PRIMARY KEY,
-                banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        for _col in ("reason TEXT", "until TIMESTAMP", "by_id INTEGER",
-                     "src TEXT NOT NULL DEFAULT 'manual'"):
-            try:
-                await db.execute(f"ALTER TABLE bans ADD COLUMN {_col}")
-            except Exception:
-                pass
         # Чёрный список: срок и автор записи
         for _col in ("until TIMESTAMP", "by_id INTEGER"):
             try:
@@ -1459,11 +1446,6 @@ async def bl_stats() -> dict:
                 "SELECT COUNT(*) FROM blacklist_manual WHERE until IS NOT NULL"),
             "forever": await one(
                 "SELECT COUNT(*) FROM blacklist_manual WHERE until IS NULL"),
-            "banned": await one(
-                "SELECT COUNT(*) FROM bans "
-                "WHERE until IS NULL OR until > CURRENT_TIMESTAMP"),
-            "banned_temp": await one(
-                "SELECT COUNT(*) FROM bans WHERE until > CURRENT_TIMESTAMP"),
             "added_30d": await one(
                 "SELECT COUNT(*) FROM blacklist_log WHERE action IN ('added', 'readded') "
                 "AND created_at >= datetime('now', '-30 days')"),
@@ -1535,28 +1517,6 @@ async def bl_hold_take(tg_id: int) -> list:
         await db.execute("DELETE FROM blacklist_hold WHERE tg_id = ?", (tg_id,))
         await db.commit()
     return rows
-
-
-async def bl_listed_users() -> list:
-    """Известные боту люди с действующей записью ЧС: (tg_id, причина).
-
-    Ручная запись важнее общей (как в entry): если у человека и ручная,
-    и общая — причина ручная. Исключения (allow) снимают только общую
-    запись, ручную — нет. Временные ручные с вышедшим сроком не считаются.
-    Только users — чужие ID из списков, никогда не открывавшие бота,
-    банить бессмысленно: бан им ничего не закроет.
-    """
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT u.id, COALESCE(m.reason, r.reason) FROM users u
-            LEFT JOIN blacklist_manual m ON m.tg_id = u.id
-                AND (m.until IS NULL OR m.until > CURRENT_TIMESTAMP)
-            LEFT JOIN blacklist_remote r ON r.tg_id = u.id
-            WHERE m.tg_id IS NOT NULL
-               OR (r.tg_id IS NOT NULL
-                   AND u.id NOT IN (SELECT tg_id FROM blacklist_allow))
-        """) as cur:
-            return await cur.fetchall()
 
 
 async def bl_remote_admin_subs() -> list:
@@ -1853,82 +1813,6 @@ async def get_user_info(user_id: int) -> tuple | None:
             "SELECT id, first_name, username FROM users WHERE id = ?", (user_id,)
         ) as cur:
             return await cur.fetchone()
-
-
-# ── Баны ─────────────────────────────────────────────────────────────────────
-
-async def ban_user(tg_id: int, reason: str | None = None,
-                   until: str | None = None, by_id: int | None = None,
-                   source: str = "manual"):
-    """Бан в боте. source: 'manual' (админ кнопкой) или 'list' (авто-бан
-    из чёрного списка при синке) — по нему синк отличает свой бан от
-    ручного, когда человек уходит из списков."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT OR REPLACE INTO bans (tg_id, banned_at, reason, until, by_id, src) "
-            "VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?)", (tg_id, reason, until, by_id, source))
-        await db.commit()
-
-
-async def ban_entry(tg_id: int) -> dict | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT reason, datetime(until, 'localtime'), by_id, "
-            "datetime(banned_at, 'localtime'), src FROM bans WHERE tg_id = ?", (tg_id,),
-        ) as cur:
-            row = await cur.fetchone()
-    if not row:
-        return None
-    return {"reason": row[0], "until": row[1], "by_id": row[2], "since": row[3],
-            "src": row[4] or "manual"}
-
-
-async def banned_ids() -> set:
-    """TG ID с действующим баном (бессрочным или ещё не истёкшим)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT tg_id FROM bans WHERE until IS NULL OR until > CURRENT_TIMESTAMP"
-        ) as cur:
-            return {r[0] for r in await cur.fetchall()}
-
-
-async def bans_expired_now() -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT tg_id FROM bans WHERE until IS NOT NULL AND until <= CURRENT_TIMESTAMP"
-        ) as cur:
-            return [r[0] for r in await cur.fetchall()]
-
-
-async def bans_list(page: int = 1, per_page: int = 10) -> tuple:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT COUNT(*) FROM bans") as cur:
-            total = (await cur.fetchone())[0]
-        async with db.execute(
-            "SELECT b.tg_id, u.first_name, u.username, b.reason, "
-            "datetime(b.until, 'localtime') FROM bans b "
-            "LEFT JOIN users u ON u.id = b.tg_id "
-            "ORDER BY b.banned_at DESC LIMIT ? OFFSET ?",
-            (per_page, (page - 1) * per_page),
-        ) as cur:
-            rows = await cur.fetchall()
-    pages = max(1, (total + per_page - 1) // per_page)
-    return rows, pages, total
-
-
-async def unban_user(tg_id: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM bans WHERE tg_id = ?", (tg_id,))
-        await db.commit()
-
-
-async def is_banned(tg_id: int) -> bool:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT 1 FROM bans WHERE tg_id = ? "
-            "AND (until IS NULL OR until > CURRENT_TIMESTAMP)", (tg_id,),
-        ) as cur:
-            return (await cur.fetchone()) is not None
 
 
 # ── Winback ──────────────────────────────────────────────────────────────────
