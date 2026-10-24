@@ -61,6 +61,7 @@ from handlers.control import (
     handle_control_menu, handle_activity_feed, handle_user_activity,
     handle_online, handle_traffic, handle_digest_toggle,
     handle_digest_hour_menu, handle_digest_set_hour, handle_digest_now,
+    handle_digest_custom,
     handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
 )
 from staff import (
@@ -381,6 +382,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_digest_set_hour(query, context, int(data.split(":")[1]))
     elif data == "ctl_digest_now":
         await handle_digest_now(query, context)
+    elif data == "ctl_digest_custom":
+        await handle_digest_custom(query, context)
     elif data == "ctl_ch_menu":
         await handle_connect_help_menu(query, context)
     elif data == "ctl_ch_toggle":
