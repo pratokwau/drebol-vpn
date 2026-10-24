@@ -12,7 +12,7 @@
 import asyncio
 import calendar
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from html import escape
 
@@ -231,6 +231,95 @@ def current_month_dates(now=None):
     return first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d"), period
 
 
+# Коды периодов: month — текущий месяц (по умолчанию), prev — прошлый
+# месяц, 7d/30d/90d — последние N дней, custom — даты, введённые вручную
+# (лежат в context.user_data["rw_usage_custom"]).
+_USAGE_PERIOD_NAMES = {
+    "month": "Текущий месяц",
+    "prev": "Прошлый месяц",
+    "7d": "Последние 7 дней",
+    "30d": "Последние 30 дней",
+    "90d": "Последние 90 дней",
+    "custom": "Свой период",
+}
+
+
+def _period_label(start: str, end: str) -> str:
+    """YYYY-MM-DD — YYYY-MM-DD -> «01.10.2026 — 31.10.2026»."""
+    def _fmt(d):
+        try:
+            return datetime.strptime(d, "%Y-%m-%d").strftime("%d.%m.%Y")
+        except (TypeError, ValueError):
+            return str(d)
+    return f"{_fmt(start)} — {_fmt(end)}"
+
+
+def resolve_usage_period(context=None, now=None):
+    """Выбранный период: (start, end, подпись, код).
+
+    По умолчанию — текущий календарный месяц, как было раньше. Выбор
+    живёт в user_data админа, поэтому пагинация и «Обновить» его не
+    теряют, а после перезапуска бота всё снова становится месяцем.
+    """
+    now = now or datetime.now(timezone.utc)
+    code = None
+    if context is not None:
+        code = (context.user_data or {}).get("rw_usage_period")
+    if code in ("7d", "30d", "90d"):
+        days = int(code[:-1])
+        end = now.date()
+        start = end - timedelta(days=days - 1)
+        return (start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"),
+                _period_label(start.strftime("%Y-%m-%d"),
+                              end.strftime("%Y-%m-%d")), code)
+    if code == "prev":
+        first_this = now.replace(day=1, hour=0, minute=0, second=0,
+                                 microsecond=0)
+        last_prev = (first_this - timedelta(days=1)).date()
+        first_prev = last_prev.replace(day=1)
+        return (first_prev.strftime("%Y-%m-%d"),
+                last_prev.strftime("%Y-%m-%d"),
+                _period_label(first_prev.strftime("%Y-%m-%d"),
+                              last_prev.strftime("%Y-%m-%d")), code)
+    if code == "custom" and context is not None:
+        custom = (context.user_data or {}).get("rw_usage_custom")
+        if (isinstance(custom, (list, tuple)) and len(custom) == 2
+                and custom[0] and custom[1]):
+            return custom[0], custom[1], _period_label(*custom), code
+    start, end, period = current_month_dates(now)
+    return start, end, period, "month"
+
+
+def parse_custom_period(text: str):
+    """«01.09.2026 — 15.09.2026» (или YYYY-MM-DD) -> (start, end).
+
+    Возвращает None, если формат не распознан, даты невалидны или
+    начало позже конца. Разделителем может быть тире, дефис или
+    просто пробел.
+    """
+    if not text:
+        return None
+    # Ищем именно две даты: так дефис внутри ISO-даты (2026-09-01)
+    # не путается с разделителем диапазона.
+    parts = re.findall(r"\d{2}\.\d{2}\.\d{4}|\d{4}-\d{2}-\d{2}",
+                       text.strip())
+    if len(parts) != 2:
+        return None
+    dates = []
+    for part in parts:
+        for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+            try:
+                dates.append(datetime.strptime(part, fmt).date())
+                break
+            except ValueError:
+                continue
+        else:
+            return None
+    if dates[0] > dates[1]:
+        return None
+    return dates[0].strftime("%Y-%m-%d"), dates[1].strftime("%Y-%m-%d")
+
+
 # Лимит топа панели по умолчанию — 100, в её же интерфейсе можно
 # выбрать до 2000. Берём 2000, чтобы в бот попадали все пользователи
 # узла, а не только первая сотня.
@@ -330,6 +419,100 @@ def _fmt_gb(nbytes: int) -> str:
     return f"{nbytes / 1024 ** 3:.2f} ГБ"
 
 
+def _panel_tg_id(panel_username: str):
+    """TG ID, зашитый в имя панели: paid_<tg_id>_<username> или
+    <tg_id>_<username> у админских подписок. None, если имя не по
+    этому шаблону (например, заведено в панели вручную)."""
+    m = re.match(r"^(?:paid_)?(\d+)_", panel_username or "")
+    return int(m.group(1)) if m else None
+
+
+async def _resolve_usage_labels(panel_usernames: list) -> dict:
+    """Имя панели -> строка для списка: имя, @username, TG ID, срок.
+
+    Привязка к базе бота (bot.db) идёт тремя путями, по надёжности:
+    1) email подписки в paid_subs/admin_subs равен имени панели —
+       оттуда TG ID и данные из таблицы users;
+    2) TG ID из самого имени панели + users по этому ID;
+    3) имя панели как @username в таблице users.
+    Не нашёлся нигде — строка помечается «нет в базе», чтобы такие
+    клиенты были видны, а не молча терялись.
+    """
+    labels = {}
+    if not panel_usernames:
+        return labels
+    try:
+        import database as db
+    except Exception:
+        return {u: f"<code>{escape(u)}</code>" for u in panel_usernames}
+    try:
+        by_email = await db.users_by_emails(list(panel_usernames))
+    except Exception:
+        by_email = {}
+    # {имя панели: (tg_id, first_name, username)}
+    resolved = {}
+    parsed_ids = {}
+    for un in panel_usernames:
+        if un in by_email:
+            tg_id, fn, db_un = by_email[un]
+            resolved[un] = (tg_id, fn, db_un)
+        else:
+            tg_id = _panel_tg_id(un)
+            if tg_id:
+                parsed_ids[un] = tg_id
+            else:
+                try:
+                    row = await db.find_user_by_username(un)
+                except Exception:
+                    row = None
+                if row:
+                    resolved[un] = (row[0], row[1], row[2])
+    tg_ids = [tg for tg, _, _ in resolved.values() if tg]
+    tg_ids += list(parsed_ids.values())
+    try:
+        by_id = await db.users_by_ids(tg_ids) if tg_ids else {}
+    except Exception:
+        by_id = {}
+    try:
+        subs = await db.subs_by_tg_ids(tg_ids) if tg_ids else {}
+    except Exception:
+        subs = {}
+    for un in panel_usernames:
+        if un in resolved:
+            tg_id, fn, db_un = resolved[un]
+        elif un in parsed_ids:
+            tg_id = parsed_ids[un]
+            fn, db_un = by_id.get(tg_id, (None, None))
+        else:
+            labels[un] = (f"<code>{escape(un)}</code>"
+                          " · <i>нет в базе</i>")
+            continue
+        if tg_id is None:
+            labels[un] = f"<code>{escape(un)}</code>"
+            continue
+        head = " ".join(p for p in (fn, f"@{db_un}" if db_un else None)
+                        if p)
+        label = f"{escape(head)} · <code>{tg_id}</code>" if head else \
+            f"TG <code>{tg_id}</code>"
+        sub = subs.get(tg_id) or {}
+        expire = sub.get("expire")
+        if expire:
+            label += f" · до {escape(_fmt_expire(expire))}"
+        labels[un] = label
+    return labels
+
+
+def _fmt_expire(expire) -> str:
+    """Дата окончания подписки -> DD.MM.YYYY (или как есть)."""
+    s = str(expire).strip()
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(s[:10], fmt).strftime("%d.%m.%Y")
+        except ValueError:
+            continue
+    return s[:10]
+
+
 _PAGE_SIZE = 20
 
 
@@ -349,6 +532,8 @@ def _usage_page_keyboard(node_uuid, page, total_pages, back_to):
                 "▶️", callback_data=f"{back_to}:{page + 1}"))
         rows.append(nav)
     rows.append([InlineKeyboardButton(
+        "📅 Период", callback_data="rw_usage_period")])
+    rows.append([InlineKeyboardButton(
         "🔄 Обновить", callback_data=f"{back_to}:{page}")])
     rows.append([InlineKeyboardButton("◀️ К узлам", callback_data="rw_usage"),
                  InlineKeyboardButton("◀️ К Remnawave",
@@ -356,21 +541,26 @@ def _usage_page_keyboard(node_uuid, page, total_pages, back_to):
     return InlineKeyboardMarkup(rows)
 
 
-def _usage_text(title, period, items, page, total_pages) -> str:
-    """Текст страницы: итог + строки «номер. username — X ГБ»."""
+def _usage_text(title, period, items, page, total_pages, labels=None) -> str:
+    """Текст страницы: итог + строки «номер. имя (@username) · TG ID — X ГБ».
+
+    labels — привязка к базе для пользователей этой страницы
+    (см. _resolve_usage_labels); без неё строка — просто имя панели.
+    """
     total_bytes = sum(total for _, total in items)
     lines = [f"📊 <b>{escape(title)}</b>",
              f"Период: <b>{period}</b>",
              f"Всего: <b>{_fmt_gb(total_bytes)}</b>"
              f" · пользователей: <b>{len(items)}</b>", ""]
     if not items:
-        lines.append("<i>В этом месяце трафика пока нет.</i>")
+        lines.append("<i>За этот период трафика пока нет.</i>")
     else:
         start = (page - 1) * _PAGE_SIZE
         for i, (username, total) in enumerate(
                 items[start:start + _PAGE_SIZE], start + 1):
-            lines.append(f"{i}. <code>{escape(username)}</code>"
-                         f" — <b>{_fmt_gb(total)}</b>")
+            shown = (labels or {}).get(username) or \
+                f"<code>{escape(username)}</code>"
+            lines.append(f"{i}. {shown} — <b>{_fmt_gb(total)}</b>")
         if total_pages > 1:
             lines.append("")
             lines.append(f"<i>Страница {page} из {total_pages}.</i>")
@@ -378,7 +568,8 @@ def _usage_text(title, period, items, page, total_pages) -> str:
 
 
 async def handle_rw_usage(query, context=None):
-    """Выбор узла для потребления за текущий месяц."""
+    """Выбор узла для потребления за выбранный период (по умолчанию —
+    текущий месяц)."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if not is_configured():
         await query.edit_message_text(
@@ -395,7 +586,7 @@ async def handle_rw_usage(query, context=None):
             parse_mode="HTML", reply_markup=_back())
         return
     parsed = _parse_nodes(r["data"])
-    _, _, period = current_month_range()
+    _, _, period, _code = resolve_usage_period(context)
     if not parsed:
         await query.edit_message_text(
             "📊 <b>Потребление ГБ</b>\n\n<i>В панели нет узлов.</i>",
@@ -409,20 +600,69 @@ async def handle_rw_usage(query, context=None):
             callback_data=f"rw_usage_node:{n['uuid']}:1")])
     rows.append([InlineKeyboardButton("🌐 Все ноды",
                                       callback_data="rw_usage_all:1")])
+    rows.append([InlineKeyboardButton(f"📅 Период: {period}",
+                                      callback_data="rw_usage_period")])
     rows.append([InlineKeyboardButton("◀️ К Remnawave",
                                       callback_data="rw_menu")])
     await query.edit_message_text(
         "📊 <b>Потребление ГБ</b>\n\n"
-        f"Период: <b>{period}</b> — с начала месяца по его конец.\n\n"
-        "Выбери узел — покажу каждого пользователя и сколько он "
-        "потратил на этом узле. «Все ноды» — суммарно по всем узлам.",
+        f"Период: <b>{period}</b>\n\n"
+        "Выбери узел — покажу каждого пользователя (имя, @username, "
+        "TG ID и срок подписки из базы бота) и сколько он потратил "
+        "на этом узле. «Все ноды» — суммарно по всем узлам.",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
 
 
-async def handle_rw_usage_node(query, context, node_uuid: str, page: int = 1):
-    """Пользователи одного узла за текущий месяц, по убыванию ГБ."""
+async def handle_rw_usage_period(query, context=None):
+    """Выбор периода: пресеты и свой диапазон."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    start, end, period = current_month_dates()
+    _, _, period, code = resolve_usage_period(context)
+    rows = []
+    for preset in ("month", "prev", "7d", "30d", "90d"):
+        mark = "✅ " if preset == code else ""
+        rows.append([InlineKeyboardButton(
+            f"{mark}{_USAGE_PERIOD_NAMES[preset]}",
+            callback_data=f"rw_usage_set:{preset}")])
+    rows.append([InlineKeyboardButton(
+        f"{'✅ ' if code == 'custom' else ''}✏️ Свой период…",
+        callback_data="rw_usage_custom")])
+    rows.append([InlineKeyboardButton("◀️ К узлам",
+                                      callback_data="rw_usage")])
+    await query.edit_message_text(
+        "📅 <b>Период потребления</b>\n\n"
+        f"Сейчас: <b>{period}</b>\n\n"
+        "Выбери готовый период или пришли свой диапазон датами.",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def handle_rw_usage_set(query, context, code: str):
+    """Пресет периода -> обратно к выбору узла с новым периодом."""
+    if context is not None:
+        context.user_data["rw_usage_period"] = code
+    await handle_rw_usage(query, context)
+
+
+async def handle_rw_usage_custom(query, context):
+    """Просьба прислать свой диапазон дат."""
+    from states import AWAITING_RW_USAGE_PERIOD
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if context is not None:
+        context.user_data["state"] = AWAITING_RW_USAGE_PERIOD
+    await query.edit_message_text(
+        "✏️ <b>Свой период</b>\n\n"
+        "Пришли диапазон, например:\n"
+        "<code>01.09.2026 — 15.09.2026</code>\n\n"
+        "<i>Подойдёт и формат 2026-09-01 — 2026-09-15.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К периодам",
+                                  callback_data="rw_usage_period")]]))
+
+
+async def handle_rw_usage_node(query, context, node_uuid: str, page: int = 1):
+    """Пользователи одного узла за выбранный период, по убыванию ГБ."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    start, end, period, _code = resolve_usage_period(context)
     await query.edit_message_text("📊 Загружаю потребление…")
     nodes_r = await nodes()
     name = node_uuid
@@ -447,8 +687,10 @@ async def handle_rw_usage_node(query, context, node_uuid: str, page: int = 1):
     items = _usage_items(r["data"])
     total_pages = max(1, (len(items) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = min(max(1, page), total_pages)
+    page_items = items[(page - 1) * _PAGE_SIZE:page * _PAGE_SIZE]
+    labels = await _resolve_usage_labels([u for u, _ in page_items])
     await query.edit_message_text(
-        _usage_text(name, period, items, page, total_pages),
+        _usage_text(name, period, items, page, total_pages, labels),
         parse_mode="HTML",
         reply_markup=_usage_page_keyboard(
             node_uuid, page, total_pages,
@@ -456,9 +698,9 @@ async def handle_rw_usage_node(query, context, node_uuid: str, page: int = 1):
 
 
 async def handle_rw_usage_all(query, context, page: int = 1):
-    """Пользователи суммарно по всем узлам за текущий месяц."""
+    """Пользователи суммарно по всем узлам за выбранный период."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    start, end, period = current_month_dates()
+    start, end, period, _code = resolve_usage_period(context)
     await query.edit_message_text("📊 Загружаю потребление по всем узлам…")
     nodes_r = await nodes()
     if not nodes_r["ok"]:
@@ -492,7 +734,9 @@ async def handle_rw_usage_all(query, context, page: int = 1):
     items = _usage_items(r["data"])
     total_pages = max(1, (len(items) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = min(max(1, page), total_pages)
-    text = _usage_text("Все ноды", period, items, page, total_pages)
+    page_items = items[(page - 1) * _PAGE_SIZE:page * _PAGE_SIZE]
+    labels = await _resolve_usage_labels([u for u, _ in page_items])
+    text = _usage_text("Все ноды", period, items, page, total_pages, labels)
     await query.edit_message_text(
         text, parse_mode="HTML",
         reply_markup=_usage_page_keyboard(
