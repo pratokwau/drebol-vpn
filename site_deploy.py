@@ -136,7 +136,14 @@ CABINET_PAGE = r"""<!doctype html>
    background:radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,.7) 100%); }
 
  .wrap { position:relative; z-index:1; max-width:560px; margin:0 auto;
-         padding:18px 16px 48px; padding-top:max(18px, env(safe-area-inset-top)); }
+         padding:18px 16px 48px;
+         /* Верхний отступ — самый большой из трёх: базовый, вырез
+            телефона и безопасная зона Telegram (шапка мини-приложения
+            с кнопками «закрыть» и меню). Раньше учитывался только
+            вырез, поэтому в полном экране логотип и кнопка «Выйти»
+            оказывались под кнопками Telegram. */
+         padding-top:max(18px, env(safe-area-inset-top, 0px),
+                          var(--tg-content-safe-area-inset-top, 0px)); }
 
  /* шапка */
  .top { display:flex; align-items:center; justify-content:space-between; gap:12px;
@@ -227,7 +234,7 @@ CABINET_PAGE = r"""<!doctype html>
  .btn-danger:hover { background:rgba(248,113,113,.10); border-color:rgba(248,113,113,.6); }
 
  /* разделы: липкая лента вкладок, контент — по одному разделу за раз */
- .tabs { position:sticky; top:0; z-index:5; display:flex; gap:8px; overflow-x:auto;
+ .tabs { position:sticky; top:var(--tg-content-safe-area-inset-top, 0px); z-index:5; display:flex; gap:8px; overflow-x:auto;
          margin:0 -16px; padding:12px 16px;
          background:rgba(5,7,12,.88); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
          scrollbar-width:none; }
@@ -731,6 +738,33 @@ CABINET_PAGE = r"""<!doctype html>
      if (tg.isVersionAtLeast && tg.isVersionAtLeast("8.0") &&
          tg.requestFullscreen && !tg.isFullscreen) {
        tg.requestFullscreen();
+     }
+   } catch (e) {}
+   // Безопасная зона Telegram: в полном экране шапка клиента
+   // (закрыть, меню) висит поверх страницы. Скрипт Telegram сам
+   // выставляет --tg-content-safe-area-inset-top, но на старых
+   // клиентах переменной может не быть — продублируем её из
+   // contentSafeAreaInset и обновим при изменении зоны.
+   (function applySafeArea() {
+     try {
+       var top = tg.contentSafeAreaInset && tg.contentSafeAreaInset.top;
+       if (typeof top === "number" && top > 0) {
+         document.documentElement.style.setProperty(
+           "--tg-content-safe-area-inset-top", top + "px");
+       }
+     } catch (e) {}
+   })();
+   try {
+     if (tg.onEvent) {
+       tg.onEvent("contentSafeAreaChanged", function () {
+         try {
+           var top = tg.contentSafeAreaInset && tg.contentSafeAreaInset.top;
+           if (typeof top === "number") {
+             document.documentElement.style.setProperty(
+               "--tg-content-safe-area-inset-top", top + "px");
+           }
+         } catch (e) {}
+       });
      }
    } catch (e) {}
    login({initData: tg.initData});
