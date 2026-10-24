@@ -964,11 +964,48 @@ def _fmt_bytes(b: int) -> str:
     return f"{b / 1024 ** 3:.2f} ГБ"
 
 
-def _lte_view_line(row) -> str:
-    """Строка LTE-лимита для карточки подписки: свой или по умолчанию."""
-    from remnawave import lte_limit_label
+# Название месяца в предложном падеже: «в октябре», «в ноябре»…
+# (та же таблица, что на экране «LTE-интернет» у пользователя)
+_MONTH_PREP = ("", "январе", "феврале", "марте", "апреле", "мае", "июне",
+               "июле", "августе", "сентябре", "октябре", "ноябре", "декабре")
+
+
+async def _lte_view_line(row) -> str:
+    """Строки LTE для карточки подписки: потребление за текущий месяц
+    и лимит (свой или по умолчанию). Потребление берётся из панели
+    тем же путём, что и на экране «LTE-интернет»: сумма по узлам [CDN].
+    Если панель не отвечает или LTE-узлов нет — карточка не ломается,
+    показывается только лимит, а при ошибке панели — пометка об этом."""
+    from remnawave import (is_configured, lte_limit_gb, lte_limit_label,
+                           make_username, user_cdn_usage)
+    from datetime import datetime as _dt
+    email = row[2]
     sub_lte = row[19] if len(row) > 19 else None
-    return f"🌐 LTE-трафик в месяц: <b>{lte_limit_label(sub_lte, load_config().get('paid_preset_lte'))}</b>\n"
+    preset = load_config().get("paid_preset_lte")
+    limit_line = (f"🌐 LTE-трафик в месяц: "
+                  f"<b>{lte_limit_label(sub_lte, preset)}</b>\n")
+    limit = lte_limit_gb(sub_lte, preset)
+    if limit == 0:
+        return "🌐 LTE-серверы: <b>закрыты</b>\n"
+    if not is_configured():
+        return limit_line
+    r = await user_cdn_usage(make_username(email or "", 0))
+    if not r.get("ok"):
+        return limit_line.rstrip("\n") + " · потребление недоступно\n"
+    if not r.get("cdn_nodes"):
+        return limit_line
+    used_gb = r["used_bytes"] / 1024 ** 3
+    left_gb = max(0.0, limit - used_gb)
+    ratio = min(used_gb / limit, 1.0)
+    bar = "▓" * int(ratio * 10) + "░" * (10 - int(ratio * 10))
+    month = _MONTH_PREP[_dt.now().month]
+    lines = (f"🌐 LTE в {month}: <b>{used_gb:.2f} ГБ</b> из {limit} ГБ · "
+             f"осталось <b>{left_gb:.2f} ГБ</b>\n"
+             f"[{bar}] {int(ratio * 100)}%\n")
+    if r.get("failed"):
+        lines += ("<i>Часть LTE-серверов не ответила — "
+                  "цифра может быть неполной.</i>\n")
+    return lines
 
 
 async def handle_paid_sub_view(query, sub_id: int):
@@ -1077,7 +1114,7 @@ async def handle_paid_sub_view(query, sub_id: int):
         "📊 <b>Лимиты</b>\n<blockquote>"
         f"🖥 Устройств: <b>{limit_hwid or 'без ограничения'}</b>\n"
         f"{traffic_line}\n"
-        + _lte_view_line(row)
+        + await _lte_view_line(row)
         + f"🕐 Создана: {created_at}"
         "</blockquote>\n"
         + (f"\n{extra_lines}\n" if extra_lines else "")
