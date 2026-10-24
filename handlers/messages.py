@@ -11,23 +11,24 @@ from states import (
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_PRESET_EXPIRE,
-    AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC,
+    AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC, AWAITING_PRESET_LTE,
     AWAITING_SUB_TG_ID,
     AWAITING_SUB_EDIT_EXPIRE,
-    AWAITING_SUB_EDIT_HWID, AWAITING_SUB_EDIT_TRAFFIC,
+    AWAITING_SUB_EDIT_HWID, AWAITING_SUB_EDIT_TRAFFIC, AWAITING_SUB_EDIT_LTE,
     AWAITING_SUB_EXTEND, AWAITING_SUB_REDUCE,
     AWAITING_PAID_SUB_TG_ID,
     AWAITING_PAID_PRESET_HWID,
-    AWAITING_PAID_PRESET_TRAFFIC,
+    AWAITING_PAID_PRESET_TRAFFIC, AWAITING_PAID_PRESET_LTE,
     AWAITING_PAID_TRIAL_PERIOD,
     AWAITING_PAID_SUB_EXTEND,
     AWAITING_PAID_SUB_EDIT_EXPIRE,
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
+    AWAITING_PAID_SUB_EDIT_LTE,
     AWAITING_PAID_SUB_EDIT_TRIAL,
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
-    AWAITING_PAID_BULK_HWID,
+    AWAITING_PAID_BULK_HWID, AWAITING_PAID_BULK_LTE,
     AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
     AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
@@ -462,6 +463,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Трафик: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
+    if state == AWAITING_PRESET_LTE:
+        if text == "-":
+            cfg = load_config()
+            cfg.pop("preset_lte", None)
+            save_config(cfg)
+            label = "30 ГБ (по умолчанию)"
+        elif text.isdigit():
+            _save("preset_lte", int(text))
+            label = f"{text} ГБ"
+        else:
+            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
+            return
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ LTE-трафик новых подписок: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
     # ── Редактирование конкретной админской подписки ────────────────────────────
     if state == AWAITING_SUB_EDIT_EXPIRE:
         try:
@@ -529,6 +546,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not res.get("success"):
                     note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
         await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>{note}",
+                                        parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_SUB_EDIT_LTE:
+        if text == "-":
+            val, label = None, "по умолчанию"
+        elif text.isdigit():
+            val, label = int(text), f"{text} ГБ"
+        else:
+            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from adminsub.storage import update_sub_field
+            await update_sub_field(sub_id, "lte_gb", val)
+        await update.message.reply_text(f"✅ LTE-трафик обновлён: <b>{label}</b>",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -746,6 +780,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("paid_preset_traffic", val)
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Трафик: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_PRESET_LTE:
+        if text == "-":
+            cfg = load_config()
+            cfg.pop("paid_preset_lte", None)
+            save_config(cfg)
+            label = "30 ГБ (по умолчанию)"
+        elif text.isdigit():
+            _save("paid_preset_lte", int(text))
+            label = f"{text} ГБ"
+        else:
+            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
+            return
+        context.user_data.pop("state", None)
+        await update.message.reply_text(f"✅ LTE-трафик новых подписок: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Платные подписки: продление срока ────────────────────────────────────────
@@ -974,6 +1024,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await preview_bulk_limits(update.message, context, "hwid", int(text))
         return
 
+    if state == AWAITING_PAID_BULK_LTE:
+        if text == "-":
+            val = None
+        elif text.isdigit():
+            val = int(text)
+        else:
+            await update.message.reply_text("❌ Число ГБ или <code>-</code> для лимита по умолчанию.",
+                                            parse_mode="HTML", reply_markup=back_admin())
+            return
+        context.user_data.pop("state", None)
+        from paidsub.handlers import preview_bulk_limits
+        await preview_bulk_limits(update.message, context, "lte", val)
+        return
+
     if state == AWAITING_PAID_SUB_EDIT_HWID:
         if not text.isdigit():
             await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
@@ -1029,6 +1093,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     panel_note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
                 await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: трафик → {label}")
         await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>{panel_note}",
+                                        parse_mode="HTML", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_PAID_SUB_EDIT_LTE:
+        if text == "-":
+            val, label = None, "по умолчанию"
+        elif text.isdigit():
+            val, label = int(text), f"{text} ГБ"
+        else:
+            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
+            return
+        sub_id = context.user_data.pop("edit_sub_id", None)
+        context.user_data.pop("state", None)
+        if sub_id:
+            from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
+            await update_paid_sub_field(sub_id, "lte_gb", val)
+            r = await get_paid_sub(sub_id)
+            if r:
+                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: LTE-трафик → {label}")
+        await update.message.reply_text(f"✅ LTE-трафик обновлён: <b>{label}</b>",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
 
