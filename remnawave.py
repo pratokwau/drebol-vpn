@@ -358,6 +358,61 @@ async def nodes_users_usage(node_uuids: list, start: str, end: str) -> dict:
     return await _request("POST", path, {"nodesUuids": list(node_uuids)})
 
 
+# ── CDN-трафик пользователя ───────────────────────────────────────────────────
+
+# Месячный лимит на CDN-узлы: каждый месяц пользователю даётся 30 ГБ,
+# счётчик — просто текущий календарный месяц, поэтому обнуление
+# происходит само, без отдельной задачи. Блокировки при превышении
+# здесь нет — только показ расхода, дальше решает владелец.
+CDN_MONTHLY_GB = 30
+
+
+def is_cdn_node(name) -> bool:
+    """CDN-узел — тот, чьё название кончается ровно на «[CDN]»,
+    со скобками. «Германия - 1 [CDN]» — да, «Германия - 1» — нет."""
+    return (name or "").strip().endswith("[CDN]")
+
+
+async def user_cdn_usage(panel_username: str, start=None, end=None) -> dict:
+    """Трафик одного пользователя панели только по CDN-узлам.
+
+    Период по умолчанию — текущий месяц. Для каждого CDN-узла берётся
+    его топ пользователей и ищется нужное имя; имя панели может не
+    попасть в топ-2000 узла только при тысячах клиентов, на практике
+    такого нет. Возвращает {ok, cdn_nodes, used_bytes, per_node,
+    failed, period} или {ok: False, error}.
+    """
+    if start is None or end is None:
+        start, end, period = current_month_dates()
+    else:
+        period = _period_label(start, end)
+    nodes_r = await nodes()
+    if not nodes_r["ok"]:
+        return {"ok": False, "error": nodes_r.get("error")}
+    cdn = [n for n in _parse_nodes(nodes_r["data"])
+           if is_cdn_node(n["name"])]
+    if not cdn:
+        return {"ok": True, "cdn_nodes": [], "used_bytes": 0,
+                "per_node": [], "failed": 0, "period": period}
+    results = await asyncio.gather(*[
+        node_users_usage(n["uuid"], start, end) for n in cdn
+    ])
+    per_node, failed, total = [], 0, 0
+    for node, res in zip(cdn, results):
+        if not res["ok"]:
+            failed += 1
+            continue
+        used = dict(_usage_items(res["data"])).get(panel_username, 0)
+        per_node.append((node["name"], used))
+        total += used
+    if failed == len(cdn):
+        return {"ok": False, "error": "CDN-узлы не ответили"}
+    per_node.sort(key=lambda kv: (-kv[1], kv[0].lower()))
+    return {"ok": True, "cdn_nodes": [n["name"] for n in cdn],
+            "used_bytes": total, "per_node": per_node,
+            "failed": failed, "period": period}
+
+
 def _parse_nodes(data) -> list:
     """Узлы панели в виде [{uuid, name, disabled}]."""
     if isinstance(data, dict):
