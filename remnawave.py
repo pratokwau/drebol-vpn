@@ -1189,8 +1189,7 @@ async def handle_rw_menu(query, context=None):
     kb = [[InlineKeyboardButton("🌐 Адрес панели", callback_data="rw_url"),
            InlineKeyboardButton("🔑 Токен", callback_data="rw_token")]]
     if is_configured():
-        kb.append([InlineKeyboardButton("👥 Сквады", callback_data="rw_squads"),
-                   InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
+        kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("🔄 Синхронизация",
                                         callback_data="panel_sync_menu")])
@@ -1463,8 +1462,5 @@ async def handle_rw_squad_toggle(query, context, uuid: str):
         chosen.append(uuid)
     save_settings(rw_squads=chosen)
     await handle_rw_squads(query, context)
-
-
-# ── Рассылка новых ссылок ─────────────────────────────────────────────────────
 
 
