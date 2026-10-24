@@ -39,7 +39,7 @@ from states import (
     AWAITING_REMIND_QUIET, AWAITING_QUICK_REPLY,
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
     AWAITING_SITE_DOMAIN, AWAITING_SITE_LOGO, AWAITING_BACKUP_FILE,
-    AWAITING_RW_URL, AWAITING_RW_TOKEN,
+    AWAITING_RW_URL, AWAITING_RW_TOKEN, AWAITING_RW_USAGE_PERIOD,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
@@ -376,6 +376,34 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔌 Проверить", callback_data="rw_test"),
                  InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
+        )
+        return
+
+    if state == AWAITING_RW_USAGE_PERIOD:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from remnawave import parse_custom_period, _period_label
+        parsed = parse_custom_period(text)
+        if not parsed:
+            await update.message.reply_text(
+                "❌ Не понял период. Пришли так:\n"
+                "<code>01.09.2026 — 15.09.2026</code>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("◀️ К периодам",
+                                          callback_data="rw_usage_period")]]),
+            )
+            return
+        context.user_data.pop("state", None)
+        context.user_data["rw_usage_period"] = "custom"
+        context.user_data["rw_usage_custom"] = parsed
+        await update.message.reply_text(
+            f"✅ Период установлен: <b>{_period_label(*parsed)}</b>\n\n"
+            "Теперь выбери узел — потребление покажется за этот период.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📊 К узлам", callback_data="rw_usage"),
+                 InlineKeyboardButton("📅 Период",
+                                      callback_data="rw_usage_period")]]),
         )
         return
 
