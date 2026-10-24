@@ -113,6 +113,9 @@ CABINET_PAGE = r"""<!doctype html>
  body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); overflow-x:hidden;
         font:16px/1.55 Manrope,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
         -webkit-font-smoothing:antialiased; }
+ /* Внутри Telegram высоту берём у клиента, а не 100vh: иначе на телефоне
+    страница прыгает при появлении клавиатуры, а в полном экране — не вся */
+ body { min-height:var(--tg-viewport-height, 100vh); }
  a { color:inherit; text-decoration:none; }
  h1, h2, p { margin:0; }
 
@@ -272,6 +275,17 @@ CABINET_PAGE = r"""<!doctype html>
    .stat:first-child { grid-column:1 / -1; }
    .pair { grid-template-columns:1fr; }
    .card { padding:20px 18px; }
+ }
+
+ /* Широкий экран (десктоп, полный экран): колонка растёт, а карточки
+    раздела «Подписка» встают в две колонки — иначе на макбуке просто
+    узкая полоска посреди пустого окна. Главная карточка — на всю ширину.
+    Остальные разделы — одна широкая колонка: там обычно одна карточка. */
+ @media (min-width: 900px) {
+   .wrap { max-width:960px; }
+   [data-sec="sub"] { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; align-items:start; }
+   [data-sec="sub"] > .card { margin:14px 0; }
+   [data-sec="sub"] > .card.hero { grid-column:1 / -1; }
  }
  @media (prefers-reduced-motion: reduce) { .silk span { animation:none; } .btn { transition:none; } }
 </style></head>
@@ -708,6 +722,17 @@ CABINET_PAGE = r"""<!doctype html>
    tg.ready(); tg.expand();
    // внутри Telegram красим шапку в цвет страницы
    try { tg.setHeaderColor("#05070c"); tg.setBackgroundColor("#05070c"); } catch (e) {}
+   // Полный экран (Bot API 8.0+): вместо маленького окошка-панели
+   // приложение занимает всё окно, как у BotFather. На старых клиентах
+   // метода нет — просто остаёмся в раскрытом expand() выше.
+   // В полноэкранном режиме шапка прозрачная, поэтому цвет шапки
+   // задан выше — он определяет контраст системных элементов.
+   try {
+     if (tg.isVersionAtLeast && tg.isVersionAtLeast("8.0") &&
+         tg.requestFullscreen && !tg.isFullscreen) {
+       tg.requestFullscreen();
+     }
+   } catch (e) {}
    login({initData: tg.initData});
  } else if (token()) {
    load();
