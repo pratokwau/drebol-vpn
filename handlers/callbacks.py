@@ -415,9 +415,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "bl_check":
         await handle_bl_check_start(query, context)
     elif data.startswith("bl_add_for:"):
-        await handle_bl_new(query, context, "bl", int(data.split(":")[1]))
-    elif data.startswith("bl_ban:"):
-        await handle_bl_new(query, context, "ban", int(data.split(":")[1]))
+        await handle_bl_new(query, context, int(data.split(":")[1]))
     elif data.startswith("bl_unban:"):
         await handle_bl_unban(query, context, int(data.split(":")[1]))
     elif data.startswith("bl_reason:"):
@@ -461,8 +459,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_find_user(query, context)
     elif data.startswith("user_profile:"):
         await handle_user_profile(query, int(data.split(":")[1]))
-    elif data.startswith("ban_user:"):
-        await handle_bl_new(query, context, "ban", int(data.split(":")[1]))
     elif data.startswith("unban_user:"):
         await handle_unban_user(query, context, int(data.split(":")[1]))
     elif data.startswith("dm_user:"):

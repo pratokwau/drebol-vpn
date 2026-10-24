@@ -972,8 +972,8 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
         kb.append([InlineKeyboardButton("⛔ Вернуть в ЧС", callback_data=f"bl_readd:{tg_id}")])
     else:
         kb.append([InlineKeyboardButton("⛔ Внести в ЧС", callback_data=f"bl_add_for:{tg_id}")])
-    kb.append([InlineKeyboardButton("✅ Разбанить", callback_data=f"bl_unban:{tg_id}") if b
-               else InlineKeyboardButton("🚫 Забанить в боте", callback_data=f"bl_ban:{tg_id}")])
+    if b:
+        kb.append([InlineKeyboardButton("✅ Разбанить", callback_data=f"bl_unban:{tg_id}")])
     tail = [InlineKeyboardButton("◀️ К списку", callback_data="bl_menu")]
     if u:
         tail.insert(0, InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{tg_id}"))
@@ -1012,15 +1012,14 @@ async def handle_bl_check_start(query, context):
     )
 
 
-async def handle_bl_new(target, context, kind: str, tg_id: int, edit: bool = True):
-    """Шаг 1: за что. kind — bl (чёрный список) или ban (бан в боте)."""
+async def handle_bl_new(target, context, tg_id: int, edit: bool = True):
+    """Шаг 1: за что. Ручной бан тут был и убран: вручную вносится
+    только чёрный список, баны ставит сам синк списков."""
     from database import get_user_info
     context.user_data.pop("state", None)
-    context.user_data["bl_pending"] = {"kind": kind, "tg_id": tg_id}
-    head = ("⛔ <b>Внести в чёрный список</b>" if kind == "bl"
-            else "🚫 <b>Забанить в боте</b>")
-    what = ("Не сможет купить и продлить, подписка встанет на паузу, останется поддержка."
-            if kind == "bl" else "Бот перестанет отвечать вообще — ни меню, ни поддержки.")
+    context.user_data["bl_pending"] = {"tg_id": tg_id}
+    head = "⛔ <b>Внести в чёрный список</b>"
+    what = "Не сможет купить и продлить, подписка встанет на паузу, останется поддержка."
     kb = [[InlineKeyboardButton(r, callback_data=f"bl_reason:{i}")]
           for i, r in enumerate(QUICK_REASONS)]
     kb.append([InlineKeyboardButton("✍️ Своя причина", callback_data="bl_reason:own")])
@@ -1059,8 +1058,7 @@ async def handle_bl_term_ask(target, context, edit: bool = True):
         await _send(target, "⛔ <b>Начни заново</b>", _cancel(), edit)
         return
     context.user_data.pop("state", None)
-    head = ("⛔ <b>Внести в чёрный список</b>" if pending["kind"] == "bl"
-            else "🚫 <b>Забанить в боте</b>")
+    head = "⛔ <b>Внести в чёрный список</b>"
     kb = [[InlineKeyboardButton(label, callback_data=f"bl_term:{code}")]
           for code, label, _s in TERMS]
     kb.append([InlineKeyboardButton("✍️ Свой срок", callback_data="bl_term:own")])
@@ -1103,30 +1101,20 @@ async def handle_bl_confirm(target, context, edit: bool = True):
     tg_id = pending["tg_id"]
     reason = pending.get("reason") or DEFAULT_REASON
     term = term_line(pending.get("until"))
-    if pending["kind"] == "ban":
-        text = (f"🚫 <b>Забанить в боте?</b>\n\n"
-                f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
-                f"📝 Причина: {html.escape(reason)}\n"
-                f"⏳ Срок: <b>{term}</b>\n"
-                "🤐 Бот перестанет отвечать совсем — даже поддержка закроется.</blockquote>\n\n"
-                "<i>Подписку бан не трогает: срок продолжит идти.</i>")
-        yes = "🚫 Да, забанить"
+    sub = await get_paid_sub_by_tg_id(tg_id)
+    if sub and sub[11] in ("active", "renewal"):
+        sub_line = (f"💳 Подписка до <b>{sub[6]}</b> остановится сразу. Остаток срока "
+                    "сохранится и вернётся при снятии.")
     else:
-        sub = await get_paid_sub_by_tg_id(tg_id)
-        if sub and sub[11] in ("active", "renewal"):
-            sub_line = (f"💳 Подписка до <b>{sub[6]}</b> остановится сразу. Остаток срока "
-                        "сохранится и вернётся при снятии.")
-        else:
-            sub_line = "💳 Действующей подписки нет — просто не сможет взять триал и оплатить."
-        text = (f"⛔ <b>Внести в чёрный список?</b>\n\n"
-                f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
-                f"📝 Причина: {html.escape(reason)}\n"
-                f"⏳ Срок: <b>{term}</b>\n{sub_line}</blockquote>\n\n"
-                f"<i>Человек получит сообщение, что доступ закрыт: "
-                f"«{html.escape(public_reason(reason))}».</i>")
-        yes = "⛔ Да, внести в ЧС"
+        sub_line = "💳 Действующей подписки нет — просто не сможет взять триал и оплатить."
+    text = (f"⛔ <b>Внести в чёрный список?</b>\n\n"
+            f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
+            f"📝 Причина: {html.escape(reason)}\n"
+            f"⏳ Срок: <b>{term}</b>\n{sub_line}</blockquote>\n\n"
+            f"<i>Человек получит сообщение, что доступ закрыт: "
+            f"«{html.escape(public_reason(reason))}».</i>")
     await _send(target, text,
-                confirm_keyboard(yes, "bl_add_apply", f"bl_view:{tg_id}", "bl_menu"), edit)
+                confirm_keyboard("⛔ Да, внести в ЧС", "bl_add_apply", f"bl_view:{tg_id}", "bl_menu"), edit)
 
 
 async def handle_bl_add_apply(query, context):
@@ -1139,11 +1127,6 @@ async def handle_bl_add_apply(query, context):
     reason = pending.get("reason") or DEFAULT_REASON
     until = pending.get("until")
     by_id = getattr(getattr(query, "from_user", None), "id", None)
-    if pending["kind"] == "ban":
-        await ban(context.bot, tg_id, reason, until, by_id)
-        note = "<i>🚫 Забанен в боте. " + term_line(until).capitalize() + ".</i>"
-        await handle_bl_view(query, tg_id, note=note)
-        return
     res = await blacklist_add(context.bot, tg_id, reason, until, by_id)
     await handle_bl_view(query, tg_id,
                          note=_result_note(f"⛔ Внесён в чёрный список ({term_line(until)}).", res))
@@ -1233,10 +1216,10 @@ async def handle_bl_input(update, context, state: str, text: str):
             return
         context.user_data.pop("state", None)
         if reason:
-            context.user_data["bl_pending"] = {"kind": "bl", "tg_id": tg_id, "reason": reason}
+            context.user_data["bl_pending"] = {"tg_id": tg_id, "reason": reason}
             await handle_bl_term_ask(msg, context, edit=False)
         else:
-            await handle_bl_new(msg, context, "bl", tg_id, edit=False)
+            await handle_bl_new(msg, context, tg_id, edit=False)
         return
 
     # AWAITING_BL_REASON — своя причина для уже выбранного человека
