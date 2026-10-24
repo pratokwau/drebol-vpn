@@ -122,6 +122,8 @@ from paidsub.handlers import (
     handle_paid_preset_hwid, handle_paid_preset_traffic,
     handle_paid_preset_lte, handle_paid_lte_fallback,
     handle_paid_lte_fallback_set, handle_paid_lte_check_now,
+    handle_paid_lte_settings, handle_paid_lte_squads,
+    handle_paid_lte_squad_toggle,
     handle_paid_preset_trial,
     handle_paid_create_sub, handle_paid_create_type,
     handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
@@ -735,6 +737,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_preset_traffic(query, context)
     elif data == "paid_preset_lte":
         await handle_paid_preset_lte(query, context)
+    elif data == "paid_lte_settings":
+        await handle_paid_lte_settings(query, context)
+    elif data == "paid_lte_squads":
+        await handle_paid_lte_squads(query, context)
+    elif data.startswith("paid_lte_squad:"):
+        await handle_paid_lte_squad_toggle(query, context, data.split(":", 1)[1])
     elif data == "paid_lte_fallback":
         await handle_paid_lte_fallback(query, context)
     elif data == "paid_lte_fallback_off":
