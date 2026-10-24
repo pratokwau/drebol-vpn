@@ -358,25 +358,51 @@ async def nodes_users_usage(node_uuids: list, start: str, end: str) -> dict:
     return await _request("POST", path, {"nodesUuids": list(node_uuids)})
 
 
-# ── CDN-трафик пользователя ───────────────────────────────────────────────────
+# ── LTE-трафик пользователя ───────────────────────────────────────────────────
+# В боте LTE-узлами называются узлы панели, чьё название кончается на [CDN].
+# В самой панели они так и зовутся [CDN] — переименование только в интерфейсе
+# бота, чтобы не путать людей: LTE — это «белый» трафик, который считается
+# отдельно от общего лимита подписки.
 
-# Месячный лимит на CDN-узлы: каждый месяц пользователю даётся 30 ГБ,
-# счётчик — просто текущий календарный месяц, поэтому обнуление
-# происходит само, без отдельной задачи. Блокировки при превышении
-# здесь нет — только показ расхода, дальше решает владелец.
-CDN_MONTHLY_GB = 30
+# Месячный лимит на LTE-узлы по умолчанию: каждый месяц пользователю
+# даётся 30 ГБ, счётчик — просто текущий календарный месяц, поэтому
+# обнуление происходит само, без отдельной задачи. Блокировки при
+# превышении здесь нет — только показ расхода, дальше решает владелец.
+# Лимит можно переопределить: пресетом для новых подписок или
+# отдельно для каждой подписки (колонка lte_gb, NULL = пресет).
+LTE_MONTHLY_GB = 30
+CDN_MONTHLY_GB = LTE_MONTHLY_GB  # старое имя, на всякий случай
+
+
+def lte_limit_gb(sub_lte=None, preset=None) -> int:
+    """Действующий месячный лимит LTE-трафика: свой у подписки,
+    иначе пресет, иначе 30 ГБ по умолчанию."""
+    if sub_lte is not None:
+        return int(sub_lte)
+    if preset is not None:
+        return int(preset)
+    return LTE_MONTHLY_GB
+
+
+def lte_limit_label(sub_lte=None, preset=None) -> str:
+    """Как показать лимит в админке: число и откуда оно взялось."""
+    if sub_lte is not None:
+        return f"{int(sub_lte)} ГБ (свой)"
+    if preset is not None:
+        return f"{int(preset)} ГБ (по умолчанию)"
+    return f"{LTE_MONTHLY_GB} ГБ (по умолчанию)"
 
 
 def is_cdn_node(name) -> bool:
-    """CDN-узел — тот, чьё название кончается ровно на «[CDN]»,
+    """LTE-узел — тот, чьё название кончается ровно на «[CDN]»,
     со скобками. «Германия - 1 [CDN]» — да, «Германия - 1» — нет."""
     return (name or "").strip().endswith("[CDN]")
 
 
 async def user_cdn_usage(panel_username: str, start=None, end=None) -> dict:
-    """Трафик одного пользователя панели только по CDN-узлам.
+    """Трафик одного пользователя панели только по LTE-узлам ([CDN]).
 
-    Период по умолчанию — текущий месяц. Для каждого CDN-узла берётся
+    Период по умолчанию — текущий месяц. Для каждого LTE-узла берётся
     его топ пользователей и ищется нужное имя; имя панели может не
     попасть в топ-2000 узла только при тысячах клиентов, на практике
     такого нет. Возвращает {ok, cdn_nodes, used_bytes, per_node,
@@ -406,7 +432,7 @@ async def user_cdn_usage(panel_username: str, start=None, end=None) -> dict:
         per_node.append((node["name"], used))
         total += used
     if failed == len(cdn):
-        return {"ok": False, "error": "CDN-узлы не ответили"}
+        return {"ok": False, "error": "LTE-узлы не ответили"}
     per_node.sort(key=lambda kv: (-kv[1], kv[0].lower()))
     return {"ok": True, "cdn_nodes": [n["name"] for n in cdn],
             "used_bytes": total, "per_node": per_node,
