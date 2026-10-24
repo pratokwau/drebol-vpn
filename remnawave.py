@@ -672,8 +672,9 @@ def _usage_text(title, period, items, page, total_pages, labels=None) -> str:
 
 
 async def handle_rw_usage(query, context=None):
-    """Выбор узла для потребления за выбранный период (по умолчанию —
-    текущий месяц)."""
+    """Единый экран «Трафик»: сводка за всё время (счётчики панели
+    с последнего сброса + топ-10) и потребление по узлам за выбранный
+    период (по умолчанию — текущий месяц)."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if not is_configured():
         await query.edit_message_text(
@@ -693,9 +694,34 @@ async def handle_rw_usage(query, context=None):
     _, _, period, _code = resolve_usage_period(context)
     if not parsed:
         await query.edit_message_text(
-            "📊 <b>Потребление ГБ</b>\n\n<i>В панели нет узлов.</i>",
+            "📊 <b>Трафик</b>\n\n<i>В панели нет узлов.</i>",
             parse_mode="HTML", reply_markup=_usage_back())
         return
+    # Сводка за всё время из старого отдельного экрана «Трафик»:
+    # панель считает один общий расход, поэтому всё лежит в «получено».
+    # Не получили — экран всё равно открывается, просто без этого блока.
+    snap_lines = []
+    try:
+        from panel import get_traffic_snapshot
+        snap = await get_traffic_snapshot()
+    except Exception:
+        snap = {}
+    if snap.get("ok") and snap.get("clients"):
+        clients = snap["clients"]
+        total = sum(up + down for up, down in clients.values())
+        top = sorted(clients.items(),
+                     key=lambda kv: kv[1][0] + kv[1][1], reverse=True)[:10]
+        labels = await _resolve_usage_labels([e for e, _ in top])
+        snap_lines = [
+            f"Всего по всем клиентам: <b>{_fmt_gb(total)}</b>"
+            f" · клиентов: <b>{len(clients)}</b>",
+            "<i>Счётчики панели с последнего сброса.</i>",
+            "",
+            "<b>Топ-10 за всё время:</b>",
+        ]
+        for i, (email, (up, down)) in enumerate(top, 1):
+            shown = labels.get(email) or f"<code>{escape(email)}</code>"
+            snap_lines.append(f"{i}. {shown} — <b>{_fmt_gb(up + down)}</b>")
     rows = []
     for n in parsed:
         mark = "⛔ " if n["disabled"] else ""
@@ -706,15 +732,19 @@ async def handle_rw_usage(query, context=None):
                                       callback_data="rw_usage_all:1")])
     rows.append([InlineKeyboardButton(f"📅 Период: {period}",
                                       callback_data="rw_usage_period")])
+    rows.append([InlineKeyboardButton("🔄 Обновить",
+                                      callback_data="rw_usage")])
     rows.append([InlineKeyboardButton("◀️ К контролю",
                                       callback_data="ctl_menu")])
+    text = "\n".join(
+        ["📊 <b>Трафик</b>", ""]
+        + snap_lines + ([""] if snap_lines else [])
+        + [f"Период: <b>{period}</b>", "",
+           "Выбери узел — покажу каждого пользователя (имя, @username, "
+           "TG ID и срок подписки из базы бота) и сколько он потратил "
+           "на этом узле за период. «Все ноды» — суммарно по всем узлам."])
     await query.edit_message_text(
-        "📊 <b>Потребление ГБ</b>\n\n"
-        f"Период: <b>{period}</b>\n\n"
-        "Выбери узел — покажу каждого пользователя (имя, @username, "
-        "TG ID и срок подписки из базы бота) и сколько он потратил "
-        "на этом узле. «Все ноды» — суммарно по всем узлам.",
-        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
+        text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
 
 
 async def handle_rw_usage_period(query, context=None):

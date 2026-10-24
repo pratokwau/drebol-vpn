@@ -469,10 +469,8 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
          InlineKeyboardButton("👥 Помощники", callback_data="act_feed:helpers:1")],
         [
             InlineKeyboardButton("🔌 Кто онлайн", callback_data="ctl_online"),
-            InlineKeyboardButton("📊 Трафик", callback_data="ctl_traffic"),
+            InlineKeyboardButton("📊 Трафик", callback_data="rw_usage"),
         ],
-        [InlineKeyboardButton("📊 Потребление ГБ",
-                              callback_data="rw_usage")],
         [InlineKeyboardButton("🔍 Найти человека", callback_data="find_user"),
          InlineKeyboardButton("🆘 Помощь с подключением", callback_data="ctl_ch_menu")],
         [InlineKeyboardButton(
@@ -692,36 +690,12 @@ async def handle_online(query):
                                   reply_markup=kb)
 
 
-async def handle_traffic(query):
-    from panel import get_traffic_snapshot
-    from database import users_by_emails
-    await query.edit_message_text("📊 Считаю трафик...")
-    r = await get_traffic_snapshot()
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Обновить", callback_data="ctl_traffic")],
-        _back("ctl_menu"),
-    ])
-    if not r.get("ok"):
-        await query.edit_message_text(
-            f"📊 <b>Трафик</b>\n\n❌ Панель не ответила:\n<code>{_esc(r.get('error'))}</code>",
-            parse_mode="HTML", reply_markup=kb)
-        return
-
-    clients = r["clients"]
-    total = sum(up + down for up, down in clients.values())
-    top = sorted(clients.items(), key=lambda kv: kv[1][0] + kv[1][1], reverse=True)[:10]
-    known = await users_by_emails([e for e, _ in top])
-
-    lines = [
-        "📊 <b>Трафик</b>\n",
-        f"Всего по всем клиентам: <b>{_fmt_bytes(total)}</b> · клиентов: <b>{len(clients)}</b>",
-        "<i>Счётчики панели с последнего сброса.</i>\n",
-        "<b>Топ-10:</b>",
-    ]
-    for i, (email, (up, down)) in enumerate(top, 1):
-        who = _who(*known[email][1:], known[email][0]) if email in known else f"<code>{_esc(email)}</code>"
-        lines.append(f"{i}. {who} — <b>{_fmt_bytes(up + down)}</b> (⬆{_fmt_bytes(up)} ⬇{_fmt_bytes(down)})")
-    await query.edit_message_text("\n".join(lines), parse_mode="HTML", reply_markup=kb)
+async def handle_traffic(query, context=None):
+    """Старое имя экрана «Трафик»: теперь это тот же единый экран, что и
+    «Потребление ГБ» — сводка за всё время плюс потребление по узлам
+    и периодам. Алиас оставлен для старых клавиатур и selftest."""
+    from remnawave import handle_rw_usage
+    await handle_rw_usage(query, context)
 
 
 # ── Ежедневная сводка ────────────────────────────────────────────────────────
