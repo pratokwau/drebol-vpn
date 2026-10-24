@@ -48,6 +48,7 @@ async def init_db():
                 limit_ip INTEGER NOT NULL DEFAULT 0,
                 limit_hwid INTEGER NOT NULL DEFAULT 0,
                 total_gb INTEGER NOT NULL DEFAULT 0,
+                lte_gb INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -71,6 +72,7 @@ async def init_db():
                 limit_ip INTEGER NOT NULL DEFAULT 0,
                 limit_hwid INTEGER NOT NULL DEFAULT 0,
                 total_gb INTEGER NOT NULL DEFAULT 0,
+                lte_gb INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -106,6 +108,12 @@ async def init_db():
             await db.execute("ALTER TABLE paid_subs ADD COLUMN period_end TEXT")
         except Exception:
             pass
+        # lte_gb — свой месячный лимит LTE-трафика подписки (NULL = пресет).
+        for _table in ("paid_subs", "admin_subs"):
+            try:
+                await db.execute(f"ALTER TABLE {_table} ADD COLUMN lte_gb INTEGER")
+            except Exception:
+                pass
 
         from config import load_config as _load_cfg
         try:
