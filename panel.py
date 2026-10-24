@@ -267,17 +267,27 @@ async def sync_client_note(email: str, username=None, first_name=None,
     return {"success": True, "changed": True}
 
 
-async def refresh_panel_descriptions(tables=("paid_subs", "admin_subs")) -> dict:
+async def refresh_panel_descriptions(tables=("paid_subs", "admin_subs"),
+                                     resolve_chat=None) -> dict:
     """Актуализация подписей в панели для платных и админских подписок.
 
-    Для каждой подписки берёт из базы бота текущие юзернейм и ник
-    человека (они обновляются в таблице users, когда человек пишет боту)
-    и пишет в описание клиента панели единый формат panel_description()
-    со штампом времени прогона. Возвращает {ok, checked, updated,
+    Юзернейм и ник берутся НЕ из базы бота, а напрямую из Telegram:
+    для каждой подписки с TG ID бот спрашивает getChat и берёт свежие
+    username/first_name на данный момент. Свежие данные заодно сохраняются
+    в таблицу users, чтобы и остальные экраны бота показывали новый ник.
+    Если Telegram не отдаёт человека (заблокировал бота, чат не найден),
+    его описание НЕ переписывается устаревшими данными из базы — клиент
+    попадает в errors, чтобы админ видел, кого не удалось проверить.
+    Подписки без TG ID проверить в Telegram нечем — для них берутся
+    данные из базы (или «без юзернейма»/«без ника»).
+
+    resolve_chat — async-функция tg_id -> (username, first_name, error):
+    error None при успехе, иначе строка причины. Без неё (старые вызовы)
+    данные берутся из базы. Возвращает {ok, checked, updated,
     errors, by_table}.
     """
     import aiosqlite
-    from database import DB_PATH
+    from database import DB_PATH, upsert_user
     stamp = datetime.now()
     checked = updated = 0
     errors = []
@@ -293,6 +303,13 @@ async def refresh_panel_descriptions(tables=("paid_subs", "admin_subs")) -> dict
         t_checked = t_updated = 0
         for tg_id, email, uname, first_name in rows:
             t_checked += 1
+            if resolve_chat and tg_id:
+                fresh_uname, fresh_name, err = await resolve_chat(tg_id)
+                if err is not None:
+                    errors.append(f"{email}: Telegram не отдал: {err}")
+                    continue
+                uname, first_name = fresh_uname, fresh_name
+                await upsert_user(tg_id, first_name or "", uname)
             r = await sync_client_note(email, uname, first_name, tg_id,
                                        now=stamp)
             if r.get("success"):
@@ -305,6 +322,19 @@ async def refresh_panel_descriptions(tables=("paid_subs", "admin_subs")) -> dict
         updated += t_updated
     return {"ok": True, "checked": checked, "updated": updated,
             "errors": errors, "by_table": by_table}
+
+
+async def tg_chat_resolver(bot):
+    """resolve_chat для refresh_panel_descriptions: живая проверка
+    человека в Telegram через bot.get_chat(tg_id). Возвращает
+    (username, first_name, error)."""
+    async def _resolve(tg_id):
+        try:
+            chat = await bot.get_chat(tg_id)
+        except Exception as e:  # заблокировал бота, чат не найден и т.п.
+            return None, None, str(e)[:120]
+        return getattr(chat, "username", None), getattr(chat, "first_name", None), None
+    return _resolve
 
 
 async def toggle_client(email: str, enable: bool) -> dict:

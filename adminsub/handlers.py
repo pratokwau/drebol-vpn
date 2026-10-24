@@ -736,17 +736,21 @@ async def handle_sub_reissue(query, context, sub_id: int):
 
 # ── Ники в панели ─────────────────────────────────────────────────────────────
 
-async def refresh_panel_names() -> dict:
+async def refresh_panel_names(context=None) -> dict:
     """Приводит подписи админских клиентов в панели к текущим никам
     из Telegram — тот же единый формат, что и общая актуализация
     (см. panel.refresh_panel_descriptions).
 
     Имя клиента и ссылку подписки не трогаем: они связаны, и переименование
     сломало бы ключ у человека. Обновляем описание и TG ID — то, по чему
-    клиента узнаёшь в панели.
+    клиента узнаёшь в панели. Если есть доступ к боту, ники проверяются
+    живой проверкой в Telegram, а не берутся из базы.
     """
-    from panel import refresh_panel_descriptions
-    res = await refresh_panel_descriptions(("admin_subs",))
+    from panel import refresh_panel_descriptions, tg_chat_resolver
+    bot = getattr(context, "bot", None) if context else None
+    resolver = await tg_chat_resolver(bot) if bot else None
+    res = await refresh_panel_descriptions(("admin_subs",),
+                                           resolve_chat=resolver)
     return {"ok": True, "checked": res["checked"], "updated": res["updated"],
             "errors": res["errors"]}
 
@@ -759,8 +763,8 @@ async def handle_subs_names_sync(query, context):
         await query.answer("Сначала задай адрес панели и токен", show_alert=True)
         return
 
-    await query.edit_message_text("🔄 Сверяю ники с панелью…")
-    res = await refresh_panel_names()
+    await query.edit_message_text("🔄 Проверяю ники в Telegram и сверяю с панелью…")
+    res = await refresh_panel_names(context)
     errors = res.get("errors") or []
     lines = ["🔄 <b>Ники в панели</b>", "",
              "<blockquote>"

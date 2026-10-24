@@ -1208,8 +1208,9 @@ async def handle_panel_sync_menu(query, context=None):
              "🔄 <b>Точечная синхронизация</b> — сверяет базу бота с панелью: "
              "ключи, ссылки, сроки, лимиты устройств и трафика.",
              "⏰ <b>Расписание</b> — когда сверка запускается сама.",
-             "👤 <b>Актуализация юзернеймов и ников</b> — переписывает описание "
-             "каждого клиента в панели по текущим данным из базы бота:",
+             "👤 <b>Актуализация юзернеймов и ников</b> — проверяет каждого "
+             "человека напрямую в Telegram и переписывает описание клиента "
+             "в панели по свежим данным:",
              "<code>Drebol VPN · @юзернейм · Ник · TG ID · "
              "Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС</code>"]
     await query.edit_message_text(
@@ -1226,15 +1227,25 @@ async def handle_panel_sync_menu(query, context=None):
 
 async def handle_panel_names_sync(query, context=None):
     """Актуализация: юзернеймы и ники платных и админских подписок —
-    в описание каждого клиента панели, единым форматом со штампом времени."""
+    в описание каждого клиента панели, единым форматом со штампом времени.
+
+    Данные берутся живой проверкой в Telegram (getChat по TG ID),
+    а не из базы бота: человек мог сменить ник/юзернейм, а боту ещё
+    не написать."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if not is_configured():
         await query.answer("Сначала задай адрес панели и токен", show_alert=True)
         return
+    bot = getattr(context, "bot", None) if context else None
+    if not bot:
+        await query.answer("Нужен доступ к Telegram для проверки",
+                           show_alert=True)
+        return
     await query.edit_message_text(
-        "👤 Сверяю юзернеймы и ники с базой и переписываю описания в панели…")
-    from panel import refresh_panel_descriptions
-    res = await refresh_panel_descriptions()
+        "👤 Проверяю каждого человека в Telegram и переписываю описания в панели…")
+    from panel import refresh_panel_descriptions, tg_chat_resolver
+    res = await refresh_panel_descriptions(
+        resolve_chat=await tg_chat_resolver(bot))
     errors = res.get("errors") or []
     by_table = res.get("by_table") or {}
     paid = by_table.get("paid_subs", {})
@@ -1254,10 +1265,12 @@ async def handle_panel_names_sync(query, context=None):
     lines += ["", "<i>Формат описания в панели:</i>",
               "<code>Drebol VPN · @юзернейм · Ник · TG ID · "
               "Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС</code>",
-              "<i>Ники берутся из базы бота — она узнаёт новый ник, когда "
-              "человек пишет боту. Если человек сменил ник, но боту ещё не "
-              "писал, бот о новом нике пока не знает. Имя клиента и ссылка "
-              "подписки при этом не меняются.</i>"]
+              "<i>Ники сверены напрямую с Telegram на момент прогона, а не "
+              "взяты из базы бота, — и заодно сохранены в базу, чтобы и "
+              "остальные экраны показывали свежие данные. Кого Telegram не "
+              "отдал (заблокировал бота, чат не найден), того не трогали: "
+              "переписывать описание устаревшими данными было бы враньём. "
+              "Имя клиента и ссылка подписки при этом не меняются.</i>"]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
