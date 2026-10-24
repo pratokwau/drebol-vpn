@@ -225,23 +225,48 @@ def current_month_range(now=None):
     return first, last, period
 
 
-def _iso_z(dt) -> str:
-    """ISO-8601 с Z на конце — такой формат панель понимает для range."""
-    return dt.astimezone(timezone.utc).isoformat(
-        timespec="seconds").replace("+00:00", "Z")
+def current_month_dates(now=None):
+    """Тот же месяц, но датами YYYY-MM-DD — так их ждёт панель 3.x."""
+    first, last, period = current_month_range(now)
+    return first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d"), period
 
 
-async def node_users_usage(node_uuid: str, start_iso: str, end_iso: str) -> dict:
-    """Расход пользователей одного узла за период.
+# Лимит топа панели по умолчанию — 100, в её же интерфейсе можно
+# выбрать до 2000. Берём 2000, чтобы в бот попадали все пользователи
+# узла, а не только первая сотня.
+_TOP_USERS_LIMIT = 2000
 
-    Путь панели: GET /api/nodes/usage/{uuid}/users/range?start=...&end=...
-    Ответ — записи {user_uuid, username, node_uuid, total, date}, по одной
-    на дату, поэтому суммирование по username делает вызывающий код.
+
+async def node_users_usage(node_uuid: str, start: str, end: str) -> dict:
+    """Расход пользователей одного узла за период (панель 3.x).
+
+    Тот же эндпоинт, что открывает сама панель в «Статистике
+    использования» узла: GET /api/bandwidth-stats/nodes/{uuid}/users
+    ?start=YYYY-MM-DD&end=YYYY-MM-DD&topUsersLimit=2000.
+    Ответ — {categories, sparklineData,
+    topUsers: [{color, username, total}]}, где total уже суммарный
+    расход пользователя за период в байтах.
     """
-    path = (f"{API_ROOT}/nodes/usage/{node_uuid}/users/range"
-            f"?start={quote(start_iso, safe='')}"
-            f"&end={quote(end_iso, safe='')}")
+    path = (f"{API_ROOT}/bandwidth-stats/nodes/{node_uuid}/users"
+            f"?start={quote(start, safe='')}"
+            f"&end={quote(end, safe='')}"
+            f"&topUsersLimit={_TOP_USERS_LIMIT}")
     return await _request("GET", path)
+
+
+async def nodes_users_usage(node_uuids: list, start: str, end: str) -> dict:
+    """Расход пользователей сразу по нескольким узлам (панель 3.x).
+
+    POST /api/bandwidth-stats/nodes/users с телом
+    {"nodesUuids": [...]} и теми же query-параметрами. Ответ той же
+    формы, что у node_users_usage, но topUsers уже суммирован по всем
+    перечисленным узлам — второй запрос на каждый узел не нужен.
+    """
+    path = (f"{API_ROOT}/bandwidth-stats/nodes/users"
+            f"?start={quote(start, safe='')}"
+            f"&end={quote(end, safe='')}"
+            f"&topUsersLimit={_TOP_USERS_LIMIT}")
+    return await _request("POST", path, {"nodesUuids": list(node_uuids)})
 
 
 def _parse_nodes(data) -> list:
@@ -268,12 +293,16 @@ def _usage_items(data) -> list:
     расход в список не попадает — он только шумит.
     """
     if isinstance(data, dict):
-        for key in ("response", "users", "data"):
-            if isinstance(data.get(key), list):
-                data = data[key]
-                break
+        if isinstance(data.get("topUsers"), list):
+            # Панель 3.x: {topUsers: [{username, total}]}.
+            data = data["topUsers"]
         else:
-            return []
+            for key in ("response", "users", "data"):
+                if isinstance(data.get(key), list):
+                    data = data[key]
+                    break
+            else:
+                return []
     if not isinstance(data, list):
         return []
     totals = {}
@@ -393,7 +422,7 @@ async def handle_rw_usage(query, context=None):
 async def handle_rw_usage_node(query, context, node_uuid: str, page: int = 1):
     """Пользователи одного узла за текущий месяц, по убыванию ГБ."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    start, end, period = current_month_range()
+    start, end, period = current_month_dates()
     await query.edit_message_text("📊 Загружаю потребление…")
     nodes_r = await nodes()
     name = node_uuid
@@ -402,13 +431,14 @@ async def handle_rw_usage_node(query, context, node_uuid: str, page: int = 1):
             if n["uuid"] == node_uuid:
                 name = n["name"]
                 break
-    r = await node_users_usage(node_uuid, _iso_z(start), _iso_z(end))
+    r = await node_users_usage(node_uuid, start, end)
     if not r["ok"]:
         await query.edit_message_text(
             f"❌ <b>Не получить потребление</b>\n\n"
             f"<code>{escape(str(r.get('error'))[:300])}</code>\n\n"
-            "<i>Если панель другой версии и этот путь у неё закрыт — "
-            "пришли мне её версию, подберу актуальный эндпоинт.</i>",
+            "<i>Если ошибка 403 — у API-токена в панели нет права "
+            "node-users-usage на чтение: его включают в настройках "
+            "токена в панели.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("◀️ К узлам",
@@ -428,7 +458,7 @@ async def handle_rw_usage_node(query, context, node_uuid: str, page: int = 1):
 async def handle_rw_usage_all(query, context, page: int = 1):
     """Пользователи суммарно по всем узлам за текущий месяц."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    start, end, period = current_month_range()
+    start, end, period = current_month_dates()
     await query.edit_message_text("📊 Загружаю потребление по всем узлам…")
     nodes_r = await nodes()
     if not nodes_r["ok"]:
@@ -449,32 +479,20 @@ async def handle_rw_usage_all(query, context, page: int = 1):
                 [InlineKeyboardButton("◀️ К узлам",
                                       callback_data="rw_usage")]]))
         return
-    results = await asyncio.gather(*[
-        node_users_usage(n["uuid"], _iso_z(start), _iso_z(end))
-        for n in parsed
-    ])
-    totals, failed = {}, 0
-    for res in results:
-        if not res["ok"]:
-            failed += 1
-            continue
-        for username, total in _usage_items(res["data"]):
-            totals[username] = totals.get(username, 0) + total
-    if failed and not totals:
+    r = await nodes_users_usage([n["uuid"] for n in parsed], start, end)
+    if not r["ok"]:
         await query.edit_message_text(
-            "❌ <b>Не получить потребление ни по одному узлу</b>",
+            f"❌ <b>Не получить потребление</b>\n\n"
+            f"<code>{escape(str(r.get('error'))[:300])}</code>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("◀️ К узлам",
                                       callback_data="rw_usage")]]))
         return
-    items = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+    items = _usage_items(r["data"])
     total_pages = max(1, (len(items) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = min(max(1, page), total_pages)
     text = _usage_text("Все ноды", period, items, page, total_pages)
-    if failed:
-        text += (f"\n\n<i>Не ответили узлов: {failed} — их трафик "
-                 "в итог не попал.</i>")
     await query.edit_message_text(
         text, parse_mode="HTML",
         reply_markup=_usage_page_keyboard(
