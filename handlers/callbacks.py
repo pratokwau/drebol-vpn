@@ -86,7 +86,7 @@ from promos import (
 )
 from handlers.payments import (
     handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
-    handle_refund_partial_start, handle_refund_partial_do,
+    handle_refund_partial_start, handle_refund_partial_do, handle_payment_sync_run,
 )
 from handlers.tariffs import (
     handle_tariffs_menu, handle_tariff_view, handle_tariff_toggle,
@@ -450,6 +450,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("refund_partial_do:"):
         _, pid, amt = data.split(":")
         await handle_refund_partial_do(query, context, int(pid), int(amt))
+    elif data == "payment_sync":
+        await handle_payment_sync_run(query, context)
     elif data == "healthcheck":
         await handle_healthcheck(query)
     elif data == "find_user":

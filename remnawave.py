@@ -1081,10 +1081,43 @@ def panel_sync_due(cfg: dict, now=None) -> bool:
 _SYNC_RUNNING = False
 
 
+def panel_sync_full_report_text(panel_res: dict, names_res: dict | None,
+                                pay_res: dict | None) -> str:
+    """Единый отчёт плановой синхронизации: панель ↔ бот, ники, платежи."""
+    parts = [panel_sync_report_text(panel_res, "⏰ Плановая синхронизация")]
+    if names_res is not None:
+        if names_res.get("ok"):
+            parts.append(
+                "\n👤 <b>Ники и юзернеймы (бот → панель)</b>\n\n"
+                "<blockquote>"
+                f"Проверено подписок: <b>{names_res['checked']}</b>\n"
+                f"Обновлено описаний: <b>{names_res['updated']}</b>\n"
+                f"С ошибкой: <b>{len(names_res.get('errors') or [])}</b>"
+                "</blockquote>")
+            if names_res.get("errors"):
+                shown = "\n".join(str(e)[:120] for e in names_res["errors"][:5])
+                parts.append(f"<blockquote>{shown}</blockquote>")
+        else:
+            parts.append(f"\n👤 <b>Ники и юзернеймы</b>\n\n"
+                         f"<blockquote>{names_res.get('error')}</blockquote>")
+    if pay_res is not None:
+        from handlers.payments import payment_sync_report_text
+        parts.append("\n" + payment_sync_report_text(pay_res))
+    return "\n".join(parts)
+
+
 async def panel_sync_tick(context):
-    """Плановая синхронизация: проверяет расписание и, если пора,
-    запускает run_panel_sync(). Админу пишет только если есть что
-    показать: изменения, ошибки или расхождения."""
+    """Единая плановая синхронизация по одному расписанию. Когда пора,
+    по очереди запускает три сверки — каждая независима, падение одной
+    не отменяет остальные:
+    1) панель → бот (обратная проверка): всё, что админ поменял в панели
+       (срок, лимиты, ссылка, uuid), переезжает в базу бота;
+    2) бот → панель: ники и юзернеймы сверяются живой проверкой
+       в Telegram и пишутся в описания клиентов панели;
+    3) Platega → бот: сверка оплат — полные возвраты доводятся,
+       частичные записываются.
+    Админу пишет только если есть что показать: изменения, ошибки,
+    расхождения или новые частичные возвраты без видимой суммы."""
     global _SYNC_RUNNING
     if _SYNC_RUNNING:
         return
@@ -1094,20 +1127,62 @@ async def panel_sync_tick(context):
         return
     _SYNC_RUNNING = True
     try:
-        res = await run_panel_sync()
+        panel_res = await run_panel_sync()
+
+        names_res = None
+        if panel_res.get("ok"):
+            try:
+                from panel import refresh_panel_descriptions, tg_chat_resolver
+                bot = getattr(context, "bot", None)
+                resolver = await tg_chat_resolver(bot) if bot else None
+                names_res = await refresh_panel_descriptions(resolve_chat=resolver)
+            except Exception as e:
+                names_res = {"ok": False, "error": str(e)[:200]}
+
+        pay_res = None
+        try:
+            from handlers.payments import run_payment_sync
+            pay_res = await run_payment_sync(context)
+        except Exception as e:
+            pay_res = {"ok": False, "error": str(e)[:200]}
+
         cfg = load_config()
-        if res.get("ok"):
+        prev_unknown = set((cfg.get("panel_sync_last_report") or {})
+                           .get("partial_unknown") or [])
+        new_unknown = set((pay_res or {}).get("partial_unknown") or [])
+        # last_run двигаем только при успешной сверке панели: если панель
+        # лежала, следующая попытка будет уже через 15 минут, а не через
+        # весь интервал — как раньше
+        if panel_res.get("ok"):
             cfg["panel_sync_last_run"] = datetime.now().isoformat(timespec="seconds")
-            cfg["panel_sync_last_report"] = {
-                "at": cfg["panel_sync_last_run"],
-                "checked": res["checked"], "updated": res["updated_subs"],
-                "orphans": len(res["orphans"]), "missing": len(res["missing"])}
+        cfg["panel_sync_last_report"] = {
+            "at": cfg.get("panel_sync_last_run"),
+            "checked": panel_res.get("checked", 0),
+            "updated": panel_res.get("updated_subs", 0),
+            "orphans": len(panel_res.get("orphans") or []),
+            "missing": len(panel_res.get("missing") or []),
+            "names_updated": (names_res or {}).get("updated", 0),
+            "names_errors": len((names_res or {}).get("errors") or []),
+            "pay_chargebacked": (pay_res or {}).get("chargebacked", 0),
+            "pay_partial_synced": (pay_res or {}).get("partial_synced", 0),
+            "partial_unknown": sorted(new_unknown),
+        }
         save_config(cfg)
-        if ADMIN_ID and (not res.get("ok") or res.get("updated_subs")
-                         or res.get("orphans") or res.get("missing")):
+        notify = (not panel_res.get("ok")
+                  or panel_res.get("updated_subs")
+                  or panel_res.get("orphans") or panel_res.get("missing")
+                  or (names_res and (names_res.get("updated")
+                                     or names_res.get("errors")))
+                  or (pay_res and (not pay_res.get("ok")
+                                   or pay_res.get("chargebacked")
+                                   or pay_res.get("partial_synced")
+                                   or pay_res.get("errors")
+                                   or (new_unknown - prev_unknown))))
+        if ADMIN_ID and notify:
             try:
                 await context.bot.send_message(
-                    ADMIN_ID, panel_sync_report_text(res, "⏰ Плановая синхронизация с панелью"),
+                    ADMIN_ID,
+                    panel_sync_full_report_text(panel_res, names_res, pay_res),
                     parse_mode="HTML")
             except Exception:
                 pass
@@ -1208,14 +1283,16 @@ async def handle_panel_sync_menu(query, context=None):
     lines = ["🔄 <b>Синхронизация</b>", "",
              "<blockquote>"
              f"Расписание: <b>{panel_sync_schedule_text(cfg)}</b></blockquote>", "",
-             "🔄 <b>Точечная синхронизация</b> — сверяет базу бота с панелью: "
-             "ключи, ссылки, сроки, лимиты устройств и трафика.",
-             "⏰ <b>Расписание</b> — когда сверка запускается сама.",
-             "👤 <b>Актуализация юзернеймов и ников</b> — проверяет каждого "
-             "человека напрямую в Telegram и переписывает описание клиента "
-             "в панели по свежим данным:",
+             "По одному расписанию идут три сверки:",
+             "🔄 <b>Панель → бот</b> — всё, что поменял в панели (ключи, "
+             "ссылки, сроки, лимиты устройств и трафика), переезжает в базу бота.",
+             "👤 <b>Бот → панель</b> — юзернеймы и ники проверяются напрямую "
+             "в Telegram и пишутся в описания клиентов панели:",
              "<code>Drebol VPN · @юзернейм · Ник · TG ID · "
-             "Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС</code>"]
+             "Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС</code>",
+             "💳 <b>Platega → бот</b> — сверка оплат: полные возвраты "
+             "доводятся, частичные записываются.",
+             "⏰ <b>Расписание</b> — когда всё это запускается само."]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
@@ -1225,6 +1302,8 @@ async def handle_panel_sync_menu(query, context=None):
                                   callback_data="panel_sync_schedule")],
             [InlineKeyboardButton("👤 Актуализация юзернеймов и ников",
                                   callback_data="panel_names_sync")],
+            [InlineKeyboardButton("💳 Синхронизация платежей",
+                                  callback_data="payment_sync")],
             [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
 
 
@@ -1336,11 +1415,18 @@ async def handle_panel_sync_schedule(query, context=None):
                      f"сверено {last.get('checked', 0)}, обновлено {last.get('updated', 0)}, "
                      f"в панели без базы {last.get('orphans', 0)}, "
                      f"в базе без панели {last.get('missing', 0)}")
+        if last.get("names_updated") is not None or last.get("pay_chargebacked") is not None:
+            lines.append(f"Ники обновлено: {last.get('names_updated', 0)} "
+                         f"(ошибок: {last.get('names_errors', 0)}) · "
+                         f"возвратов доведено: {last.get('pay_chargebacked', 0)}, "
+                         f"частичных записано: {last.get('pay_partial_synced', 0)}")
     lines.append("</blockquote>")
-    lines += ["", "<i>Плановая проверка ходит каждые 15 минут и запускается, "
+    lines += ["", "По этому расписанию идут три сверки: панель → бот, "
+              "ники (бот → панель) и платежи (Platega → бот).",
+              "", "<i>Плановая проверка ходит каждые 15 минут и запускается, "
               "когда подошло время. Если панель недоступна — база не меняется, "
-              "а запуск повторится при следующей проверке. Ручная кнопка "
-              "«Точечная синхронизация» работает всегда, вне расписания.</i>"]
+              "а запуск повторится при следующей проверке. Ручные кнопки "
+              "работают всегда, вне расписания.</i>"]
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=_panel_sync_schedule_keyboard())
 

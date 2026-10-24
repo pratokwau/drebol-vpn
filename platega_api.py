@@ -169,6 +169,9 @@ async def get_status(transaction_id: str) -> dict:
         "status": (body.get("status") or "").upper(),
         "amount": amount,
         "payload": body.get("payload"),
+        # сырое тело — для сверки платежей: Platega может отдавать
+        # суммы возвратов (refundedAmount и подобные) вне схемы
+        "raw": body,
     }
 
 

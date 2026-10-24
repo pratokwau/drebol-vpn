@@ -189,6 +189,126 @@ async def user_payments_block(tg_id: int) -> str:
     return "\n".join(lines)
 
 
+# ── Сверка платежей с Platega ────────────────────────────────────────────────
+
+def _scan_refunded_amount(raw):
+    """Ищет в сыром ответе Platega накопленную сумму частичных возвратов.
+
+    Поле в схеме статуса не зафиксировано, поэтому ищем по смыслу ключа:
+    refundedAmount, totalRefunded и подобные. Если ничего не нашлось —
+    возвращаем None, а не ноль: ноль означал бы «возвратов нет», а мы
+    этого как раз не знаем.
+    """
+    import re
+    wanted = {"refundedamount", "totalrefundedamount", "refunded",
+              "refundamount", "totalrefunded"}
+    if not isinstance(raw, dict):
+        return None
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                norm = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                if norm in wanted and isinstance(value, (int, float)) and value > 0:
+                    return int(value)
+                found = walk(value)
+                if found is not None:
+                    return found
+        elif isinstance(node, list):
+            for value in node:
+                found = walk(value)
+                if found is not None:
+                    return found
+        return None
+
+    return walk(raw)
+
+
+async def run_payment_sync(context) -> dict:
+    """Сверка оплат с Platega: платёжная система — источник правды.
+
+    Проходит по оплатам за 30 дней и возвратам в обработке:
+    - CHARGEBACKED → доводит полный возврат тем же finalize_refund,
+      что и кнопка (атомарно, дважды не доведёт);
+    - PARTIALLY_REFUNDED → записывает накопленную сумму частичных
+      возвратов, если Platega отдала её в ответе; если суммы в ответе
+      нет, платёж попадает в partial_unknown — админу стоит проверить
+      сумму в кабинете Platega руками.
+    Срок подписок не трогается: частичный возврат его не меняет.
+    """
+    import platega_api as pg
+    from database import (get_refund_watchlist, get_partial_refunded,
+                          set_partial_refunded, get_payment_full)
+    if not pg.is_configured():
+        return {"ok": False, "error": "Platega не настроена"}
+    watch = await get_refund_watchlist(days=30, limit=100)
+    checked = chargebacked = partial_synced = 0
+    partial_unknown, errors = [], []
+    for pay_id, _tg_id, ext_id, _amount, _period, _status in watch:
+        if not ext_id:
+            continue
+        checked += 1
+        r = await pg.get_status(ext_id)
+        if not r.get("ok"):
+            errors.append(f"#{pay_id}: {r.get('error')}")
+            continue
+        st = r.get("status")
+        if st == pg.STATUS_CHARGEBACKED:
+            before = await get_payment_full(pay_id)
+            await finalize_refund(context, pay_id)
+            after = await get_payment_full(pay_id)
+            if before and before[7] != "refunded" and after and after[7] == "refunded":
+                chargebacked += 1
+        elif st == pg.STATUS_PARTIALLY_REFUNDED:
+            known = await get_partial_refunded(pay_id)
+            found = _scan_refunded_amount(r.get("raw"))
+            if found is not None and found > known:
+                await set_partial_refunded(pay_id, found)
+                partial_synced += 1
+            elif found is None and known == 0:
+                partial_unknown.append(pay_id)
+    return {"ok": True, "checked": checked, "chargebacked": chargebacked,
+            "partial_synced": partial_synced,
+            "partial_unknown": partial_unknown, "errors": errors}
+
+
+def payment_sync_report_text(res: dict) -> str:
+    """Текст отчёта run_payment_sync() — для ручного запуска и для
+    общей плановой синхронизации."""
+    if not res.get("ok"):
+        return (f"❌ <b>Сверка платежей</b>\n\n"
+                f"<blockquote>{res.get('error')}</blockquote>")
+    lines = ["💳 <b>Сверка платежей с Platega</b>", "",
+             "<blockquote>"
+             f"Проверено оплат: <b>{res['checked']}</b>\n"
+             f"Доведено полных возвратов: <b>{res['chargebacked']}</b>\n"
+             f"Обновлено частичных возвратов: <b>{res['partial_synced']}</b>"
+             "</blockquote>"]
+    if res["partial_unknown"]:
+        shown = ", ".join(f"#{i}" for i in res["partial_unknown"][:10])
+        lines += ["", "⚠️ <b>Частичный возврат есть, а сумма из опроса не видна</b>",
+                  f"<blockquote>{shown}</blockquote>",
+                  "<i>Проверь суммы в кабинете Platega — бот их сам не угадывает.</i>"]
+    if res["errors"]:
+        shown = "\n".join(str(e)[:120] for e in res["errors"][:5])
+        lines += ["", "⚠️ <b>Не сверены</b>", f"<blockquote>{shown}</blockquote>"]
+    return "\n".join(lines)
+
+
+async def handle_payment_sync_run(query, context):
+    """Ручной запуск сверки платежей: та же, что идёт по расписанию."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    await query.edit_message_text("💳 Сверяю оплаты с Platega…")
+    res = await run_payment_sync(context)
+    await query.edit_message_text(
+        payment_sync_report_text(res), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 Ещё раз", callback_data="payment_sync"),
+             InlineKeyboardButton("🔄 К синхронизации",
+                                  callback_data="panel_sync_menu")],
+            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
+
+
 # ── Возвраты ─────────────────────────────────────────────────────────────────
 
 async def handle_refund_start(query, payment_id: int):

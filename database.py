@@ -1035,6 +1035,18 @@ async def add_partial_refunded(payment_id: int, amount: int) -> None:
         await db.commit()
 
 
+async def set_partial_refunded(payment_id: int, amount: int) -> None:
+    """Ставит суммарно возвращённую частями сумму (абсолютное значение,
+    а не прибавку: Platega отдаёт именно накопленный итог)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE payments SET partial_refunded = MAX(COALESCE(partial_refunded, 0), ?) "
+            "WHERE id = ?",
+            (int(amount), payment_id),
+        )
+        await db.commit()
+
+
 async def get_refund_revoke(payment_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
