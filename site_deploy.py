@@ -145,9 +145,11 @@ CABINET_PAGE = r"""<!doctype html>
          padding-top:max(18px, env(safe-area-inset-top, 0px),
                           var(--tg-content-safe-area-inset-top, 0px)); }
 
- /* шапка */
+ /* шапка: сплошной чёрный прямоугольник, а не прозрачный фон — в полном
+    экране шапка Telegram прозрачная, и логотип с «Выйти» на ней терялись */
  .top { display:flex; align-items:center; justify-content:space-between; gap:12px;
-        min-height:48px; margin-bottom:22px; }
+        min-height:48px; margin-bottom:22px; background:#000;
+        padding:12px 16px; border-radius:14px; }
  /* Полный экран: шапка Telegram висит поверх страницы, а переменную
     безопасной зоны отдают не все клиенты — поэтому в полном экране
     опускаем нашу шапку фиксированным отступом, ни от чего не зависящим.
@@ -580,8 +582,22 @@ CABINET_PAGE = r"""<!doctype html>
 
  // Разделы: лента вкладок собирается из того, что реально есть на странице.
  // Один раздел — ленту не показываем, запоминаем выбор между заходами.
+ // Разделы открываются и прямыми ссылками: /cabinet/lte, /cabinet/devices
+ // и т.д. — адрес из ссылки важнее запомненного, а переключение вкладок
+ // само обновляет адрес (без перезагрузки), чтобы ссылку можно было взять.
  var SEC_LABELS = {sub: "Подписка", lte: "LTE", devices: "Устройства",
                    payments: "Платежи", friends: "Друзья"};
+ function cabinetBase() {
+   var p = location.pathname.replace(/\/+$/, "");
+   if (p.slice(-13) === "/cabinet.html") { return p.slice(0, -13) + "/cabinet"; }
+   var i = p.lastIndexOf("/cabinet");
+   return i !== -1 ? p.slice(0, i + 8) : "/cabinet";
+ }
+ function sectionFromPath() {
+   var parts = location.pathname.replace(/\/+$/, "").split("/");
+   var last = parts[parts.length - 1];
+   return (last && last !== "cabinet" && last !== "cabinet.html") ? last : "";
+ }
  function buildTabs() {
    var tabs = document.getElementById("tabs");
    if (!tabs) { return; }
@@ -594,7 +610,9 @@ CABINET_PAGE = r"""<!doctype html>
    tabs.style.display = "";
    var saved = "";
    try { saved = localStorage.getItem("drebol_tab") || ""; } catch (e) {}
-   var active = seen.indexOf(saved) !== -1 ? saved : seen[0];
+   var pathSec = sectionFromPath();
+   var active = seen.indexOf(pathSec) !== -1 ? pathSec
+     : seen.indexOf(saved) !== -1 ? saved : seen[0];
    tabs.innerHTML = "";
    seen.forEach(function (name) {
      var b = document.createElement("button");
@@ -605,6 +623,9 @@ CABINET_PAGE = r"""<!doctype html>
      tabs.appendChild(b);
    });
    showTab(active, true);
+   if (seen.indexOf(pathSec) !== -1) {
+     try { localStorage.setItem("drebol_tab", pathSec); } catch (e) {}
+   }
  }
  function showTab(name, silent) {
    document.querySelectorAll("#body [data-sec]").forEach(function (el) {
@@ -620,7 +641,10 @@ CABINET_PAGE = r"""<!doctype html>
    document.querySelectorAll("#tabs .tab").forEach(function (b) {
      b.classList.toggle("active", b.textContent === (SEC_LABELS[name] || name));
    });
-   if (!silent) { try { localStorage.setItem("drebol_tab", name); } catch (e) {} }
+   if (!silent) {
+     try { localStorage.setItem("drebol_tab", name); } catch (e) {}
+     try { history.replaceState(null, "", cabinetBase() + "/" + name); } catch (e) {}
+   }
  }
 
  // Рефералка: статистика и ссылка — имя бота страница уже знает (BOT)
@@ -1057,11 +1081,18 @@ mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
 mv /tmp/drebol_add.html {WEB_ROOT}/add.html
 # Кабинет — по чистому адресу /cabinet: nginx отдаёт index.html из папки
 # сам (try_files $uri $uri/). Старый cabinet.html оставляем — закладки
-# и старые кнопки из бота не сломаются.
+# и старые кнопки из бота не сломаются. Разделы — отдельными адресами
+# /cabinet/lte, /cabinet/devices и т.д.: та же страница, нужный раздел
+# она выбирает сама по адресу (см. sectionFromPath в её JS).
 mkdir -p {WEB_ROOT}/cabinet
 cp /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet/index.html
+for sec in sub lte devices payments friends; do
+  mkdir -p {WEB_ROOT}/cabinet/$sec
+  cp /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet/$sec/index.html
+done
 mv /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet.html
 chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html {WEB_ROOT}/cabinet/index.html
+chmod 644 {WEB_ROOT}/cabinet/*/index.html || true
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
