@@ -33,6 +33,7 @@ from remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
     handle_rw_squads, handle_rw_squad_toggle,
     handle_rw_notify, handle_rw_notify_go,
+    handle_rw_usage, handle_rw_usage_node, handle_rw_usage_all,
 )
 from backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
@@ -486,6 +487,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_rw_notify(query, context)
     elif data == "rw_notify_go":
         await handle_rw_notify_go(query, context)
+    elif data == "rw_usage":
+        await handle_rw_usage(query, context)
+    elif data.startswith("rw_usage_node:"):
+        _parts = data.split(":")
+        await handle_rw_usage_node(query, context, _parts[1],
+                                   int(_parts[2]) if len(_parts) > 2 else 1)
+    elif data.startswith("rw_usage_all:"):
+        await handle_rw_usage_all(query, context,
+                                  int(data.split(":", 1)[1] or 1))
     elif data == "backup_menu":
         await handle_backup_menu(query, context)
     elif data == "backup_export":
