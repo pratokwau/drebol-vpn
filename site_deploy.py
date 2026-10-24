@@ -583,8 +583,9 @@ CABINET_PAGE = r"""<!doctype html>
  // Разделы: лента вкладок собирается из того, что реально есть на странице.
  // Один раздел — ленту не показываем, запоминаем выбор между заходами.
  // Разделы открываются и прямыми ссылками: /cabinet/lte, /cabinet/devices
- // и т.д. — адрес из ссылки важнее запомненного, а переключение вкладок
- // само обновляет адрес (без перезагрузки), чтобы ссылку можно было взять.
+ // и т.д. — адрес из ссылки важнее запомненного. Клик по вкладке — это
+ // настоящий переход на другую ссылку (с перезагрузкой страницы), а не
+ // тихая смена адреса: с /cabinet/sub на /cabinet/devices и так далее.
  var SEC_LABELS = {sub: "Подписка", lte: "LTE", devices: "Устройства",
                    payments: "Платежи", friends: "Друзья"};
  function cabinetBase() {
@@ -619,7 +620,11 @@ CABINET_PAGE = r"""<!doctype html>
      b.className = "tab" + (name === active ? " active" : "");
      b.type = "button";
      b.textContent = SEC_LABELS[name] || name;
-     b.onclick = function () { showTab(name); };
+     b.onclick = function () {
+       // уже на этом разделе — просто показать, без перезагрузки
+       if (sectionFromPath() === name) { showTab(name); return; }
+       location.href = cabinetBase() + "/" + name;
+     };
      tabs.appendChild(b);
    });
    showTab(active, true);
@@ -641,10 +646,7 @@ CABINET_PAGE = r"""<!doctype html>
    document.querySelectorAll("#tabs .tab").forEach(function (b) {
      b.classList.toggle("active", b.textContent === (SEC_LABELS[name] || name));
    });
-   if (!silent) {
-     try { localStorage.setItem("drebol_tab", name); } catch (e) {}
-     try { history.replaceState(null, "", cabinetBase() + "/" + name); } catch (e) {}
-   }
+   if (!silent) { try { localStorage.setItem("drebol_tab", name); } catch (e) {} }
  }
 
  // Рефералка: статистика и ссылка — имя бота страница уже знает (BOT)
