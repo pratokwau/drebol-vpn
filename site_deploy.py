@@ -223,6 +223,17 @@ CABINET_PAGE = r"""<!doctype html>
  .btn-danger { border-color:rgba(248,113,113,.45); color:#fca5a5; }
  .btn-danger:hover { background:rgba(248,113,113,.10); border-color:rgba(248,113,113,.6); }
 
+ /* разделы: липкая лента вкладок, контент — по одному разделу за раз */
+ .tabs { position:sticky; top:0; z-index:5; display:flex; gap:8px; overflow-x:auto;
+         margin:0 -16px; padding:12px 16px;
+         background:rgba(5,7,12,.88); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+         scrollbar-width:none; }
+ .tabs::-webkit-scrollbar { display:none; }
+ .tab { flex:none; min-height:40px; padding:0 16px; border-radius:999px;
+        border:1px solid rgba(255,255,255,.16); background:transparent; color:rgba(255,255,255,.75);
+        font:inherit; font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap; }
+ .tab.active { background:#fff; color:#05070c; border-color:#fff; }
+
  /* вход */
  #login { text-align:center; padding:6vh 0 0; }
  #login .card { padding:30px 22px; }
@@ -370,8 +381,10 @@ CABINET_PAGE = r"""<!doctype html>
      out.push('<div class="card hero">' + title("key", "Подписки пока нет") +
               '<p class="card-sub">Оформите её в боте — пробный период выдаётся сразу.</p>' +
               '<a class="btn btn-main" href="' + botUrl() + '">' + ICON.tg + "Оформить в боте</a></div>");
-     out.push(referralCard(p));
+     var ref0 = referralCard(p);
+     if (ref0) { out.push('<div data-sec="friends">' + ref0 + "</div>"); }
      document.getElementById("body").innerHTML = out.join("");
+     buildTabs();
      bindActions();
      return;
    }
@@ -394,7 +407,7 @@ CABINET_PAGE = r"""<!doctype html>
    }
 
    // Главная карточка: статус и сколько осталось
-   out.push('<div class="card hero">' +
+   out.push('<div data-sec="sub"><div class="card hero">' +
             '<div class="hero-head"><span class="plan">' + plan + "</span>" + mark + "</div>" +
             '<div class="big">' + big + "</div>" +
             '<div class="big-sub">' + bigSub + "</div>" +
@@ -405,15 +418,15 @@ CABINET_PAGE = r"""<!doctype html>
             "</div>" + trafficBar +
             '<div class="stack" style="margin-top:16px"><a class="btn btn-main" href="' + botUrl() + '">' +
             ICON.card + (s.status === "expired" ? "Продлить в боте" : "Продлить подписку") + "</a></div>" +
-            "</div>");
+            "</div></div>");
 
    // Детали подписки: что не влезло в главную карточку
    var details = [row("Продлений", esc(s.renewed))];
    if (s.created_at) { details.push(row("Подписка с", esc(s.created_at))); }
    if (s.devices_extra) { details.push(row("Докуплено мест", "+" + esc(s.devices_extra))); }
-   out.push('<div class="card">' + title("key", "О подписке") +
+   out.push('<div data-sec="sub"><div class="card">' + title("key", "О подписке") +
             '<p class="card-sub">Цифры на сейчас — кнопка «Обновить» внизу пересчитает их.</p>' +
-            details.join("") + "</div>");
+            details.join("") + "</div></div>");
 
    // LTE: остаток за текущий месяц, как в боте на экране «LTE-интернет»
    if (p.lte && p.lte.available) {
@@ -433,11 +446,11 @@ CABINET_PAGE = r"""<!doctype html>
                      "сейчас работают обычные серверы, в новом месяце LTE вернётся.</p>"
                    : "");
      }
-     out.push('<div class="card">' + title("lock", "LTE-интернет") + lteBody + "</div>");
+     out.push('<div data-sec="lte"><div class="card">' + title("lock", "LTE-интернет") + lteBody + "</div></div>");
    }
 
    // Подключение: приложение в одно нажатие и ссылка с копированием
-   out.push('<div class="card">' + title("key", "Подключение") +
+   out.push('<div data-sec="sub"><div class="card">' + title("key", "Подключение") +
             '<p class="card-sub">Добавьте подписку в приложение одним нажатием.</p>' +
             '<div class="pair">' +
               '<a class="btn btn-main" href="happ://add/' + encodeURI(s.url) + '">Добавить в Happ</a>' +
@@ -445,7 +458,7 @@ CABINET_PAGE = r"""<!doctype html>
             "</div>" +
             '<div class="link"><code id="suburl">' + esc(s.url) + "</code>" +
             '<button class="copy" type="button" data-copy="' + esc(s.url) + '">Скопировать</button></div>' +
-            "</div>");
+            "</div></div>");
 
    // Устройства: каждое можно отключить прямо здесь
    var devList = (p.devices || []).map(function (x) {
@@ -454,19 +467,19 @@ CABINET_PAGE = r"""<!doctype html>
             '<button class="btn-mini" type="button" data-del="' + esc(x.id) +
             '" data-name="' + esc(x.model) + '">Отключить</button></div>';
    }).join("");
-   out.push('<div class="card">' + title("dev", "Мои устройства") +
+   out.push('<div data-sec="devices"><div class="card">' + title("dev", "Мои устройства") +
             '<p class="card-sub">Подключено: ' + (p.devices ? p.devices.length : 0) +
             (s.devices_limit ? " из " + esc(s.devices_limit) : "") +
             (s.devices_limit && p.devices && p.devices.length >= s.devices_limit
               ? " · все места заняты" : "") + "</p>" +
-            (devList || '<p class="card-sub">Пока ни одного — подключитесь в приложении.</p>') + "</div>");
+            (devList || '<p class="card-sub">Пока ни одного — подключитесь в приложении.</p>') + "</div></div>");
 
    // Действия: перевыпуск ключа — как кнопка «Новый ключ» в боте
    if ((s.status === "active" || s.status === "renewal") && s.enabled) {
-     out.push('<div class="card">' + title("key", "Действия") +
+     out.push('<div data-sec="sub"><div class="card">' + title("key", "Действия") +
               '<p class="card-sub">Старая ссылка перестанет работать на всех устройствах — ' +
               "пригодится, если она попала в чужие руки.</p>" +
-              '<button class="btn btn-ghost btn-danger" type="button" id="reissue">🔁 Новый ключ</button></div>');
+              '<button class="btn btn-ghost btn-danger" type="button" id="reissue">🔁 Новый ключ</button></div></div>');
    }
 
    // Платежи: история уже приходила с сервера, но не показывалась
@@ -478,17 +491,57 @@ CABINET_PAGE = r"""<!doctype html>
      var total = p.payments_total
        ? '<p class="card-sub">Всего оплачено: <b style="color:#fff">' + esc(p.payments_total.sum) +
          " ₽</b> · оплат: " + esc(p.payments_total.count) + "</p>" : "";
-     out.push('<div class="card">' + title("card", "Платежи") + total + payRows + "</div>");
+     out.push('<div data-sec="payments"><div class="card">' + title("card", "Платежи") + total + payRows + "</div></div>");
    }
 
-   out.push(referralCard(p));
+   var ref = referralCard(p);
+   if (ref) { out.push('<div data-sec="friends">' + ref + "</div>"); }
 
    out.push('<div class="stack" style="margin-top:6px">' +
             '<button class="btn btn-ghost" type="button" onclick="load()">🔄 Обновить данные</button>' +
             '<a class="btn btn-ghost" href="' + botUrl() + '">' +
             ICON.tg + "Открыть бота</a></div>");
-   document.getElementById("body").innerHTML = out.join("");
+   document.getElementById("body").innerHTML = '<div class="tabs" id="tabs"></div>' + out.join("");
+   buildTabs();
    bindActions();
+ }
+
+ // Разделы: лента вкладок собирается из того, что реально есть на странице.
+ // Один раздел — ленту не показываем, запоминаем выбор между заходами.
+ var SEC_LABELS = {sub: "Подписка", lte: "LTE", devices: "Устройства",
+                   payments: "Платежи", friends: "Друзья"};
+ function buildTabs() {
+   var tabs = document.getElementById("tabs");
+   if (!tabs) { return; }
+   var seen = [];
+   document.querySelectorAll("#body [data-sec]").forEach(function (el) {
+     var name = el.getAttribute("data-sec");
+     if (seen.indexOf(name) === -1) { seen.push(name); }
+   });
+   if (seen.length <= 1) { tabs.style.display = "none"; return; }
+   tabs.style.display = "";
+   var saved = "";
+   try { saved = localStorage.getItem("drebol_tab") || ""; } catch (e) {}
+   var active = seen.indexOf(saved) !== -1 ? saved : seen[0];
+   tabs.innerHTML = "";
+   seen.forEach(function (name) {
+     var b = document.createElement("button");
+     b.className = "tab" + (name === active ? " active" : "");
+     b.type = "button";
+     b.textContent = SEC_LABELS[name] || name;
+     b.onclick = function () { showTab(name); };
+     tabs.appendChild(b);
+   });
+   showTab(active, true);
+ }
+ function showTab(name, silent) {
+   document.querySelectorAll("#body [data-sec]").forEach(function (el) {
+     el.style.display = el.getAttribute("data-sec") === name ? "" : "none";
+   });
+   document.querySelectorAll("#tabs .tab").forEach(function (b) {
+     b.classList.toggle("active", b.textContent === (SEC_LABELS[name] || name));
+   });
+   if (!silent) { try { localStorage.setItem("drebol_tab", name); } catch (e) {} }
  }
 
  // Рефералка: статистика и ссылка — имя бота страница уже знает (BOT)
@@ -866,8 +919,13 @@ chmod 755 {WEB_ROOT}
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html
 mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
 mv /tmp/drebol_add.html {WEB_ROOT}/add.html
+# Кабинет — по чистому адресу /cabinet: nginx отдаёт index.html из папки
+# сам (try_files $uri $uri/). Старый cabinet.html оставляем — закладки
+# и старые кнопки из бота не сломаются.
+mkdir -p {WEB_ROOT}/cabinet
+cp /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet/index.html
 mv /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet.html
-chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html
+chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html {WEB_ROOT}/cabinet/index.html
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
@@ -1062,8 +1120,8 @@ async def build_current(bot_username: str) -> tuple:
     cfg = load_config()
     og_bytes = _asset("og.webp")
     logo_bytes = _asset(LOGO_NAME)
-    # кабинет лежит рядом со страницей — ссылка относительная
-    cabinet = "cabinet.html" if cfg.get("webapi_public") else ""
+    # кабинет лежит рядом со страницей — ссылка относительная, без .html
+    cabinet = "cabinet" if cfg.get("webapi_public") else ""
     page = build_page(
         bot_username=bot_username,
         cabinet_url=cabinet,
@@ -1085,7 +1143,7 @@ def cabinet_ready() -> bool:
 
 
 def cabinet_link() -> str:
-    return f"{site_url()}/cabinet.html" if cabinet_ready() else ""
+    return f"{site_url()}/cabinet" if cabinet_ready() else ""
 
 
 def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes) -> str:
