@@ -55,7 +55,6 @@ CB_LABELS = {
     "backup_menu": "💾 Бэкап",
     "rw_menu": "🆕 Remnawave",
     "rw_test": "🔌 Проверка Remnawave",
-    "rw_notify_go": "📨 Рассылка новых ссылок",
     "backup_export": "📤 Выгрузка базы",
     "backup_apply": "♻️ Восстановление из бэкапа",
     "site_logo": "🖼 Логотип сайта",
@@ -474,6 +473,8 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
             InlineKeyboardButton("🔌 Кто онлайн", callback_data="ctl_online"),
             InlineKeyboardButton("📊 Трафик", callback_data="ctl_traffic"),
         ],
+        [InlineKeyboardButton("📊 Потребление ГБ",
+                              callback_data="rw_usage")],
         [InlineKeyboardButton("🔍 Найти человека", callback_data="find_user"),
          InlineKeyboardButton("🆘 Помощь с подключением", callback_data="ctl_ch_menu")],
         [InlineKeyboardButton(

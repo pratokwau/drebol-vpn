@@ -640,8 +640,8 @@ def _usage_page_keyboard(node_uuid, page, total_pages, back_to):
     rows.append([InlineKeyboardButton(
         "🔄 Обновить", callback_data=f"{back_to}:{page}")])
     rows.append([InlineKeyboardButton("◀️ К узлам", callback_data="rw_usage"),
-                 InlineKeyboardButton("◀️ К Remnawave",
-                                      callback_data="rw_menu")])
+                 InlineKeyboardButton("◀️ К контролю",
+                                      callback_data="ctl_menu")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -679,7 +679,7 @@ async def handle_rw_usage(query, context=None):
         await query.edit_message_text(
             "❌ <b>Панель не настроена</b>\n\n"
             "Сначала задай адрес и токен в меню Remnawave.",
-            parse_mode="HTML", reply_markup=_back())
+            parse_mode="HTML", reply_markup=_usage_back())
         return
     await query.edit_message_text("📊 Загружаю узлы…")
     r = await nodes()
@@ -687,14 +687,14 @@ async def handle_rw_usage(query, context=None):
         await query.edit_message_text(
             f"❌ <b>Не получить узлы</b>\n\n"
             f"<code>{escape(str(r.get('error'))[:300])}</code>",
-            parse_mode="HTML", reply_markup=_back())
+            parse_mode="HTML", reply_markup=_usage_back())
         return
     parsed = _parse_nodes(r["data"])
     _, _, period, _code = resolve_usage_period(context)
     if not parsed:
         await query.edit_message_text(
             "📊 <b>Потребление ГБ</b>\n\n<i>В панели нет узлов.</i>",
-            parse_mode="HTML", reply_markup=_back())
+            parse_mode="HTML", reply_markup=_usage_back())
         return
     rows = []
     for n in parsed:
@@ -706,8 +706,8 @@ async def handle_rw_usage(query, context=None):
                                       callback_data="rw_usage_all:1")])
     rows.append([InlineKeyboardButton(f"📅 Период: {period}",
                                       callback_data="rw_usage_period")])
-    rows.append([InlineKeyboardButton("◀️ К Remnawave",
-                                      callback_data="rw_menu")])
+    rows.append([InlineKeyboardButton("◀️ К контролю",
+                                      callback_data="ctl_menu")])
     await query.edit_message_text(
         "📊 <b>Потребление ГБ</b>\n\n"
         f"Период: <b>{period}</b>\n\n"
@@ -1162,6 +1162,13 @@ def _back():
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]])
 
 
+def _usage_back():
+    """Возврат из просмотра потребления: он живёт в «Контроле»,
+    а не в меню Remnawave, поэтому ведём туда, а не в rw_menu."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ К контролю", callback_data="ctl_menu")]])
+
+
 async def handle_rw_menu(query, context=None):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if context:
@@ -1185,11 +1192,8 @@ async def handle_rw_menu(query, context=None):
         kb.append([InlineKeyboardButton("👥 Сквады", callback_data="rw_squads"),
                    InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
-        kb.append([InlineKeyboardButton("📊 Потребление ГБ", callback_data="rw_usage")])
         kb.append([InlineKeyboardButton("🔄 Синхронизация",
                                         callback_data="panel_sync_menu")])
-        kb.append([InlineKeyboardButton("📨 Разослать ссылки клиентам",
-                                        callback_data="rw_notify")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
@@ -1463,79 +1467,4 @@ async def handle_rw_squad_toggle(query, context, uuid: str):
 
 # ── Рассылка новых ссылок ─────────────────────────────────────────────────────
 
-async def handle_rw_notify(query, context):
-    """Спрашивает подтверждение: ссылки уходят живым людям, молча нельзя."""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from paidsub.storage import live_paid_subs
-    rows = await live_paid_subs()
-    with_link = [r for r in rows if r[10]]
-    if not with_link:
-        await query.answer("Некому: ссылок в базе нет", show_alert=True)
-        return
 
-    await query.edit_message_text(
-        "📨 <b>Новые ссылки клиентам</b>\n\n"
-        f"<blockquote>Получат сообщение: <b>{len(with_link)}</b></blockquote>\n\n"
-        "Каждому уйдёт его новая ссылка подписки и просьба заменить старую "
-        "в приложении.\n\n"
-        "<i>Сначала убедись, что ссылка из панели работает: после рассылки "
-        "отменить сообщения нельзя.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📨 Разослать", callback_data="rw_notify_go")],
-            [InlineKeyboardButton("◀️ Отмена", callback_data="rw_menu")],
-        ]),
-    )
-
-
-async def handle_rw_notify_go(query, context):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, CopyTextButton
-    from paidsub.storage import live_paid_subs
-    rows = [r for r in await live_paid_subs() if r[10]]
-    await query.edit_message_text("📨 Рассылаю…")
-
-    sent = failed = 0
-    for i, row in enumerate(rows, 1):
-        tg_id, link = row[1], row[10]
-        if not tg_id:
-            continue
-        try:
-            await context.bot.send_message(
-                chat_id=tg_id,
-                text=("🔄 <b>Мы обновили серверы</b>\n\n"
-                      "<blockquote>Вот твоя новая ссылка подписки:\n"
-                      f"<code>{escape(str(link))}</code></blockquote>\n\n"
-                      "Замени её в приложении — старая больше не обновляется. "
-                      "Срок подписки и устройства остались как были."),
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📋 Скопировать ссылку",
-                                          copy_text=CopyTextButton(text=str(link)))],
-                    [InlineKeyboardButton("📖 Как подключиться", callback_data="how_to")],
-                ]),
-                disable_web_page_preview=True,
-            )
-            sent += 1
-        except Exception:
-            failed += 1
-        # телеграм не любит спешку на больших рассылках
-        await asyncio.sleep(0.08)
-        if i % 25 == 0:
-            try:
-                await query.edit_message_text(
-                    f"📨 Рассылаю… <b>{i}</b> из <b>{len(rows)}</b>", parse_mode="HTML")
-            except Exception:
-                pass
-
-    from log_channel import send_log
-    await send_log(context.bot,
-                   f"📨 Новые ссылки Remnawave: доставлено {sent}, не дошло {failed}")
-    await query.edit_message_text(
-        "✅ <b>Рассылка закончена</b>\n\n"
-        f"<blockquote>Доставлено: <b>{sent}</b>\n"
-        f"Не дошло: <b>{failed}</b></blockquote>\n\n"
-        "<i>Не дошло — чаще всего бот заблокирован у человека.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
-    )
