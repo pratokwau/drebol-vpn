@@ -285,6 +285,11 @@ async def post_init(app: Application):
         from webapi import sessions_tick
         app.job_queue.run_repeating(sessions_tick, interval=24 * 3600, first=900)
 
+        # синхронизация с панелью по расписанию: тик каждые 15 минут
+        # проверяет, подошло ли время, и запускает сверку, если пора
+        from remnawave import panel_sync_tick
+        app.job_queue.run_repeating(panel_sync_tick, interval=900, first=900)
+
     # Личный кабинет: http-api для сайта и мини-приложения
     from webapi import start_server
     started = await start_server()

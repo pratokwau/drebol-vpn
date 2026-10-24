@@ -41,6 +41,7 @@ from states import (
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
     AWAITING_SITE_DOMAIN, AWAITING_SITE_LOGO, AWAITING_BACKUP_FILE,
     AWAITING_RW_URL, AWAITING_RW_TOKEN, AWAITING_RW_USAGE_PERIOD,
+    AWAITING_PANEL_SYNC_DAILY, AWAITING_PANEL_SYNC_INTERVAL,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
@@ -405,6 +406,62 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("📊 К узлам", callback_data="rw_usage"),
                  InlineKeyboardButton("📅 Период",
                                       callback_data="rw_usage_period")]]),
+        )
+        return
+
+    # ── Расписание синхронизации с панелью ────────────────────────────────────
+    if state == AWAITING_PANEL_SYNC_DAILY:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from config import save_config
+        parts = text.strip().split(":")
+        ok = False
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            hh, mm = int(parts[0]), int(parts[1])
+            ok = 0 <= hh <= 23 and 0 <= mm <= 59
+        if not ok:
+            await update.message.reply_text(
+                "❌ Время — в формате <code>ЧЧ:ММ</code>, например <code>03:00</code>.",
+                parse_mode="HTML", reply_markup=back_admin())
+            return
+        from config import load_config
+        cfg = load_config()
+        cfg["panel_sync_mode"] = "daily"
+        cfg["panel_sync_daily_time"] = f"{hh:02d}:{mm:02d}"
+        save_config(cfg)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(
+            f"✅ Синхронизация каждый день в <b>{hh:02d}:{mm:02d}</b>.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⏰ К расписанию",
+                                      callback_data="panel_sync_schedule"),
+                 InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
+        )
+        return
+
+    if state == AWAITING_PANEL_SYNC_INTERVAL:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from remnawave import _parse_interval_hours, panel_sync_schedule_text
+        from config import load_config, save_config
+        hours = _parse_interval_hours(text)
+        if hours is None:
+            await update.message.reply_text(
+                "❌ Не понял интервал. Пришли, например: <code>2</code>, "
+                "<code>72ч</code> или <code>3 дня</code>.",
+                parse_mode="HTML", reply_markup=back_admin())
+            return
+        cfg = load_config()
+        cfg["panel_sync_mode"] = "interval"
+        cfg["panel_sync_interval_hours"] = hours
+        save_config(cfg)
+        context.user_data.pop("state", None)
+        await update.message.reply_text(
+            f"✅ Синхронизация: <b>{panel_sync_schedule_text(cfg)}</b>.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⏰ К расписанию",
+                                      callback_data="panel_sync_schedule"),
+                 InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
         )
         return
 

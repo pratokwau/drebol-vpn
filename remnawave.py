@@ -869,6 +869,274 @@ async def all_users(limit: int = 5000) -> list:
     return out
 
 
+# ── Точечная синхронизация с панелью ─────────────────────────────────────────
+
+def _panel_expire_to_bot(raw) -> str | None:
+    """expireAt панели (ISO) → формат базы бота DD.MM.YYYY HH:MM:SS."""
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return dt.astimezone().strftime("%d.%m.%Y %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
+
+
+async def run_panel_sync() -> dict:
+    """Сверяет базу бота с панелью: панель — источник правды для полей,
+    которые она хранит. Обновляет у платных и админских подписок uuid,
+    sub_id, sub_url, expire_date, limit_hwid, total_gb (у платных заодно
+    period_end вслед за expire_date — как при обычном продлении).
+
+    Сознательно НЕ делается, чтобы одна ошибка не унесла подписки:
+    — не меняются статусы, продления, LTE-настройки и чёрный список;
+    — не удаляются подписки, которых нет в панели;
+    — не создаются подписки для пользователей панели без записи в боте;
+    — сквады не трогаются (там живёт LTE-fallback).
+    Обе «подозрительные» группы только попадают в отчёт.
+    """
+    if not is_configured():
+        return {"ok": False, "error": "панель не настроена"}
+    probe = await users_page(0, 1)
+    if not probe["ok"]:
+        return {"ok": False, "error": str(probe.get("error"))}
+    panel_users = await all_users()
+    if not panel_users and (probe.get("data") or {}).get("total"):
+        return {"ok": False, "error": "не удалось забрать пользователей панели"}
+
+    import aiosqlite
+    from database import DB_PATH
+    from paidsub.storage import update_paid_sub_field
+    from adminsub.storage import update_sub_field
+
+    tables = []
+    async with aiosqlite.connect(DB_PATH) as db:
+        for table in ("paid_subs", "admin_subs"):
+            async with db.execute(
+                    f"SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date,"
+                    f" limit_hwid, total_gb FROM {table} ORDER BY id") as cur:
+                tables.append((table, await cur.fetchall()))
+
+    # Карта «имя в панели → строка базы»: имя в панели — это
+    # make_username(email, 0), то же правило, что при выдаче.
+    by_name, by_tg = {}, {}
+    for table, rows in tables:
+        for row in rows:
+            by_name.setdefault(make_username(row[2] or "", 0), []).append((table, row))
+            if row[1] is not None:
+                by_tg.setdefault(int(row[1]), []).append((table, row))
+
+    checked = updated_subs = updated_fields = disabled = 0
+    orphans, missing, examples = [], [], []
+    matched_keys = set()
+
+    def _match(pu: dict):
+        uname = pu.get("username") or ""
+        cands = by_name.get(make_username(uname, 0), [])
+        if len(cands) == 1:
+            return cands[0]
+        if not cands:
+            # Запасной путь: у части подписок email в базе не совпадает с
+            # именем в панели (длинные ники обрезаются) — тогда ищем по
+            # telegramId, но только если такой подписчик ровно один.
+            tid = pu.get("telegramId")
+            if tid is not None:
+                free = [c for c in by_tg.get(int(tid), [])
+                        if (c[0], c[1][0]) not in matched_keys]
+                if len(free) == 1:
+                    return free[0]
+        return None
+
+    for pu in panel_users:
+        m = _match(pu)
+        if m is None:
+            orphans.append(pu.get("username") or "без имени")
+            continue
+        table, row = m
+        matched_keys.add((table, row[0]))
+        checked += 1
+        if (pu.get("status") or "") != "ACTIVE":
+            disabled += 1
+        traffic = pu.get("userTraffic") or {}
+        want = {}
+        if pu.get("vlessUuid") and pu["vlessUuid"] != row[3]:
+            want["uuid"] = pu["vlessUuid"]
+        if pu.get("shortUuid") and pu["shortUuid"] != row[4]:
+            want["sub_id"] = pu["shortUuid"]
+        if pu.get("subscriptionUrl") and pu["subscriptionUrl"] != row[5]:
+            want["sub_url"] = pu["subscriptionUrl"]
+        exp = _panel_expire_to_bot(pu.get("expireAt"))
+        if exp and exp != row[6]:
+            want["expire_date"] = exp
+        if pu.get("hwidDeviceLimit") is not None and \
+                int(pu["hwidDeviceLimit"]) != int(row[7] or 0):
+            want["limit_hwid"] = int(pu["hwidDeviceLimit"])
+        if pu.get("trafficLimitBytes") is not None:
+            gb = int(round(int(pu["trafficLimitBytes"]) / 1024 ** 3))
+            if gb != int(row[8] or 0):
+                want["total_gb"] = gb
+        if not want:
+            continue
+        upd = update_paid_sub_field if table == "paid_subs" else update_sub_field
+        for field, value in want.items():
+            await upd(row[0], field, value)
+        if table == "paid_subs" and "expire_date" in want:
+            await update_paid_sub_field(row[0], "period_end", want["expire_date"])
+        updated_subs += 1
+        updated_fields += len(want)
+        if len(examples) < 5:
+            fields = ", ".join(want)
+            examples.append(f"{row[2]}: {fields}")
+
+    for table, rows in tables:
+        for row in rows:
+            if (table, row[0]) not in matched_keys:
+                missing.append(f"{'платная' if table == 'paid_subs' else 'админская'}: {row[2]}")
+
+    return {"ok": True, "panel_total": len(panel_users), "checked": checked,
+            "updated_subs": updated_subs, "updated_fields": updated_fields,
+            "disabled": disabled, "orphans": orphans, "missing": missing,
+            "examples": examples}
+
+
+def panel_sync_report_text(res: dict, title: str = "🔄 Синхронизация с панелью") -> str:
+    """Текст отчёта по результату run_panel_sync() — один для ручного
+    запуска и для уведомления о плановой синхронизации."""
+    if not res.get("ok"):
+        return (f"❌ <b>{title}</b>\n\n"
+                f"<blockquote>{escape(str(res.get('error'))[:300])}</blockquote>\n\n"
+                "<i>База не менялась: при ошибке панели ничего не трогаем.</i>")
+    lines = [f"✅ <b>{title}</b>", "",
+             "<blockquote>"
+             f"Пользователей в панели: <b>{res['panel_total']}</b>\n"
+             f"Сверено подписок: <b>{res['checked']}</b>\n"
+             f"Обновлено подписок: <b>{res['updated_subs']}</b> "
+             f"(полей: {res['updated_fields']})</blockquote>"]
+    if res["examples"]:
+        shown = "\n".join(escape(e) for e in res["examples"])
+        lines += ["", "✏️ <b>Что поменялось</b>", f"<blockquote>{shown}</blockquote>"]
+    if res["disabled"]:
+        lines += ["", f"⏸ В панели отключено подписок: <b>{res['disabled']}</b> "
+                      "(статусы в базе не трогаем — заморозка и так читается из панели)."]
+    if res["orphans"]:
+        shown = "\n".join(escape(o) for o in res["orphans"][:5])
+        lines += ["", f"👻 В панели есть, а в базе нет: <b>{len(res['orphans'])}</b>",
+                  f"<blockquote>{shown}</blockquote>"]
+        if len(res["orphans"]) > 5:
+            lines.append(f"<i>…и ещё {len(res['orphans']) - 5}</i>")
+    if res["missing"]:
+        shown = "\n".join(escape(m) for m in res["missing"][:5])
+        lines += ["", f"⚠️ В базе есть, а в панели нет: <b>{len(res['missing'])}</b>",
+                  f"<blockquote>{shown}</blockquote>"]
+        if len(res["missing"]) > 5:
+            lines.append(f"<i>…и ещё {len(res['missing']) - 5}</i>")
+    lines += ["", "<i>Синхронизируются только поля панели: uuid, ссылка, срок, "
+              "лимит устройств и лимит трафика. Статусы, продления и LTE-настройки "
+              "не меняются, ничего не удаляется и не создаётся само.</i>"]
+    return "\n".join(lines)
+
+
+# ── Расписание синхронизации ─────────────────────────────────────────────────
+
+def panel_sync_schedule_text(cfg: dict) -> str:
+    mode = cfg.get("panel_sync_mode") or "off"
+    if mode == "interval":
+        hours = int(cfg.get("panel_sync_interval_hours") or 24)
+        if hours % 24 == 0 and hours >= 24:
+            days = hours // 24
+            return f"каждые {days} дн." if days > 1 else "каждый день"
+        return f"каждые {hours} ч."
+    if mode == "daily":
+        return f"каждый день в {cfg.get('panel_sync_daily_time') or '—'}"
+    return "выключено"
+
+
+def panel_sync_due(cfg: dict, now=None) -> bool:
+    """Пора ли запускать плановую синхронизацию. Тик ходит каждые
+    15 минут, поэтому точность — до 15 минут."""
+    mode = cfg.get("panel_sync_mode") or "off"
+    if mode == "off":
+        return False
+    now = now or datetime.now()
+    last_raw = cfg.get("panel_sync_last_run")
+    last = None
+    if last_raw:
+        try:
+            last = datetime.fromisoformat(str(last_raw))
+        except ValueError:
+            last = None
+    if mode == "interval":
+        hours = int(cfg.get("panel_sync_interval_hours") or 24)
+        return last is None or (now - last).total_seconds() >= hours * 3600
+    if mode == "daily":
+        try:
+            hh, mm = (cfg.get("panel_sync_daily_time") or "03:00").split(":")
+            sched = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+        except (ValueError, TypeError):
+            return False
+        return now >= sched and (last is None or last < sched)
+    return False
+
+
+_SYNC_RUNNING = False
+
+
+async def panel_sync_tick(context):
+    """Плановая синхронизация: проверяет расписание и, если пора,
+    запускает run_panel_sync(). Админу пишет только если есть что
+    показать: изменения, ошибки или расхождения."""
+    global _SYNC_RUNNING
+    if _SYNC_RUNNING:
+        return
+    from config import ADMIN_ID, load_config, save_config
+    cfg = load_config()
+    if not panel_sync_due(cfg):
+        return
+    _SYNC_RUNNING = True
+    try:
+        res = await run_panel_sync()
+        cfg = load_config()
+        if res.get("ok"):
+            cfg["panel_sync_last_run"] = datetime.now().isoformat(timespec="seconds")
+            cfg["panel_sync_last_report"] = {
+                "at": cfg["panel_sync_last_run"],
+                "checked": res["checked"], "updated": res["updated_subs"],
+                "orphans": len(res["orphans"]), "missing": len(res["missing"])}
+        save_config(cfg)
+        if ADMIN_ID and (not res.get("ok") or res.get("updated_subs")
+                         or res.get("orphans") or res.get("missing")):
+            try:
+                await context.bot.send_message(
+                    ADMIN_ID, panel_sync_report_text(res, "⏰ Плановая синхронизация с панелью"),
+                    parse_mode="HTML")
+            except Exception:
+                pass
+    finally:
+        _SYNC_RUNNING = False
+
+
+def _parse_interval_hours(text: str) -> int | None:
+    """«3», «72ч», «3 дня», «2d» → часы. Допустимо от 1 часа до 30 дней."""
+    t = (text or "").strip().lower().replace(" ", "")
+    if not t:
+        return None
+    mult, num = 1, t
+    for suf in ("дней", "дня", "день", "дн", "д", "day", "days"):
+        if t.endswith(suf):
+            mult, num = 24, t[:-len(suf)]
+            break
+    else:
+        for suf in ("часов", "часа", "час", "ч", "hour", "hours", "h"):
+            if t.endswith(suf):
+                num = t[:-len(suf)]
+                break
+    try:
+        hours = int(num) * mult
+    except ValueError:
+        return None
+    return hours if 1 <= hours <= 24 * 30 else None
+
+
 # ── Подготовка данных подписки ────────────────────────────────────────────────
 
 def make_username(email: str, tg_id: int) -> str:
@@ -918,12 +1186,113 @@ async def handle_rw_menu(query, context=None):
                    InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("📊 Потребление ГБ", callback_data="rw_usage")])
+        kb.append([InlineKeyboardButton("🔄 Точечная синхронизация",
+                                        callback_data="panel_sync")])
+        kb.append([InlineKeyboardButton("⏰ Расписание синхронизации",
+                                        callback_data="panel_sync_schedule")])
         kb.append([InlineKeyboardButton("📨 Разослать ссылки клиентам",
                                         callback_data="rw_notify")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
                                   disable_web_page_preview=True)
+
+
+async def handle_panel_sync(query, context=None):
+    """Ручной запуск: идём в панель, сверяем каждую подписку с базой."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if not is_configured():
+        await query.answer("Сначала задай адрес панели и токен", show_alert=True)
+        return
+    await query.edit_message_text("🔄 Иду в панель и сверяю каждую подписку…")
+    res = await run_panel_sync()
+    if res.get("ok"):
+        cfg = load_config()
+        cfg["panel_sync_last_run"] = datetime.now().isoformat(timespec="seconds")
+        cfg["panel_sync_last_report"] = {
+            "at": cfg["panel_sync_last_run"],
+            "checked": res["checked"], "updated": res["updated_subs"],
+            "orphans": len(res["orphans"]), "missing": len(res["missing"])}
+        save_config(cfg)
+    await query.edit_message_text(
+        panel_sync_report_text(res), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Ещё раз", callback_data="panel_sync"),
+             InlineKeyboardButton("⏰ Расписание", callback_data="panel_sync_schedule")],
+            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
+
+
+def _panel_sync_schedule_keyboard():
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏰ Выкл", callback_data="panel_sync_off")],
+        [InlineKeyboardButton("🔁 Каждый час", callback_data="panel_sync_set:interval:1"),
+         InlineKeyboardButton("🔁 Каждые 6 ч.", callback_data="panel_sync_set:interval:6")],
+        [InlineKeyboardButton("🔁 Каждые 12 ч.", callback_data="panel_sync_set:interval:12"),
+         InlineKeyboardButton("🔁 Каждые 3 дня", callback_data="panel_sync_set:interval:72")],
+        [InlineKeyboardButton("🔁 Каждую неделю", callback_data="panel_sync_set:interval:168")],
+        [InlineKeyboardButton("📅 Каждый день в …", callback_data="panel_sync_daily"),
+         InlineKeyboardButton("✏️ Свой интервал", callback_data="panel_sync_interval")],
+        [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]])
+
+
+async def handle_panel_sync_schedule(query, context=None):
+    """Экран расписания: текущий режим, последний отчёт, выбор периода."""
+    if context:
+        context.user_data.pop("state", None)
+    cfg = load_config()
+    lines = ["⏰ <b>Расписание синхронизации</b>", "",
+             f"<blockquote>Сейчас: <b>{panel_sync_schedule_text(cfg)}</b>"]
+    last = cfg.get("panel_sync_last_report") or {}
+    if last.get("at"):
+        lines.append(f"Последний запуск: {last['at'][:16].replace('T', ' ')} · "
+                     f"сверено {last.get('checked', 0)}, обновлено {last.get('updated', 0)}, "
+                     f"в панели без базы {last.get('orphans', 0)}, "
+                     f"в базе без панели {last.get('missing', 0)}")
+    lines.append("</blockquote>")
+    lines += ["", "<i>Плановая проверка ходит каждые 15 минут и запускается, "
+              "когда подошло время. Если панель недоступна — база не меняется, "
+              "а запуск повторится при следующей проверке. Ручная кнопка "
+              "«Точечная синхронизация» работает всегда, вне расписания.</i>"]
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=_panel_sync_schedule_keyboard())
+
+
+async def handle_panel_sync_set(query, context, mode: str, value: str):
+    cfg = load_config()
+    if mode == "interval":
+        cfg["panel_sync_mode"] = "interval"
+        cfg["panel_sync_interval_hours"] = int(value)
+    save_config(cfg)
+    await handle_panel_sync_schedule(query, context)
+
+
+async def handle_panel_sync_off(query, context=None):
+    cfg = load_config()
+    cfg["panel_sync_mode"] = "off"
+    save_config(cfg)
+    await handle_panel_sync_schedule(query, context)
+
+
+async def handle_panel_sync_daily(query, context):
+    from states import AWAITING_PANEL_SYNC_DAILY
+    context.user_data["state"] = AWAITING_PANEL_SYNC_DAILY
+    await query.edit_message_text(
+        "📅 <b>Каждый день в …</b>\n\n"
+        "Пришли время в формате <code>ЧЧ:ММ</code>, например <code>03:00</code>.\n"
+        "<i>Время — по часовому поясу сервера.</i>",
+        parse_mode="HTML", reply_markup=_back())
+
+
+async def handle_panel_sync_interval(query, context):
+    from states import AWAITING_PANEL_SYNC_INTERVAL
+    context.user_data["state"] = AWAITING_PANEL_SYNC_INTERVAL
+    await query.edit_message_text(
+        "✏️ <b>Свой интервал</b>\n\n"
+        "Пришли, как часто сверяться: <code>2</code> — каждые 2 часа, "
+        "<code>72ч</code> — каждые 72 часа, <code>3 дня</code> — каждые 3 дня.\n"
+        "<i>От 1 часа до 30 дней.</i>",
+        parse_mode="HTML", reply_markup=_back())
 
 
 async def handle_rw_url(query, context):
