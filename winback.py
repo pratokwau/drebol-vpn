@@ -48,7 +48,7 @@ async def _send_wave(bot, tg_id: int, stage: int, percent: int, life_days: int) 
     until = (datetime.now() + timedelta(days=life_days)).strftime(DATE_FMT)
     if not await get_promo(code):
         await create_promo(code, percent, until, owner_tg_id=tg_id,
-                           max_uses=1, note="Winback", source="winback")
+                           max_uses=1, note="Возврат ушедших", source="winback")
 
     head = ("🎯 <b>Возвращайтесь — мы сделали скидку</b>" if stage == 1
             else "🎯 <b>Последнее предложение</b>")
@@ -117,7 +117,7 @@ async def winback_tick(context):
             continue
         await mark_winback_sent(tg_id, target)
         await send_log(context.bot,
-                       f"🎯 Winback (волна {target}): <code>{tg_id}</code> · "
+                       f"🎯 Возврат ушедших (волна {target}): <code>{tg_id}</code> · "
                        f"промокод <b>{code}</b> (−{percent}%)")
 
 
@@ -133,7 +133,7 @@ async def handle_winback_settings(query):
              if s["days2"] else "выключена")
 
     await query.edit_message_text(
-        "🎯 <b>Winback — возврат ушедших</b>\n\n"
+        "🎯 <b>Возврат ушедших</b>\n\n"
         f"<blockquote>Статус: <b>{status}</b>\n"
         f"1️⃣ Первая волна: через <b>{s['days']}</b> дн. · скидка <b>{s['percent']}%</b>\n"
         f"2️⃣ Вторая волна: {wave2}\n"

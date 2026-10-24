@@ -1323,7 +1323,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         _save("winback_days", int(text))
         context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Winback через <b>{text} дн.</b>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Возврат ушедших через <b>{text} дн.</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Winback: процент ─────────────────────────────────────────────────────
@@ -1333,7 +1333,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         _save("winback_percent", int(text))
         context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Скидка Winback: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Скидка возврата: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Адрес узла ───────────────────────────────────────────────────────────
