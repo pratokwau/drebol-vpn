@@ -38,12 +38,14 @@ async def handle_my_sub(query):
     else:
         status_line = "⚪ Статус: <b>неизвестен</b>"
 
+    cdn = await _cdn_block(email)
     await query.edit_message_text(
         "📋 <b>Админская подписка</b>\n\n"
         f"📅 Действует до: <b>{expire}</b>\n"
         f"📶 Трафик: <b>{traffic}</b>\n"
         f"{status_line}\n\n"
-        f"🔗 <b>Ссылка подписки:</b>\n<code>{sub_url}</code>\n\n"
+        + (cdn + "\n\n" if cdn else "")
+        + f"🔗 <b>Ссылка подписки:</b>\n<code>{sub_url}</code>\n\n"
         "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)",
         parse_mode="HTML",
         reply_markup=back_main(),
@@ -67,6 +69,47 @@ def _progress_bar(used_gb: float, total_gb: int) -> str:
     bar = "▓" * filled + "░" * empty
     pct = int(ratio * 100)
     return f"[{bar}] {pct}%"
+
+
+async def _cdn_block(email: str) -> str:
+    """Блок CDN-трафика для экрана подписки: использовано/осталось
+    из месячных 30 ГБ и разбивка по CDN-узлам.
+
+    Пустая строка, если панель не настроена, CDN-узлов нет или
+    статистика недоступна: экран подписки из-за этого ломаться
+    не должен — это дополнительная информация, а не основная.
+    """
+    try:
+        from remnawave import (CDN_MONTHLY_GB, is_configured,
+                               make_username, user_cdn_usage)
+        if not is_configured():
+            return ""
+        r = await user_cdn_usage(make_username(email or "", 0))
+    except Exception:
+        return ""
+    if not r.get("ok") or not r.get("cdn_nodes"):
+        return ""
+    used_gb = r["used_bytes"] / 1024 ** 3
+    left_gb = max(0.0, CDN_MONTHLY_GB - used_gb)
+    lines = ["🌐 <b>CDN-трафик в этом месяце</b>",
+             f"Использовано: <b>{used_gb:.2f} ГБ</b> "
+             f"из <b>{CDN_MONTHLY_GB} ГБ</b>",
+             f"Осталось: <b>{left_gb:.2f} ГБ</b>"]
+    bar = _progress_bar(used_gb, CDN_MONTHLY_GB)
+    if bar:
+        lines.append(bar)
+    spent = [(name, b) for name, b in r["per_node"] if b > 0]
+    if spent:
+        lines.append("<blockquote>" + "\n".join(
+            f"{escape(name)}: <b>{_fmt_bytes_user(b)}</b>"
+            for name, b in spent) + "</blockquote>")
+    else:
+        lines.append("<i>В этом месяце на CDN-узлах трафика пока нет.</i>")
+    lines.append("<i>Лимит 30 ГБ на CDN-узлы обновляется каждый месяц.</i>")
+    if r.get("failed"):
+        lines.append("<i>Часть CDN-узлов не ответила — "
+                     "цифра может быть неполной.</i>")
+    return "\n".join(lines)
 
 
 async def handle_my_paid_sub(query):
@@ -137,10 +180,12 @@ async def handle_my_paid_sub(query):
         kb_rows.append(cab)
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
+    cdn = await _cdn_block(email)
     await query.edit_message_text(
         "⚙️ <b>Моя подписка</b>\n\n"
         f"<blockquote>{plan}  ·  {mark}</blockquote>\n\n"
-        "<i>Скопируйте ссылку, продлите подписку или управляйте устройствами.</i>",
+        + (cdn + "\n\n" if cdn else "")
+        + "<i>Скопируйте ссылку, продлите подписку или управляйте устройствами.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb_rows),
         disable_web_page_preview=True,
