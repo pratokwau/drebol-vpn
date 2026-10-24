@@ -470,6 +470,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == AWAITING_DIGEST_HOUR:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         from handlers.control import parse_digest_time
+        # локальный импорт обязателен: в других ветках handle_text есть
+        # свои from config import — из-за этого load_config/save_config
+        # считаются локальными для всей функции, и без этой строки ветка
+        # падала бы с UnboundLocalError до любого ответа
+        from config import load_config, save_config
         parsed = parse_digest_time(text)
         if parsed is None:
             await update.message.reply_text(
