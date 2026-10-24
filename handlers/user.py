@@ -1524,7 +1524,7 @@ async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
 
 
 async def _sub_facts(row) -> list:
-    """Трафик и устройства — то, что человек хочет видеть сразу.
+    """Трафик, остаток LTE и устройства — то, что человек хочет видеть сразу.
 
     Панель может не ответить: тогда просто не показываем строку,
     а не пугаем ошибкой на главном экране.
@@ -1541,6 +1541,25 @@ async def _sub_facts(row) -> list:
                 lines.append(f"<code>{_progress_bar(used / 1024 ** 3, total_gb)}</code>")
             else:
                 lines.append(f"📊 Трафик: <b>{_fmt_bytes_user(used)}</b> · без лимита")
+    except Exception:
+        pass
+    # Остаток LTE-серверов — той же строкой в цитате подписки.
+    # Панель может не ответить или LTE-узлов может не быть: тогда строку
+    # просто не показываем, а не пугаем ошибкой на главном экране.
+    try:
+        from config import load_config
+        from remnawave import (is_configured, lte_limit_gb,
+                               make_username, user_cdn_usage)
+        lte_limit = lte_limit_gb(row[19] if len(row) > 19 else None,
+                                 load_config().get("paid_preset_lte"))
+        if lte_limit == 0:
+            lines.append("🌐 LTE-серверы: <b>закрыты</b>")
+        elif is_configured():
+            r = await user_cdn_usage(make_username(email or "", 0))
+            if r.get("ok") and r.get("cdn_nodes"):
+                left_gb = max(0.0, lte_limit - r["used_bytes"] / 1024 ** 3)
+                lines.append(f"🌐 Остаток LTE-серверов: <b>{left_gb:.2f} ГБ</b> "
+                             f"из {lte_limit} ГБ")
     except Exception:
         pass
     if limit_hwid:
