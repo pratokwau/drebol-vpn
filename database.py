@@ -1131,6 +1131,52 @@ async def users_by_emails(emails: list) -> dict:
     return out
 
 
+async def users_by_ids(tg_ids: list) -> dict:
+    """TG ID -> (first_name, username) из таблицы users."""
+    tg_ids = [t for t in tg_ids if t]
+    if not tg_ids:
+        return {}
+    marks = ",".join("?" * len(tg_ids))
+    out = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"""
+            SELECT id, first_name, username FROM users WHERE id IN ({marks})
+        """, tg_ids) as cur:
+            for tg_id, fn, un in await cur.fetchall():
+                out[tg_id] = (fn, un)
+    return out
+
+
+async def subs_by_tg_ids(tg_ids: list) -> dict:
+    """TG ID -> {email, expire, total_gb, status} самой свежей подписки.
+
+    Платные подписки в приоритете, админские — запасной вариант.
+    """
+    tg_ids = [t for t in tg_ids if t]
+    if not tg_ids:
+        return {}
+    marks = ",".join("?" * len(tg_ids))
+    out = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(f"""
+            SELECT tg_id, email, expire_date, total_gb, status
+            FROM paid_subs WHERE tg_id IN ({marks})
+            ORDER BY created_at DESC
+        """, tg_ids) as cur:
+            for tg_id, email, expire, total_gb, status in await cur.fetchall():
+                out.setdefault(tg_id, {"email": email, "expire": expire,
+                                       "total_gb": total_gb, "status": status})
+        async with db.execute(f"""
+            SELECT tg_id, email, expire_date, total_gb
+            FROM admin_subs WHERE tg_id IN ({marks})
+            ORDER BY created_at DESC
+        """, tg_ids) as cur:
+            for tg_id, email, expire, total_gb in await cur.fetchall():
+                out.setdefault(tg_id, {"email": email, "expire": expire,
+                                       "total_gb": total_gb, "status": None})
+    return out
+
+
 async def recent_subs_for_connect_help(window_hours: int) -> list[tuple]:
     """Свежие подписки, по которым ещё не решили, помогать ли с подключением.
 
