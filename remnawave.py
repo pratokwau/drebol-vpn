@@ -10,8 +10,10 @@
 """
 
 import asyncio
+import calendar
 import re
-from datetime import datetime
+from datetime import datetime, timezone
+from urllib.parse import quote
 from html import escape
 
 import aiohttp
@@ -205,6 +207,280 @@ async def nodes() -> dict:
     return await _request("GET", f"{API_ROOT}/nodes")
 
 
+# ── Потребление трафика по узлам ──────────────────────────────────────────────
+
+def current_month_range(now=None):
+    """Текущий календарный месяц: с 1-го числа по его последний день.
+
+    Панель отдаёт расход по датам, а не «за последние 30 дней», поэтому
+    границы берём именно календарные: в феврале это 28 (29 в високосном),
+    в октябре — 31. Возвращает (начало, конец, «01.10.2026 — 31.10.2026»).
+    """
+    now = now or datetime.now(timezone.utc)
+    first = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_day = calendar.monthrange(now.year, now.month)[1]
+    last = now.replace(day=last_day, hour=23, minute=59, second=59,
+                       microsecond=0)
+    period = f"{first.strftime('%d.%m.%Y')} — {last.strftime('%d.%m.%Y')}"
+    return first, last, period
+
+
+def _iso_z(dt) -> str:
+    """ISO-8601 с Z на конце — такой формат панель понимает для range."""
+    return dt.astimezone(timezone.utc).isoformat(
+        timespec="seconds").replace("+00:00", "Z")
+
+
+async def node_users_usage(node_uuid: str, start_iso: str, end_iso: str) -> dict:
+    """Расход пользователей одного узла за период.
+
+    Путь панели: GET /api/nodes/usage/{uuid}/users/range?start=...&end=...
+    Ответ — записи {user_uuid, username, node_uuid, total, date}, по одной
+    на дату, поэтому суммирование по username делает вызывающий код.
+    """
+    path = (f"{API_ROOT}/nodes/usage/{node_uuid}/users/range"
+            f"?start={quote(start_iso, safe='')}"
+            f"&end={quote(end_iso, safe='')}")
+    return await _request("GET", path)
+
+
+def _parse_nodes(data) -> list:
+    """Узлы панели в виде [{uuid, name, disabled}]."""
+    if isinstance(data, dict):
+        raw = data.get("nodes") or data.get("response") or []
+    else:
+        raw = data or []
+    out = []
+    for n in raw:
+        if not isinstance(n, dict) or not n.get("uuid"):
+            continue
+        out.append({"uuid": n["uuid"],
+                    "name": n.get("name") or n.get("address") or "узел",
+                    "disabled": bool(n.get("isDisabled"))})
+    return out
+
+
+def _usage_items(data) -> list:
+    """Записи панели -> [(username, байты за период)], по убыванию.
+
+    _request уже снял внешнюю обёртку {"response": ...}, но на всякий
+    случай поддерживаем и вложенный список, и ключ users. Нулевой
+    расход в список не попадает — он только шумит.
+    """
+    if isinstance(data, dict):
+        for key in ("response", "users", "data"):
+            if isinstance(data.get(key), list):
+                data = data[key]
+                break
+        else:
+            return []
+    if not isinstance(data, list):
+        return []
+    totals = {}
+    for row in data:
+        if not isinstance(row, dict):
+            continue
+        username = row.get("username") or row.get("userName") or ""
+        total = row.get("total")
+        if total is None:
+            total = (row.get("totalTrafficBytes")
+                     or row.get("usedTrafficBytes") or 0)
+        if isinstance(total, dict):
+            total = sum(v for v in total.values()
+                        if isinstance(v, (int, float)))
+        try:
+            total = int(total or 0)
+        except (TypeError, ValueError):
+            total = 0
+        if username and total > 0:
+            totals[username] = totals.get(username, 0) + total
+    return sorted(totals.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+
+
+def _fmt_gb(nbytes: int) -> str:
+    return f"{nbytes / 1024 ** 3:.2f} ГБ"
+
+
+_PAGE_SIZE = 20
+
+
+def _usage_page_keyboard(node_uuid, page, total_pages, back_to):
+    """Пагинация: кнопки ◀️/▶️, обновление и возврат."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    rows = []
+    if total_pages > 1:
+        nav = []
+        if page > 1:
+            nav.append(InlineKeyboardButton(
+                "◀️", callback_data=f"{back_to}:{page - 1}"))
+        nav.append(InlineKeyboardButton(f"{page}/{total_pages}",
+                                        callback_data="noop"))
+        if page < total_pages:
+            nav.append(InlineKeyboardButton(
+                "▶️", callback_data=f"{back_to}:{page + 1}"))
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(
+        "🔄 Обновить", callback_data=f"{back_to}:{page}")])
+    rows.append([InlineKeyboardButton("◀️ К узлам", callback_data="rw_usage"),
+                 InlineKeyboardButton("◀️ К Remnawave",
+                                      callback_data="rw_menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _usage_text(title, period, items, page, total_pages) -> str:
+    """Текст страницы: итог + строки «номер. username — X ГБ»."""
+    total_bytes = sum(total for _, total in items)
+    lines = [f"📊 <b>{escape(title)}</b>",
+             f"Период: <b>{period}</b>",
+             f"Всего: <b>{_fmt_gb(total_bytes)}</b>"
+             f" · пользователей: <b>{len(items)}</b>", ""]
+    if not items:
+        lines.append("<i>В этом месяце трафика пока нет.</i>")
+    else:
+        start = (page - 1) * _PAGE_SIZE
+        for i, (username, total) in enumerate(
+                items[start:start + _PAGE_SIZE], start + 1):
+            lines.append(f"{i}. <code>{escape(username)}</code>"
+                         f" — <b>{_fmt_gb(total)}</b>")
+        if total_pages > 1:
+            lines.append("")
+            lines.append(f"<i>Страница {page} из {total_pages}.</i>")
+    return "\n".join(lines)
+
+
+async def handle_rw_usage(query, context=None):
+    """Выбор узла для потребления за текущий месяц."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if not is_configured():
+        await query.edit_message_text(
+            "❌ <b>Панель не настроена</b>\n\n"
+            "Сначала задай адрес и токен в меню Remnawave.",
+            parse_mode="HTML", reply_markup=_back())
+        return
+    await query.edit_message_text("📊 Загружаю узлы…")
+    r = await nodes()
+    if not r["ok"]:
+        await query.edit_message_text(
+            f"❌ <b>Не получить узлы</b>\n\n"
+            f"<code>{escape(str(r.get('error'))[:300])}</code>",
+            parse_mode="HTML", reply_markup=_back())
+        return
+    parsed = _parse_nodes(r["data"])
+    _, _, period = current_month_range()
+    if not parsed:
+        await query.edit_message_text(
+            "📊 <b>Потребление ГБ</b>\n\n<i>В панели нет узлов.</i>",
+            parse_mode="HTML", reply_markup=_back())
+        return
+    rows = []
+    for n in parsed:
+        mark = "⛔ " if n["disabled"] else ""
+        rows.append([InlineKeyboardButton(
+            f"{mark}{n['name']}",
+            callback_data=f"rw_usage_node:{n['uuid']}:1")])
+    rows.append([InlineKeyboardButton("🌐 Все ноды",
+                                      callback_data="rw_usage_all:1")])
+    rows.append([InlineKeyboardButton("◀️ К Remnawave",
+                                      callback_data="rw_menu")])
+    await query.edit_message_text(
+        "📊 <b>Потребление ГБ</b>\n\n"
+        f"Период: <b>{period}</b> — с начала месяца по его конец.\n\n"
+        "Выбери узел — покажу каждого пользователя и сколько он "
+        "потратил на этом узле. «Все ноды» — суммарно по всем узлам.",
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def handle_rw_usage_node(query, context, node_uuid: str, page: int = 1):
+    """Пользователи одного узла за текущий месяц, по убыванию ГБ."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    start, end, period = current_month_range()
+    await query.edit_message_text("📊 Загружаю потребление…")
+    nodes_r = await nodes()
+    name = node_uuid
+    if nodes_r["ok"]:
+        for n in _parse_nodes(nodes_r["data"]):
+            if n["uuid"] == node_uuid:
+                name = n["name"]
+                break
+    r = await node_users_usage(node_uuid, _iso_z(start), _iso_z(end))
+    if not r["ok"]:
+        await query.edit_message_text(
+            f"❌ <b>Не получить потребление</b>\n\n"
+            f"<code>{escape(str(r.get('error'))[:300])}</code>\n\n"
+            "<i>Если панель другой версии и этот путь у неё закрыт — "
+            "пришли мне её версию, подберу актуальный эндпоинт.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ К узлам",
+                                      callback_data="rw_usage")]]))
+        return
+    items = _usage_items(r["data"])
+    total_pages = max(1, (len(items) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    page = min(max(1, page), total_pages)
+    await query.edit_message_text(
+        _usage_text(name, period, items, page, total_pages),
+        parse_mode="HTML",
+        reply_markup=_usage_page_keyboard(
+            node_uuid, page, total_pages,
+            f"rw_usage_node:{node_uuid}"))
+
+
+async def handle_rw_usage_all(query, context, page: int = 1):
+    """Пользователи суммарно по всем узлам за текущий месяц."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    start, end, period = current_month_range()
+    await query.edit_message_text("📊 Загружаю потребление по всем узлам…")
+    nodes_r = await nodes()
+    if not nodes_r["ok"]:
+        await query.edit_message_text(
+            f"❌ <b>Не получить узлы</b>\n\n"
+            f"<code>{escape(str(nodes_r.get('error'))[:300])}</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ К узлам",
+                                      callback_data="rw_usage")]]))
+        return
+    parsed = _parse_nodes(nodes_r["data"])
+    if not parsed:
+        await query.edit_message_text(
+            "📊 <b>Потребление ГБ</b>\n\n<i>В панели нет узлов.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ К узлам",
+                                      callback_data="rw_usage")]]))
+        return
+    results = await asyncio.gather(*[
+        node_users_usage(n["uuid"], _iso_z(start), _iso_z(end))
+        for n in parsed
+    ])
+    totals, failed = {}, 0
+    for res in results:
+        if not res["ok"]:
+            failed += 1
+            continue
+        for username, total in _usage_items(res["data"]):
+            totals[username] = totals.get(username, 0) + total
+    if failed and not totals:
+        await query.edit_message_text(
+            "❌ <b>Не получить потребление ни по одному узлу</b>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ К узлам",
+                                      callback_data="rw_usage")]]))
+        return
+    items = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0].lower()))
+    total_pages = max(1, (len(items) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    page = min(max(1, page), total_pages)
+    text = _usage_text("Все ноды", period, items, page, total_pages)
+    if failed:
+        text += (f"\n\n<i>Не ответили узлов: {failed} — их трафик "
+                 "в итог не попал.</i>")
+    await query.edit_message_text(
+        text, parse_mode="HTML",
+        reply_markup=_usage_page_keyboard(
+            None, page, total_pages, "rw_usage_all"))
+
+
 async def users_page(start: int = 0, size: int = 500) -> dict:
     """Страница пользователей. Больше 1000 за раз панель не отдаёт."""
     return await _request("GET", f"{USERS}?start={int(start)}&size={min(int(size), 1000)}")
@@ -275,6 +551,7 @@ async def handle_rw_menu(query, context=None):
         kb.append([InlineKeyboardButton("👥 Сквады", callback_data="rw_squads"),
                    InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
+        kb.append([InlineKeyboardButton("📊 Потребление ГБ", callback_data="rw_usage")])
         kb.append([InlineKeyboardButton("📨 Разослать ссылки клиентам",
                                         callback_data="rw_notify")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
