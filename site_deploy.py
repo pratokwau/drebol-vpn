@@ -148,6 +148,12 @@ CABINET_PAGE = r"""<!doctype html>
  /* шапка */
  .top { display:flex; align-items:center; justify-content:space-between; gap:12px;
         min-height:48px; margin-bottom:22px; }
+ /* Полный экран: шапка Telegram висит поверх страницы, а переменную
+    безопасной зоны отдают не все клиенты — поэтому в полном экране
+    опускаем нашу шапку фиксированным отступом, ни от чего не зависящим.
+    В обычном раскрытом виде и в браузере это правило не действует. */
+ body.tg-fullscreen .wrap { padding-top:76px; }
+ body.tg-fullscreen .tabs { top:56px; }
  .brand { display:flex; align-items:center; min-height:44px; }
  .brand img { height:26px; width:auto; display:block; }
  .logo { display:none; align-items:center; gap:10px; font-weight:800; font-size:22px; letter-spacing:-.02em; }
@@ -740,6 +746,25 @@ CABINET_PAGE = r"""<!doctype html>
        tg.requestFullscreen();
      }
    } catch (e) {}
+   // Фиксированный отступ шапки в полном экране: класс ставится,
+   // когда клиент реально перешёл в полный экран, и снимается при
+   // выходе из него. requestFullscreen асинхронен, поэтому ловим
+   // и событие, и повторную проверку через 800 мс.
+   try {
+     document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
+   } catch (e) {}
+   try {
+     if (tg.onEvent) { tg.onEvent("fullscreenChanged", function () {
+       try {
+         document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
+       } catch (e) {}
+     }); }
+   } catch (e) {}
+   setTimeout(function () {
+     try {
+       document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
+     } catch (e) {}
+   }, 800);
    // Безопасная зона Telegram: в полном экране шапка клиента
    // (закрыть, меню) висит поверх страницы. Скрипт Telegram сам
    // выставляет --tg-content-safe-area-inset-top, но на старых
