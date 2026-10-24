@@ -1559,6 +1559,17 @@ async def bl_listed_users() -> list:
             return await cur.fetchall()
 
 
+async def bl_remote_admin_subs() -> list:
+    """TG ID админских подписок людей из общего списка без исключений."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT s.tg_id FROM admin_subs s
+            JOIN blacklist_remote r ON r.tg_id = s.tg_id
+            WHERE s.tg_id NOT IN (SELECT tg_id FROM blacklist_allow)
+        """) as cur:
+            return [r[0] for r in await cur.fetchall()]
+
+
 async def bl_remote_subs() -> list:
     """Подписки людей из общего списка без исключений: (tg_id, статус, продлений)."""
     async with aiosqlite.connect(DB_PATH) as db:

@@ -47,9 +47,8 @@ PER_PAGE = 10
 USER_ALLOWED = {"support_open", "support_files"}
 USER_ALLOWED_PREFIXES = ("support_page:",)
 
-LIST_TABS = {"ours": "Твои", "manual": "Вручную", "allow": "Исключения"}
+LIST_TABS = {"manual": "Вручную", "allow": "Исключения"}
 LIST_TITLES = {
-    "ours": "👥 Твои пользователи в ЧС",
     "manual": "✍️ Добавлены вручную",
     "allow": "✅ Исключения из общего списка",
 }
@@ -552,10 +551,11 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
     синк вымывал бы его записи. При совпадении ID побеждает основной.
     """
     import aiohttp
-    from database import bl_extra_entries, bl_remote_subs, bl_replace_remote
+    from database import (bl_extra_entries, bl_remote_admin_subs,
+                          bl_remote_subs, bl_replace_remote)
 
     report = {"ok": False, "error": None, "total": 0, "added": 0, "removed": 0,
-              "trials_stopped": [], "paid_found": [], "restored": [],
+              "trials_stopped": [], "paid_stopped": [], "admin_stopped": [], "restored": [],
               "banned": [], "unbanned": [],
               "extra_total": 0, "extra_fetched": False, "extra_error": None}
     try:
@@ -594,9 +594,15 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
     if not remote_on():
         return report
 
+    # Подписка отключается у всех из списка — и триал, и оплаченная.
+    # Ограничения «только новые» тут нет специально: уже числящиеся
+    # в списке с живой подпиской остановятся на ближайшем синке, а не
+    # только те, кто попал туда сейчас. stop_subs кладёт остаток срока
+    # в hold: при выходе из списка он вернётся (restore_unlisted).
+    # Уже остановленные (статус expired) проходятся мимо по статусу.
     seen = set()
     for tg_id, status, times_renewed in await bl_remote_subs():
-        if tg_id in seen or tg_id not in added:
+        if tg_id in seen:
             continue
         seen.add(tg_id)
         if status not in ("active", "renewal"):
@@ -604,13 +610,26 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
         e = await entry(tg_id)
         if not e or e["source"] != "remote":
             continue
+        await stop_subs(tg_id, e["reason"])
+        await _notify_blocked(bot, tg_id, e["reason"])
         if times_renewed:
-            # человек заплатил — останавливать или нет, решает админ
-            report["paid_found"].append(tg_id)
+            report["paid_stopped"].append(tg_id)
         else:
-            await stop_subs(tg_id, e["reason"])
-            await _notify_blocked(bot, tg_id, e["reason"])
             report["trials_stopped"].append(tg_id)
+
+    # Админские подписки: строки в paid_subs у них нет, поэтому тех,
+    # кто ещё не обработан выше, останавливаем отдельным проходом.
+    # stop_subs заодно гасит и админскую подписку у владельцев платных.
+    for tg_id in await bl_remote_admin_subs():
+        if tg_id in seen:
+            continue
+        seen.add(tg_id)
+        e = await entry(tg_id)
+        if not e or e["source"] != "remote":
+            continue
+        await stop_subs(tg_id, e["reason"])
+        await _notify_blocked(bot, tg_id, e["reason"])
+        report["admin_stopped"].append(tg_id)
 
     # Все из списков — в «Баны в боте» с причиной из списка: одно место,
     # где видно, кто закрыт и за что. Банятся только известные боту люди
@@ -618,8 +637,7 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
     # забаненных пропускаем, админа — никогда. Ручной разбан при этом
     # не вечен: пока человек в списке, следующий синк вернёт бан —
     # снять навсегда можно только исключением (кнопка в карточке).
-    # Подписки бан не трогает: триалы останавливаются выше, оплаченные
-    # остаются в paid_found на решение админа.
+    # Подписки бан не трогает: они останавливаются проходом выше.
     from database import ban_entry, banned_ids, bl_listed_users
     already = await banned_ids()
     for tg_id, reason in await bl_listed_users():
@@ -644,7 +662,8 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
 
 async def send_report(bot, r: dict):
     """Сообщение админу — только если обновление что-то поменяло у своих."""
-    if not r.get("ok") or not (r["trials_stopped"] or r["paid_found"] or r["restored"]
+    if not r.get("ok") or not (r["trials_stopped"] or r.get("paid_stopped")
+                               or r.get("admin_stopped") or r["restored"]
                                or r.get("banned") or r.get("unbanned")):
         return
     from database import get_user_info
@@ -658,6 +677,11 @@ async def send_report(bot, r: dict):
         lines.append(f"⚠️ Доп. список не обновился: <code>{r['extra_error']}</code>")
     if r["trials_stopped"]:
         lines.append(f"⛔ Остановлены триалы твоих пользователей: <b>{len(r['trials_stopped'])}</b>")
+    if r.get("paid_stopped"):
+        lines.append(f"💳 Остановлены оплаченные подписки: <b>{len(r['paid_stopped'])}</b> — "
+                     "остаток срока сохранён, вернётся при выходе из списка")
+    if r.get("admin_stopped"):
+        lines.append(f"👑 Остановлены админские подписки: <b>{len(r['admin_stopped'])}</b>")
     if r.get("banned"):
         lines.append(f"🚫 Забанены в боте из списков: <b>{len(r['banned'])}</b>")
     if r.get("unbanned"):
@@ -678,12 +702,10 @@ async def send_report(bot, r: dict):
                                         callback_data=f"bl_view:{tg_id}")])
     for tg_id in r["trials_stopped"][:8]:
         await _btn(tg_id, "⛔")
-    if r["paid_found"]:
-        lines.append(f"\n💳 В списке нашлись клиенты с оплаченной подпиской: <b>{len(r['paid_found'])}</b>.\n"
-                     "Подписку бот не трогал — человек заплатил. Открой и реши: "
-                     "остановить или сделать исключение.")
-        for tg_id in r["paid_found"][:8]:
-            await _btn(tg_id, "💳")
+    for tg_id in r.get("paid_stopped", [])[:8]:
+        await _btn(tg_id, "💳")
+    for tg_id in r.get("admin_stopped", [])[:8]:
+        await _btn(tg_id, "👑")
     for tg_id in r.get("banned", [])[:8]:
         await _btn(tg_id, "🚫")
     kb.append([InlineKeyboardButton("⛔ К чёрному списку", callback_data="bl_menu")])
@@ -766,8 +788,6 @@ async def handle_bl_menu(query, context=None, note: str = ""):
     extra_synced = (extra_raw.replace("T", " ")[:16] if extra_raw
                     else "ещё не обновлялся")
     who = [
-        f"👥 Твоих пользователей в ЧС: <b>{c['ours']}</b>"
-        + (f"  ·  с подпиской: <b>{c['ours_active']}</b>" if c["ours_active"] else ""),
         f"✍️ Вручную: <b>{c['manual']}</b> (бессрочно <b>{st['forever']}</b> · "
         f"со сроком <b>{st['temporary']}</b>)  ·  исключений: <b>{c['allow']}</b>",
         f"🚫 Забанены в боте: <b>{st['banned']}</b>"
@@ -795,7 +815,6 @@ async def handle_bl_menu(query, context=None, note: str = ""):
     kb = [
         [InlineKeyboardButton("➕ Внести в ЧС", callback_data="bl_add"),
          InlineKeyboardButton("🔍 Проверить ID", callback_data="bl_check")],
-        [InlineKeyboardButton("👥 Твои пользователи в ЧС", callback_data="bl_list:ours:1")],
         [InlineKeyboardButton("✍️ Вручную", callback_data="bl_list:manual:1"),
          InlineKeyboardButton("✅ Исключения", callback_data="bl_list:allow:1")],
         [InlineKeyboardButton(f"🚫 Баны в боте · {st['banned']}", callback_data="bl_bans:1")],
@@ -811,7 +830,7 @@ async def handle_bl_menu(query, context=None, note: str = ""):
 async def handle_bl_list(query, scope: str, page: int = 1):
     from database import bl_list
     if scope not in LIST_TITLES:
-        scope = "ours"
+        scope = "manual"
     rows, pages = await bl_list(scope, remote_on(), page, PER_PAGE)
     page = min(max(1, page), pages)
     lines = [f"⛔ <b>{LIST_TITLES[scope]}</b>", f"<i>стр. {page} из {pages} · нажми на человека, чтобы открыть</i>"]
