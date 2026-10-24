@@ -416,7 +416,8 @@ async def init_db():
                 banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        for _col in ("reason TEXT", "until TIMESTAMP", "by_id INTEGER"):
+        for _col in ("reason TEXT", "until TIMESTAMP", "by_id INTEGER",
+                     "src TEXT NOT NULL DEFAULT 'manual'"):
             try:
                 await db.execute(f"ALTER TABLE bans ADD COLUMN {_col}")
             except Exception:
@@ -1536,6 +1537,28 @@ async def bl_hold_take(tg_id: int) -> list:
     return rows
 
 
+async def bl_listed_users() -> list:
+    """Известные боту люди с действующей записью ЧС: (tg_id, причина).
+
+    Ручная запись важнее общей (как в entry): если у человека и ручная,
+    и общая — причина ручная. Исключения (allow) снимают только общую
+    запись, ручную — нет. Временные ручные с вышедшим сроком не считаются.
+    Только users — чужие ID из списков, никогда не открывавшие бота,
+    банить бессмысленно: бан им ничего не закроет.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT u.id, COALESCE(m.reason, r.reason) FROM users u
+            LEFT JOIN blacklist_manual m ON m.tg_id = u.id
+                AND (m.until IS NULL OR m.until > CURRENT_TIMESTAMP)
+            LEFT JOIN blacklist_remote r ON r.tg_id = u.id
+            WHERE m.tg_id IS NOT NULL
+               OR (r.tg_id IS NOT NULL
+                   AND u.id NOT IN (SELECT tg_id FROM blacklist_allow))
+        """) as cur:
+            return await cur.fetchall()
+
+
 async def bl_remote_subs() -> list:
     """Подписки людей из общего списка без исключений: (tg_id, статус, продлений)."""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1824,11 +1847,15 @@ async def get_user_info(user_id: int) -> tuple | None:
 # ── Баны ─────────────────────────────────────────────────────────────────────
 
 async def ban_user(tg_id: int, reason: str | None = None,
-                   until: str | None = None, by_id: int | None = None):
+                   until: str | None = None, by_id: int | None = None,
+                   source: str = "manual"):
+    """Бан в боте. source: 'manual' (админ кнопкой) или 'list' (авто-бан
+    из чёрного списка при синке) — по нему синк отличает свой бан от
+    ручного, когда человек уходит из списков."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR REPLACE INTO bans (tg_id, banned_at, reason, until, by_id) "
-            "VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?)", (tg_id, reason, until, by_id))
+            "INSERT OR REPLACE INTO bans (tg_id, banned_at, reason, until, by_id, src) "
+            "VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?)", (tg_id, reason, until, by_id, source))
         await db.commit()
 
 
@@ -1836,12 +1863,22 @@ async def ban_entry(tg_id: int) -> dict | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT reason, datetime(until, 'localtime'), by_id, "
-            "datetime(banned_at, 'localtime') FROM bans WHERE tg_id = ?", (tg_id,),
+            "datetime(banned_at, 'localtime'), src FROM bans WHERE tg_id = ?", (tg_id,),
         ) as cur:
             row = await cur.fetchone()
     if not row:
         return None
-    return {"reason": row[0], "until": row[1], "by_id": row[2], "since": row[3]}
+    return {"reason": row[0], "until": row[1], "by_id": row[2], "since": row[3],
+            "src": row[4] or "manual"}
+
+
+async def banned_ids() -> set:
+    """TG ID с действующим баном (бессрочным или ещё не истёкшим)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT tg_id FROM bans WHERE until IS NULL OR until > CURRENT_TIMESTAMP"
+        ) as cur:
+            return {r[0] for r in await cur.fetchall()}
 
 
 async def bans_expired_now() -> list:

@@ -8,6 +8,9 @@
   но обновляет только раз в неделю — кэш живёт отдельно, чтобы обычный
   синк не вымывал его записи. Если человек есть в обоих — побеждает
   причина основного списка;
+• каждый синк банит в боте всех известных боту людей из списков
+  (причина — из списка, источник бана помечается) и снимает авто-бан,
+  когда человек из списков ушёл. Ручные баны синк не трогает;
 • админ добавляет своих и снимает любых. Снятие человека из общего списка
   запоминается исключением — иначе следующее обновление вернуло бы его;
 • блокировка бывает срочной: бот снимет её сам, когда срок выйдет, и вернёт
@@ -467,13 +470,14 @@ async def banned_view(tg_id: int) -> str:
 
 
 async def ban(bot, tg_id: int, reason: str | None = None, until: str | None = None,
-              by_id: int | None = None):
+              by_id: int | None = None, source: str = "manual"):
     """Бан в боте: человек вообще не может пользоваться ботом."""
     from database import ban_user, bl_log
-    await ban_user(tg_id, reason, until, by_id)
+    await ban_user(tg_id, reason, until, by_id, source)
     await bl_log(tg_id, "banned", reason, by_id)
     await _tell(bot, tg_id, ban_view(reason, _to_local(until)))
-    await _log(bot, f"🚫 Забанен в боте: <code>{tg_id}</code>"
+    await _log(bot, f"🚫 Забанен в боте{' (чёрный список)' if source == 'list' else ''}: "
+                    f"<code>{tg_id}</code>"
                     + (f" — {html.escape(reason[:200])}" if reason else "")
                     + f" · {term_line(until)}")
 
@@ -552,6 +556,7 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
 
     report = {"ok": False, "error": None, "total": 0, "added": 0, "removed": 0,
               "trials_stopped": [], "paid_found": [], "restored": [],
+              "banned": [], "unbanned": [],
               "extra_total": 0, "extra_fetched": False, "extra_error": None}
     try:
         async with aiohttp.ClientSession() as s:
@@ -607,13 +612,40 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
             await _notify_blocked(bot, tg_id, e["reason"])
             report["trials_stopped"].append(tg_id)
 
+    # Все из списков — в «Баны в боте» с причиной из списка: одно место,
+    # где видно, кто закрыт и за что. Банятся только известные боту люди
+    # (таблица users) — чужие ID из списков банить бессмысленно. Уже
+    # забаненных пропускаем, админа — никогда. Ручной разбан при этом
+    # не вечен: пока человек в списке, следующий синк вернёт бан —
+    # снять навсегда можно только исключением (кнопка в карточке).
+    # Подписки бан не трогает: триалы останавливаются выше, оплаченные
+    # остаются в paid_found на решение админа.
+    from database import ban_entry, banned_ids, bl_listed_users
+    already = await banned_ids()
+    for tg_id, reason in await bl_listed_users():
+        if tg_id in already or tg_id == ADMIN_ID:
+            continue
+        await ban(bot, tg_id, reason, source="list")
+        report["banned"].append(tg_id)
+
+    # Ушёл из списков — авто-бан снимается сам. Ручные баны не трогаем:
+    # их админ ставил сам, списки тут ни при чём.
+    for tg_id in removed:
+        if await entry(tg_id):
+            continue
+        b = await ban_entry(tg_id)
+        if b and b.get("src") == "list":
+            await unban(bot, tg_id)
+            report["unbanned"].append(tg_id)
+
     report["restored"] = await restore_unlisted(bot)
     return report
 
 
 async def send_report(bot, r: dict):
     """Сообщение админу — только если обновление что-то поменяло у своих."""
-    if not r.get("ok") or not (r["trials_stopped"] or r["paid_found"] or r["restored"]):
+    if not r.get("ok") or not (r["trials_stopped"] or r["paid_found"] or r["restored"]
+                               or r.get("banned") or r.get("unbanned")):
         return
     from database import get_user_info
     lines = ["🌐 <b>Общий чёрный список обновлён</b>\n",
@@ -626,23 +658,34 @@ async def send_report(bot, r: dict):
         lines.append(f"⚠️ Доп. список не обновился: <code>{r['extra_error']}</code>")
     if r["trials_stopped"]:
         lines.append(f"⛔ Остановлены триалы твоих пользователей: <b>{len(r['trials_stopped'])}</b>")
+    if r.get("banned"):
+        lines.append(f"🚫 Забанены в боте из списков: <b>{len(r['banned'])}</b>")
+    if r.get("unbanned"):
+        lines.append(f"✅ Бан снят (ушли из списков): <b>{len(r['unbanned'])}</b>")
     if r["restored"]:
         lines.append(f"✅ Ушли из общего списка, остаток срока возвращён: <b>{len(r['restored'])}</b>")
     kb = []
-    # чьи именно триалы встали: кнопки на карточки, как у оплаченных, —
-    # иначе из отчёта не понять, кого смотреть
-    for tg_id in r["trials_stopped"][:8]:
+    # кнопки на карточки: триалы, оплаченные, прочие забаненные — без
+    # дублей, один человек одной кнопкой, даже если он в двух группах
+    seen = set()
+
+    async def _btn(tg_id, emoji):
+        if tg_id in seen:
+            return
+        seen.add(tg_id)
         u = await get_user_info(tg_id)
-        kb.append([InlineKeyboardButton(f"⛔ {(u[1] if u and u[1] else tg_id)}"[:40],
+        kb.append([InlineKeyboardButton(f"{emoji} {(u[1] if u and u[1] else tg_id)}"[:40],
                                         callback_data=f"bl_view:{tg_id}")])
+    for tg_id in r["trials_stopped"][:8]:
+        await _btn(tg_id, "⛔")
     if r["paid_found"]:
         lines.append(f"\n💳 В списке нашлись клиенты с оплаченной подпиской: <b>{len(r['paid_found'])}</b>.\n"
                      "Подписку бот не трогал — человек заплатил. Открой и реши: "
                      "остановить или сделать исключение.")
         for tg_id in r["paid_found"][:8]:
-            u = await get_user_info(tg_id)
-            kb.append([InlineKeyboardButton(f"💳 {(u[1] if u and u[1] else tg_id)}"[:40],
-                                            callback_data=f"bl_view:{tg_id}")])
+            await _btn(tg_id, "💳")
+    for tg_id in r.get("banned", [])[:8]:
+        await _btn(tg_id, "🚫")
     kb.append([InlineKeyboardButton("⛔ К чёрному списку", callback_data="bl_menu")])
     try:
         await bot.send_message(chat_id=ADMIN_ID, text="\n".join(lines), parse_mode="HTML",
@@ -866,7 +909,8 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
 
     ban_card = []
     if b:
-        ban_card.append("🚫 Бан в боте: <b>стоит</b> — бот для человека закрыт целиком")
+        ban_card.append("🚫 Бан в боте: <b>стоит</b> — бот для человека закрыт целиком"
+                        + (" (авто-бан из чёрного списка)" if b.get("src") == "list" else ""))
         if b["reason"]:
             ban_card.append(f"📝 Причина: {html.escape(b['reason'])}")
         ban_card.append(f"⏳ Срок: <b>{fmt_until(b['until'])}</b>")
