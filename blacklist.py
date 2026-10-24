@@ -629,6 +629,12 @@ async def send_report(bot, r: dict):
     if r["restored"]:
         lines.append(f"✅ Ушли из общего списка, остаток срока возвращён: <b>{len(r['restored'])}</b>")
     kb = []
+    # чьи именно триалы встали: кнопки на карточки, как у оплаченных, —
+    # иначе из отчёта не понять, кого смотреть
+    for tg_id in r["trials_stopped"][:8]:
+        u = await get_user_info(tg_id)
+        kb.append([InlineKeyboardButton(f"⛔ {(u[1] if u and u[1] else tg_id)}"[:40],
+                                        callback_data=f"bl_view:{tg_id}")])
     if r["paid_found"]:
         lines.append(f"\n💳 В списке нашлись клиенты с оплаченной подпиской: <b>{len(r['paid_found'])}</b>.\n"
                      "Подписку бот не трогал — человек заплатил. Открой и реши: "
