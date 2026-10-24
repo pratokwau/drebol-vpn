@@ -116,8 +116,7 @@ async def handle_dashboard(query):
         text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📈 Оплаты по дням", callback_data="payment_stats:30"),
-             InlineKeyboardButton("🔄 Обновить", callback_data="dashboard")],
+            [InlineKeyboardButton("🔄 Обновить", callback_data="dashboard")],
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
     )
