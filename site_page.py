@@ -90,6 +90,16 @@ FAQ = [
 PLATFORMS = ["iOS", "Android", "Windows", "macOS"]
 TARIFF_PERKS = ["Без логов", "iOS, Android, Windows, macOS", "Поддержка в боте"]
 
+# Приложения для подключения — те же, что предлагает бот
+APPS = [
+    ("Happ", "Лёгкое приложение для телефона и компьютера: вставили ссылку — и онлайн.",
+     "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+     "https://play.google.com/store/apps/details?id=com.happproxy"),
+    ("INCY", "Приложение, которое бот советует первым: импорт подписки в один тап.",
+     "https://apps.apple.com/ru/app/incy/id6756943388",
+     "https://play.google.com/store/apps/details?id=llc.itdev.incy"),
+]
+
 # ── Стили ────────────────────────────────────────────────────────────────────
 
 CSS = """
@@ -108,6 +118,8 @@ CSS = """
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
+/* Липкая шапка не должна перекрывать заголовок раздела при переходе по якорю */
+section[id] { scroll-margin-top: 100px; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font-family: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -546,6 +558,16 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 
     perks_html = "".join(f"<li>{_CHECK}{escape(p)}</li>" for p in TARIFF_PERKS)
 
+    apps_html = "".join(f"""
+      <article class="feature reveal">
+        <span class="ico">{_ICONS["devices"]}</span>
+        <div><h3>{escape(name)}</h3><p>{escape(desc)}</p>
+        <div class="actions" style="margin-top:18px">
+          <a class="btn btn-ghost btn-sm" href="{escape(ios)}">App Store</a>
+          <a class="btn btn-ghost btn-sm" href="{escape(android)}">Google Play</a>
+        </div></div>
+      </article>""" for name, desc, ios, android in APPS)
+
     pricing_html = ""
     cab = escape(cabinet_url) if cabinet_url else ""
     cab_nav = (f'<a class="btn btn-ghost btn-sm" href="{cab}">{_ICONS["cabinet"]}'
@@ -647,6 +669,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     <nav class="nav" aria-label="Разделы">
       <a href="#features">Возможности</a>
       <a href="#how">Как подключить</a>
+      <a href="#apps">Приложения</a>
       {nav_pricing}
       <a href="#faq">Вопросы</a>
     </nav>
@@ -695,6 +718,20 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
       <h2>Три шага — и вы онлайн</h2>
     </div>
     <div class="grid3 steps">{steps_html}
+    </div>
+  </div>
+</section>
+
+<section class="section" id="apps">
+  <div class="wrap">
+    <div class="head split reveal">
+      <div class="head" style="margin:0">
+        <span class="eyebrow">Приложения</span>
+        <h2>Поставьте приложение заранее</h2>
+      </div>
+      <p class="sub">Ссылка из бота вставляется в любое из них в один тап — а сами приложения можно скачать уже сейчас.</p>
+    </div>
+    <div class="grid3">{apps_html}
     </div>
   </div>
 </section>

@@ -217,8 +217,11 @@ async def profile(tg_id: int) -> dict:
                 "seen": str(d.get("lastSeen") or "")[:16].replace("T", " "),
             })
     rows, pays_count, pays_sum = await user_payments(tg_id, 10)
-    out["payments"] = [{"amount": r[2], "status": r[3], "date": str(r[4] or "")[:16]}
-                       for r in rows]
+    # строки user_payments: id, provider, amount, status, date, promo_code —
+    # провайдера и промокод тоже отдаём: из них складывается карточка платежа
+    out["payments"] = [{"id": r[0], "provider": r[1] or "", "amount": r[2],
+                        "status": r[3], "date": str(r[4] or "")[:16],
+                        "promo": r[5] or ""} for r in rows]
     out["payments_total"] = {"count": pays_count, "sum": pays_sum}
     return out
 

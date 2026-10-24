@@ -231,8 +231,28 @@ CABINET_PAGE = r"""<!doctype html>
  .tabs::-webkit-scrollbar { display:none; }
  .tab { flex:none; min-height:40px; padding:0 16px; border-radius:999px;
         border:1px solid rgba(255,255,255,.16); background:transparent; color:rgba(255,255,255,.75);
-        font:inherit; font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap; }
+        font:inherit; font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap;
+        transition:background .25s ease, color .25s ease, border-color .25s ease, transform .25s ease; }
+ .tab:active { transform:scale(.96); }
  .tab.active { background:#fff; color:#05070c; border-color:#fff; }
+
+ /* карточка платежа: сумма и статус слева, дата и детали справа */
+ .pay { padding:14px 0; border-top:1px solid var(--line); }
+ .pay:first-of-type { border-top:0; }
+ .pay-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+ .pay-amount { font-size:19px; font-weight:800; letter-spacing:-.01em; }
+ .pay-date { font-size:13px; color:var(--soft); margin-top:2px; }
+ .pay-meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+ .chip { padding:4px 10px; border-radius:999px; border:1px solid var(--line);
+         font-size:12px; font-weight:600; color:var(--muted); }
+
+ /* плавное появление раздела при переключении вкладок и при входе */
+ @keyframes secIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+ @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+ #app:not(.hide) { animation:fadeIn .35s ease both; }
+ [data-sec].sec-show { animation:secIn .35s ease both; }
+ @media (prefers-reduced-motion: reduce) {
+   #app:not(.hide), [data-sec].sec-show { animation:none; } }
 
  /* вход */
  #login { text-align:center; padding:6vh 0 0; }
@@ -359,6 +379,25 @@ CABINET_PAGE = r"""<!doctype html>
  function row(a, b) { return '<div class="row"><span>' + a + "</span><span>" + b + "</span></div>"; }
  function stat(value, label) { return '<div class="stat"><b>' + value + "</b><span>" + esc(label) + "</span></div>"; }
 
+ // Статусы платежей — человеческим языком, а не кодами из базы
+ var PAY_STATUS = {
+   paid: {text: "Оплачено", kind: "ok"},
+   pending: {text: "Ожидает оплаты", kind: "warn"},
+   failed: {text: "Не прошла", kind: "bad"},
+   cancelled: {text: "Отменена", kind: "bad"},
+   refunded: {text: "Возврат", kind: "warn"},
+   refund_pending: {text: "Возврат в обработке", kind: "warn"}
+ };
+ function payProvider(raw) {
+   var map = {platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
+   return map[String(raw).toLowerCase()] || String(raw);
+ }
+ // "2026-10-20 10:00" -> "20.10.2026 · 10:00"
+ function fmtDate(raw) {
+   var m = String(raw || "").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
+   return m ? m[3] + "." + m[2] + "." + m[1] + " · " + m[4] : String(raw || "");
+ }
+
  function render(p) {
    document.getElementById("login").className = "hide";
    document.getElementById("app").className = "";
@@ -482,17 +521,23 @@ CABINET_PAGE = r"""<!doctype html>
               '<button class="btn btn-ghost btn-danger" type="button" id="reissue">🔁 Новый ключ</button></div></div>');
    }
 
-   // Платежи: история уже приходила с сервера, но не показывалась
-   if (p.payments && p.payments.length) {
-     var payRows = p.payments.map(function (x) {
-       var st = x.status === "paid" ? "оплачено" : esc(x.status);
-       return row(esc(x.amount) + " ₽ · " + st, esc(x.date));
-     }).join("");
-     var total = p.payments_total
-       ? '<p class="card-sub">Всего оплачено: <b style="color:#fff">' + esc(p.payments_total.sum) +
-         " ₽</b> · оплат: " + esc(p.payments_total.count) + "</p>" : "";
-     out.push('<div data-sec="payments"><div class="card">' + title("card", "Платежи") + total + payRows + "</div></div>");
-   }
+   // Платежи: карточка на оплату — сумма, статус-пилюля, дата, провайдер
+   var payCards = (p.payments || []).map(function (x) {
+     var st = PAY_STATUS[x.status] || {text: esc(x.status), kind: ""};
+     var meta = [];
+     if (x.provider) { meta.push('<span class="chip">' + esc(payProvider(x.provider)) + "</span>"); }
+     if (x.promo) { meta.push('<span class="chip">🎟 ' + esc(x.promo) + "</span>"); }
+     return '<div class="pay"><div class="pay-head"><span class="pay-amount">' + esc(x.amount) +
+            " ₽</span>" + pill(st.text, st.kind) + "</div>" +
+            '<div class="pay-date">' + esc(fmtDate(x.date)) + "</div>" +
+            (meta.length ? '<div class="pay-meta">' + meta.join("") + "</div>" : "") + "</div>";
+   }).join("");
+   var payTotal = p.payments_total
+     ? '<p class="card-sub">Всего оплачено: <b style="color:#fff">' + esc(p.payments_total.sum) +
+       " ₽</b> · успешных оплат: " + esc(p.payments_total.count) + "</p>" : "";
+   out.push('<div data-sec="payments"><div class="card">' + title("card", "Платежи") + payTotal +
+            (payCards || '<p class="card-sub">Платежей пока нет — первая оплата появится ' +
+             "здесь сразу после оформления в боте.</p>") + "</div></div>");
 
    var ref = referralCard(p);
    if (ref) { out.push('<div data-sec="friends">' + ref + "</div>"); }
@@ -536,7 +581,14 @@ CABINET_PAGE = r"""<!doctype html>
  }
  function showTab(name, silent) {
    document.querySelectorAll("#body [data-sec]").forEach(function (el) {
-     el.style.display = el.getAttribute("data-sec") === name ? "" : "none";
+     var show = el.getAttribute("data-sec") === name;
+     el.style.display = show ? "" : "none";
+     if (show) {
+       // перезапускаем анимацию появления при каждом переключении
+       el.classList.remove("sec-show");
+       void el.offsetWidth;
+       el.classList.add("sec-show");
+     }
    });
    document.querySelectorAll("#tabs .tab").forEach(function (b) {
      b.classList.toggle("active", b.textContent === (SEC_LABELS[name] || name));
