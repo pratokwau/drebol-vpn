@@ -108,9 +108,10 @@ from handlers.tickets import (
 from adminsub.handlers import (
     handle_admin_subs_menu, handle_presets_menu,
     handle_preset_expire, handle_preset_hwid, handle_preset_traffic,
+    handle_preset_lte,
     handle_create_sub, handle_sub_view, handle_sub_delete, handle_sub_toggle,
     handle_sub_settings, handle_sub_edit_expire,
-    handle_sub_edit_hwid, handle_sub_edit_traffic,
+    handle_sub_edit_hwid, handle_sub_edit_traffic, handle_sub_edit_lte,
     handle_sub_extend, handle_sub_reduce, handle_sub_devices, handle_sub_ips,
     handle_sub_hwid_del, handle_sub_hwid_clear, handle_sub_reissue,
     handle_subs_names_sync,
@@ -118,19 +119,19 @@ from adminsub.handlers import (
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
     handle_paid_preset_hwid, handle_paid_preset_traffic,
-    handle_paid_preset_trial,
+    handle_paid_preset_lte, handle_paid_preset_trial,
     handle_paid_create_sub, handle_paid_create_type,
     handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
     handle_approve, handle_reject, handle_request_sub,
     handle_paid_sub_freeze, handle_paid_sub_extend, handle_paid_sub_reduce,
     handle_paid_bulk_menu, handle_paid_bulk_extend, handle_paid_bulk_reduce,
-    handle_paid_bulk_hwid, handle_paid_bulk_limits_apply,
+    handle_paid_bulk_hwid, handle_paid_bulk_lte, handle_paid_bulk_limits_apply,
     handle_paid_device_price, handle_paid_device_max,
     handle_paid_devices, handle_paid_ips, handle_paid_hwid_del,
     handle_paid_hwid_clear,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
-    handle_paid_sub_edit_trial,
+    handle_paid_sub_edit_lte, handle_paid_sub_edit_trial,
     handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
     handle_toggle_auto_trial, handle_paid_bulk_apply,
 )
@@ -643,6 +644,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_preset_hwid(query, context)
     elif data == "preset_traffic":
         await handle_preset_traffic(query, context)
+    elif data == "preset_lte":
+        await handle_preset_lte(query, context)
     elif data.startswith("sub_view:"):
         await handle_sub_view(query, int(data.split(":")[1]))
     elif data.startswith("sub_toggle:"):
@@ -672,6 +675,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_sub_edit_hwid(query, int(data.split(":")[1]), context)
     elif data.startswith("sub_edit_traffic:"):
         await handle_sub_edit_traffic(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_edit_lte:"):
+        await handle_sub_edit_lte(query, int(data.split(":")[1]), context)
 
     # Платные подписки
     elif data == "paid_subs":
@@ -721,6 +726,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_preset_hwid(query, context)
     elif data == "paid_preset_traffic":
         await handle_paid_preset_traffic(query, context)
+    elif data == "paid_preset_lte":
+        await handle_paid_preset_lte(query, context)
     elif data.startswith("paid_sub_view:"):
         await handle_paid_sub_view(query, int(data.split(":")[1]))
     elif data.startswith("paid_devices:"):
@@ -754,6 +761,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_device_max(query, context)
     elif data == "paid_bulk_hwid":
         await handle_paid_bulk_hwid(query, context)
+    elif data == "paid_bulk_lte":
+        await handle_paid_bulk_lte(query, context)
     elif data == "paid_bulk_limits_apply":
         await handle_paid_bulk_limits_apply(query, context)
     elif data == "paid_bulk_apply":
@@ -766,6 +775,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_edit_hwid(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_traffic:"):
         await handle_paid_sub_edit_traffic(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_edit_lte:"):
+        await handle_paid_sub_edit_lte(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_trial:"):
         await handle_paid_sub_edit_trial(query, int(data.split(":")[1]), context)
     elif data == "referral_settings":
