@@ -103,8 +103,14 @@ def _err_text(status: int, body) -> str:
 async def create_payment(amount: int, description: str, tg_id: int,
                          username: str | None = None,
                          order_id: str | None = None,
-                         method: int | None = None) -> dict:
-    """Создаёт платёж и возвращает ссылку на оплату."""
+                         method: int | None = None,
+                         return_url: str | None = None) -> dict:
+    """Создаёт платёж и возвращает ссылку на оплату.
+
+    return_url — куда вернуть человека после оплаты. По умолчанию бот
+    (t.me), а кабинетные платежи передают адрес кабинета, чтобы человек
+    после оплаты попал обратно в кабинет, а не в бот.
+    """
     if not is_configured():
         return {"ok": False, "error": "Platega не настроена (нет MerchantId или ключа)"}
 
@@ -112,7 +118,7 @@ async def create_payment(amount: int, description: str, tg_id: int,
     if method is None:
         method = int(cfg.get("platega_method", DEFAULT_METHOD) or DEFAULT_METHOD)
 
-    ret = _return_url()
+    ret = return_url or _return_url()
     payload = {
         "paymentMethod": method,
         "paymentDetails": {"amount": amount, "currency": "RUB"},

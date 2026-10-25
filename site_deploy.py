@@ -463,7 +463,7 @@ CABINET_PAGE = r"""<!doctype html>
    var plan = s.plan === "paid" ? "⭐️ Премиум" : "🆓 Пробный период";
    var big = s.status === "expired" ? "Подписка закончилась"
            : (s.left_text ? esc(s.left_text) : "до " + esc(s.until));
-   var bigSub = s.status === "expired" ? "Продлите в боте — доступ вернётся сразу."
+   var bigSub = s.status === "expired" ? "Продлите здесь — доступ вернётся сразу."
               : (s.left_text ? "осталось · до " + esc(s.until) : "действует");
    var traffic = esc(s.traffic_used_text) + (s.traffic_limit_gb ? " / " + esc(s.traffic_limit_gb) + " ГБ" : "");
    var trafficBar = "";
@@ -484,9 +484,13 @@ CABINET_PAGE = r"""<!doctype html>
               stat(s.devices_limit ? "до " + esc(s.devices_limit) : "∞", "устройств") +
               stat(traffic || "—", s.traffic_limit_gb ? "трафик" : "трафик · безлимит") +
             "</div>" + trafficBar +
-            '<div class="stack" style="margin-top:16px"><a class="btn btn-main" href="' + botUrl() + '">' +
-            ICON.card + (s.status === "expired" ? "Продлить в боте" : "Продлить подписку") + "</a></div>" +
+            '<div class="stack" style="margin-top:16px"><button class="btn btn-main" type="button" id="renew-open">' +
+            ICON.card + "Продлить подписку</button></div>" +
             "</div></div>");
+
+   // Продление: тарифы и оплата прямо здесь, без ухода в бот
+   out.push('<div data-sec="sub"><div class="card" id="renew-card">' + title("card", "Продление") +
+            '<div id="renew-body"><p class="card-sub">Загружаем тарифы…</p></div></div></div>');
 
    // Детали подписки: что не влезло в главную карточку
    var details = [row("Продлений", esc(s.renewed))];
@@ -566,7 +570,7 @@ CABINET_PAGE = r"""<!doctype html>
        " ₽</b> · успешных оплат: " + esc(p.payments_total.count) + "</p>" : "";
    out.push('<div data-sec="payments"><div class="card">' + title("card", "Платежи") + payTotal +
             (payCards || '<p class="card-sub">Платежей пока нет — первая оплата появится ' +
-             "здесь сразу после оформления в боте.</p>") + "</div></div>");
+             "здесь сразу после оплаты.</p>") + "</div></div>");
 
    var ref = referralCard(p);
    if (ref) { out.push('<div data-sec="friends">' + ref + "</div>"); }
@@ -698,6 +702,125 @@ CABINET_PAGE = r"""<!doctype html>
          .catch(function () { alert("Не получилось — попробуйте позже."); load(); });
      };
    }
+   var ro = document.getElementById("renew-open");
+   if (ro) {
+     ro.onclick = function () {
+       var c = document.getElementById("renew-card");
+       if (c) { c.scrollIntoView({behavior: "smooth", block: "start"}); }
+       loadRenew();
+     };
+   }
+   if (document.getElementById("renew-card")) { loadRenew(); }
+ }
+
+ // Продление: тарифы, счёт, ожидание подтверждения. Подтверждение
+ // приходит опросом: бот сам спрашивает Platega раз в минуту, вебхуков нет,
+ // поэтому страница опрашивает статус счёта каждые 10 секунд, пока ждёт.
+ var renewTimer = null;
+ var renewPayUrl = "";
+ var pendingPayUrl = "";
+ function stopRenewPoll() { if (renewTimer) { clearTimeout(renewTimer); renewTimer = null; } }
+ function openPay(url) {
+   if (tg && tg.openLink) { tg.openLink(url); }
+   else { window.open(url, "_blank"); }
+ }
+ function loadRenew() {
+   stopRenewPoll();
+   var body = document.getElementById("renew-body");
+   if (!body) { return; }
+   api("/api/renew-options").then(function (r) {
+     if (r.status !== 200 || !r.data.tariffs) {
+       body.innerHTML = '<p class="card-sub">Продление сейчас недоступно. ' +
+                        "Попробуйте позже или продлите в боте.</p>";
+       return;
+     }
+     var d = r.data;
+     var html = "";
+     if (d.promo) {
+       html += '<p class="card-sub">🎟 Промокод ' + esc(d.promo.code) + " (−" +
+               esc(d.promo.percent) + "%) уже учтён в цене.</p>";
+     }
+     if (d.devices && d.devices.count && d.devices.price) {
+       html += '<p class="card-sub">В цену включены ваши места: ' + esc(d.devices.count) +
+               " × " + esc(d.devices.price) + " ₽.</p>";
+     }
+     if (d.pending) {
+       pendingPayUrl = d.pending.url;
+       html += '<p class="card-sub">⏳ У вас есть неоплаченный счёт на <b style="color:#fff">' +
+               esc(d.pending.amount) + " ₽</b>.</p>" +
+               '<div class="stack"><button class="btn btn-main" type="button" ' +
+               'onclick="openPay(pendingPayUrl)">Продолжить оплату</button>' +
+               '<button class="btn btn-ghost" type="button" onclick="pollPayment(' +
+               d.pending.id + ', 90)">Проверить оплату</button></div>';
+     }
+     html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через Platega.</p>';
+     d.tariffs.forEach(function (t) {
+       html += '<button class="btn btn-ghost" type="button" style="margin-top:8px" onclick="renewPay(' +
+               t.id + ')">' + esc(t.name) + " — " + esc(t.period) + " — " +
+               esc(t.price) + " ₽</button>";
+     });
+     body.innerHTML = html;
+   }).catch(function () {
+     body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
+   });
+ }
+ function renewPay(tariffId) {
+   var body = document.getElementById("renew-body");
+   if (!body) { return; }
+   body.innerHTML = '<p class="card-sub">Создаём счёт…</p>';
+   api("/api/renew", {method: "POST", body: JSON.stringify({tariff_id: tariffId})})
+     .then(function (r) {
+       if (r.status !== 200 || !r.data.url) {
+         var msg = "Не получилось создать счёт. Попробуйте позже.";
+         if (r.data.error === "bad_tariff") { msg = "Тариф больше недоступен."; }
+         else if (r.data.error === "pay_unavailable") { msg = "Оплата временно недоступна."; }
+         body.innerHTML = '<p class="card-sub">' + msg + '</p>' +
+           '<button class="btn btn-ghost" type="button" onclick="loadRenew()">Попробовать ещё раз</button>';
+         return;
+       }
+       renewPayUrl = r.data.url;
+       body.innerHTML = '<div id="renew-wait"><p class="card-sub">Счёт на <b style="color:#fff">' +
+         esc(r.data.amount) + " ₽</b> готов. Оплатите его — подтверждение придёт само, " +
+         "обычно в течение минуты.</p>" +
+         '<button class="btn btn-main" type="button" onclick="openPay(renewPayUrl)">Оплатить</button></div>';
+       openPay(r.data.url);
+       pollPayment(r.data.payment_id, 90);
+     })
+     .catch(function () {
+       body.innerHTML = '<p class="card-sub">Не получилось создать счёт. Попробуйте позже.</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="loadRenew()">Попробовать ещё раз</button>';
+     });
+ }
+ function pollPayment(id, tries) {
+   stopRenewPoll();
+   api("/api/payment?id=" + id).then(function (r) {
+     var box = document.getElementById("renew-wait");
+     if (r.status !== 200) {
+       if (box) { box.innerHTML = '<p class="card-sub">Не удалось проверить статус. Попробуйте позже.</p>'; }
+       return;
+     }
+     var st = r.data.status;
+     if (st === "paid" || st === "refund_pending") {
+       if (box) { box.innerHTML = '<p class="card-sub">✅ Оплата прошла! Обновляем данные…</p>'; }
+       load();
+       return;
+     }
+     if (st === "canceled" || st === "expired" || st === "error" ||
+         st === "refunded" || st === "chargebacked") {
+       if (box) { box.innerHTML = '<p class="card-sub">Счёт не оплачен. Создайте новый счёт.</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="loadRenew()">К тарифам</button>'; }
+       return;
+     }
+     if (tries <= 0) {
+       if (box) { box.innerHTML = '<p class="card-sub">Пока не оплачено. Если вы уже оплатили, ' +
+         'подождите немного и нажмите «Проверить».</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="pollPayment(' + id + ', 90)">Проверить</button>'; }
+       return;
+     }
+     renewTimer = setTimeout(function () { pollPayment(id, tries - 1); }, 10000);
+   }).catch(function () {
+     renewTimer = setTimeout(function () { pollPayment(id, tries - 1); }, 10000);
+   });
  }
 
  // Копирование ссылки. Где буфер недоступен — просто выделяем её
@@ -720,6 +843,7 @@ CABINET_PAGE = r"""<!doctype html>
  });
 
  function load() {
+   stopRenewPoll();
    return api("/api/me").then(function (r) {
      if (r.status === 200) { say(""); return render(r.data); }
      setToken("");

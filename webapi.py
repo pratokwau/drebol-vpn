@@ -12,9 +12,11 @@
 видно только одного человека — того, кто вошёл.
 
 Кабинет показывает срок, трафик, LTE, устройства, платежи и рефералку.
-Действий всего два, и оба — те же, что уже есть в боте для самого человека:
-отключить своё устройство и перевыпустить свой ключ. Всё остальное
-(оплата, тарифы, лимиты) — только в боте, где это видно в журнале.
+Действия — те же, что уже есть в боте для самого человека: отключить
+своё устройство, перевыпустить свой ключ и продлить подписку. Продление
+идёт через тот же Platega-счёт, что и в боте, а подтверждение — опросом
+статусов фоновой задачей бота (вебхуки Platega не используются, как и
+в боте). После оплаты Platega возвращает человека обратно в кабинет.
 """
 
 from __future__ import annotations
@@ -223,6 +225,53 @@ async def profile(tg_id: int) -> dict:
     return out
 
 
+# ── Продление ────────────────────────────────────────────────────────────────
+
+async def _renew_quote(tg_id: int, tariff: tuple) -> dict:
+    """Цена и состав счёта за продление — ровно как кнопка оплаты в боте:
+    тариф, плюс уже купленные места (если места вообще продаются), минус
+    висящий промокод из бота, если он есть и ещё действует. Скидка, как
+    и в боте, считается только от тарифа, а не от мест."""
+    from config import load_config
+    from paidsub.handlers import apply_discount, validate_promo
+    from paidsub.storage import base_hwid, get_paid_sub_by_tg_id, get_pending_promo
+    row = await get_paid_sub_by_tg_id(tg_id)
+    cfg = load_config()
+    dev_price = int(cfg.get("device_price", 0) or 0)
+    dev_max = int(cfg.get("device_max_extra", 0) or 0)
+    limit_now = int(row[8] or 0) if row else 0
+    bought = int(row[18] or 0) if row and len(row) > 18 else 0
+    if not base_hwid(limit_now, bought):
+        dev_price = 0
+    devices = max(0, min(bought, dev_max if dev_price else 0))
+    base_price = int(tariff[3])
+    promo_code = None
+    promo_percent = 0
+    pending = await get_pending_promo(tg_id)
+    if pending:
+        promo, _err = await validate_promo(pending, tg_id)
+        if promo:
+            promo_code = promo[1]
+            promo_percent = int(promo[2])
+            base_price = apply_discount(base_price, promo[2])
+    return {"price": base_price + devices * dev_price,
+            "seconds": int(tariff[2]), "name": tariff[1],
+            "kind": "period_dev" if dev_price else "period", "extra": devices,
+            "dev_price": dev_price, "promo_code": promo_code,
+            "promo_percent": promo_percent}
+
+
+def _cabinet_return_url() -> str | None:
+    """Куда Platega вернёт человека после оплаты — раздел платежей
+    кабинета. Сайта нет — None, и счёт вернёт его в бот, как обычно."""
+    try:
+        from site_deploy import site_url
+        site = site_url()
+    except Exception:
+        site = ""
+    return f"{site}/cabinet/payments" if site else None
+
+
 # ── Сервер ───────────────────────────────────────────────────────────────────
 
 def _too_often(ip: str) -> bool:
@@ -358,6 +407,117 @@ def build_app():
         await add_history(tg_id, "key_reissued", "Ключ перевыпущен из кабинета")
         return web.json_response({"ok": True, "url": res["sub_url"]})
 
+    async def renew_options(request):
+        """Тарифы с посчитанными для этого человека ценами, висящий
+        промокод из бота и неоплаченный счёт, если такой уже есть."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        from database import get_active_payment, list_tariffs
+        from paidsub.storage import get_paid_sub_by_tg_id
+        from paidsub.time_parser import fmt_duration
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        tariffs = await list_tariffs(only_active=True)
+        if not tariffs:
+            return web.json_response({"error": "no_tariffs"}, status=409)
+        out = []
+        quote0 = None
+        for t in tariffs:
+            q = await _renew_quote(tg_id, t)
+            if quote0 is None:
+                quote0 = q
+            out.append({"id": t[0], "name": t[1],
+                        "period": fmt_duration(q["seconds"]),
+                        "price": q["price"]})
+        pending = await get_active_payment(tg_id, "platega")
+        return web.json_response({
+            "tariffs": out,
+            "devices": {"count": quote0["extra"], "price": quote0["dev_price"]},
+            "promo": ({"code": quote0["promo_code"],
+                       "percent": quote0["promo_percent"]}
+                      if quote0["promo_code"] else None),
+            "pending": ({"id": pending[0], "amount": pending[4],
+                         "url": pending[8], "period": pending[5]}
+                        if pending and pending[8] else None),
+        })
+
+    async def renew(request):
+        """Создаёт счёт за продление — тот же Platega-счёт, что и в боте.
+        Повторное нажатие на тот же тариф не плодит счета: возвращается
+        уже созданная ссылка. Подтверждение — опросом, без вебхуков."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            tariff_id = int(body.get("tariff_id") or 0)
+        except (TypeError, ValueError):
+            tariff_id = 0
+        from blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        from database import (add_payment, get_active_payment, get_tariff,
+                              get_user_info)
+        from paidsub.storage import get_paid_sub_by_tg_id
+        import platega_api as pg
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        tariff = await get_tariff(tariff_id) if tariff_id else None
+        if not tariff or not tariff[4]:
+            return web.json_response({"error": "bad_tariff"}, status=400)
+        if not pg.is_configured():
+            return web.json_response({"error": "pay_unavailable"}, status=503)
+        q = await _renew_quote(tg_id, tariff)
+        existing = await get_active_payment(tg_id, "platega")
+        if (existing and existing[4] == q["price"]
+                and existing[5] == q["seconds"] and existing[8]
+                and (len(existing) < 12 or existing[11] == q["extra"])):
+            return web.json_response({"payment_id": existing[0],
+                                      "url": existing[8],
+                                      "amount": existing[4], "reused": True})
+        user = await get_user_info(tg_id)
+        res = await pg.create_payment(
+            amount=q["price"],
+            description=f"Подписка Drebol VPN · {q['name']} · {tg_id}",
+            tg_id=tg_id, username=user[2] if user else None,
+            return_url=_cabinet_return_url())
+        if not res.get("ok"):
+            logging.error("кабинет: счёт Platega не создан для %s: %s",
+                          tg_id, res.get("error"))
+            return web.json_response({"error": "pay_failed"}, status=502)
+        pid = await add_payment(
+            tg_id, "platega", res["transaction_id"], q["price"], q["seconds"],
+            res["url"], promo_code=q["promo_code"], kind=q["kind"],
+            extra=q["extra"])
+        return web.json_response({"payment_id": pid, "url": res["url"],
+                                  "amount": q["price"]})
+
+    async def payment_status(request):
+        """Статус своего счёта — его опрашивает страница, пока ждёт
+        подтверждения. Чужие счета не отдаём: только свои."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            pid = int(request.query.get("id") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        from database import get_payment
+        p = await get_payment(pid) if pid else None
+        if not p or p[1] != tg_id:
+            return web.json_response({"error": "no_payment"}, status=404)
+        return web.json_response({"id": p[0], "status": p[7], "amount": p[4],
+                                  "url": p[8], "period": p[5]})
+
     app = web.Application(middlewares=[web.middleware(guard)])
     app.router.add_get("/api/health", health)
     app.router.add_post("/api/auth", auth)
@@ -365,6 +525,9 @@ def build_app():
     app.router.add_post("/api/logout", logout)
     app.router.add_post("/api/device/delete", device_delete)
     app.router.add_post("/api/reissue", reissue)
+    app.router.add_get("/api/renew-options", renew_options)
+    app.router.add_post("/api/renew", renew)
+    app.router.add_get("/api/payment", payment_status)
     return app
 
 
