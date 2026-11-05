@@ -155,11 +155,12 @@ CABINET_PAGE = r"""<!doctype html>
         padding:10px 16px; border-radius:18px; }
  body.tg-fullscreen .wrap { padding-top:124px; }
  body.tg-fullscreen .tabs { top:104px; }
- .brand { display:flex; align-items:center; min-height:44px; }
- .brand img { height:28px; width:auto; display:block; filter:drop-shadow(0 2px 8px rgba(79,140,255,.3)); }
- .logo { display:none; align-items:center; gap:10px; font-weight:800; font-size:22px; letter-spacing:-.02em; font-family:"Space Grotesk",sans-serif; }
- .logo svg { width:28px; height:28px; }
- .logo svg * { fill:none; stroke:#4f8cff; stroke-width:7; }
+ .brand { display:flex; align-items:center; min-height:44px; text-decoration:none; }
+ .brand img { height:30px; width:auto; display:block; filter:drop-shadow(0 2px 8px rgba(79,140,255,.3)); }
+ .logo { display:flex; align-items:center; gap:12px; }
+ .logo .mark { width:34px; height:34px; }
+ .logo .mark circle, .logo .mark ellipse { fill:none; stroke:#4f8cff; stroke-width:7; }
+ .logo .word { font-size:26px; font-weight:800; letter-spacing:-.02em; font-family:"Space Grotesk",sans-serif; color:#fff; }
 
  .btn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%;
         min-height:52px; padding:0 22px; border-radius:999px; border:1px solid transparent;
@@ -304,8 +305,7 @@ CABINET_PAGE = r"""<!doctype html>
 <div class="wrap">
  <header class="top">
    <a class="brand" href="/" aria-label="Drebol VPN — на сайт">
-     <img src="logo.png" alt="drebol" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-     <span class="logo"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="40"/><ellipse cx="50" cy="50" rx="40" ry="13"/></svg>drebol</span>
+     __LOGO__
    </a>
    <button class="btn btn-ghost btn-sm hide" id="out" type="button">Выйти</button>
  </header>
@@ -946,11 +946,16 @@ CABINET_PAGE = r"""<!doctype html>
 
 
 def cabinet_page(bot_username: str) -> str:
-    """Готовая страница кабинета: подставлены адрес API и имя бота."""
+    """Готовая страница кабинета: подставлены адрес API, имя бота и точный логотип с основного сайта."""
     from config import load_config
     api = (load_config().get("webapi_public") or "").rstrip("/")
+    logo_html = ('<span class="logo"><svg class="mark" viewBox="0 0 100 100" aria-hidden="true">'
+                 '<circle cx="50" cy="50" r="40"/>'
+                 '<ellipse cx="50" cy="50" rx="40" ry="13"/></svg>'
+                 '<span class="word">drebol</span></span>')
     return (CABINET_PAGE.replace("__API__", api or "")
-            .replace("__BOT__", bot_username or ""))
+            .replace("__BOT__", bot_username or "")
+            .replace("__LOGO__", logo_html))
 
 
 def add_ready() -> bool:
@@ -1414,7 +1419,7 @@ async def build_current(bot_username: str) -> tuple:
         privacy_url=cfg.get("privacy_url", "") or "",
         terms_url=cfg.get("terms_url", "") or "",
         channel_url=cfg.get("channel_url", "") or "",
-        logo_file=LOGO_NAME if logo_bytes else "",
+        logo_file="",
         tariffs=await site_tariffs(cfg),
         poster_file="og.webp" if og_bytes else "",
         site_texts=cfg.get("site_texts") or {},
