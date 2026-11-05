@@ -113,9 +113,6 @@ CABINET_PAGE = r"""<!doctype html>
  body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); overflow-x:hidden;
         font:16px/1.55 Manrope,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
         -webkit-font-smoothing:antialiased; }
- /* Внутри Telegram высоту берём у клиента, а не 100vh: иначе на телефоне
-    страница прыгает при появлении клавиатуры, а в полном экране — не вся */
- body { min-height:var(--tg-viewport-height, 100vh); }
  a { color:inherit; text-decoration:none; }
  h1, h2, p { margin:0; }
 
@@ -136,26 +133,11 @@ CABINET_PAGE = r"""<!doctype html>
    background:radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,.7) 100%); }
 
  .wrap { position:relative; z-index:1; max-width:560px; margin:0 auto;
-         padding:18px 16px 48px;
-         /* Верхний отступ — самый большой из трёх: базовый, вырез
-            телефона и безопасная зона Telegram (шапка мини-приложения
-            с кнопками «закрыть» и меню). Раньше учитывался только
-            вырез, поэтому в полном экране логотип и кнопка «Выйти»
-            оказывались под кнопками Telegram. */
-         padding-top:max(18px, env(safe-area-inset-top, 0px),
-                          var(--tg-content-safe-area-inset-top, 0px)); }
+         padding:18px 16px 48px; padding-top:max(18px, env(safe-area-inset-top)); }
 
- /* шапка: сплошной чёрный прямоугольник, а не прозрачный фон — в полном
-    экране шапка Telegram прозрачная, и логотип с «Выйти» на ней терялись */
+ /* шапка */
  .top { display:flex; align-items:center; justify-content:space-between; gap:12px;
-        min-height:48px; margin-bottom:22px; background:#000;
-        padding:12px 16px; border-radius:14px; }
- /* Полный экран: шапка Telegram висит поверх страницы, а переменную
-    безопасной зоны отдают не все клиенты — поэтому в полном экране
-    опускаем нашу шапку фиксированным отступом, ни от чего не зависящим.
-    В обычном раскрытом виде и в браузере это правило не действует. */
- body.tg-fullscreen .wrap { padding-top:124px; }
- body.tg-fullscreen .tabs { top:104px; }
+        min-height:48px; margin-bottom:22px; }
  .brand { display:flex; align-items:center; min-height:44px; }
  .brand img { height:26px; width:auto; display:block; }
  .logo { display:none; align-items:center; gap:10px; font-weight:800; font-size:22px; letter-spacing:-.02em; }
@@ -221,57 +203,6 @@ CABINET_PAGE = r"""<!doctype html>
  .row span:first-child { color:rgba(255,255,255,.88); min-width:0; overflow-wrap:anywhere; }
  .row span:last-child { color:var(--soft); text-align:right; }
 
- /* полоска расхода: трафик и LTE */
- .bar { height:10px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:14px; }
- .bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, var(--accent), #7fb0ff); }
- .bar-fill.full { background:linear-gradient(90deg, #fbbf24, #f87171); }
- .bar-note { display:flex; justify-content:space-between; gap:12px; margin-top:8px; font-size:13px; color:var(--soft); }
-
- /* устройство: название слева, кнопка отключения справа */
- .dev { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 0;
-        border-top:1px solid var(--line); }
- .dev:first-of-type { border-top:0; }
- .dev b { display:block; font-size:15px; overflow-wrap:anywhere; }
- .dev small { color:var(--soft); font-size:13px; }
- .btn-mini { flex:none; min-height:38px; padding:0 14px; border-radius:999px;
-             border:1px solid rgba(248,113,113,.4); background:transparent; color:#fca5a5;
-             font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
- .btn-mini:hover { background:rgba(248,113,113,.12); }
- .btn-mini:disabled { opacity:.5; }
- .btn-danger { border-color:rgba(248,113,113,.45); color:#fca5a5; }
- .btn-danger:hover { background:rgba(248,113,113,.10); border-color:rgba(248,113,113,.6); }
-
- /* разделы: липкая лента вкладок, контент — по одному разделу за раз */
- .tabs { position:sticky; top:var(--tg-content-safe-area-inset-top, 0px); z-index:5; display:flex; gap:8px; overflow-x:auto;
-         margin:0 -16px; padding:12px 16px;
-         background:rgba(5,7,12,.88); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-         scrollbar-width:none; }
- .tabs::-webkit-scrollbar { display:none; }
- .tab { flex:none; min-height:40px; padding:0 16px; border-radius:999px;
-        border:1px solid rgba(255,255,255,.16); background:transparent; color:rgba(255,255,255,.75);
-        font:inherit; font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap;
-        transition:background .25s ease, color .25s ease, border-color .25s ease, transform .25s ease; }
- .tab:active { transform:scale(.96); }
- .tab.active { background:#fff; color:#05070c; border-color:#fff; }
-
- /* карточка платежа: сумма и статус слева, дата и детали справа */
- .pay { padding:14px 0; border-top:1px solid var(--line); }
- .pay:first-of-type { border-top:0; }
- .pay-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
- .pay-amount { font-size:19px; font-weight:800; letter-spacing:-.01em; }
- .pay-date { font-size:13px; color:var(--soft); margin-top:2px; }
- .pay-meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
- .chip { padding:4px 10px; border-radius:999px; border:1px solid var(--line);
-         font-size:12px; font-weight:600; color:var(--muted); }
-
- /* плавное появление раздела при переключении вкладок и при входе */
- @keyframes secIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
- @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
- #app:not(.hide) { animation:fadeIn .35s ease both; }
- [data-sec].sec-show { animation:secIn .35s ease both; }
- @media (prefers-reduced-motion: reduce) {
-   #app:not(.hide), [data-sec].sec-show { animation:none; } }
-
  /* вход */
  #login { text-align:center; padding:6vh 0 0; }
  #login .card { padding:30px 22px; }
@@ -291,17 +222,6 @@ CABINET_PAGE = r"""<!doctype html>
    .pair { grid-template-columns:1fr; }
    .card { padding:20px 18px; }
  }
-
- /* Широкий экран (десктоп, полный экран): колонка растёт, а карточки
-    раздела «Подписка» встают в две колонки — иначе на макбуке просто
-    узкая полоска посреди пустого окна. Главная карточка — на всю ширину.
-    Остальные разделы — одна широкая колонка: там обычно одна карточка. */
- @media (min-width: 900px) {
-   .wrap { max-width:960px; }
-   [data-sec="sub"] { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; align-items:start; }
-   [data-sec="sub"] > .card { margin:14px 0; }
-   [data-sec="sub"] > .card.hero { grid-column:1 / -1; }
- }
  @media (prefers-reduced-motion: reduce) { .silk span { animation:none; } .btn { transition:none; } }
 </style></head>
 <body>
@@ -320,7 +240,7 @@ CABINET_PAGE = r"""<!doctype html>
    <div class="card">
      <span class="eyebrow">Личный кабинет</span>
      <h1>Войдите через Telegram</h1>
-     <p class="muted">Увидите срок и трафик подписки, остаток LTE,<br>свои устройства, платежи и рефералку.</p>
+     <p class="muted">Увидите срок подписки, ссылку для подключения<br>и свои устройства.</p>
      <div id="widget"></div>
      <p class="muted" id="loginerr"></p>
      <div class="perks"><span>Без паролей</span><span>Данные только ваши</span><span>Вход за секунду</span></div>
@@ -345,6 +265,7 @@ CABINET_PAGE = r"""<!doctype html>
  var tg = window.Telegram && window.Telegram.WebApp;
  function esc(s) { return String(s == null ? "" : s).replace(/[<>&"]/g, function (c) {
    return {"<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;"}[c]; }); }
+ var BR = "<" + "br>";
  var memToken = "";
  function token() {
    if (memToken) { return memToken; }
@@ -387,8 +308,8 @@ CABINET_PAGE = r"""<!doctype html>
  // Причину видно сразу: иначе вход «проходит», а страница молча остаётся формой
  function fail(where, err) {
    var addr = API || location.origin;
-   say("Не получилось " + where + ".<code>" + esc(addr) + "</code>" +
-       esc(err && err.message ? err.message : err || "нет ответа"));
+   say("Не получилось " + where + "." + BR + "Адрес: <code>" + esc(addr) + "</code>" +
+       BR + esc(err && err.message ? err.message : err || "нет ответа"));
  }
 
  function login(payload) {
@@ -407,25 +328,6 @@ CABINET_PAGE = r"""<!doctype html>
  function pill(text, kind) { return '<span class="pill ' + kind + '">' + esc(text) + "</span>"; }
  function row(a, b) { return '<div class="row"><span>' + a + "</span><span>" + b + "</span></div>"; }
  function stat(value, label) { return '<div class="stat"><b>' + value + "</b><span>" + esc(label) + "</span></div>"; }
-
- // Статусы платежей — человеческим языком, а не кодами из базы
- var PAY_STATUS = {
-   paid: {text: "Оплачено", kind: "ok"},
-   pending: {text: "Ожидает оплаты", kind: "warn"},
-   failed: {text: "Не прошла", kind: "bad"},
-   cancelled: {text: "Отменена", kind: "bad"},
-   refunded: {text: "Возврат", kind: "warn"},
-   refund_pending: {text: "Возврат в обработке", kind: "warn"}
- };
- function payProvider(raw) {
-   var map = {platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
-   return map[String(raw).toLowerCase()] || String(raw);
- }
- // "2026-10-20 10:00" -> "20.10.2026 · 10:00"
- function fmtDate(raw) {
-   var m = String(raw || "").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
-   return m ? m[3] + "." + m[2] + "." + m[1] + " · " + m[4] : String(raw || "");
- }
 
  function render(p) {
    document.getElementById("login").className = "hide";
@@ -449,11 +351,7 @@ CABINET_PAGE = r"""<!doctype html>
      out.push('<div class="card hero">' + title("key", "Подписки пока нет") +
               '<p class="card-sub">Оформите её в боте — пробный период выдаётся сразу.</p>' +
               '<a class="btn btn-main" href="' + botUrl() + '">' + ICON.tg + "Оформить в боте</a></div>");
-     var ref0 = referralCard(p);
-     if (ref0) { out.push('<div data-sec="friends">' + ref0 + "</div>"); }
      document.getElementById("body").innerHTML = out.join("");
-     buildTabs();
-     bindActions();
      return;
    }
 
@@ -463,19 +361,12 @@ CABINET_PAGE = r"""<!doctype html>
    var plan = s.plan === "paid" ? "⭐️ Премиум" : "🆓 Пробный период";
    var big = s.status === "expired" ? "Подписка закончилась"
            : (s.left_text ? esc(s.left_text) : "до " + esc(s.until));
-   var bigSub = s.status === "expired" ? "Продлите здесь — доступ вернётся сразу."
+   var bigSub = s.status === "expired" ? "Продлите в боте — доступ вернётся сразу."
               : (s.left_text ? "осталось · до " + esc(s.until) : "действует");
    var traffic = esc(s.traffic_used_text) + (s.traffic_limit_gb ? " / " + esc(s.traffic_limit_gb) + " ГБ" : "");
-   var trafficBar = "";
-   if (s.traffic_limit_gb) {
-     var pct = Math.min(100, Math.round(s.traffic_used / (s.traffic_limit_gb * 1024 * 1024 * 1024) * 100));
-     trafficBar = '<div class="bar"><div class="bar-fill' + (pct >= 100 ? " full" : "") +
-                  '" style="width:' + pct + '%"></div></div>' +
-                  '<div class="bar-note"><span>Использовано ' + pct + "%</span><span>" + traffic + "</span></div>";
-   }
 
    // Главная карточка: статус и сколько осталось
-   out.push('<div data-sec="sub"><div class="card hero">' +
+   out.push('<div class="card hero">' +
             '<div class="hero-head"><span class="plan">' + plan + "</span>" + mark + "</div>" +
             '<div class="big">' + big + "</div>" +
             '<div class="big-sub">' + bigSub + "</div>" +
@@ -483,46 +374,13 @@ CABINET_PAGE = r"""<!doctype html>
               stat(esc(s.until), "действует до") +
               stat(s.devices_limit ? "до " + esc(s.devices_limit) : "∞", "устройств") +
               stat(traffic || "—", s.traffic_limit_gb ? "трафик" : "трафик · безлимит") +
-            "</div>" + trafficBar +
-            '<div class="stack" style="margin-top:16px"><button class="btn btn-main" type="button" id="renew-open">' +
-            ICON.card + "Продлить подписку</button></div>" +
-            "</div></div>");
-
-   // Продление: тарифы и оплата прямо здесь, без ухода в бот
-   out.push('<div data-sec="sub"><div class="card" id="renew-card">' + title("card", "Продление") +
-            '<div id="renew-body"><p class="card-sub">Загружаем тарифы…</p></div></div></div>');
-
-   // Детали подписки: что не влезло в главную карточку
-   var details = [row("Продлений", esc(s.renewed))];
-   if (s.created_at) { details.push(row("Подписка с", esc(s.created_at))); }
-   if (s.devices_extra) { details.push(row("Докуплено мест", "+" + esc(s.devices_extra))); }
-   out.push('<div data-sec="sub"><div class="card">' + title("key", "О подписке") +
-            '<p class="card-sub">Цифры на сейчас — кнопка «Обновить» внизу пересчитает их.</p>' +
-            details.join("") + "</div></div>");
-
-   // LTE: остаток за текущий месяц, как в боте на экране «LTE-интернет»
-   if (p.lte && p.lte.available) {
-     var lteBody;
-     if (p.lte.closed) {
-       lteBody = '<p class="card-sub">LTE-серверы для этой подписки закрыты.</p>';
-     } else {
-       var lpct = Math.min(100, Math.round(p.lte.used / (p.lte.limit_gb * 1024 * 1024 * 1024) * 100));
-       lteBody = '<p class="card-sub">Использовано ' + esc(p.lte.used_text) + " из " +
-                 esc(p.lte.limit_gb) + " ГБ · осталось <b style=\"color:#fff\">" +
-                 esc(p.lte.left_gb) + " ГБ</b></p>" +
-                 '<div class="bar"><div class="bar-fill' + (lpct >= 100 ? " full" : "") +
-                 '" style="width:' + lpct + '%"></div></div>' +
-                 '<div class="bar-note"><span>Лимит обновляется каждый месяц</span><span>' + lpct + "%</span></div>" +
-                 (p.lte.fallback_active
-                   ? '<p class="card-sub" style="margin-top:12px">⚠️ LTE на этот месяц закончился — ' +
-                     "сейчас работают обычные серверы, в новом месяце LTE вернётся.</p>"
-                   : "");
-     }
-     out.push('<div data-sec="lte"><div class="card">' + title("lock", "LTE-интернет") + lteBody + "</div></div>");
-   }
+            "</div>" +
+            '<div class="stack" style="margin-top:16px"><a class="btn btn-main" href="' + botUrl() + '">' +
+            ICON.card + (s.status === "expired" ? "Продлить в боте" : "Продлить подписку") + "</a></div>" +
+            "</div>");
 
    // Подключение: приложение в одно нажатие и ссылка с копированием
-   out.push('<div data-sec="sub"><div class="card">' + title("key", "Подключение") +
+   out.push('<div class="card">' + title("key", "Подключение") +
             '<p class="card-sub">Добавьте подписку в приложение одним нажатием.</p>' +
             '<div class="pair">' +
               '<a class="btn btn-main" href="happ://add/' + encodeURI(s.url) + '">Добавить в Happ</a>' +
@@ -530,297 +388,17 @@ CABINET_PAGE = r"""<!doctype html>
             "</div>" +
             '<div class="link"><code id="suburl">' + esc(s.url) + "</code>" +
             '<button class="copy" type="button" data-copy="' + esc(s.url) + '">Скопировать</button></div>' +
-            "</div></div>");
+            "</div>");
 
-   // Устройства: каждое можно отключить прямо здесь
-   var devList = (p.devices || []).map(function (x) {
-     return '<div class="dev"><div><b>' + esc(x.model) + "</b><small>" +
-            esc(x.seen || "был недавно") + "</small></div>" +
-            '<button class="btn-mini" type="button" data-del="' + esc(x.id) +
-            '" data-name="' + esc(x.model) + '">Отключить</button></div>';
-   }).join("");
-   out.push('<div data-sec="devices"><div class="card">' + title("dev", "Мои устройства") +
-            '<p class="card-sub">Подключено: ' + (p.devices ? p.devices.length : 0) +
-            (s.devices_limit ? " из " + esc(s.devices_limit) : "") +
-            (s.devices_limit && p.devices && p.devices.length >= s.devices_limit
-              ? " · все места заняты" : "") + "</p>" +
-            (devList || '<p class="card-sub">Пока ни одного — подключитесь в приложении.</p>') + "</div></div>");
-
-   // Действия: перевыпуск ключа — как кнопка «Новый ключ» в боте
-   if ((s.status === "active" || s.status === "renewal") && s.enabled) {
-     out.push('<div data-sec="sub"><div class="card">' + title("key", "Действия") +
-              '<p class="card-sub">Старая ссылка перестанет работать на всех устройствах — ' +
-              "пригодится, если она попала в чужие руки.</p>" +
-              '<button class="btn btn-ghost btn-danger" type="button" id="reissue">🔁 Новый ключ</button></div></div>');
+   if (p.devices && p.devices.length) {
+     var d = p.devices.map(function (x) { return row(esc(x.model), esc(x.seen)); }).join("");
+     out.push('<div class="card">' + title("dev", "Мои устройства") +
+              '<p class="card-sub">Подключено: ' + p.devices.length +
+              (s.devices_limit ? " из " + esc(s.devices_limit) : "") + "</p>" + d + "</div>");
    }
-
-   // Платежи: карточка на оплату — сумма, статус-пилюля, дата, провайдер
-   var payCards = (p.payments || []).map(function (x) {
-     var st = PAY_STATUS[x.status] || {text: esc(x.status), kind: ""};
-     var meta = [];
-     if (x.provider) { meta.push('<span class="chip">' + esc(payProvider(x.provider)) + "</span>"); }
-     if (x.promo) { meta.push('<span class="chip">🎟 ' + esc(x.promo) + "</span>"); }
-     return '<div class="pay"><div class="pay-head"><span class="pay-amount">' + esc(x.amount) +
-            " ₽</span>" + pill(st.text, st.kind) + "</div>" +
-            '<div class="pay-date">' + esc(fmtDate(x.date)) + "</div>" +
-            (meta.length ? '<div class="pay-meta">' + meta.join("") + "</div>" : "") + "</div>";
-   }).join("");
-   var payTotal = p.payments_total
-     ? '<p class="card-sub">Всего оплачено: <b style="color:#fff">' + esc(p.payments_total.sum) +
-       " ₽</b> · успешных оплат: " + esc(p.payments_total.count) + "</p>" : "";
-   out.push('<div data-sec="payments"><div class="card">' + title("card", "Платежи") + payTotal +
-            (payCards || '<p class="card-sub">Платежей пока нет — первая оплата появится ' +
-             "здесь сразу после оплаты.</p>") + "</div></div>");
-
-   var ref = referralCard(p);
-   if (ref) { out.push('<div data-sec="friends">' + ref + "</div>"); }
-
-   out.push('<div class="stack" style="margin-top:6px">' +
-            '<button class="btn btn-ghost" type="button" onclick="load()">🔄 Обновить данные</button>' +
-            '<a class="btn btn-ghost" href="' + botUrl() + '">' +
+   out.push('<div class="stack" style="margin-top:6px"><a class="btn btn-ghost" href="' + botUrl() + '">' +
             ICON.tg + "Открыть бота</a></div>");
-   document.getElementById("body").innerHTML = '<div class="tabs" id="tabs"></div>' + out.join("");
-   buildTabs();
-   bindActions();
- }
-
- // Разделы: лента вкладок собирается из того, что реально есть на странице.
- // Один раздел — ленту не показываем, запоминаем выбор между заходами.
- // Разделы открываются и прямыми ссылками: /cabinet/lte, /cabinet/devices
- // и т.д. — адрес из ссылки важнее запомненного. Переключение вкладок
- // тихое: раздел меняется на месте, без перезагрузки, а адрес просто
- // подстраивается под текущий раздел, чтобы ссылку можно было взять.
- var SEC_LABELS = {sub: "Подписка", lte: "LTE", devices: "Устройства",
-                   payments: "Платежи", friends: "Друзья"};
- function cabinetBase() {
-   var p = location.pathname.replace(/\/+$/, "");
-   if (p.slice(-13) === "/cabinet.html") { return p.slice(0, -13) + "/cabinet"; }
-   var i = p.lastIndexOf("/cabinet");
-   return i !== -1 ? p.slice(0, i + 8) : "/cabinet";
- }
- function sectionFromPath() {
-   var parts = location.pathname.replace(/\/+$/, "").split("/");
-   var last = parts[parts.length - 1];
-   return (last && last !== "cabinet" && last !== "cabinet.html") ? last : "";
- }
- function buildTabs() {
-   var tabs = document.getElementById("tabs");
-   if (!tabs) { return; }
-   var seen = [];
-   document.querySelectorAll("#body [data-sec]").forEach(function (el) {
-     var name = el.getAttribute("data-sec");
-     if (seen.indexOf(name) === -1) { seen.push(name); }
-   });
-   if (seen.length <= 1) { tabs.style.display = "none"; return; }
-   tabs.style.display = "";
-   var saved = "";
-   try { saved = localStorage.getItem("drebol_tab") || ""; } catch (e) {}
-   var pathSec = sectionFromPath();
-   var active = seen.indexOf(pathSec) !== -1 ? pathSec
-     : seen.indexOf(saved) !== -1 ? saved : seen[0];
-   tabs.innerHTML = "";
-   seen.forEach(function (name) {
-     var b = document.createElement("button");
-     b.className = "tab" + (name === active ? " active" : "");
-     b.type = "button";
-     b.textContent = SEC_LABELS[name] || name;
-     b.onclick = function () { showTab(name); };
-     tabs.appendChild(b);
-   });
-   showTab(active, true);
-   if (seen.indexOf(pathSec) !== -1) {
-     try { localStorage.setItem("drebol_tab", pathSec); } catch (e) {}
-   }
- }
- function showTab(name, silent) {
-   document.querySelectorAll("#body [data-sec]").forEach(function (el) {
-     var show = el.getAttribute("data-sec") === name;
-     el.style.display = show ? "" : "none";
-     if (show) {
-       // перезапускаем анимацию появления при каждом переключении
-       el.classList.remove("sec-show");
-       void el.offsetWidth;
-       el.classList.add("sec-show");
-     }
-   });
-   document.querySelectorAll("#tabs .tab").forEach(function (b) {
-     b.classList.toggle("active", b.textContent === (SEC_LABELS[name] || name));
-   });
-   if (!silent) {
-     try { localStorage.setItem("drebol_tab", name); } catch (e) {}
-     try { history.replaceState(null, "", cabinetBase() + "/" + name); } catch (e) {}
-   }
- }
-
- // Рефералка: статистика и ссылка — имя бота страница уже знает (BOT)
- function referralCard(p) {
-   if (!p.referral) { return ""; }
-   var r = p.referral;
-   var link = "https://t.me/" + BOT + "?start=ref_" + p.user.id;
-   var share = "https://t.me/share/url?url=" + encodeURIComponent(link) +
-               "&text=" + encodeURIComponent("Попробуй Drebol VPN — быстрый и безопасный VPN!");
-   return '<div class="card">' + title("tg", "Приглашайте друзей") +
-     '<p class="card-sub">Приглашено: <b style="color:#fff">' + esc(r.invited) + "</b>" +
-     " · бонус получили: <b style=\"color:#fff\">" + esc(r.rewarded) + "</b>" +
-     (r.bonus_text ? " · вам начислено: <b style=\"color:#fff\">+" + esc(r.bonus_text) + "</b>" : "") + "</p>" +
-     '<div class="link"><code id="reflink">' + esc(link) + "</code>" +
-     '<button class="copy" type="button" data-copy="' + esc(link) + '">Скопировать</button></div>' +
-     '<div class="stack" style="margin-top:12px"><a class="btn btn-ghost" href="' + share +
-     '">📤 Поделиться ссылкой</a></div></div>';
- }
-
- // Кнопки действий после отрисовки: отключение устройства и перевыпуск
- function bindActions() {
-   document.querySelectorAll("[data-del]").forEach(function (btn) {
-     btn.onclick = function () {
-       var name = btn.getAttribute("data-name") || "это устройство";
-       if (!confirm("Отключить " + name + "? Оно потеряет доступ, слот освободится.")) { return; }
-       btn.disabled = true; btn.textContent = "Отключаем…";
-       api("/api/device/delete", {method: "POST",
-           body: JSON.stringify({hwid: btn.getAttribute("data-del")})})
-         .then(function (r) {
-           if (r.status === 200) { return load(); }
-           alert(r.data && r.data.error === "already_gone"
-             ? "Это устройство уже отключено." : "Не получилось — попробуйте позже.");
-           load();
-         })
-         .catch(function () { alert("Не получилось — попробуйте позже."); load(); });
-     };
-   });
-   var re = document.getElementById("reissue");
-   if (re) {
-     re.onclick = function () {
-       if (!confirm("Перевыпустить ключ? Старая ссылка перестанет работать на всех устройствах, " +
-                    "новую нужно будет заново вставить в приложение.")) { return; }
-       re.disabled = true; re.textContent = "Перевыпускаем…";
-       api("/api/reissue", {method: "POST", body: "{}"})
-         .then(function (r) {
-           if (r.status === 200) { alert("Готово — новая ссылка уже в карточке «Подключение»."); }
-           else { alert("Не получилось — попробуйте позже."); }
-           load();
-         })
-         .catch(function () { alert("Не получилось — попробуйте позже."); load(); });
-     };
-   }
-   var ro = document.getElementById("renew-open");
-   if (ro) {
-     ro.onclick = function () {
-       var c = document.getElementById("renew-card");
-       if (c) { c.scrollIntoView({behavior: "smooth", block: "start"}); }
-       loadRenew();
-     };
-   }
-   if (document.getElementById("renew-card")) { loadRenew(); }
- }
-
- // Продление: тарифы, счёт, ожидание подтверждения. Подтверждение
- // приходит опросом: бот сам спрашивает Platega раз в минуту, вебхуков нет,
- // поэтому страница опрашивает статус счёта каждые 10 секунд, пока ждёт.
- var renewTimer = null;
- var renewPayUrl = "";
- var pendingPayUrl = "";
- function stopRenewPoll() { if (renewTimer) { clearTimeout(renewTimer); renewTimer = null; } }
- function openPay(url) {
-   if (tg && tg.openLink) { tg.openLink(url); }
-   else { window.open(url, "_blank"); }
- }
- function loadRenew() {
-   stopRenewPoll();
-   var body = document.getElementById("renew-body");
-   if (!body) { return; }
-   api("/api/renew-options").then(function (r) {
-     if (r.status !== 200 || !r.data.tariffs) {
-       body.innerHTML = '<p class="card-sub">Продление сейчас недоступно. ' +
-                        "Попробуйте позже или продлите в боте.</p>";
-       return;
-     }
-     var d = r.data;
-     var html = "";
-     if (d.promo) {
-       html += '<p class="card-sub">🎟 Промокод ' + esc(d.promo.code) + " (−" +
-               esc(d.promo.percent) + "%) уже учтён в цене.</p>";
-     }
-     if (d.devices && d.devices.count && d.devices.price) {
-       html += '<p class="card-sub">В цену включены ваши места: ' + esc(d.devices.count) +
-               " × " + esc(d.devices.price) + " ₽.</p>";
-     }
-     if (d.pending) {
-       pendingPayUrl = d.pending.url;
-       html += '<p class="card-sub">⏳ У вас есть неоплаченный счёт на <b style="color:#fff">' +
-               esc(d.pending.amount) + " ₽</b>.</p>" +
-               '<div class="stack"><button class="btn btn-main" type="button" ' +
-               'onclick="openPay(pendingPayUrl)">Продолжить оплату</button>' +
-               '<button class="btn btn-ghost" type="button" onclick="pollPayment(' +
-               d.pending.id + ', 90)">Проверить оплату</button></div>';
-     }
-     html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через Platega.</p>';
-     d.tariffs.forEach(function (t) {
-       html += '<button class="btn btn-ghost" type="button" style="margin-top:8px" onclick="renewPay(' +
-               t.id + ')">' + esc(t.name) + " — " + esc(t.period) + " — " +
-               esc(t.price) + " ₽</button>";
-     });
-     body.innerHTML = html;
-   }).catch(function () {
-     body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
-   });
- }
- function renewPay(tariffId) {
-   var body = document.getElementById("renew-body");
-   if (!body) { return; }
-   body.innerHTML = '<p class="card-sub">Создаём счёт…</p>';
-   api("/api/renew", {method: "POST", body: JSON.stringify({tariff_id: tariffId})})
-     .then(function (r) {
-       if (r.status !== 200 || !r.data.url) {
-         var msg = "Не получилось создать счёт. Попробуйте позже.";
-         if (r.data.error === "bad_tariff") { msg = "Тариф больше недоступен."; }
-         else if (r.data.error === "pay_unavailable") { msg = "Оплата временно недоступна."; }
-         body.innerHTML = '<p class="card-sub">' + msg + '</p>' +
-           '<button class="btn btn-ghost" type="button" onclick="loadRenew()">Попробовать ещё раз</button>';
-         return;
-       }
-       renewPayUrl = r.data.url;
-       body.innerHTML = '<div id="renew-wait"><p class="card-sub">Счёт на <b style="color:#fff">' +
-         esc(r.data.amount) + " ₽</b> готов. Оплатите его — подтверждение придёт само, " +
-         "обычно в течение минуты.</p>" +
-         '<button class="btn btn-main" type="button" onclick="openPay(renewPayUrl)">Оплатить</button></div>';
-       openPay(r.data.url);
-       pollPayment(r.data.payment_id, 90);
-     })
-     .catch(function () {
-       body.innerHTML = '<p class="card-sub">Не получилось создать счёт. Попробуйте позже.</p>' +
-         '<button class="btn btn-ghost" type="button" onclick="loadRenew()">Попробовать ещё раз</button>';
-     });
- }
- function pollPayment(id, tries) {
-   stopRenewPoll();
-   api("/api/payment?id=" + id).then(function (r) {
-     var box = document.getElementById("renew-wait");
-     if (r.status !== 200) {
-       if (box) { box.innerHTML = '<p class="card-sub">Не удалось проверить статус. Попробуйте позже.</p>'; }
-       return;
-     }
-     var st = r.data.status;
-     if (st === "paid" || st === "refund_pending") {
-       if (box) { box.innerHTML = '<p class="card-sub">✅ Оплата прошла! Обновляем данные…</p>'; }
-       load();
-       return;
-     }
-     if (st === "canceled" || st === "expired" || st === "error" ||
-         st === "refunded" || st === "chargebacked") {
-       if (box) { box.innerHTML = '<p class="card-sub">Счёт не оплачен. Создайте новый счёт.</p>' +
-         '<button class="btn btn-ghost" type="button" onclick="loadRenew()">К тарифам</button>'; }
-       return;
-     }
-     if (tries <= 0) {
-       if (box) { box.innerHTML = '<p class="card-sub">Пока не оплачено. Если вы уже оплатили, ' +
-         'подождите немного и нажмите «Проверить».</p>' +
-         '<button class="btn btn-ghost" type="button" onclick="pollPayment(' + id + ', 90)">Проверить</button>'; }
-       return;
-     }
-     renewTimer = setTimeout(function () { pollPayment(id, tries - 1); }, 10000);
-   }).catch(function () {
-     renewTimer = setTimeout(function () { pollPayment(id, tries - 1); }, 10000);
-   });
+   document.getElementById("body").innerHTML = out.join("");
  }
 
  // Копирование ссылки. Где буфер недоступен — просто выделяем её
@@ -843,7 +421,6 @@ CABINET_PAGE = r"""<!doctype html>
  });
 
  function load() {
-   stopRenewPoll();
    return api("/api/me").then(function (r) {
      if (r.status === 200) { say(""); return render(r.data); }
      setToken("");
@@ -884,63 +461,6 @@ CABINET_PAGE = r"""<!doctype html>
    tg.ready(); tg.expand();
    // внутри Telegram красим шапку в цвет страницы
    try { tg.setHeaderColor("#05070c"); tg.setBackgroundColor("#05070c"); } catch (e) {}
-   // Полный экран (Bot API 8.0+): вместо маленького окошка-панели
-   // приложение занимает всё окно, как у BotFather. На старых клиентах
-   // метода нет — просто остаёмся в раскрытом expand() выше.
-   // В полноэкранном режиме шапка прозрачная, поэтому цвет шапки
-   // задан выше — он определяет контраст системных элементов.
-   try {
-     if (tg.isVersionAtLeast && tg.isVersionAtLeast("8.0") &&
-         tg.requestFullscreen && !tg.isFullscreen) {
-       tg.requestFullscreen();
-     }
-   } catch (e) {}
-   // Фиксированный отступ шапки в полном экране: класс ставится,
-   // когда клиент реально перешёл в полный экран, и снимается при
-   // выходе из него. requestFullscreen асинхронен, поэтому ловим
-   // и событие, и повторную проверку через 800 мс.
-   try {
-     document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
-   } catch (e) {}
-   try {
-     if (tg.onEvent) { tg.onEvent("fullscreenChanged", function () {
-       try {
-         document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
-       } catch (e) {}
-     }); }
-   } catch (e) {}
-   setTimeout(function () {
-     try {
-       document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
-     } catch (e) {}
-   }, 800);
-   // Безопасная зона Telegram: в полном экране шапка клиента
-   // (закрыть, меню) висит поверх страницы. Скрипт Telegram сам
-   // выставляет --tg-content-safe-area-inset-top, но на старых
-   // клиентах переменной может не быть — продублируем её из
-   // contentSafeAreaInset и обновим при изменении зоны.
-   (function applySafeArea() {
-     try {
-       var top = tg.contentSafeAreaInset && tg.contentSafeAreaInset.top;
-       if (typeof top === "number" && top > 0) {
-         document.documentElement.style.setProperty(
-           "--tg-content-safe-area-inset-top", top + "px");
-       }
-     } catch (e) {}
-   })();
-   try {
-     if (tg.onEvent) {
-       tg.onEvent("contentSafeAreaChanged", function () {
-         try {
-           var top = tg.contentSafeAreaInset && tg.contentSafeAreaInset.top;
-           if (typeof top === "number") {
-             document.documentElement.style.setProperty(
-               "--tg-content-safe-area-inset-top", top + "px");
-           }
-         } catch (e) {}
-       });
-     }
-   } catch (e) {}
    login({initData: tg.initData});
  } else if (token()) {
    load();
@@ -1204,20 +724,8 @@ chmod 755 {WEB_ROOT}
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html
 mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
 mv /tmp/drebol_add.html {WEB_ROOT}/add.html
-# Кабинет — по чистому адресу /cabinet: nginx отдаёт index.html из папки
-# сам (try_files $uri $uri/). Старый cabinet.html оставляем — закладки
-# и старые кнопки из бота не сломаются. Разделы — отдельными адресами
-# /cabinet/lte, /cabinet/devices и т.д.: та же страница, нужный раздел
-# она выбирает сама по адресу (см. sectionFromPath в её JS).
-mkdir -p {WEB_ROOT}/cabinet
-cp /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet/index.html
-for sec in sub lte devices payments friends; do
-  mkdir -p {WEB_ROOT}/cabinet/$sec
-  cp /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet/$sec/index.html
-done
 mv /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet.html
-chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html {WEB_ROOT}/cabinet/index.html
-chmod 644 {WEB_ROOT}/cabinet/*/index.html || true
+chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
@@ -1412,8 +920,8 @@ async def build_current(bot_username: str) -> tuple:
     cfg = load_config()
     og_bytes = _asset("og.webp")
     logo_bytes = _asset(LOGO_NAME)
-    # кабинет лежит рядом со страницей — ссылка относительная, без .html
-    cabinet = "cabinet" if cfg.get("webapi_public") else ""
+    # кабинет лежит рядом со страницей — ссылка относительная
+    cabinet = "cabinet.html" if cfg.get("webapi_public") else ""
     page = build_page(
         bot_username=bot_username,
         cabinet_url=cabinet,
@@ -1435,7 +943,12 @@ def cabinet_ready() -> bool:
 
 
 def cabinet_link() -> str:
-    return f"{site_url()}/cabinet" if cabinet_ready() else ""
+    """Ссылка на кабинет. Хвост с датой выкладки сбивает кэш вебвью телеграма."""
+    if not cabinet_ready():
+        return ""
+    stamp = str(load_config().get("site_deployed_at") or "").replace(" ", "").replace(":", "")
+    tail = f"?v={stamp[-8:]}" if stamp else ""
+    return f"{site_url()}/cabinet.html{tail}"
 
 
 def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes) -> str:

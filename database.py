@@ -48,7 +48,6 @@ async def init_db():
                 limit_ip INTEGER NOT NULL DEFAULT 0,
                 limit_hwid INTEGER NOT NULL DEFAULT 0,
                 total_gb INTEGER NOT NULL DEFAULT 0,
-                lte_gb INTEGER,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -72,8 +71,6 @@ async def init_db():
                 limit_ip INTEGER NOT NULL DEFAULT 0,
                 limit_hwid INTEGER NOT NULL DEFAULT 0,
                 total_gb INTEGER NOT NULL DEFAULT 0,
-                lte_gb INTEGER,
-                lte_fallback_month TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -107,18 +104,6 @@ async def init_db():
         # времени на оплату двигала конец периода задним числом у всех подписок.
         try:
             await db.execute("ALTER TABLE paid_subs ADD COLUMN period_end TEXT")
-        except Exception:
-            pass
-        # lte_gb — свой месячный лимит LTE-трафика подписки (NULL = пресет).
-        for _table in ("paid_subs", "admin_subs"):
-            try:
-                await db.execute(f"ALTER TABLE {_table} ADD COLUMN lte_gb INTEGER")
-            except Exception:
-                pass
-        # lte_fallback_month — месяц «ГГГГ-ММ», в котором подписку уже
-        # перевели на fallback-сквад из-за конца LTE. Пусто — не переводили.
-        try:
-            await db.execute("ALTER TABLE paid_subs ADD COLUMN lte_fallback_month TEXT")
         except Exception:
             pass
 
@@ -262,18 +247,7 @@ async def init_db():
         # ручные записи админа и исключения из общего. Удержания — остаток
         # срока подписки, остановленной из-за ЧС, чтобы вернуть его при снятии.
         await db.execute(
-            "CREATE TABLE IF NOT EXISTS blacklist_remote (tg_id INTEGER PRIMARY KEY, reason TEXT, "
-            "src TEXT NOT NULL DEFAULT 'main')")
-        try:
-            await db.execute(
-                "ALTER TABLE blacklist_remote ADD COLUMN src TEXT NOT NULL DEFAULT 'main'")
-        except Exception:
-            pass  # на свежих базах колонка уже есть в CREATE TABLE
-        # Доп. источник общего списка (ban-vpn): кэшируется отдельно и
-        # обновляется раз в неделю, а в blacklist_remote вливается вместе
-        # с основным — чтобы основной синк не вымывал его записи
-        await db.execute(
-            "CREATE TABLE IF NOT EXISTS blacklist_remote_extra (tg_id INTEGER PRIMARY KEY, reason TEXT)")
+            "CREATE TABLE IF NOT EXISTS blacklist_remote (tg_id INTEGER PRIMARY KEY, reason TEXT)")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS blacklist_manual (
                 tg_id INTEGER PRIMARY KEY,
@@ -400,13 +374,22 @@ async def init_db():
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)"
         )
-        # поля возврата: отзывать ли срок и когда возврат завершился;
-        # partial_refunded — сколько уже вернули частями (платёж при этом
-        # остаётся «оплачен», срок не трогается)
-        for _col in ("refund_revoke INTEGER", "refunded_at TIMESTAMP",
-                     "partial_refunded INTEGER NOT NULL DEFAULT 0"):
+        # поля возврата: отзывать ли срок и когда возврат завершился
+        for _col in ("refund_revoke INTEGER", "refunded_at TIMESTAMP"):
             try:
                 await db.execute(f"ALTER TABLE payments ADD COLUMN {_col}")
+            except Exception:
+                pass
+        # Баны. until — временный бан, снимется сам; by — кто забанил
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS bans (
+                tg_id INTEGER PRIMARY KEY,
+                banned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        for _col in ("reason TEXT", "until TIMESTAMP", "by_id INTEGER"):
+            try:
+                await db.execute(f"ALTER TABLE bans ADD COLUMN {_col}")
             except Exception:
                 pass
         # Чёрный список: срок и автор записи
@@ -1014,38 +997,6 @@ async def claim_refund(payment_id: int) -> bool:
         return (cur.rowcount or 0) > 0
 
 
-async def get_partial_refunded(payment_id: int) -> int:
-    """Сколько по платежу уже вернули частями (подтверждённых ботом)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT COALESCE(partial_refunded, 0) FROM payments WHERE id = ?",
-            (payment_id,)) as cur:
-            r = await cur.fetchone()
-    return int(r[0]) if r else 0
-
-
-async def add_partial_refunded(payment_id: int, amount: int) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE payments SET partial_refunded = COALESCE(partial_refunded, 0) + ? "
-            "WHERE id = ?",
-            (int(amount), payment_id),
-        )
-        await db.commit()
-
-
-async def set_partial_refunded(payment_id: int, amount: int) -> None:
-    """Ставит суммарно возвращённую частями сумму (абсолютное значение,
-    а не прибавку: Platega отдаёт именно накопленный итог)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE payments SET partial_refunded = MAX(COALESCE(partial_refunded, 0), ?) "
-            "WHERE id = ?",
-            (int(amount), payment_id),
-        )
-        await db.commit()
-
-
 async def get_refund_revoke(payment_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -1180,52 +1131,6 @@ async def users_by_emails(emails: list) -> dict:
     return out
 
 
-async def users_by_ids(tg_ids: list) -> dict:
-    """TG ID -> (first_name, username) из таблицы users."""
-    tg_ids = [t for t in tg_ids if t]
-    if not tg_ids:
-        return {}
-    marks = ",".join("?" * len(tg_ids))
-    out = {}
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(f"""
-            SELECT id, first_name, username FROM users WHERE id IN ({marks})
-        """, tg_ids) as cur:
-            for tg_id, fn, un in await cur.fetchall():
-                out[tg_id] = (fn, un)
-    return out
-
-
-async def subs_by_tg_ids(tg_ids: list) -> dict:
-    """TG ID -> {email, expire, total_gb, status} самой свежей подписки.
-
-    Платные подписки в приоритете, админские — запасной вариант.
-    """
-    tg_ids = [t for t in tg_ids if t]
-    if not tg_ids:
-        return {}
-    marks = ",".join("?" * len(tg_ids))
-    out = {}
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(f"""
-            SELECT tg_id, email, expire_date, total_gb, status
-            FROM paid_subs WHERE tg_id IN ({marks})
-            ORDER BY created_at DESC
-        """, tg_ids) as cur:
-            for tg_id, email, expire, total_gb, status in await cur.fetchall():
-                out.setdefault(tg_id, {"email": email, "expire": expire,
-                                       "total_gb": total_gb, "status": status})
-        async with db.execute(f"""
-            SELECT tg_id, email, expire_date, total_gb
-            FROM admin_subs WHERE tg_id IN ({marks})
-            ORDER BY created_at DESC
-        """, tg_ids) as cur:
-            for tg_id, email, expire, total_gb in await cur.fetchall():
-                out.setdefault(tg_id, {"email": email, "expire": expire,
-                                       "total_gb": total_gb, "status": None})
-    return out
-
-
 async def recent_subs_for_connect_help(window_hours: int) -> list[tuple]:
     """Свежие подписки, по которым ещё не решили, помогать ли с подключением.
 
@@ -1292,47 +1197,25 @@ async def bl_lookup(tg_id: int) -> dict:
             (tg_id,),
         ) as cur:
             manual = await cur.fetchone()
-        async with db.execute("SELECT reason, src FROM blacklist_remote WHERE tg_id = ?", (tg_id,)) as cur:
+        async with db.execute("SELECT reason FROM blacklist_remote WHERE tg_id = ?", (tg_id,)) as cur:
             remote = await cur.fetchone()
         async with db.execute("SELECT 1 FROM blacklist_allow WHERE tg_id = ?", (tg_id,)) as cur:
             allowed = await cur.fetchone() is not None
     return {"manual": manual, "remote_listed": remote is not None,
-            "remote": remote[0] if remote else None,
-            "remote_src": remote[1] if remote else None, "allowed": allowed}
+            "remote": remote[0] if remote else None, "allowed": allowed}
 
 
 async def bl_replace_remote(entries: dict) -> tuple[set, set]:
-    """Перезаписывает общий список одной транзакцией: (новые ID, пропавшие ID).
-
-    entries: {tg_id: (reason, src)} — src 'main' (основной список) или
-    'extra' (доп. источник). Источник нужен карточке человека: показать,
-    откуда именно он прилетел.
-    """
+    """Перезаписывает общий список одной транзакцией: (новые ID, пропавшие ID)."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT tg_id FROM blacklist_remote") as cur:
             old = {r[0] for r in await cur.fetchall()}
         await db.execute("DELETE FROM blacklist_remote")
-        await db.executemany("INSERT INTO blacklist_remote (tg_id, reason, src) VALUES (?, ?, ?)",
-                             [(tg_id, reason, src) for tg_id, (reason, src) in entries.items()])
+        await db.executemany("INSERT INTO blacklist_remote (tg_id, reason) VALUES (?, ?)",
+                             list(entries.items()))
         await db.commit()
     new = set(entries)
     return new - old, old - new
-
-
-async def bl_replace_extra(entries: dict) -> None:
-    """Перезаписывает кэш доп. источника целиком (он обновляется раз в неделю)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM blacklist_remote_extra")
-        await db.executemany("INSERT INTO blacklist_remote_extra (tg_id, reason) VALUES (?, ?)",
-                             list(entries.items()))
-        await db.commit()
-
-
-async def bl_extra_entries() -> dict:
-    """Кэш доп. источника: {tg_id: reason}."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT tg_id, reason FROM blacklist_remote_extra") as cur:
-            return {r[0]: r[1] for r in await cur.fetchall()}
 
 
 async def bl_add_manual(tg_id: int, reason: str, until: str | None = None,
@@ -1425,7 +1308,6 @@ async def bl_counts(use_remote: bool) -> dict:
                 return (await cur.fetchone())[0]
         return {
             "remote": await one("SELECT COUNT(*) FROM blacklist_remote"),
-            "extra": await one("SELECT COUNT(*) FROM blacklist_remote_extra"),
             "manual": await one("SELECT COUNT(*) FROM blacklist_manual"),
             "allow": await one("SELECT COUNT(*) FROM blacklist_allow"),
             "ours": await one(_BL_CTE + "SELECT COUNT(*) FROM users u JOIN bl ON bl.tg_id = u.id", flag),
@@ -1446,6 +1328,11 @@ async def bl_stats() -> dict:
                 "SELECT COUNT(*) FROM blacklist_manual WHERE until IS NOT NULL"),
             "forever": await one(
                 "SELECT COUNT(*) FROM blacklist_manual WHERE until IS NULL"),
+            "banned": await one(
+                "SELECT COUNT(*) FROM bans "
+                "WHERE until IS NULL OR until > CURRENT_TIMESTAMP"),
+            "banned_temp": await one(
+                "SELECT COUNT(*) FROM bans WHERE until > CURRENT_TIMESTAMP"),
             "added_30d": await one(
                 "SELECT COUNT(*) FROM blacklist_log WHERE action IN ('added', 'readded') "
                 "AND created_at >= datetime('now', '-30 days')"),
@@ -1469,33 +1356,6 @@ async def bl_list(scope: str, use_remote: bool, page: int = 1, per_page: int = 1
                 "LEFT JOIN blacklist_remote r ON r.tg_id = a.tg_id")
         cols = "a.tg_id, u.first_name, u.username, r.reason, 'allow'"
         order, params = "a.created_at DESC", []
-    elif scope == "people":
-        # Только те, кто уже был в боте (есть строка в users): вручную
-        # (сначала) и из общих списков (потом). Ручная запись побеждает
-        # удалённую, просроченная ручная не считается, исключение убирает
-        # из списка. Чужие ID из списков, не открывавшие бота, не показываем.
-        base = ("(SELECT m.tg_id AS tg_id, u.first_name AS first_name, "
-                "u.username AS username, m.reason AS reason, 'manual' AS src, "
-                "m.created_at AS ord "
-                "FROM blacklist_manual m JOIN users u ON u.id = m.tg_id "
-                "WHERE m.until IS NULL OR m.until > CURRENT_TIMESTAMP "
-                "UNION ALL "
-                "SELECT r.tg_id, u.first_name, u.username, r.reason, 'remote', NULL "
-                "FROM blacklist_remote r JOIN users u ON u.id = r.tg_id "
-                "WHERE ? = 1 AND r.tg_id NOT IN (SELECT tg_id FROM blacklist_allow) "
-                "AND r.tg_id NOT IN (SELECT tg_id FROM blacklist_manual "
-                "WHERE until IS NULL OR until > CURRENT_TIMESTAMP))")
-        params = [1 if use_remote else 0]
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(f"SELECT COUNT(*) FROM {base}", params) as cur:
-                total = (await cur.fetchone())[0]
-            pages = max(1, (total + per_page - 1) // per_page)
-            page = min(max(1, page), pages)
-            async with db.execute(
-                f"SELECT tg_id, first_name, username, reason, src FROM {base} "
-                "ORDER BY (src = 'remote'), ord DESC, tg_id DESC LIMIT ? OFFSET ?",
-                params + [per_page, (page - 1) * per_page]) as cur:
-                return await cur.fetchall(), pages
     else:
         base = ("FROM users u LEFT JOIN blacklist_manual m ON m.tg_id = u.id "
                 "LEFT JOIN blacklist_remote r ON r.tg_id = u.id AND ? = 1 "
@@ -1544,17 +1404,6 @@ async def bl_hold_take(tg_id: int) -> list:
         await db.execute("DELETE FROM blacklist_hold WHERE tg_id = ?", (tg_id,))
         await db.commit()
     return rows
-
-
-async def bl_remote_admin_subs() -> list:
-    """TG ID админских подписок людей из общего списка без исключений."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT s.tg_id FROM admin_subs s
-            JOIN blacklist_remote r ON r.tg_id = s.tg_id
-            WHERE s.tg_id NOT IN (SELECT tg_id FROM blacklist_allow)
-        """) as cur:
-            return [r[0] for r in await cur.fetchall()]
 
 
 async def bl_remote_subs() -> list:
@@ -1840,6 +1689,68 @@ async def get_user_info(user_id: int) -> tuple | None:
             "SELECT id, first_name, username FROM users WHERE id = ?", (user_id,)
         ) as cur:
             return await cur.fetchone()
+
+
+# ── Баны ─────────────────────────────────────────────────────────────────────
+
+async def ban_user(tg_id: int, reason: str | None = None,
+                   until: str | None = None, by_id: int | None = None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO bans (tg_id, banned_at, reason, until, by_id) "
+            "VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?)", (tg_id, reason, until, by_id))
+        await db.commit()
+
+
+async def ban_entry(tg_id: int) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT reason, datetime(until, 'localtime'), by_id, "
+            "datetime(banned_at, 'localtime') FROM bans WHERE tg_id = ?", (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return None
+    return {"reason": row[0], "until": row[1], "by_id": row[2], "since": row[3]}
+
+
+async def bans_expired_now() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT tg_id FROM bans WHERE until IS NOT NULL AND until <= CURRENT_TIMESTAMP"
+        ) as cur:
+            return [r[0] for r in await cur.fetchall()]
+
+
+async def bans_list(page: int = 1, per_page: int = 10) -> tuple:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM bans") as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT b.tg_id, u.first_name, u.username, b.reason, "
+            "datetime(b.until, 'localtime') FROM bans b "
+            "LEFT JOIN users u ON u.id = b.tg_id "
+            "ORDER BY b.banned_at DESC LIMIT ? OFFSET ?",
+            (per_page, (page - 1) * per_page),
+        ) as cur:
+            rows = await cur.fetchall()
+    pages = max(1, (total + per_page - 1) // per_page)
+    return rows, pages, total
+
+
+async def unban_user(tg_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM bans WHERE tg_id = ?", (tg_id,))
+        await db.commit()
+
+
+async def is_banned(tg_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM bans WHERE tg_id = ? "
+            "AND (until IS NULL OR until > CURRENT_TIMESTAMP)", (tg_id,),
+        ) as cur:
+            return (await cur.fetchone()) is not None
 
 
 # ── Winback ──────────────────────────────────────────────────────────────────

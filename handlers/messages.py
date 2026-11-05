@@ -11,24 +11,23 @@ from states import (
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_PRESET_EXPIRE,
-    AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC, AWAITING_PRESET_LTE,
+    AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC,
     AWAITING_SUB_TG_ID,
     AWAITING_SUB_EDIT_EXPIRE,
-    AWAITING_SUB_EDIT_HWID, AWAITING_SUB_EDIT_TRAFFIC, AWAITING_SUB_EDIT_LTE,
+    AWAITING_SUB_EDIT_HWID, AWAITING_SUB_EDIT_TRAFFIC,
     AWAITING_SUB_EXTEND, AWAITING_SUB_REDUCE,
     AWAITING_PAID_SUB_TG_ID,
     AWAITING_PAID_PRESET_HWID,
-    AWAITING_PAID_PRESET_TRAFFIC, AWAITING_PAID_PRESET_LTE,
+    AWAITING_PAID_PRESET_TRAFFIC,
     AWAITING_PAID_TRIAL_PERIOD,
     AWAITING_PAID_SUB_EXTEND,
     AWAITING_PAID_SUB_EDIT_EXPIRE,
     AWAITING_PAID_SUB_EDIT_HWID, AWAITING_PAID_SUB_EDIT_TRAFFIC,
-    AWAITING_PAID_SUB_EDIT_LTE,
     AWAITING_PAID_SUB_EDIT_TRIAL,
     AWAITING_REFERRAL_BONUS, AWAITING_REFERRAL_INVITED_BONUS,
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
-    AWAITING_PAID_BULK_HWID, AWAITING_PAID_BULK_LTE,
+    AWAITING_PAID_BULK_HWID,
     AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
     AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
@@ -40,11 +39,9 @@ from states import (
     AWAITING_REMIND_QUIET, AWAITING_QUICK_REPLY,
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
     AWAITING_SITE_DOMAIN, AWAITING_SITE_LOGO, AWAITING_BACKUP_FILE,
-    AWAITING_RW_URL, AWAITING_RW_TOKEN, AWAITING_RW_USAGE_PERIOD,
-    AWAITING_PANEL_SYNC_DAILY, AWAITING_PANEL_SYNC_INTERVAL,
-    AWAITING_DIGEST_HOUR,
+    AWAITING_RW_URL, AWAITING_RW_TOKEN,
     AWAITING_DM_USER,
-    AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET, AWAITING_REFUND_PARTIAL,
+    AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
     AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
@@ -159,6 +156,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
         return
+
+    # ── Бан-чек ───────────────────────────────────────────────────────────────
+    if not is_admin:
+        from database import is_banned
+        if await is_banned(user.id):
+            from blacklist import banned_view
+            await update.message.reply_text(await banned_view(user.id), parse_mode="HTML")
+            return
 
     # ── Чёрный список: писать можно только в поддержку (она выше) ────────────
     if not is_admin and not helper_input:
@@ -374,122 +379,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if state == AWAITING_RW_USAGE_PERIOD:
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from remnawave import parse_custom_period, _period_label
-        parsed = parse_custom_period(text)
-        if not parsed:
-            await update.message.reply_text(
-                "❌ Не понял период. Пришли так:\n"
-                "<code>01.09.2026 — 15.09.2026</code>",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("◀️ К периодам",
-                                          callback_data="rw_usage_period")]]),
-            )
-            return
-        context.user_data.pop("state", None)
-        context.user_data["rw_usage_period"] = "custom"
-        context.user_data["rw_usage_custom"] = parsed
-        await update.message.reply_text(
-            f"✅ Период установлен: <b>{_period_label(*parsed)}</b>\n\n"
-            "Теперь выбери узел — потребление покажется за этот период.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📊 К узлам", callback_data="rw_usage"),
-                 InlineKeyboardButton("📅 Период",
-                                      callback_data="rw_usage_period")]]),
-        )
-        return
-
-    # ── Расписание синхронизации с панелью ────────────────────────────────────
-    if state == AWAITING_PANEL_SYNC_DAILY:
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from config import save_config
-        parts = text.strip().split(":")
-        ok = False
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            hh, mm = int(parts[0]), int(parts[1])
-            ok = 0 <= hh <= 23 and 0 <= mm <= 59
-        if not ok:
-            await update.message.reply_text(
-                "❌ Время — в формате <code>ЧЧ:ММ</code>, например <code>03:00</code>.",
-                parse_mode="HTML", reply_markup=back_admin())
-            return
-        from config import load_config
-        cfg = load_config()
-        cfg["panel_sync_mode"] = "daily"
-        cfg["panel_sync_daily_time"] = f"{hh:02d}:{mm:02d}"
-        save_config(cfg)
-        context.user_data.pop("state", None)
-        await update.message.reply_text(
-            f"✅ Синхронизация каждый день в <b>{hh:02d}:{mm:02d}</b>.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⏰ К расписанию",
-                                      callback_data="panel_sync_schedule"),
-                 InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
-        )
-        return
-
-    if state == AWAITING_PANEL_SYNC_INTERVAL:
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from remnawave import _parse_interval_hours, panel_sync_schedule_text
-        from config import load_config, save_config
-        hours = _parse_interval_hours(text)
-        if hours is None:
-            await update.message.reply_text(
-                "❌ Не понял интервал. Пришли, например: <code>2</code>, "
-                "<code>72ч</code> или <code>3 дня</code>.",
-                parse_mode="HTML", reply_markup=back_admin())
-            return
-        cfg = load_config()
-        cfg["panel_sync_mode"] = "interval"
-        cfg["panel_sync_interval_hours"] = hours
-        save_config(cfg)
-        context.user_data.pop("state", None)
-        await update.message.reply_text(
-            f"✅ Синхронизация: <b>{panel_sync_schedule_text(cfg)}</b>.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⏰ К расписанию",
-                                      callback_data="panel_sync_schedule"),
-                 InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
-        )
-        return
-
-    # ── Сводка: своё время ─────────────────────────────────────────────────────
-    if state == AWAITING_DIGEST_HOUR:
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from handlers.control import parse_digest_time
-        # локальный импорт обязателен: в других ветках handle_text есть
-        # свои from config import — из-за этого load_config/save_config
-        # считаются локальными для всей функции, и без этой строки ветка
-        # падала бы с UnboundLocalError до любого ответа
-        from config import load_config, save_config
-        parsed = parse_digest_time(text)
-        if parsed is None:
-            await update.message.reply_text(
-                "❌ Не понял время. Пришли час (<code>9</code>) или время "
-                "(<code>9:30</code>).",
-                parse_mode="HTML", reply_markup=back_admin())
-            return
-        hour, minute = parsed
-        cfg = load_config()
-        cfg["digest_hour"] = hour
-        cfg["digest_minute"] = minute
-        save_config(cfg)
-        context.user_data.pop("state", None)
-        await update.message.reply_text(
-            f"✅ Сводка: <b>каждый день в {hour}:{minute:02d}</b>.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🕘 К времени сводки",
-                                      callback_data="ctl_digest_hour"),
-                 InlineKeyboardButton("◀️ К контролю", callback_data="ctl_menu")]]),
-        )
-        return
-
     # ── Создание подписки: TG ID ─────────────────────────────────────────────────
     if state == AWAITING_SUB_TG_ID:
         if not text.isdigit():
@@ -543,22 +432,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("preset_traffic", val)
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Трафик: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_PRESET_LTE:
-        if text == "-":
-            cfg = load_config()
-            cfg.pop("preset_lte", None)
-            save_config(cfg)
-            label = "30 ГБ (по умолчанию)"
-        elif text.isdigit():
-            _save("preset_lte", int(text))
-            label = f"{text} ГБ"
-        else:
-            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
-            return
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ LTE-трафик новых подписок: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Редактирование конкретной админской подписки ────────────────────────────
@@ -628,23 +501,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if not res.get("success"):
                     note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
         await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>{note}",
-                                        parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_SUB_EDIT_LTE:
-        if text == "-":
-            val, label = None, "по умолчанию"
-        elif text.isdigit():
-            val, label = int(text), f"{text} ГБ"
-        else:
-            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
-            return
-        sub_id = context.user_data.pop("edit_sub_id", None)
-        context.user_data.pop("state", None)
-        if sub_id:
-            from adminsub.storage import update_sub_field
-            await update_sub_field(sub_id, "lte_gb", val)
-        await update.message.reply_text(f"✅ LTE-трафик обновлён: <b>{label}</b>",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -862,22 +718,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("paid_preset_traffic", val)
         context.user_data.pop("state", None)
         await update.message.reply_text(f"✅ Трафик: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_PAID_PRESET_LTE:
-        if text == "-":
-            cfg = load_config()
-            cfg.pop("paid_preset_lte", None)
-            save_config(cfg)
-            label = "30 ГБ (по умолчанию)"
-        elif text.isdigit():
-            _save("paid_preset_lte", int(text))
-            label = f"{text} ГБ"
-        else:
-            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
-            return
-        context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ LTE-трафик новых подписок: <b>{label}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Платные подписки: продление срока ────────────────────────────────────────
@@ -1106,20 +946,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await preview_bulk_limits(update.message, context, "hwid", int(text))
         return
 
-    if state == AWAITING_PAID_BULK_LTE:
-        if text == "-":
-            val = None
-        elif text.isdigit():
-            val = int(text)
-        else:
-            await update.message.reply_text("❌ Число ГБ или <code>-</code> для лимита по умолчанию.",
-                                            parse_mode="HTML", reply_markup=back_admin())
-            return
-        context.user_data.pop("state", None)
-        from paidsub.handlers import preview_bulk_limits
-        await preview_bulk_limits(update.message, context, "lte", val)
-        return
-
     if state == AWAITING_PAID_SUB_EDIT_HWID:
         if not text.isdigit():
             await update.message.reply_text("❌ Введи число.", reply_markup=back_admin())
@@ -1175,26 +1001,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     panel_note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
                 await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: трафик → {label}")
         await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>{panel_note}",
-                                        parse_mode="HTML", reply_markup=back_admin())
-        return
-
-    if state == AWAITING_PAID_SUB_EDIT_LTE:
-        if text == "-":
-            val, label = None, "по умолчанию"
-        elif text.isdigit():
-            val, label = int(text), f"{text} ГБ"
-        else:
-            await update.message.reply_text("❌ Число ГБ или <code>-</code>", parse_mode="HTML", reply_markup=back_admin())
-            return
-        sub_id = context.user_data.pop("edit_sub_id", None)
-        context.user_data.pop("state", None)
-        if sub_id:
-            from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
-            await update_paid_sub_field(sub_id, "lte_gb", val)
-            r = await get_paid_sub(sub_id)
-            if r:
-                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: LTE-трафик → {label}")
-        await update.message.reply_text(f"✅ LTE-трафик обновлён: <b>{label}</b>",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -1348,7 +1154,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         _save("winback_days", int(text))
         context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Возврат ушедших через <b>{text} дн.</b>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Winback через <b>{text} дн.</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Winback: процент ─────────────────────────────────────────────────────
@@ -1358,7 +1164,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         _save("winback_percent", int(text))
         context.user_data.pop("state", None)
-        await update.message.reply_text(f"✅ Скидка возврата: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(f"✅ Скидка Winback: <b>{text}%</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Адрес узла ───────────────────────────────────────────────────────────
@@ -1387,46 +1193,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         field = ("platega_merchant_id" if state == AWAITING_PLATEGA_MERCHANT
                  else "platega_secret")
         await apply_credential(update.message, context, field, text)
-        return
-
-    # ── Частичный возврат ──────────────────────────────────────────────────
-    if state == AWAITING_REFUND_PARTIAL:
-        pid = context.user_data.get("refund_partial_payment")
-        context.user_data.pop("state", None)
-        context.user_data.pop("refund_partial_payment", None)
-        if not pid:
-            return
-        raw = text.replace(" ", "").replace("₽", "")
-        try:
-            amt = int(raw)
-        except ValueError:
-            await update.message.reply_text(
-                "❌ Пришли сумму целым числом в рублях, например <code>500</code>.",
-                parse_mode="HTML")
-            return
-        from database import get_payment_full, get_partial_refunded
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        p = await get_payment_full(pid)
-        if not p or p[7] != "paid":
-            await update.message.reply_text("❌ Платёж уже не в статусе «оплачен».")
-            return
-        remaining = p[4] - await get_partial_refunded(pid)
-        if amt < 1 or amt > remaining:
-            await update.message.reply_text(
-                f"❌ Сумма должна быть от 1 до {remaining} ₽.")
-            return
-        await update.message.reply_text(
-            f"💸 Частичный возврат платежа #{pid}\n\n"
-            f"Вернуть клиенту: <b>{amt} ₽</b> из <b>{p[4]} ₽</b>\n"
-            "<i>Срок подписки не меняется.</i>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"✅ Вернуть {amt} ₽",
-                                      callback_data=f"refund_partial_do:{pid}:{amt}")],
-                [InlineKeyboardButton("❌ Отмена",
-                                      callback_data=f"payment_view:{pid}")],
-            ]),
-        )
         return
 
     # ── Сообщение юзеру из профиля ─────────────────────────────────────────────

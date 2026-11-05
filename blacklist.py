@@ -4,20 +4,16 @@
 показывает причину и оставляет только поддержку, чтобы можно было оспорить.
 
 • общий список BEDOLAGA-DEV/VPN-BLACKLIST бот обновляет сам;
-• второй общий список Blin4ickUSE/ban-vpn (JSON) бот подмешивает туда же,
-  но обновляет только раз в неделю — кэш живёт отдельно, чтобы обычный
-  синк не вымывал его записи. Если человек есть в обоих — побеждает
-  причина основного списка;
 • админ добавляет своих и снимает любых. Снятие человека из общего списка
   запоминается исключением — иначе следующее обновление вернуло бы его;
 • блокировка бывает срочной: бот снимет её сам, когда срок выйдет, и вернёт
   подписку с сохранённым остатком;
 • при внесении подписка останавливается сразу, остаток срока запоминается
   и возвращается, если человека убрать из списка;
-• найденным в общем списке подписка останавливается сама — триал,
-  оплаченная и админская, — а выход из списка возвращает остаток срока;
-• бана в боте больше нет: только чёрный список. Всё, что ставили
-  и снимали, видно в карточке человека.
+• найденным в общем списке триал останавливается сам, а оплаченную подписку
+  бот не трогает — пишет админу: человек заплатил, решать ему;
+• рядом живёт бан в боте — он закрывает бота целиком, тоже с причиной,
+  сроком и автором. Всё, что ставили и снимали, видно в карточке человека.
 """
 
 from __future__ import annotations
@@ -34,8 +30,6 @@ from states import (
 )
 
 DEFAULT_URL = "https://raw.githubusercontent.com/BEDOLAGA-DEV/VPN-BLACKLIST/main/blacklist.txt"
-DEFAULT_EXTRA_URL = "https://raw.githubusercontent.com/Blin4ickUSE/ban-vpn/refs/heads/main/blacklist.json"
-EXTRA_INTERVAL_DAYS = 7
 DEFAULT_REASON = "Нарушение правил сервиса"
 DATE_FMT = "%d.%m.%Y %H:%M:%S"
 PER_PAGE = 10
@@ -44,11 +38,11 @@ PER_PAGE = 10
 USER_ALLOWED = {"support_open", "support_files"}
 USER_ALLOWED_PREFIXES = ("support_page:",)
 
-LIST_TABS = {"manual": "Вручную", "allow": "Исключения", "people": "Люди в ЧС"}
+LIST_TABS = {"ours": "Твои", "manual": "Вручную", "allow": "Исключения"}
 LIST_TITLES = {
+    "ours": "👥 Твои пользователи в ЧС",
     "manual": "✍️ Добавлены вручную",
     "allow": "✅ Исключения из общего списка",
-    "people": "👥 Люди в чёрном списке",
 }
 
 
@@ -58,31 +52,11 @@ def remote_on() -> bool:
     return bool(load_config().get("blacklist_remote_enabled", True))
 
 
-def _to_raw(url: str) -> str:
+def source_url() -> str:
+    url = (load_config().get("blacklist_url") or DEFAULT_URL).strip()
     # ссылку на страницу файла в GitHub превращаем в ссылку на сам файл
     m = re.match(r"https://github\.com/([^/]+)/([^/]+)/blob/(.+)", url)
     return f"https://raw.githubusercontent.com/{m[1]}/{m[2]}/{m[3]}" if m else url
-
-
-def source_url() -> str:
-    return _to_raw((load_config().get("blacklist_url") or DEFAULT_URL).strip())
-
-
-def extra_url() -> str:
-    return _to_raw((load_config().get("blacklist_extra_url") or DEFAULT_EXTRA_URL).strip())
-
-
-def extra_due(cfg: dict | None = None) -> bool:
-    """Пора ли обновлять доп. список: прошло 7 дней или ещё ни разу."""
-    cfg = cfg if cfg is not None else load_config()
-    raw = cfg.get("blacklist_extra_synced_at")
-    if not raw:
-        return True
-    try:
-        last = datetime.fromisoformat(str(raw))
-    except ValueError:
-        return True
-    return (datetime.now() - last).total_seconds() >= EXTRA_INTERVAL_DAYS * 86400
 
 
 def parse_list(text: str) -> dict[int, str]:
@@ -99,42 +73,6 @@ def parse_list(text: str) -> dict[int, str]:
         tg_id = int(parts[0])
         if not out.get(tg_id):
             out[tg_id] = reason.strip()[:500]
-    return out
-
-
-def parse_list_json(text: str) -> dict[int, str]:
-    """JSON доп. списка: [{"telegram_id": 123, "username": "Шаринг"}, ...].
-
-    Поле называется username, но лежит там причина — юзернейма в файле
-    нет, TG ID — единственный ключ. На будущее принимаем и "reason",
-    если такое поле появится. Дубли: первый выигрывает.
-    """
-    import json
-    data = json.loads(text)
-    if isinstance(data, dict):
-        for key in ("blacklist", "users", "data", "items"):
-            if isinstance(data.get(key), list):
-                data = data[key]
-                break
-        else:
-            raise ValueError("в JSON нет списка")
-    if not isinstance(data, list):
-        raise ValueError("в JSON нет списка")
-    out: dict[int, str] = {}
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        raw_id = item.get("telegram_id")
-        if isinstance(raw_id, bool):
-            continue
-        try:
-            tg_id = int(raw_id)
-        except (TypeError, ValueError):
-            continue
-        if tg_id in out:
-            continue
-        reason = item.get("reason") or item.get("username") or ""
-        out[tg_id] = str(reason).strip()[:500]
     return out
 
 
@@ -160,8 +98,7 @@ async def entry(tg_id: int) -> dict | None:
             return {"source": "manual", "reason": reason, "since": since,
                     "until": until, "by_id": by_id}
     elif info["remote_listed"] and not info["allowed"] and remote_on():
-        return {"source": "remote", "remote_src": info.get("remote_src") or "main",
-                "reason": info["remote"] or "",
+        return {"source": "remote", "reason": info["remote"] or "",
                 "since": None, "until": None, "by_id": None}
     return None
 
@@ -448,75 +385,69 @@ async def blacklist_stop(bot, tg_id: int) -> dict | None:
     return res
 
 
+# ── Бан в боте ───────────────────────────────────────────────────────────────
+
+def ban_view(reason: str | None, until_local: str | None = None) -> str:
+    text = "🚫 <b>Аккаунт заблокирован</b>"
+    if reason:
+        text += f"\n\n<blockquote>Причина: {html.escape(public_reason(reason))}</blockquote>"
+    if until_local:
+        text += f"\n\n<blockquote>⏳ Блокировка снимется сама: <b>{fmt_until(until_local)}</b></blockquote>"
+    return text + "\n\n<i>Если это ошибка — свяжитесь с администратором.</i>"
+
+
+async def banned_view(tg_id: int) -> str:
+    """Текст для забаненного: с причиной и сроком, если они заданы."""
+    from database import ban_entry
+    b = await ban_entry(tg_id) or {}
+    return ban_view(b.get("reason"), b.get("until"))
+
+
+async def ban(bot, tg_id: int, reason: str | None = None, until: str | None = None,
+              by_id: int | None = None):
+    """Бан в боте: человек вообще не может пользоваться ботом."""
+    from database import ban_user, bl_log
+    await ban_user(tg_id, reason, until, by_id)
+    await bl_log(tg_id, "banned", reason, by_id)
+    await _tell(bot, tg_id, ban_view(reason, _to_local(until)))
+    await _log(bot, f"🚫 Забанен в боте: <code>{tg_id}</code>"
+                    + (f" — {html.escape(reason[:200])}" if reason else "")
+                    + f" · {term_line(until)}")
+
+
+async def unban(bot, tg_id: int, by_id: int | None = None, auto: bool = False):
+    from database import bl_log, unban_user
+    await unban_user(tg_id)
+    await bl_log(tg_id, "unbanned", "срок бана вышел" if auto else None, by_id)
+    await _tell(bot, tg_id, "✅ <b>Блокировка снята</b>\n\n"
+                            "<i>Бот снова работает — откройте /start.</i>")
+    await _log(bot, ("⏳ Срок бана вышел, разбанил сам: " if auto
+                     else "✅ Разбанен в боте: ") + f"<code>{tg_id}</code>")
+
+
 async def blacklist_expire_tick(context):
     """Снимает временные блокировки, у которых вышел срок."""
-    from database import bl_expired_now
+    from database import bans_expired_now, bl_expired_now
     for tg_id, _reason in await bl_expired_now():
         await blacklist_remove(context.bot, tg_id, auto=True)
+    for tg_id in await bans_expired_now():
+        await unban(context.bot, tg_id, auto=True)
 
 
 # ── Обновление общего списка ─────────────────────────────────────────────────
 
-async def sync_extra(session, force: bool = False) -> dict:
-    """Обновляет кэш доп. списка (ban-vpn) не чаще раза в неделю.
-
-    force — ручное обновление из админки, срок не смотрит. Ошибка не
-    роняет общий синк: кэш остаётся прежним, ошибка пишется в конфиг
-    и показывается в меню ЧС. Пустой или битый файл кэш не затирает.
-    """
-    import aiohttp
-    from database import bl_extra_entries, bl_replace_extra
-    res = {"ok": False, "fetched": False, "total": 0, "error": None}
-    cached = await bl_extra_entries()
-    if not force and not extra_due():
-        res.update(ok=True, total=len(cached))
-        return res
-    try:
-        async with session.get(extra_url(), timeout=aiohttp.ClientTimeout(total=30)) as resp:
-            if resp.status != 200:
-                raise RuntimeError(f"HTTP {resp.status}")
-            text = await resp.text()
-        entries = parse_list_json(text)
-        if not entries:
-            raise RuntimeError("в файле не нашлось ни одного ID")
-    except Exception as ex:
-        res["error"] = (str(ex) if isinstance(ex, RuntimeError) else f"{type(ex).__name__}: {ex}")[:200]
-        res["total"] = len(cached)
-        cfg = load_config()
-        cfg["blacklist_extra_last_error"] = res["error"]
-        save_config(cfg)
-        return res
-    await bl_replace_extra(entries)
-    cfg = load_config()
-    cfg["blacklist_extra_synced_at"] = datetime.now().isoformat(timespec="seconds")
-    cfg.pop("blacklist_extra_last_error", None)
-    save_config(cfg)
-    res.update(ok=True, fetched=True, total=len(entries))
-    return res
-
-
-async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -> dict:
+async def sync_remote(bot, full_scan: bool = False) -> dict:
     """Скачивает общий список и применяет его к своим пользователям.
 
     full_scan — считать новыми все записи (после включения списка).
-    force_extra — обновить доп. список вне недельного срока (ручная кнопка).
-
-    В общую таблицу вливается и доп. список из кэша: основной синк ходит
-    каждые несколько часов, а доп. — раз в неделю, и без кэша каждый
-    синк вымывал бы его записи. При совпадении ID побеждает основной.
     """
     import aiohttp
-    from database import (bl_extra_entries, bl_remote_admin_subs,
-                          bl_remote_subs, bl_replace_remote)
+    from database import bl_remote_subs, bl_replace_remote
 
     report = {"ok": False, "error": None, "total": 0, "added": 0, "removed": 0,
-              "trials_stopped": [], "paid_stopped": [], "admin_stopped": [], "restored": [],
-              "extra_total": 0, "extra_fetched": False, "extra_error": None}
+              "trials_stopped": [], "paid_found": [], "restored": []}
     try:
         async with aiohttp.ClientSession() as s:
-            extra_res = await sync_extra(s, force=force_extra)
-            report["extra_fetched"] = extra_res["fetched"]
-            report["extra_error"] = extra_res["error"]
             async with s.get(source_url(), timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status != 200:
                     raise RuntimeError(f"HTTP {resp.status}")
@@ -532,31 +463,20 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
         save_config(cfg)
         return report
 
-    extra = await bl_extra_entries()
-    report["extra_total"] = len(extra)
-    merged = {tg_id: (reason, "main") for tg_id, reason in entries.items()}
-    for tg_id, reason in extra.items():
-        merged.setdefault(tg_id, (reason, "extra"))
-    added, removed = await bl_replace_remote(merged)
+    added, removed = await bl_replace_remote(entries)
     if full_scan:
-        added = set(merged)
+        added = set(entries)
     cfg = load_config()
     cfg["blacklist_synced_at"] = datetime.now().strftime("%d.%m.%Y %H:%M")
     cfg.pop("blacklist_last_error", None)
     save_config(cfg)
-    report.update(ok=True, total=len(merged), added=len(added), removed=len(removed))
+    report.update(ok=True, total=len(entries), added=len(added), removed=len(removed))
     if not remote_on():
         return report
 
-    # Подписка отключается у всех из списка — и триал, и оплаченная.
-    # Ограничения «только новые» тут нет специально: уже числящиеся
-    # в списке с живой подпиской остановятся на ближайшем синке, а не
-    # только те, кто попал туда сейчас. stop_subs кладёт остаток срока
-    # в hold: при выходе из списка он вернётся (restore_unlisted).
-    # Уже остановленные (статус expired) проходятся мимо по статусу.
     seen = set()
     for tg_id, status, times_renewed in await bl_remote_subs():
-        if tg_id in seen:
+        if tg_id in seen or tg_id not in added:
             continue
         seen.add(tg_id)
         if status not in ("active", "renewal"):
@@ -564,26 +484,13 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
         e = await entry(tg_id)
         if not e or e["source"] != "remote":
             continue
-        await stop_subs(tg_id, e["reason"])
-        await _notify_blocked(bot, tg_id, e["reason"])
         if times_renewed:
-            report["paid_stopped"].append(tg_id)
+            # человек заплатил — останавливать или нет, решает админ
+            report["paid_found"].append(tg_id)
         else:
+            await stop_subs(tg_id, e["reason"])
+            await _notify_blocked(bot, tg_id, e["reason"])
             report["trials_stopped"].append(tg_id)
-
-    # Админские подписки: строки в paid_subs у них нет, поэтому тех,
-    # кто ещё не обработан выше, останавливаем отдельным проходом.
-    # stop_subs заодно гасит и админскую подписку у владельцев платных.
-    for tg_id in await bl_remote_admin_subs():
-        if tg_id in seen:
-            continue
-        seen.add(tg_id)
-        e = await entry(tg_id)
-        if not e or e["source"] != "remote":
-            continue
-        await stop_subs(tg_id, e["reason"])
-        await _notify_blocked(bot, tg_id, e["reason"])
-        report["admin_stopped"].append(tg_id)
 
     report["restored"] = await restore_unlisted(bot)
     return report
@@ -591,45 +498,24 @@ async def sync_remote(bot, full_scan: bool = False, force_extra: bool = False) -
 
 async def send_report(bot, r: dict):
     """Сообщение админу — только если обновление что-то поменяло у своих."""
-    if not r.get("ok") or not (r["trials_stopped"] or r.get("paid_stopped")
-                               or r.get("admin_stopped") or r["restored"]):
+    if not r.get("ok") or not (r["trials_stopped"] or r["paid_found"] or r["restored"]):
         return
     from database import get_user_info
     lines = ["🌐 <b>Общий чёрный список обновлён</b>\n",
              f"Записей: {r['total']} (+{r['added']} / −{r['removed']})"]
-    if r.get("extra_total"):
-        lines.append(f"🌐 Доп. список ban-vpn: <b>{r['extra_total']}</b> записей"
-                     + (" (обновлён сейчас)" if r.get("extra_fetched")
-                        else " (кэш, обновление раз в неделю)"))
-    if r.get("extra_error"):
-        lines.append(f"⚠️ Доп. список не обновился: <code>{r['extra_error']}</code>")
     if r["trials_stopped"]:
         lines.append(f"⛔ Остановлены триалы твоих пользователей: <b>{len(r['trials_stopped'])}</b>")
-    if r.get("paid_stopped"):
-        lines.append(f"💳 Остановлены оплаченные подписки: <b>{len(r['paid_stopped'])}</b> — "
-                     "остаток срока сохранён, вернётся при выходе из списка")
-    if r.get("admin_stopped"):
-        lines.append(f"👑 Остановлены админские подписки: <b>{len(r['admin_stopped'])}</b>")
     if r["restored"]:
         lines.append(f"✅ Ушли из общего списка, остаток срока возвращён: <b>{len(r['restored'])}</b>")
     kb = []
-    # кнопки на карточки — без дублей, один человек одной кнопкой,
-    # даже если он в двух группах
-    seen = set()
-
-    async def _btn(tg_id, emoji):
-        if tg_id in seen:
-            return
-        seen.add(tg_id)
-        u = await get_user_info(tg_id)
-        kb.append([InlineKeyboardButton(f"{emoji} {(u[1] if u and u[1] else tg_id)}"[:40],
-                                        callback_data=f"bl_view:{tg_id}")])
-    for tg_id in r["trials_stopped"][:8]:
-        await _btn(tg_id, "⛔")
-    for tg_id in r.get("paid_stopped", [])[:8]:
-        await _btn(tg_id, "💳")
-    for tg_id in r.get("admin_stopped", [])[:8]:
-        await _btn(tg_id, "👑")
+    if r["paid_found"]:
+        lines.append(f"\n💳 В списке нашлись клиенты с оплаченной подпиской: <b>{len(r['paid_found'])}</b>.\n"
+                     "Подписку бот не трогал — человек заплатил. Открой и реши: "
+                     "остановить или сделать исключение.")
+        for tg_id in r["paid_found"][:8]:
+            u = await get_user_info(tg_id)
+            kb.append([InlineKeyboardButton(f"💳 {(u[1] if u and u[1] else tg_id)}"[:40],
+                                            callback_data=f"bl_view:{tg_id}")])
     kb.append([InlineKeyboardButton("⛔ К чёрному списку", callback_data="bl_menu")])
     try:
         await bot.send_message(chat_id=ADMIN_ID, text="\n".join(lines), parse_mode="HTML",
@@ -702,24 +588,21 @@ async def handle_bl_menu(query, context=None, note: str = ""):
     on = remote_on()
     c = await bl_counts(on)
     st = await bl_stats()
-    lines = ["⛔ <b>Чёрный список</b>", ""]
+    lines = ["⛔ <b>Чёрный список и баны</b>", ""]
     if note:
         lines += [note, ""]
     synced = cfg.get("blacklist_synced_at") or "ещё не обновлялся"
-    extra_raw = cfg.get("blacklist_extra_synced_at") or ""
-    extra_synced = (extra_raw.replace("T", " ")[:16] if extra_raw
-                    else "ещё не обновлялся")
     who = [
+        f"👥 Твоих пользователей в ЧС: <b>{c['ours']}</b>"
+        + (f"  ·  с подпиской: <b>{c['ours_active']}</b>" if c["ours_active"] else ""),
         f"✍️ Вручную: <b>{c['manual']}</b> (бессрочно <b>{st['forever']}</b> · "
         f"со сроком <b>{st['temporary']}</b>)  ·  исключений: <b>{c['allow']}</b>",
+        f"🚫 Забанены в боте: <b>{st['banned']}</b>"
+        + (f" (со сроком <b>{st['banned_temp']}</b>)" if st["banned_temp"] else ""),
         f"🌐 Общий список: <b>{'вкл' if on else 'выкл'}</b>  ·  записей: <b>{c['remote']}</b>",
         f"🔄 Обновлён: {synced}",
-        f"🌐 Доп. список ban-vpn: <b>{c['extra']}</b> записей  ·  обновлён: {extra_synced} (раз в неделю)",
     ]
     lines.append("<blockquote>" + "\n".join(who) + "</blockquote>")
-    if cfg.get("blacklist_extra_last_error"):
-        lines.append(f"\n⚠️ Доп. список не обновился: "
-                     f"<code>{html.escape(cfg['blacklist_extra_last_error'])}</code>")
     month = [f"📆 За 30 дней: заблокировано <b>{st['added_30d']}</b> · "
              f"снято <b>{st['removed_30d']}</b>"]
     if st["held"]:
@@ -730,13 +613,15 @@ async def handle_bl_menu(query, context=None, note: str = ""):
         lines.append(f"\n⚠️ Последнее обновление не удалось: "
                      f"<code>{html.escape(cfg['blacklist_last_error'])}</code>")
     lines.append("\n<i>ЧС закрывает покупки и подписку, оставляя поддержку. "
-                 "Запись можно поставить на срок — снимется сама.</i>")
+                 "Бан закрывает бота целиком. Оба можно поставить на срок — "
+                 "снимутся сами.</i>")
     kb = [
         [InlineKeyboardButton("➕ Внести в ЧС", callback_data="bl_add"),
          InlineKeyboardButton("🔍 Проверить ID", callback_data="bl_check")],
+        [InlineKeyboardButton("👥 Твои пользователи в ЧС", callback_data="bl_list:ours:1")],
         [InlineKeyboardButton("✍️ Вручную", callback_data="bl_list:manual:1"),
          InlineKeyboardButton("✅ Исключения", callback_data="bl_list:allow:1")],
-        [InlineKeyboardButton("👥 Люди в ЧС", callback_data="bl_list:people:1")],
+        [InlineKeyboardButton(f"🚫 Баны в боте · {st['banned']}", callback_data="bl_bans:1")],
         [InlineKeyboardButton("🔄 Обновить общий", callback_data="bl_sync"),
          InlineKeyboardButton(f"🌐 Общий · {'вкл ✅' if on else 'выкл'}",
                               callback_data="bl_remote_toggle")],
@@ -749,7 +634,7 @@ async def handle_bl_menu(query, context=None, note: str = ""):
 async def handle_bl_list(query, scope: str, page: int = 1):
     from database import bl_list
     if scope not in LIST_TITLES:
-        scope = "manual"
+        scope = "ours"
     rows, pages = await bl_list(scope, remote_on(), page, PER_PAGE)
     page = min(max(1, page), pages)
     lines = [f"⛔ <b>{LIST_TITLES[scope]}</b>", f"<i>стр. {page} из {pages} · нажми на человека, чтобы открыть</i>"]
@@ -776,15 +661,44 @@ async def handle_bl_list(query, scope: str, page: int = 1):
                                   reply_markup=InlineKeyboardMarkup(kb))
 
 
+async def handle_bl_bans(query, page: int = 1):
+    """Кто закрыт в боте целиком."""
+    from database import bans_list
+    rows, pages, total = await bans_list(page, PER_PAGE)
+    page = min(max(1, page), pages)
+    lines = ["🚫 <b>Баны в боте</b>",
+             f"<i>всего {total} · стр. {page} из {pages} · нажми, чтобы открыть</i>"]
+    if not rows:
+        lines = [lines[0], "", "<blockquote>Никто не забанен.</blockquote>"]
+    kb = []
+    for tg_id, fn, _un, reason, until in rows:
+        term = "♾ навсегда" if not until else ("⏳ " + fmt_until(until).split(" · ")[0])
+        label = f"👤 {fn or tg_id} · {term}" + (f" · {public_reason(reason)}" if reason else "")
+        kb.append([InlineKeyboardButton(label[:60], callback_data=f"bl_view:{tg_id}")])
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"bl_bans:{page - 1}"))
+    if pages > 1:
+        nav.append(InlineKeyboardButton(f"{page}/{pages}", callback_data="noop"))
+    if page < pages:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"bl_bans:{page + 1}"))
+    if nav:
+        kb.append(nav)
+    kb.append([InlineKeyboardButton("◀️ К чёрному списку", callback_data="bl_menu")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
 async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
     from database import (
-        bl_history, bl_holds, bl_lookup, bl_times_listed, get_user_info,
+        ban_entry, bl_history, bl_holds, bl_lookup, bl_times_listed, get_user_info,
     )
     from paidsub.storage import get_paid_sub_by_tg_id
     from paidsub.time_parser import fmt_duration
     u = await get_user_info(tg_id)
     info = await bl_lookup(tg_id)
     e = await entry(tg_id)
+    b = await ban_entry(tg_id)
     holds = {h[1]: h[3] for h in await bl_holds(tg_id)}
     sub = await get_paid_sub_by_tg_id(tg_id)
     sub_live = bool(sub) and sub[11] in ("active", "renewal")
@@ -799,9 +713,7 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
         card.append("📌 Статус: <b>в чёрном списке</b>")
         card.append(f"📝 Причина: {html.escape(e['reason'] or '—')}")
         if e["source"] == "remote":
-            card.append("🌐 Источник: "
-                        + ("доп. список ban-vpn" if e.get("remote_src") == "extra"
-                           else "общий список"))
+            card.append("🌐 Источник: общий список")
         else:
             card.append(f"⏳ Срок: <b>{fmt_until(e.get('until'))}</b>")
             card.append("✍️ Внёс: " + _by_line(e.get("by_id"))
@@ -815,6 +727,18 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
     else:
         card.append("📌 Статус: <b>не в чёрном списке</b>")
     lines += ["", "<blockquote>" + "\n".join(card) + "</blockquote>"]
+
+    ban_card = []
+    if b:
+        ban_card.append("🚫 Бан в боте: <b>стоит</b> — бот для человека закрыт целиком")
+        if b["reason"]:
+            ban_card.append(f"📝 Причина: {html.escape(b['reason'])}")
+        ban_card.append(f"⏳ Срок: <b>{fmt_until(b['until'])}</b>")
+        ban_card.append("✍️ Забанил: " + _by_line(b["by_id"])
+                        + (f" · {b['since'][:16]}" if b.get("since") else ""))
+    else:
+        ban_card.append("🚫 Бан в боте: <b>нет</b>")
+    lines += ["", "<blockquote>" + "\n".join(ban_card) + "</blockquote>"]
 
     sub_card = []
     if "paid" in holds:
@@ -849,6 +773,8 @@ async def handle_bl_view(target, tg_id: int, edit: bool = True, note: str = ""):
         kb.append([InlineKeyboardButton("⛔ Вернуть в ЧС", callback_data=f"bl_readd:{tg_id}")])
     else:
         kb.append([InlineKeyboardButton("⛔ Внести в ЧС", callback_data=f"bl_add_for:{tg_id}")])
+    kb.append([InlineKeyboardButton("✅ Разбанить", callback_data=f"bl_unban:{tg_id}") if b
+               else InlineKeyboardButton("🚫 Забанить в боте", callback_data=f"bl_ban:{tg_id}")])
     tail = [InlineKeyboardButton("◀️ К списку", callback_data="bl_menu")]
     if u:
         tail.insert(0, InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{tg_id}"))
@@ -887,14 +813,15 @@ async def handle_bl_check_start(query, context):
     )
 
 
-async def handle_bl_new(target, context, tg_id: int, edit: bool = True):
-    """Шаг 1: за что. Ручной бан тут был и убран: вручную вносится
-    только чёрный список, баны ставит сам синк списков."""
+async def handle_bl_new(target, context, kind: str, tg_id: int, edit: bool = True):
+    """Шаг 1: за что. kind — bl (чёрный список) или ban (бан в боте)."""
     from database import get_user_info
     context.user_data.pop("state", None)
-    context.user_data["bl_pending"] = {"tg_id": tg_id}
-    head = "⛔ <b>Внести в чёрный список</b>"
-    what = "Не сможет купить и продлить, подписка встанет на паузу, останется поддержка."
+    context.user_data["bl_pending"] = {"kind": kind, "tg_id": tg_id}
+    head = ("⛔ <b>Внести в чёрный список</b>" if kind == "bl"
+            else "🚫 <b>Забанить в боте</b>")
+    what = ("Не сможет купить и продлить, подписка встанет на паузу, останется поддержка."
+            if kind == "bl" else "Бот перестанет отвечать вообще — ни меню, ни поддержки.")
     kb = [[InlineKeyboardButton(r, callback_data=f"bl_reason:{i}")]
           for i, r in enumerate(QUICK_REASONS)]
     kb.append([InlineKeyboardButton("✍️ Своя причина", callback_data="bl_reason:own")])
@@ -933,7 +860,8 @@ async def handle_bl_term_ask(target, context, edit: bool = True):
         await _send(target, "⛔ <b>Начни заново</b>", _cancel(), edit)
         return
     context.user_data.pop("state", None)
-    head = "⛔ <b>Внести в чёрный список</b>"
+    head = ("⛔ <b>Внести в чёрный список</b>" if pending["kind"] == "bl"
+            else "🚫 <b>Забанить в боте</b>")
     kb = [[InlineKeyboardButton(label, callback_data=f"bl_term:{code}")]
           for code, label, _s in TERMS]
     kb.append([InlineKeyboardButton("✍️ Свой срок", callback_data="bl_term:own")])
@@ -976,20 +904,30 @@ async def handle_bl_confirm(target, context, edit: bool = True):
     tg_id = pending["tg_id"]
     reason = pending.get("reason") or DEFAULT_REASON
     term = term_line(pending.get("until"))
-    sub = await get_paid_sub_by_tg_id(tg_id)
-    if sub and sub[11] in ("active", "renewal"):
-        sub_line = (f"💳 Подписка до <b>{sub[6]}</b> остановится сразу. Остаток срока "
-                    "сохранится и вернётся при снятии.")
+    if pending["kind"] == "ban":
+        text = (f"🚫 <b>Забанить в боте?</b>\n\n"
+                f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
+                f"📝 Причина: {html.escape(reason)}\n"
+                f"⏳ Срок: <b>{term}</b>\n"
+                "🤐 Бот перестанет отвечать совсем — даже поддержка закроется.</blockquote>\n\n"
+                "<i>Подписку бан не трогает: срок продолжит идти.</i>")
+        yes = "🚫 Да, забанить"
     else:
-        sub_line = "💳 Действующей подписки нет — просто не сможет взять триал и оплатить."
-    text = (f"⛔ <b>Внести в чёрный список?</b>\n\n"
-            f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
-            f"📝 Причина: {html.escape(reason)}\n"
-            f"⏳ Срок: <b>{term}</b>\n{sub_line}</blockquote>\n\n"
-            f"<i>Человек получит сообщение, что доступ закрыт: "
-            f"«{html.escape(public_reason(reason))}».</i>")
+        sub = await get_paid_sub_by_tg_id(tg_id)
+        if sub and sub[11] in ("active", "renewal"):
+            sub_line = (f"💳 Подписка до <b>{sub[6]}</b> остановится сразу. Остаток срока "
+                        "сохранится и вернётся при снятии.")
+        else:
+            sub_line = "💳 Действующей подписки нет — просто не сможет взять триал и оплатить."
+        text = (f"⛔ <b>Внести в чёрный список?</b>\n\n"
+                f"<blockquote>👤 {_who_line(await get_user_info(tg_id), tg_id)}\n"
+                f"📝 Причина: {html.escape(reason)}\n"
+                f"⏳ Срок: <b>{term}</b>\n{sub_line}</blockquote>\n\n"
+                f"<i>Человек получит сообщение, что доступ закрыт: "
+                f"«{html.escape(public_reason(reason))}».</i>")
+        yes = "⛔ Да, внести в ЧС"
     await _send(target, text,
-                confirm_keyboard("⛔ Да, внести в ЧС", "bl_add_apply", f"bl_view:{tg_id}", "bl_menu"), edit)
+                confirm_keyboard(yes, "bl_add_apply", f"bl_view:{tg_id}", "bl_menu"), edit)
 
 
 async def handle_bl_add_apply(query, context):
@@ -1002,6 +940,11 @@ async def handle_bl_add_apply(query, context):
     reason = pending.get("reason") or DEFAULT_REASON
     until = pending.get("until")
     by_id = getattr(getattr(query, "from_user", None), "id", None)
+    if pending["kind"] == "ban":
+        await ban(context.bot, tg_id, reason, until, by_id)
+        note = "<i>🚫 Забанен в боте. " + term_line(until).capitalize() + ".</i>"
+        await handle_bl_view(query, tg_id, note=note)
+        return
     res = await blacklist_add(context.bot, tg_id, reason, until, by_id)
     await handle_bl_view(query, tg_id,
                          note=_result_note(f"⛔ Внесён в чёрный список ({term_line(until)}).", res))
@@ -1027,6 +970,12 @@ async def handle_bl_readd(query, context, tg_id: int):
     head = ("⛔ Снова в чёрном списке." if res is not None
             else "В общем списке его уже нет — вносить нечего.")
     await handle_bl_view(query, tg_id, note=_result_note(head, res))
+
+
+async def handle_bl_unban(query, context, tg_id: int):
+    by_id = getattr(getattr(query, "from_user", None), "id", None)
+    await unban(context.bot, tg_id, by_id)
+    await handle_bl_view(query, tg_id, note="<i>✅ Разбанен — бот снова ему отвечает.</i>")
 
 
 # ── Ввод текстом ─────────────────────────────────────────────────────────────
@@ -1085,10 +1034,10 @@ async def handle_bl_input(update, context, state: str, text: str):
             return
         context.user_data.pop("state", None)
         if reason:
-            context.user_data["bl_pending"] = {"tg_id": tg_id, "reason": reason}
+            context.user_data["bl_pending"] = {"kind": "bl", "tg_id": tg_id, "reason": reason}
             await handle_bl_term_ask(msg, context, edit=False)
         else:
-            await handle_bl_new(msg, context, tg_id, edit=False)
+            await handle_bl_new(msg, context, "bl", tg_id, edit=False)
         return
 
     # AWAITING_BL_REASON — своя причина для уже выбранного человека
@@ -1110,8 +1059,7 @@ async def handle_bl_input(update, context, state: str, text: str):
 
 async def handle_bl_sync_now(query, context):
     await query.edit_message_text("🔄 Обновляю общий список…")
-    # ручная кнопка обновляет и доп. список сразу, не дожидаясь недели
-    r = await sync_remote(context.bot, force_extra=True)
+    r = await sync_remote(context.bot)
     if r["ok"]:
         note = f"<i>✅ Обновлено: {r['total']} записей (+{r['added']} / −{r['removed']}).</i>"
         await send_report(context.bot, r)
@@ -1127,7 +1075,7 @@ async def handle_bl_remote_toggle(query, context):
     save_config(cfg)
     if turn_on:
         await query.edit_message_text("🔄 Включаю и обновляю общий список…")
-        r = await sync_remote(context.bot, full_scan=True, force_extra=True)
+        r = await sync_remote(context.bot, full_scan=True)
         await send_report(context.bot, r)
         note = ("<i>🌐 Общий список включён и обновлён.</i>" if r["ok"]
                 else f"<i>🌐 Включён, но обновить не удалось: {html.escape(r['error'] or '?')}</i>")

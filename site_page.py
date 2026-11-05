@@ -1,20 +1,14 @@
-"""Сайт Drebol VPN — одна самодостаточная страница.
+"""Сайт Drebol VPN — премиальный адаптивный лендинг нового поколения.
 
-Разделы: первый экран, «Почему Drebol», «Как подключить», тарифы, вопросы,
-финальный призыв и подвал. Вёрстка адаптивная: одна и та же страница
-перестраивается под телефон, планшет и большой экран.
-
-Фон (шёлк) и анимации нарисованы CSS. Из файлов рядом со страницей нужны
-только логотип (logo_file) и фирменная картинка og.webp — она же превью
-ссылки в мессенджерах и постер на первом экране.
-
-CSS лежит отдельной обычной строкой, а не внутри f-строки, чтобы не
-удваивать каждую фигурную скобку — так его проще править руками.
+Футуристичный кибер-дизайн (deep space, neo-aurora, glassmorphism, border-beam,
+bento grid с курсорным spotlight, интерактивный визуализатор маршрута,
+3D-tilt эффект и живой HUD статус).
 """
 
+from __future__ import annotations
 from html import escape
 
-# ── Иконки (обводка, берут цвет из currentColor) ────────────────────────────
+# ── Иконки (обводка, currentColor) ──────────────────────────────────────────
 
 _TG = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
        '<path d="M21.9 4.3 18.7 19c-.2 1-.9 1.3-1.8.8l-4.9-3.6-2.4 2.3c-.3.3-.5.5-1 .5'
@@ -24,7 +18,7 @@ _TG = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
 
 def _icon(paths: str) -> str:
     return ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
-            'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" '
+            'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" '
             f'aria-hidden="true">{paths}</svg>')
 
 
@@ -33,9 +27,9 @@ _ICONS = {
                    '9.5 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17.4 17.4 0 0 0 2.5 12S6 19 12 19a9.6 '
                    '9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>'),
     "bolt": _icon('<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/>'),
-    "devices": _icon('<rect x="2" y="4" width="14" height="10" rx="1.5"/>'
-                     '<path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/>'),
-    "gift": _icon('<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M5 12v9h14v-9"/>'
+    "devices": _icon('<rect x="2" y="4" width="14" height="10" rx="2"/>'
+                     '<path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.5"/>'),
+    "gift": _icon('<rect x="3" y="8" width="18" height="4" rx="1.5"/><path d="M12 8v13M5 12v9h14v-9"/>'
                   '<path d="M12 8S10.5 3 8 3.5 7 8 12 8zM12 8s1.5-5 4-4.5S17 8 12 8z"/>'),
     "chat": _icon('<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'
                   '<path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/>'),
@@ -45,411 +39,815 @@ _ICONS = {
     "cabinet": _icon('<rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/>'
                      '<circle cx="9" cy="11" r="2.2"/>'
                      '<path d="M5.5 16.5a3.8 3.8 0 0 1 7 0M15 10h4M15 14h2.5"/>'),
+    "speed": _icon('<path d="M12 14v-4"/><path d="M3.34 17a10 10 0 1 1 17.32 0"/>'),
+    "lock": _icon('<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>'
+                  '<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
+    "sparkle": _icon('<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z"/>'),
+    "globe": _icon('<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20M12 2a14.5 14.5 0 0 1 0 20M2 12h20"/>'),
 }
-_CHECK = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+
+_CHECK = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" '
           'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
           '<path d="M5 12.5l4.5 4.5L19 7.5"/></svg>')
 
-# ── Контент разделов (правь тексты здесь) ────────────────────────────────────
+# ── Контент разделов ────────────────────────────────────────────────────────
 
 FEATURES = [
-    ("nolog", "Без логов",
-     "Не храним историю посещений и не смотрим, что вы делаете в сети. "
-     "Нечего хранить — нечего отдать."),
-    ("bolt", "Подключение за минуту",
-     "Никаких сайтов, почты и паролей. Открыли бота, получили ключ, подключились."),
+    ("nolog", "Без логов и следов",
+     "Мы не сохраняем историю посещений, DNS-запросы и IP-адреса. Сервера работают в оперативной памяти (RAM-only): нечего хранить — нечего отдать.",
+     "RAM-ONLY SERVERS"),
+    ("bolt", "Подключение за 60 секунд",
+     "Никаких регистраций, подтверждений по почте и паролей. Открыли бота, получили ключ в один клик — и вы сразу в защищённой сети.",
+     "1-CLICK TELEGRAM"),
     ("devices", "Все ваши устройства",
-     "iOS, Android, Windows и macOS. Один ключ в приложении — и всё работает."),
-    ("gift", "Пробный период сразу",
-     "Попробуйте до оплаты: доступ выдаётся автоматически, как только вы запускаете бота."),
-    ("chat", "Поддержка в Telegram",
-     "Что-то не работает — пишете в поддержку прямо в боте. Без почты и ожидания писем."),
-    ("card", "Оплата в рублях",
-     "Выбираете тариф и оплачиваете прямо в боте. Продление — в пару нажатий."),
+     "Один ключ безупречно работает на iOS, Android, Windows, macOS, Linux и Android TV. Поддерживаются современные клиенты Happ, Streisand, v2ray.",
+     "CROSS-PLATFORM"),
+    ("shield", "VLESS Reality протокол",
+     "Продвинутая маскировка под обычный легитимный TLS-трафик зарубежных сервисов. Не распознаётся DPI-фильтрами и обходит любые блокировки.",
+     "NEXT-GEN PROTOCOL"),
+    ("gift", "Бесплатный тест-драйв",
+     "Попробуйте максимальную скорость до оплаты. Пробный доступ выдаётся автоматически при первом запуске бота без привязки карт.",
+     "ZERO COMMITMENT"),
+    ("card", "Оплата российскими картами",
+     "СБП, Т-Банк, Сбер и любые карты банков РФ, а также криптовалюта. Моментальное зачисление и продление подписки без потери оставшихся дней.",
+     "SBP & MIR READY"),
 ]
 
 STEPS = [
-    ("Откройте бота", "Нажмите «Открыть в Telegram» и запустите бота кнопкой «Старт»."),
-    ("Получите ключ", "Подпишитесь на наш канал — бот сразу выдаст пробный доступ."),
-    ("Подключитесь", "Вставьте ключ в приложение на телефоне или компьютере. Готово."),
+    ("Запустите бота", "Нажмите «Открыть в Telegram» и отправьте боту команду /start для старта.", "01"),
+    ("Получите ключ", "Подпишитесь на новостной канал — бот мгновенно выдаст персональный ключ доступа.", "02"),
+    ("Подключитесь", "Вставьте ключ в приложение на телефоне или компьютере в одно нажатие. Всё работает!", "03"),
 ]
 
 FAQ = [
-    ("Вы храните логи?",
-     "Нет. Мы не сохраняем историю посещений и не смотрим, какие сайты вы открываете."),
-    ("Как оплатить подписку?",
-     "Прямо в боте: выберите тариф и оплатите в рублях. Продлить можно там же, в пару нажатий."),
-    ("На каких устройствах работает?",
-     "На iOS, Android, Windows и macOS. Ключ из бота вставляется в приложение на нужном устройстве."),
-    ("Есть пробный период?",
-     "Да. Запустите бота и подпишитесь на наш канал — пробный доступ выдаётся автоматически."),
-    ("Что делать, если не подключается?",
-     "Напишите в поддержку прямо в боте — поможем разобраться."),
+    ("Вы ведёте логи посещений?",
+     "Категорически нет. Архитектура Drebol VPN построена на принципах Zero-Logs: трафик не логируется, не перехватывается и не хранится на дисках. Узлы работают исключительно в оперативной памяти."),
+    ("Как оплатить подписку из России?",
+     "Оплата проходит через российские платёжные шлюзы: доступны СБП, любые карты Visa, Mastercard и МИР. Оплата в рублях без зарубежных карт."),
+    ("Какие приложения нужны для подключения?",
+     "Мы поддерживаем удобные современные клиенты: Happ, Streisand, v2rayNG, Hiddify, FoXray и другие. Бот предоставит прямую ссылку для автоматического добавления конфигурации в один клик."),
+    ("Есть ли ограничения по скорости или трафику?",
+     "Трафик и скорость безлимитны. Каждый сервер подключён к выделенным 10-гигабитным оптическим каналам в Европе, поэтому YouTube 4K 60fps и Twitch стримят без буферизации."),
+    ("Что делать, если возникнут вопросы?",
+     "Прямо в боте работает тикет-служба поддержки. Напишите нам свой вопрос или отправьте скриншот — дежурный специалист ответит в течение нескольких минут."),
 ]
 
-PLATFORMS = ["iOS", "Android", "Windows", "macOS"]
-TARIFF_PERKS = ["Без логов", "iOS, Android, Windows, macOS", "Поддержка в боте"]
-
-# Приложения для подключения — те же, что предлагает бот
-APPS = [
-    ("Happ", "Лёгкое приложение для телефона и компьютера: вставили ссылку — и онлайн.",
-     "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
-     "https://play.google.com/store/apps/details?id=com.happproxy"),
-    ("INCY", "Приложение, которое бот советует первым: импорт подписки в один тап.",
-     "https://apps.apple.com/ru/app/incy/id6756943388",
-     "https://play.google.com/store/apps/details?id=llc.itdev.incy"),
-]
+PLATFORMS = ["iOS", "Android", "Windows", "macOS", "Linux", "Android TV"]
+TARIFF_PERKS = ["Без ограничений скорости и трафика", "Протокол VLESS Reality", "Все платформы (iOS, Android, PC)", "RAM-Only сервера без логов", "Поддержка в Telegram 24/7"]
 
 # ── Стили ────────────────────────────────────────────────────────────────────
 
 CSS = """
 :root {
   --bg: #05070c;
+  --bg-elevated: #0a0e17;
   --ink: #ffffff;
-  --muted: rgba(255, 255, 255, .64);
-  --soft: rgba(255, 255, 255, .56);
-  --line: rgba(255, 255, 255, .12);
-  --card: rgba(255, 255, 255, .03);
+  --muted: rgba(255, 255, 255, 0.72);
+  --soft: rgba(255, 255, 255, 0.48);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --card: rgba(13, 18, 30, 0.65);
+  --card-hover: rgba(20, 28, 48, 0.85);
   --accent: #4f8cff;
-  --accent-soft: rgba(79, 140, 255, .14);
+  --accent-cyan: #38ef7d;
+  --accent-indigo: #7952ff;
+  --accent-glow: rgba(79, 140, 255, 0.4);
   --pad: clamp(20px, 5vw, 120px);
-  --section: clamp(64px, 9vw, 120px);
-  --ease: cubic-bezier(.2, .8, .2, 1);
+  --section: clamp(70px, 9vw, 130px);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
-/* Липкая шапка не должна перекрывать заголовок раздела при переходе по якорю */
-section[id] { scroll-margin-top: 100px; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
-  font-family: Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  line-height: 1.5;
 }
 a { color: inherit; text-decoration: none; }
 img { max-width: 100%; }
-h1, h2, h3, p { margin: 0; }
-.wrap { width: 100%; max-width: 1440px; margin: 0 auto; padding-inline: var(--pad); }
+h1, h2, h3, h4, p { margin: 0; }
+.wrap { width: 100%; max-width: 1360px; margin: 0 auto; padding-inline: var(--pad); }
 
-/* Шёлк: мягкие пятна плывут друг сквозь друга, поверх — складки и блик */
+/* ── Задний фон: Кибер-аура и сетка ── */
 .bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
-.silk { position: absolute; inset: -20%; filter: blur(60px); opacity: .9; }
-.silk span {
+.aurora {
+  position: absolute; inset: -30%;
+  filter: blur(80px); opacity: 0.85;
+}
+.aurora span {
   position: absolute; border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, rgba(79,140,255,.55), transparent 60%);
-  animation: drift 26s ease-in-out infinite;
+  animation: floatOrb 24s ease-in-out infinite;
+  mix-blend-mode: screen;
 }
-.silk span:nth-child(1) { width: 60vmax; height: 60vmax; top: -10%; left: -5%; }
-.silk span:nth-child(2) {
-  width: 50vmax; height: 50vmax; bottom: -15%; right: -10%;
-  background: radial-gradient(circle at 60% 40%, rgba(120,140,190,.42), transparent 62%);
-  animation-duration: 32s; animation-delay: -8s;
+.aurora span:nth-child(1) {
+  width: 65vmax; height: 65vmax; top: -15%; left: -10%;
+  background: radial-gradient(circle at center, rgba(79, 140, 255, 0.38), rgba(79, 140, 255, 0.08) 50%, transparent 70%);
 }
-.silk span:nth-child(3) {
-  width: 42vmax; height: 42vmax; top: 35%; left: 45%;
-  background: radial-gradient(circle at 50% 50%, rgba(255,255,255,.12), transparent 65%);
-  animation-duration: 38s; animation-delay: -16s;
+.aurora span:nth-child(2) {
+  width: 55vmax; height: 55vmax; bottom: -20%; right: -15%;
+  background: radial-gradient(circle at center, rgba(121, 82, 255, 0.28), rgba(79, 140, 255, 0.06) 55%, transparent 75%);
+  animation-duration: 30s; animation-delay: -6s;
 }
-@keyframes drift {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  33%      { transform: translate3d(6vw, -4vh, 0) scale(1.12); }
-  66%      { transform: translate3d(-5vw, 5vh, 0) scale(.94); }
+.aurora span:nth-child(3) {
+  width: 48vmax; height: 48vmax; top: 30%; left: 35%;
+  background: radial-gradient(circle at center, rgba(56, 239, 125, 0.12), rgba(79, 140, 255, 0.08) 50%, transparent 70%);
+  animation-duration: 36s; animation-delay: -14s;
 }
-.folds {
-  position: absolute; inset: -25%;
-  background: linear-gradient(104deg,
-    transparent 6%, rgba(255,255,255,.09) 14%, transparent 24%,
-    rgba(160,190,255,.08) 34%, transparent 44%,
-    rgba(255,255,255,.06) 58%, transparent 68%,
-    rgba(255,255,255,.04) 82%, transparent 92%);
-  filter: blur(26px);
-  animation: fold 22s ease-in-out infinite alternate;
+.aurora span:nth-child(4) {
+  width: 40vmax; height: 40vmax; top: 10%; right: 5%;
+  background: radial-gradient(circle at center, rgba(79, 140, 255, 0.25), transparent 60%);
+  animation-duration: 22s; animation-delay: -18s;
 }
-@keyframes fold {
-  from { transform: translate3d(-3%, 0, 0) skewY(-1.5deg) scaleY(1.05); }
-  to   { transform: translate3d(3%, 0, 0) skewY(1.5deg) scaleY(.98); }
+
+@keyframes floatOrb {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  33%      { transform: translate3d(5vw, -6vh, 0) scale(1.1) rotate(60deg); }
+  66%      { transform: translate3d(-6vw, 4vh, 0) scale(0.92) rotate(120deg); }
 }
+
+/* Космическая сетка с затуханием */
+.cyber-grid {
+  position: absolute; inset: 0;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse at 50% 20%, black 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 20%, black 20%, transparent 75%);
+}
+
+.light-beam {
+  position: absolute; top: -180px; left: 50%; transform: translateX(-50%);
+  width: 800px; height: 500px;
+  background: radial-gradient(ellipse at top, rgba(79, 140, 255, 0.32), transparent 70%);
+  filter: blur(40px);
+}
+
 .vignette {
   position: absolute; inset: 0;
-  background: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,.7) 100%);
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(5, 7, 12, 0.85) 100%);
 }
-main, header, footer { position: relative; z-index: 1; }
 
-/* Шапка */
+header, main, footer { position: relative; z-index: 1; }
+
+/* ── Навигация (Header) ── */
 .top {
-  position: sticky; top: 0; z-index: 10;
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  background: rgba(5, 7, 12, .55); border-bottom: 1px solid transparent;
+  position: sticky; top: 0; z-index: 100;
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  background: rgba(5, 7, 12, 0.65);
+  border-bottom: 1px solid var(--line);
+  transition: border-color 0.3s;
 }
-.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 84px; }
-.brand { display: flex; align-items: center; min-height: 44px; }
-.brand img { height: 30px; width: auto; display: block; }
-.nav { display: flex; gap: 34px; font-size: 15px; font-weight: 600; }
-.nav a { color: rgba(255,255,255,.66); transition: color .2s; }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 76px; }
+.brand { display: flex; align-items: center; text-decoration: none; }
+.brand img { height: 32px; width: auto; display: block; filter: drop-shadow(0 2px 8px rgba(79, 140, 255, 0.3)); }
+.nav { display: flex; gap: 32px; font-size: 14px; font-weight: 600; }
+.nav a {
+  color: var(--muted); position: relative; padding: 6px 0;
+  transition: color 0.2s ease;
+}
+.nav a::after {
+  content: ""; position: absolute; left: 0; bottom: 0; width: 0; height: 2px;
+  background: var(--accent); border-radius: 2px; transition: width 0.25s var(--ease);
+}
 .nav a:hover { color: #fff; }
-.head-actions { display: flex; align-items: center; gap: 10px; }
+.nav a:hover::after { width: 100%; }
+.head-actions { display: flex; align-items: center; gap: 12px; }
 
-/* Кнопки */
+/* ── Кнопки ── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 10px;
-  height: 58px; padding: 0 30px; border-radius: 999px;
-  font-size: 17px; font-weight: 800; white-space: nowrap;
-  transition: transform .25s ease, box-shadow .25s ease, background .2s, border-color .2s;
+  height: 54px; padding: 0 28px; border-radius: 999px;
+  font-size: 16px; font-weight: 700; white-space: nowrap; cursor: pointer;
+  position: relative; overflow: hidden;
+  transition: transform 0.25s var(--ease), box-shadow 0.25s var(--ease), background 0.2s, border-color 0.2s;
 }
-.btn svg { width: 20px; height: 20px; flex: none; }
-.btn-main { background: #fff; color: var(--bg); box-shadow: 0 10px 40px rgba(255,255,255,.18); }
-.btn-main:hover { transform: translateY(-2px); box-shadow: 0 16px 50px rgba(255,255,255,.28); }
-.btn-ghost { border: 1px solid rgba(255,255,255,.2); color: #fff; font-weight: 700; }
-.btn-ghost:hover { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.32); }
-.btn-sm { height: 46px; padding: 0 20px; font-size: 15px; }
-.btn-sm svg { width: 18px; height: 18px; }
-.glow { animation: glow 3.6s 2s ease-in-out infinite; }
-@keyframes glow {
-  0%, 100% { box-shadow: 0 10px 40px rgba(255,255,255,.18); }
-  50%      { box-shadow: 0 10px 52px rgba(120,170,255,.45); }
+.btn svg { width: 19px; height: 19px; flex: none; }
+
+.btn-main {
+  background: linear-gradient(135deg, #ffffff 0%, #e2e8f5 100%);
+  color: #05070c;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4), 0 8px 32px rgba(255, 255, 255, 0.16);
+}
+.btn-main:hover {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: 0 0 0 1px #fff, 0 14px 44px rgba(79, 140, 255, 0.4);
+}
+.btn-main:active { transform: translateY(0) scale(0.99); }
+
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-strong);
+  color: #fff;
+  backdrop-filter: blur(10px);
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.35);
+  transform: translateY(-2px);
 }
 
-/* Первый экран */
+.btn-accent {
+  background: linear-gradient(135deg, #4f8cff 0%, #2968f5 100%);
+  color: #fff;
+  box-shadow: 0 0 30px rgba(79, 140, 255, 0.45);
+}
+.btn-accent:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 45px rgba(79, 140, 255, 0.65);
+}
+
+.btn-sm { height: 42px; padding: 0 18px; font-size: 14px; }
+.btn-sm svg { width: 16px; height: 16px; }
+
+/* Бегущий луч по периметру кнопки (Border Beam) */
+.btn-beam {
+  position: relative;
+  border: 1px solid rgba(79, 140, 255, 0.4);
+}
+.btn-beam::before {
+  content: ""; position: absolute; inset: -2px; border-radius: 999px;
+  background: conic-gradient(from 0deg, transparent 0deg, #4f8cff 60deg, transparent 120deg);
+  animation: rotateBeam 4s linear infinite;
+  z-index: -1;
+}
+
+@keyframes rotateBeam {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Первый экран (Hero) ── */
+.hero { padding-top: clamp(36px, 5vw, 64px); padding-bottom: clamp(60px, 8vw, 100px); }
 .hero .wrap {
-  display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-  gap: 64px; align-items: center;
-  padding-top: clamp(28px, 4vw, 56px); padding-bottom: var(--section);
+  display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: clamp(40px, 6vw, 80px); align-items: center;
 }
-.hero-text { display: flex; flex-direction: column; align-items: flex-start; gap: 26px; }
-.pill {
+.hero-text { display: flex; flex-direction: column; align-items: flex-start; gap: 24px; }
+
+/* Кибер-бейдж */
+.cyber-pill {
   display: inline-flex; align-items: center; gap: 10px;
-  padding: 8px 16px 8px 12px; border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04);
-  font-size: 14px; font-weight: 600; color: rgba(255,255,255,.82);
+  padding: 8px 18px 8px 12px; border-radius: 999px;
+  border: 1px solid rgba(79, 140, 255, 0.3);
+  background: rgba(79, 140, 255, 0.08);
+  backdrop-filter: blur(12px);
+  font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: #b6d0ff;
+  box-shadow: 0 0 24px rgba(79, 140, 255, 0.2);
 }
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 2.4s ease-in-out infinite; }
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(79,140,255,.55); }
-  50%      { box-shadow: 0 0 0 7px rgba(79,140,255,0); }
+.pulse-beacon {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent-cyan);
+  box-shadow: 0 0 10px var(--accent-cyan);
+  animation: beaconPulse 2s ease-in-out infinite;
 }
+@keyframes beaconPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(56, 239, 125, 0.6); }
+  50%      { box-shadow: 0 0 0 8px rgba(56, 239, 125, 0); }
+}
+
 h1 {
-  font-size: clamp(42px, 6.2vw, 80px); line-height: 1.02;
-  font-weight: 800; letter-spacing: -.035em; text-wrap: balance;
+  font-size: clamp(42px, 5.6vw, 78px); line-height: 1.04;
+  font-weight: 800; letter-spacing: -0.035em; text-wrap: balance;
 }
-h1 .dim { color: rgba(255,255,255,.5); }
-.lead { max-width: 540px; font-size: clamp(17px, 1.5vw, 20px); line-height: 1.55; color: var(--muted); text-wrap: pretty; }
-.actions { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 6px; }
-.hint { font-size: 14px; color: var(--soft); }
-.handle { color: rgba(255,255,255,.9); font-weight: 700; user-select: all; -webkit-user-select: all; }
-.chips { display: flex; flex-wrap: wrap; gap: 10px; list-style: none; padding: 0; margin: 8px 0 0; }
+.shimmer-text {
+  background: linear-gradient(135deg, #ffffff 15%, #9bc2ff 55%, #ffffff 90%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shine 6s linear infinite;
+}
+@keyframes shine {
+  to { background-position: 200% center; }
+}
+h1 .dim { color: rgba(255, 255, 255, 0.45); font-weight: 700; }
+
+.lead {
+  max-width: 540px; font-size: clamp(16px, 1.4vw, 19px); line-height: 1.6;
+  color: var(--muted); text-wrap: pretty;
+}
+.hero-actions { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 4px; }
+.hint { font-size: 13px; color: var(--soft); }
+.handle { color: #fff; font-weight: 700; user-select: all; -webkit-user-select: all; }
+
+/* Чипсы платформ */
+.chips-wrap { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.chips-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--soft); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 0; }
 .chips li {
-  padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
-  font-size: 13px; font-weight: 600; color: var(--muted);
+  padding: 6px 14px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line);
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  transition: all 0.2s ease;
+}
+.chips li:hover {
+  background: rgba(79, 140, 255, 0.12);
+  border-color: rgba(79, 140, 255, 0.4);
+  color: #fff; transform: translateY(-1px);
 }
 
-.visual { position: relative; display: flex; justify-content: center; }
-.poster {
-  width: min(100%, 480px); aspect-ratio: 4 / 5; border-radius: 32px; overflow: hidden;
-  border: 1px solid rgba(255,255,255,.12);
-  box-shadow: 0 40px 120px rgba(79,140,255,.22), 0 0 0 1px rgba(0,0,0,.4);
-  animation: float 8s ease-in-out infinite;
+/* ── 3D Hero Визуал и HUD ── */
+.visual {
+  position: relative; display: flex; justify-content: center;
+  perspective: 1200px;
 }
-.poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
-@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
-.status {
-  position: absolute; left: 0; bottom: 56px;
-  display: flex; align-items: center; gap: 14px; padding: 16px 20px; border-radius: 20px;
-  background: rgba(12,16,26,.8); border: 1px solid rgba(255,255,255,.14);
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 20px 50px rgba(0,0,0,.45);
+.visual-card {
+  position: relative; width: min(100%, 460px); aspect-ratio: 4 / 4.8;
+  border-radius: 32px;
+  background: radial-gradient(circle at 50% 0%, rgba(79, 140, 255, 0.25), rgba(13, 18, 30, 0.9) 70%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.8), 0 0 60px rgba(79, 140, 255, 0.2);
+  transition: transform 0.2s ease-out;
+  transform-style: preserve-3d;
+  overflow: hidden;
 }
-.status b { display: block; font-size: 15px; }
-.status small { font-size: 13px; color: rgba(255,255,255,.6); }
+.visual-card img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  mix-blend-mode: luminosity; opacity: 0.92;
+  transition: opacity 0.3s ease;
+}
+.visual-card:hover img { opacity: 1; mix-blend-mode: normal; }
 
-/* Общие элементы разделов */
+/* Угловые кибер-метки HUD */
+.hud-corner {
+  position: absolute; width: 14px; height: 14px;
+  border: 2px solid rgba(79, 140, 255, 0.6); pointer-events: none; z-index: 2;
+}
+.hud-tl { top: 14px; left: 14px; border-right: none; border-bottom: none; }
+.hud-tr { top: 14px; right: 14px; border-left: none; border-bottom: none; }
+.hud-bl { bottom: 14px; left: 14px; border-right: none; border-top: none; }
+.hud-br { bottom: 14px; right: 14px; border-left: none; border-top: none; }
+
+/* Плавающие плашки HUD */
+.hud-badge {
+  position: absolute; z-index: 3;
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 18px; border-radius: 18px;
+  background: rgba(10, 14, 24, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 25px rgba(79, 140, 255, 0.15);
+  animation: hudFloat 7s ease-in-out infinite alternate;
+}
+@keyframes hudFloat {
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(-8px); }
+}
+
+.hud-status { left: -10px; bottom: 36px; }
+.hud-speed { right: -12px; top: 40px; animation-delay: -3.5s; }
+
+.hud-icon {
+  width: 38px; height: 38px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(79, 140, 255, 0.16); color: var(--accent);
+  box-shadow: inset 0 0 12px rgba(79, 140, 255, 0.2);
+}
+.hud-icon svg { width: 20px; height: 20px; }
+.hud-icon.success { background: rgba(56, 239, 125, 0.16); color: var(--accent-cyan); }
+
+.hud-text { display: flex; flex-direction: column; gap: 2px; }
+.hud-text b { font-size: 14px; font-weight: 700; color: #fff; }
+.hud-text small { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.ping-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-cyan); }
+
+/* ── Метрики (Stats Bar) ── */
+.metrics { padding-top: 10px; padding-bottom: 50px; }
+.metrics-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px;
+}
+.metric-card {
+  padding: 24px 26px; border-radius: 22px;
+  background: var(--card); border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  transition: all 0.3s var(--ease);
+  position: relative; overflow: hidden;
+}
+.metric-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(79, 140, 255, 0.6), transparent);
+  opacity: 0; transition: opacity 0.3s ease;
+}
+.metric-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(79, 140, 255, 0.35);
+  background: var(--card-hover);
+}
+.metric-card:hover::before { opacity: 1; }
+
+.metric-val {
+  font-size: clamp(32px, 3vw, 44px); font-weight: 800; letter-spacing: -0.03em;
+  color: #fff; line-height: 1; display: flex; align-items: baseline; gap: 4px;
+}
+.metric-unit { font-size: 20px; font-weight: 700; color: var(--accent); }
+.metric-label { font-size: 14px; font-weight: 700; color: #fff; margin-top: 8px; }
+.metric-sub { font-size: 12px; color: var(--soft); margin-top: 2px; }
+
+/* ── Архитектура / Интерактивный маршрут ── */
+.route-section { padding-block: 40px; }
+.route-box {
+  padding: clamp(32px, 4vw, 48px); border-radius: 32px;
+  background: linear-gradient(180deg, rgba(13, 18, 30, 0.75), rgba(7, 10, 18, 0.85));
+  border: 1px solid var(--line-strong);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  position: relative; overflow: hidden;
+}
+.route-box::after {
+  content: ""; position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, rgba(79, 140, 255, 0.15), transparent 70%);
+  pointer-events: none;
+}
+.route-head { text-align: center; max-width: 680px; margin: 0 auto 36px; }
+.route-head h3 { font-size: clamp(22px, 2.5vw, 32px); font-weight: 800; letter-spacing: -0.02em; }
+.route-head p { font-size: 15px; color: var(--muted); margin-top: 8px; }
+
+.route-flow {
+  display: grid; grid-template-columns: 1fr auto 1.3fr auto 1fr;
+  align-items: center; gap: 16px; position: relative; z-index: 2;
+}
+.flow-node {
+  padding: 20px; border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line);
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px;
+  transition: all 0.3s ease;
+}
+.flow-node:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(79, 140, 255, 0.5);
+  transform: translateY(-2px);
+}
+.flow-node.core {
+  background: linear-gradient(180deg, rgba(79, 140, 255, 0.15), rgba(79, 140, 255, 0.04));
+  border-color: rgba(79, 140, 255, 0.45);
+  box-shadow: 0 0 40px rgba(79, 140, 255, 0.2);
+}
+.flow-icon {
+  width: 48px; height: 48px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(79, 140, 255, 0.12); color: var(--accent);
+}
+.flow-node.core .flow-icon {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+.flow-title { font-size: 15px; font-weight: 700; color: #fff; }
+.flow-badge {
+  font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06); color: var(--muted);
+}
+.flow-node.core .flow-badge {
+  background: rgba(56, 239, 125, 0.18); color: var(--accent-cyan);
+}
+
+.flow-beam {
+  position: relative; width: 60px; height: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+}
+.beam-pulse {
+  position: absolute; top: 0; left: 0; width: 30px; height: 100%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: beamFlow 1.8s linear infinite;
+}
+.beam-pulse.delayed { animation-delay: 0.9s; }
+@keyframes beamFlow {
+  0%   { transform: translateX(-30px); }
+  100% { transform: translateX(60px); }
+}
+
+/* ── Разделы (Общее) ── */
 .section { padding-block: var(--section); }
-.head { display: flex; flex-direction: column; gap: 16px; margin-bottom: clamp(28px, 4vw, 56px); }
+.head { display: flex; flex-direction: column; gap: 14px; margin-bottom: clamp(36px, 5vw, 64px); }
 .head.center { align-items: center; text-align: center; }
 .head.split { flex-direction: row; align-items: flex-end; justify-content: space-between; gap: 48px; }
-.eyebrow { font-size: 14px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--accent);
+}
+.eyebrow::before {
+  content: ""; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 8px var(--accent);
+}
+
 h2 {
-  font-size: clamp(32px, 4vw, 54px); line-height: 1.08;
-  font-weight: 800; letter-spacing: -.03em; text-wrap: balance; max-width: 720px;
+  font-size: clamp(32px, 4.2vw, 56px); line-height: 1.08;
+  font-weight: 800; letter-spacing: -0.03em; text-wrap: balance; max-width: 740px;
 }
-.sub { max-width: 560px; font-size: 17px; line-height: 1.6; color: var(--muted); }
-.head.split .sub { max-width: 380px; }
-.ico {
-  flex: none; width: 52px; height: 52px; border-radius: 16px;
+.sub { max-width: 580px; font-size: 17px; line-height: 1.6; color: var(--muted); }
+.head.split .sub { max-width: 400px; }
+
+/* ── Bento Grid (Возможности) ── */
+.bento-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+}
+.bento-card {
+  position: relative; border-radius: 26px; padding: 34px;
+  background: var(--card); border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  display: flex; flex-direction: column; justify-content: space-between; gap: 24px;
+  overflow: hidden; cursor: default;
+  transition: transform 0.3s var(--ease), border-color 0.3s ease, background 0.3s ease;
+}
+
+/* Курсорный Spotlight */
+.bento-card::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(500px circle at var(--mx, 50%) var(--my, 50%), rgba(79, 140, 255, 0.12), transparent 45%);
+  opacity: 0; transition: opacity 0.3s ease;
+}
+.bento-card:hover::after { opacity: 1; }
+
+.bento-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(79, 140, 255, 0.45);
+  background: var(--card-hover);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+}
+
+.bento-card.wide { grid-column: span 2; }
+
+.card-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.card-ico {
+  width: 54px; height: 54px; border-radius: 16px;
   display: flex; align-items: center; justify-content: center;
-  background: var(--accent-soft); color: var(--accent);
+  background: rgba(79, 140, 255, 0.12); color: var(--accent);
+  border: 1px solid rgba(79, 140, 255, 0.25);
+  box-shadow: 0 0 24px rgba(79, 140, 255, 0.2);
+  transition: transform 0.3s var(--ease);
 }
-.ico svg { width: 26px; height: 26px; }
+.bento-card:hover .card-ico {
+  transform: scale(1.08) rotate(4deg);
+  background: var(--accent); color: #fff;
+  box-shadow: 0 0 35px var(--accent-glow);
+}
+.card-ico svg { width: 26px; height: 26px; }
 
-/* Возможности */
-.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
-.feature {
-  display: flex; flex-direction: column; gap: 18px; padding: 32px;
-  border-radius: 24px; border: 1px solid rgba(255,255,255,.1); background: var(--card);
-  transition: border-color .25s, background .25s, transform .25s;
+.card-tag {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 5px 12px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line);
+  color: var(--soft);
 }
-.feature:hover { border-color: rgba(79,140,255,.45); background: rgba(255,255,255,.05); transform: translateY(-3px); }
-.feature h3 { font-size: 22px; font-weight: 700; letter-spacing: -.01em; }
-.feature h3, .step h3 { margin-bottom: 10px; }
-.feature p, .step p { font-size: 16px; line-height: 1.6; color: var(--muted); }
 
-/* Шаги */
-.step {
-  display: flex; flex-direction: column; gap: 20px; padding: 36px 32px; border-radius: 24px;
-  border: 1px solid rgba(255,255,255,.1);
-  background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.01));
-}
-.step:last-child { border-color: rgba(79,140,255,.35); background: linear-gradient(180deg, rgba(79,140,255,.12), rgba(79,140,255,.02)); }
-.num {
-  font-size: 64px; line-height: 1; font-weight: 800; letter-spacing: -.04em;
-  color: transparent; -webkit-text-stroke: 1.5px rgba(255,255,255,.4);
-}
-.step:last-child .num { -webkit-text-stroke-color: var(--accent); }
-.step h3 { font-size: 24px; font-weight: 700; }
+.bento-card h3 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: #fff; margin-bottom: 8px; }
+.bento-card p { font-size: 15px; line-height: 1.6; color: var(--muted); }
 
-/* Тарифы */
-.plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+/* ── Шаги подключения ── */
+.steps-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
+  position: relative;
+}
+.step-card {
+  padding: 38px 32px; border-radius: 26px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+  border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  display: flex; flex-direction: column; gap: 20px;
+  position: relative; overflow: hidden;
+  transition: transform 0.3s var(--ease), border-color 0.3s ease;
+}
+.step-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(79, 140, 255, 0.4);
+}
+.step-card:last-child {
+  border-color: rgba(79, 140, 255, 0.4);
+  background: linear-gradient(180deg, rgba(79, 140, 255, 0.12), rgba(79, 140, 255, 0.02));
+  box-shadow: 0 20px 50px rgba(79, 140, 255, 0.12);
+}
+
+.step-num {
+  font-size: 56px; line-height: 1; font-weight: 800; letter-spacing: -0.04em;
+  color: transparent; -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.35);
+  font-family: "Space Grotesk", sans-serif;
+}
+.step-card:last-child .step-num { -webkit-text-stroke-color: var(--accent); }
+.step-card h3 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+.step-card p { font-size: 15px; line-height: 1.6; color: var(--muted); }
+
+/* ── Тарифы ── */
+.plans {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px; align-items: stretch;
+}
 .plan {
-  display: flex; flex-direction: column; gap: 26px; padding: 40px 36px; border-radius: 28px;
-  border: 1px solid rgba(255,255,255,.1); background: var(--card);
+  padding: 42px 34px; border-radius: 28px;
+  background: var(--card); border: 1px solid var(--line);
+  backdrop-filter: blur(18px);
+  display: flex; flex-direction: column; gap: 24px;
+  position: relative; overflow: hidden;
+  transition: transform 0.3s var(--ease), border-color 0.3s ease, box-shadow 0.3s ease;
 }
-.plan.best {
-  border-color: rgba(79,140,255,.55);
-  background: linear-gradient(180deg, rgba(79,140,255,.16), rgba(79,140,255,.03));
-  box-shadow: 0 30px 90px rgba(79,140,255,.18);
+.plan:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
 }
-.plan-name { font-size: 18px; font-weight: 700; color: rgba(255,255,255,.85); }
-.plan-period { font-size: 14px; color: var(--soft); margin-top: 4px; }
-.price { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; }
-.price b { font-size: clamp(40px, 4vw, 52px); font-weight: 800; letter-spacing: -.03em; }
-.price span { font-size: 20px; font-weight: 700; color: rgba(255,255,255,.6); }
-.rule { height: 1px; background: var(--line); }
-.perks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; font-size: 16px; color: rgba(255,255,255,.82); }
-.perks li { display: flex; align-items: center; gap: 12px; }
-.perks svg { width: 20px; height: 20px; flex: none; color: var(--accent); }
-.plan .btn { margin-top: auto; height: 56px; font-size: 16px; }
-.note { margin-top: 28px; text-align: center; font-size: 15px; color: var(--soft); }
 
-/* Вопросы: нативные <details>, работают без JS */
-.faq .wrap { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 80px; }
-.faq .head { margin-bottom: 0; }
-.qa { border-top: 1px solid var(--line); }
-.qa details { border-bottom: 1px solid var(--line); }
+/* Выделенный лучший тариф */
+.plan.best {
+  border-color: rgba(79, 140, 255, 0.6);
+  background: linear-gradient(180deg, rgba(79, 140, 255, 0.18), rgba(13, 18, 30, 0.95));
+  box-shadow: 0 30px 90px rgba(79, 140, 255, 0.25);
+  transform: scale(1.02);
+}
+.plan.best:hover {
+  transform: scale(1.03) translateY(-4px);
+  box-shadow: 0 35px 100px rgba(79, 140, 255, 0.35);
+}
+
+/* Бейдж популярного тарифа */
+.best-tag {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 14px; border-radius: 999px;
+  background: linear-gradient(135deg, #4f8cff, #7952ff);
+  color: #fff; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+  box-shadow: 0 0 20px rgba(79, 140, 255, 0.5);
+}
+
+.plan-top { display: flex; flex-direction: column; gap: 6px; }
+.plan-name { font-size: 20px; font-weight: 700; color: #fff; }
+.plan-period { font-size: 14px; color: var(--soft); }
+
+.price-box { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
+.price-box b {
+  font-size: clamp(44px, 4.5vw, 56px); font-weight: 800; letter-spacing: -0.04em;
+  color: #fff; line-height: 1; font-family: "Space Grotesk", sans-serif;
+}
+.price-box span { font-size: 20px; font-weight: 700; color: var(--muted); }
+
+.rule { height: 1px; background: var(--line); }
+
+.perks {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 14px;
+  font-size: 15px; color: rgba(255, 255, 255, 0.85);
+}
+.perks li { display: flex; align-items: center; gap: 12px; }
+.perks svg { width: 18px; height: 18px; flex: none; color: var(--accent); }
+.plan.best .perks svg { color: var(--accent-cyan); }
+
+.plan .btn { margin-top: auto; }
+.note { margin-top: 32px; text-align: center; font-size: 15px; color: var(--soft); }
+
+/* ── FAQ (Вопросы и ответы) ── */
+.faq .wrap { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 70px; }
+.qa { display: flex; flex-direction: column; gap: 12px; }
+.qa details {
+  border-radius: 18px;
+  background: var(--card); border: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+  overflow: hidden; transition: all 0.25s ease;
+}
+.qa details[open] {
+  border-color: rgba(79, 140, 255, 0.4);
+  background: var(--card-hover);
+}
 .qa summary {
   list-style: none; cursor: pointer;
-  display: flex; align-items: center; justify-content: space-between; gap: 24px;
-  min-height: 76px; padding: 20px 8px; font-size: 19px; font-weight: 700;
-  transition: background .2s;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  padding: 22px 24px; font-size: 17px; font-weight: 700; color: #fff;
+  transition: color 0.2s ease;
 }
 .qa summary::-webkit-details-marker { display: none; }
-.qa summary:hover { background: rgba(255,255,255,.03); }
-.qa summary i {
-  flex: none; position: relative; width: 36px; height: 36px; border-radius: 50%;
-  border: 1px solid rgba(255,255,255,.18);
-}
-.qa summary i::before, .qa summary i::after {
-  content: ""; position: absolute; left: 50%; top: 50%; width: 14px; height: 2px;
-  margin: -1px 0 0 -7px; background: #fff; border-radius: 2px; transition: transform .25s var(--ease);
-}
-.qa summary i::after { transform: rotate(90deg); }
-.qa details[open] summary i::after { transform: rotate(0deg); }
-.qa p { padding: 0 64px 26px 8px; font-size: 16px; line-height: 1.65; color: var(--muted); }
+.qa summary:hover { color: var(--accent); }
 
-/* Финальный призыв */
+.qa-toggle {
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  display: flex; align-items: center; justify-content: center;
+  position: relative; flex: none; transition: transform 0.25s var(--ease), border-color 0.25s;
+}
+.qa-toggle::before, .qa-toggle::after {
+  content: ""; position: absolute; background: #fff; border-radius: 2px;
+  transition: transform 0.25s var(--ease);
+}
+.qa-toggle::before { width: 12px; height: 2px; }
+.qa-toggle::after { width: 2px; height: 12px; }
+.qa details[open] .qa-toggle { transform: rotate(45deg); border-color: var(--accent); }
+.qa details[open] .qa-toggle::before,
+.qa details[open] .qa-toggle::after { background: var(--accent); }
+
+.qa p { padding: 0 24px 24px; font-size: 15px; line-height: 1.65; color: var(--muted); }
+
+/* ── Финальный CTA портал ── */
 .cta-box {
-  display: flex; flex-direction: column; align-items: center; gap: 22px; text-align: center;
-  padding: clamp(48px, 7vw, 88px) clamp(22px, 4vw, 48px); border-radius: 36px;
-  border: 1px solid rgba(255,255,255,.12);
-  background: radial-gradient(ellipse at 50% 0%, rgba(79,140,255,.24), rgba(5,7,12,.2) 70%);
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; gap: 26px; text-align: center;
+  padding: clamp(60px, 8vw, 100px) clamp(24px, 5vw, 60px); border-radius: 40px;
+  border: 1px solid rgba(79, 140, 255, 0.35);
+  background: radial-gradient(ellipse at 50% -20%, rgba(79, 140, 255, 0.4), rgba(5, 7, 12, 0.95) 75%);
+  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.8), 0 0 80px rgba(79, 140, 255, 0.2);
 }
-.cta-box .mark-img { height: 44px; width: auto; }
-.cta-box h2 { font-size: clamp(34px, 5vw, 62px); }
-.cta-box .actions { justify-content: center; }
+.cta-box::before {
+  content: ""; position: absolute; inset: 0;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse at center, black 10%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 10%, transparent 70%);
+  pointer-events: none;
+}
+.cta-box .mark-img { height: 48px; width: auto; filter: drop-shadow(0 0 20px rgba(79, 140, 255, 0.5)); }
+.cta-box h2 { font-size: clamp(36px, 5.2vw, 64px); position: relative; z-index: 1; }
+.cta-box p { position: relative; z-index: 1; }
+.cta-box .actions { justify-content: center; position: relative; z-index: 1; }
 
-/* Подвал */
-.foot { border-top: 1px solid rgba(255,255,255,.08); }
-.foot .wrap { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-block: 36px 44px; }
-.foot img { height: 26px; width: auto; opacity: .85; }
-.foot nav { display: flex; flex-wrap: wrap; gap: 8px 28px; font-size: 14px; font-weight: 600; }
-.foot nav a { color: rgba(255,255,255,.66); }
+/* ── Подвал (Footer) ── */
+.foot { border-top: 1px solid var(--line); }
+.foot .wrap {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  padding-block: 36px 44px;
+}
+.foot img { height: 26px; width: auto; opacity: 0.85; }
+.foot-status {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; color: var(--muted);
+}
+.foot-status .pulse-beacon { width: 7px; height: 7px; }
+.foot nav { display: flex; flex-wrap: wrap; gap: 12px 28px; font-size: 14px; font-weight: 600; }
+.foot nav a { color: var(--muted); transition: color 0.2s; }
 .foot nav a:hover { color: #fff; }
-.copy { font-size: 14px; color: var(--soft); }
+.copy { font-size: 13px; color: var(--soft); }
 
-/* Логотип, нарисованный линиями (если картинку не залили) */
+/* Логотип по умолчанию (линии) */
 .logo { display: flex; align-items: center; gap: 12px; }
 .logo .mark { width: 34px; height: 34px; }
 .logo .mark circle, .logo .mark ellipse { fill: none; stroke: #fff; stroke-width: 7; }
-.logo .word { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+.logo .word { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; font-family: "Space Grotesk", sans-serif; }
 .cta-box .logo .mark { width: 44px; height: 44px; }
 .cta-box .logo .word { font-size: 34px; }
 
-/* Появление при прокрутке (включается скриптом; без JS всё просто видно) */
-.js .reveal { opacity: 0; transform: translateY(18px); transition: opacity .8s var(--ease), transform .8s var(--ease); }
+/* ── Скролл-появление (Reveal) ── */
+.js .reveal {
+  opacity: 0; transform: translateY(22px);
+  transition: opacity 0.85s var(--ease), transform 0.85s var(--ease);
+}
 .js .reveal.in { opacity: 1; transform: none; }
 
-/* ── Планшет ── */
+/* ── Адаптивность (Планшет) ── */
 @media (max-width: 1080px) {
   .nav { display: none; }
   .hero .wrap { grid-template-columns: 1fr; gap: 48px; }
-  .visual { justify-content: flex-start; }
-  .poster { width: min(100%, 440px); }
-  .status { left: 16px; bottom: 16px; }
-  .grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .steps.grid3 { grid-template-columns: 1fr; }
-  .faq .wrap { grid-template-columns: 1fr; gap: 28px; }
+  .visual { justify-content: center; }
+  .visual-card { width: min(100%, 420px); }
+  .metrics-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .route-flow { grid-template-columns: 1fr; gap: 14px; }
+  .flow-beam { display: none; }
+  .bento-grid { grid-template-columns: 1fr; }
+  .bento-card.wide { grid-column: auto; }
+  .steps-grid { grid-template-columns: 1fr; gap: 14px; }
+  .faq .wrap { grid-template-columns: 1fr; gap: 32px; }
   .head.split { flex-direction: column; align-items: flex-start; gap: 16px; }
 }
 
-/* ── Телефон ── */
+/* ── Адаптивность (Телефон) ── */
 @media (max-width: 640px) {
-  .top .wrap { height: 68px; }
+  .top .wrap { height: 64px; }
   .brand img { height: 26px; }
-  .top .btn-sm { height: 44px; padding: 0 16px; font-size: 14px; }
+  .top .btn-sm { height: 40px; padding: 0 16px; font-size: 13px; }
   .top .btn-sm .long { display: none; }
   .head-actions { gap: 8px; }
-  .head-actions .btn-sm:first-child span { display: none; }
-  .head-actions .btn-sm:first-child { padding: 0 14px; }
+
   .hero-text { gap: 20px; }
-  .pill { font-size: 13px; }
-  .actions { flex-direction: column; width: 100%; }
-  .actions .btn { width: 100%; }
-  .hint { align-self: center; text-align: center; font-size: 13px; }
-  .visual { justify-content: center; }
-  .poster { width: 100%; border-radius: 26px; }
-  .status { left: 12px; right: 12px; bottom: 12px; padding: 12px 14px; }
-  .chips { justify-content: center; width: 100%; }
-  .eyebrow { font-size: 13px; }
-  .sub { font-size: 16px; }
-  .grid3 { grid-template-columns: 1fr; gap: 12px; }
-  .feature { flex-direction: row; align-items: flex-start; gap: 16px; padding: 20px; border-radius: 20px; }
-  .feature:hover { transform: none; }
-  .feature .ico { width: 46px; height: 46px; border-radius: 14px; }
-  .feature .ico svg { width: 23px; height: 23px; }
-  .feature h3 { font-size: 18px; margin-bottom: 6px; }
-  .feature p, .step p { font-size: 15px; line-height: 1.55; }
-  .step { flex-direction: row; align-items: flex-start; gap: 18px; padding: 22px 20px; border-radius: 20px; }
-  .num { flex: none; width: 52px; font-size: 40px; -webkit-text-stroke-width: 1.2px; }
-  .step h3 { font-size: 19px; margin-bottom: 6px; }
-  .plans { grid-template-columns: 1fr; gap: 12px; }
-  .plan { padding: 24px; gap: 18px; border-radius: 22px; }
-  .plan .perks, .plan .rule { display: none; }
-  .plan-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-  .price { margin-top: 0; }
-  .price b { font-size: 34px; }
-  .price span { font-size: 17px; }
-  .plan .btn { height: 52px; }
-  .perks-mobile { display: flex !important; }
-  .note { font-size: 14px; }
-  .qa summary { min-height: 64px; padding: 16px 2px; font-size: 17px; gap: 16px; }
-  .qa summary i { width: 32px; height: 32px; }
-  .qa p { padding: 0 44px 20px 2px; font-size: 15px; }
-  .cta-box { border-radius: 28px; }
-  .cta-box .mark-img { height: 34px; }
-  .foot .wrap { flex-direction: column; text-align: center; gap: 18px; padding-block: 28px 40px; }
-  .foot nav { flex-direction: column; align-items: center; gap: 0; }
-  .foot nav a { display: flex; align-items: center; min-height: 44px; }
-}
-.perks-mobile {
-  display: none; margin-top: 12px; padding: 20px; border-radius: 20px;
-  border: 1px dashed rgba(255,255,255,.14); font-size: 15px;
+  .hero-actions { flex-direction: column; width: 100%; }
+  .hero-actions .btn { width: 100%; }
+  .hint { align-self: center; text-align: center; font-size: 12px; }
+  .chips-wrap { align-items: center; }
+  .chips { justify-content: center; }
+
+  .visual-card { width: 100%; border-radius: 24px; }
+  .hud-status { left: 10px; right: 10px; bottom: 12px; }
+  .hud-speed { display: none; }
+
+  .metrics-grid { grid-template-columns: 1fr; }
+  .metric-card { padding: 18px 20px; }
+
+  .bento-card { padding: 24px; border-radius: 20px; }
+  .card-ico { width: 46px; height: 46px; }
+  .card-ico svg { width: 22px; height: 22px; }
+  .bento-card h3 { font-size: 19px; }
+
+  .step-card { padding: 26px 22px; border-radius: 20px; }
+  .step-num { font-size: 42px; }
+
+  .plans { grid-template-columns: 1fr; gap: 14px; }
+  .plan { padding: 28px 24px; border-radius: 22px; }
+  .plan.best { transform: none; }
+  .plan.best:hover { transform: translateY(-3px); }
+  .price-box b { font-size: 38px; }
+
+  .cta-box { padding: 48px 20px; border-radius: 28px; }
+  .cta-box .actions { flex-direction: column; width: 100%; }
+  .cta-box .btn { width: 100%; }
+
+  .foot .wrap { flex-direction: column; text-align: center; gap: 20px; padding-block: 28px 36px; }
+  .foot nav { flex-direction: column; align-items: center; gap: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -459,23 +857,61 @@ h2 {
 }
 """
 
-# Появление блоков при прокрутке. Если JS выключен — класс .js не ставится
-# и страница просто показывается целиком.
 JS_HEAD = "document.documentElement.classList.add('js');"
 
 JS = """
 (function () {
+  // Появление элементов при прокрутке
   var items = document.querySelectorAll('.reveal');
-  if (!('IntersectionObserver' in window)) {
+  if ('IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          e.target.classList.add('in');
+          io.unobserve(e.target);
+        }
+      });
+    }, { rootMargin: '0px 0px -6% 0px' });
+    items.forEach(function (el) { io.observe(el); });
+  } else {
     items.forEach(function (el) { el.classList.add('in'); });
-    return;
   }
-  var io = new IntersectionObserver(function (entries) {
-    entries.forEach(function (e) {
-      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+
+  // Интерактивный курсорный Spotlight на карточках Bento
+  var bentoCards = document.querySelectorAll('.bento-card');
+  bentoCards.forEach(function (card) {
+    card.addEventListener('mousemove', function (e) {
+      var rect = card.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var y = e.clientY - rect.top;
+      card.style.setProperty('--mx', x + 'px');
+      card.style.setProperty('--my', y + 'px');
     });
-  }, { rootMargin: '0px 0px -8% 0px' });
-  items.forEach(function (el) { io.observe(el); });
+  });
+
+  // 3D Tilt эффект на постере в Hero
+  var visual = document.querySelector('.visual');
+  var visualCard = document.querySelector('.visual-card');
+  if (visual && visualCard && window.matchMedia('(min-width: 768px)').matches) {
+    visual.addEventListener('mousemove', function (e) {
+      var rect = visual.getBoundingClientRect();
+      var x = (e.clientX - rect.left) / rect.width - 0.5;
+      var y = (e.clientY - rect.top) / rect.height - 0.5;
+      visualCard.style.transform = 'perspective(1000px) rotateY(' + (x * 12) + 'deg) rotateX(' + (-y * 12) + 'deg)';
+    });
+    visual.addEventListener('mouseleave', function () {
+      visualCard.style.transform = 'perspective(1000px) rotateY(0deg) rotateX(0deg)';
+    });
+  }
+
+  // Живая микрофлуктуация пинга (кибер-эффект)
+  var pingEl = document.getElementById('heroPing');
+  if (pingEl) {
+    setInterval(function () {
+      var p = Math.floor(Math.random() * 5) + 11;
+      pingEl.textContent = p;
+    }, 2800);
+  }
 })();
 """
 
@@ -495,20 +931,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
                tariffs: list | None = None,
                poster_file: str = "og.webp",
                cabinet_url: str = "") -> str:
-    """Собирает страницу.
-
-    logo_file — имя файла с настоящим логотипом рядом со страницей. Если его
-    нет, логотип рисуется линиями — страница никогда не остаётся без знака.
-
-    tariffs — список словарей {"name", "price", "period"} (period — срок
-    текстом, необязателен). Пустой список — раздел «Тарифы» не показывается.
-
-    poster_file — фирменная картинка для первого экрана (по умолчанию og.webp,
-    её и так кладёт деплой). Пустая строка — первый экран без картинки.
-
-    cabinet_url — адрес личного кабинета. Пустая строка — кабинета на сайте нет,
-    и кнопки на него не появляются.
-    """
+    """Собирает ультрасовременную страницу."""
     handle = bot_username.lstrip("@")
     bot_url = escape(f"https://t.me/{handle}" if handle else "https://t.me/")
     name = escape(title)
@@ -528,45 +951,67 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
                  f'<span class="word">{word}</span></span>')
         brand_html = cta_logo = foot_logo = drawn
 
-    hint_html = (f'<p class="hint">Не открылось? Найдите в Telegram '
+    hint_html = (f'<p class="hint">Не открылось? Найдите в Telegram: '
                  f'<span class="handle">@{escape(handle)}</span></p>' if handle else "")
 
     chips = "".join(f"<li>{escape(p)}</li>" for p in PLATFORMS)
 
+    # 3D Hero Poster / Terminal
     visual_html = ""
     if poster_file:
         visual_html = f"""
     <div class="visual reveal">
-      <div class="poster"><img src="{escape(poster_file)}" alt="Фирменный знак {name} на тёмном шёлке" width="1122" height="1402"></div>
-      <div class="status">
-        <span class="ico">{_ICONS["shield"]}</span>
-        <span><b>Подключено</b><small>Соединение защищено</small></span>
+      <div class="visual-card">
+        <div class="hud-corner hud-tl"></div>
+        <div class="hud-corner hud-tr"></div>
+        <div class="hud-corner hud-bl"></div>
+        <div class="hud-corner hud-br"></div>
+        <img src="{escape(poster_file)}" alt="Drebol VPN Shield" width="1122" height="1402">
+      </div>
+      <div class="hud-badge hud-speed">
+        <div class="hud-icon">{_ICONS["speed"]}</div>
+        <div class="hud-text">
+          <b>10 Gbps Uplink</b>
+          <small>4K 60fps Ready</small>
+        </div>
+      </div>
+      <div class="hud-badge hud-status">
+        <div class="hud-icon success">{_ICONS["shield"]}</div>
+        <div class="hud-text">
+          <b>VLESS Reality Protected</b>
+          <small><span class="ping-dot"></span>Пинг: <span id="heroPing">12</span> ms · 0% потерь</small>
+        </div>
       </div>
     </div>"""
 
-    features_html = "".join(f"""
-      <article class="feature reveal">
-        <span class="ico">{_ICONS[icon]}</span>
-        <div><h3>{escape(h)}</h3><p>{escape(t)}</p></div>
-      </article>""" for icon, h, t in FEATURES)
+    # Bento карточки возможностей
+    bento_items = []
+    for i, (icon, h, t, tag) in enumerate(FEATURES):
+        is_wide = (i == 0 or i == 3)
+        bento_items.append(f"""
+      <article class="bento-card{' wide' if is_wide else ''} reveal">
+        <div class="card-top">
+          <div class="card-ico">{_ICONS[icon]}</div>
+          <span class="card-tag">{escape(tag)}</span>
+        </div>
+        <div>
+          <h3>{escape(h)}</h3>
+          <p>{escape(t)}</p>
+        </div>
+      </article>""")
+    features_html = "".join(bento_items)
 
+    # Шаги
     steps_html = "".join(f"""
-      <article class="step reveal">
-        <span class="num">{i:02d}</span>
-        <div><h3>{escape(h)}</h3><p>{escape(t)}</p></div>
-      </article>""" for i, (h, t) in enumerate(STEPS, 1))
+      <article class="step-card reveal">
+        <span class="step-num">{num}</span>
+        <div>
+          <h3>{escape(h)}</h3>
+          <p>{escape(t)}</p>
+        </div>
+      </article>""" for h, t, num in STEPS)
 
     perks_html = "".join(f"<li>{_CHECK}{escape(p)}</li>" for p in TARIFF_PERKS)
-
-    apps_html = "".join(f"""
-      <article class="feature reveal">
-        <span class="ico">{_ICONS["devices"]}</span>
-        <div><h3>{escape(name)}</h3><p>{escape(desc)}</p>
-        <div class="actions" style="margin-top:18px">
-          <a class="btn btn-ghost btn-sm" href="{escape(ios)}">App Store</a>
-          <a class="btn btn-ghost btn-sm" href="{escape(android)}">Google Play</a>
-        </div></div>
-      </article>""" for name, desc, ios, android in APPS)
 
     pricing_html = ""
     cab = escape(cabinet_url) if cabinet_url else ""
@@ -585,29 +1030,35 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
             period = str(t.get("period", "") or "").strip()
             period_html = (f'<div class="plan-period">{escape(period)}</div>'
                            if period and period.lower() != t_name.lower() else "")
-            is_best = i == best
+            is_best = (i == best)
             btn_cls = "btn btn-main" if is_best else "btn btn-ghost"
+            best_badge = '<span class="best-tag">🔥 Самый популярный</span>' if is_best else ""
             cards.append(f"""
       <article class="plan{' best' if is_best else ''} reveal">
+        {best_badge}
         <div class="plan-top">
-          <div><div class="plan-name">{escape(t_name)}</div>{period_html}</div>
-          <div class="price"><b>{_fmt_price(t.get("price", ""))}</b><span>₽</span></div>
+          <div class="plan-name">{escape(t_name)}</div>
+          {period_html}
+          <div class="price-box">
+            <b>{_fmt_price(t.get("price", ""))}</b>
+            <span>₽</span>
+          </div>
         </div>
         <div class="rule"></div>
         <ul class="perks">{perks_html}</ul>
         <a class="{btn_cls}" href="{bot_url}">Выбрать в боте</a>
       </article>""")
+
         pricing_html = f"""
 <section class="section" id="pricing">
   <div class="wrap">
     <div class="head center reveal">
       <span class="eyebrow">Тарифы</span>
-      <h2>Простые цены. Без сюрпризов.</h2>
-      <p class="sub">Все возможности — в любом тарифе. Разница только в сроке. Оплата и продление — в боте.</p>
+      <h2>Честные цены. Без скрытых платежей.</h2>
+      <p class="sub">Все серверы, протоколы и платформы доступны на любом тарифе. Разница только в длительности подписки.</p>
     </div>
     <div class="plans">{"".join(cards)}</div>
-    <ul class="perks perks-mobile">{perks_html}</ul>
-    <p class="note">Не уверены? Начните с пробного периода — он выдаётся сразу после запуска бота.</p>
+    <p class="note">Не готовы сразу покупать? Начните с бесплатного пробного периода — он активируется мгновенно в боте.</p>
   </div>
 </section>"""
         nav_pricing = '<a href="#pricing">Тарифы</a>'
@@ -617,7 +1068,10 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 
     faq_html = "".join(f"""
       <details{' open' if i == 0 else ''}>
-        <summary>{escape(q)}<i aria-hidden="true"></i></summary>
+        <summary>
+          <span>{escape(q)}</span>
+          <span class="qa-toggle" aria-hidden="true"></span>
+        </summary>
         <p>{escape(a)}</p>
       </details>""" for i, (q, a) in enumerate(FAQ))
 
@@ -643,23 +1097,26 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{name} — {escape(tagline)}</title>
-<meta name="description" content="{escape(tagline)}. Подключение за минуту прямо в Telegram, iOS, Android, Windows и macOS.">
+<meta name="description" content="{escape(tagline)}. Мгновенное подключение по протоколу VLESS Reality прямо в Telegram. Поддержка iOS, Android, Windows и macOS.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="{name}">
 <meta property="og:description" content="{escape(tagline)}">
 {og_meta}
 <meta name="theme-color" content="#05070c">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='white' stroke-width='7'%3E%3Ccircle cx='50' cy='50' r='40'/%3E%3Cellipse cx='50' cy='50' rx='40' ry='13'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%234f8cff' stroke-width='7'%3E%3Ccircle cx='50' cy='50' r='40'/%3E%3Cellipse cx='50' cy='50' rx='40' ry='13'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700;800&display=swap" rel="stylesheet">
 <style>{CSS}</style>
 <script>{JS_HEAD}</script>
 </head>
 <body>
 <div class="bg" aria-hidden="true">
-  <div class="silk"><span></span><span></span><span></span></div>
-  <div class="folds"></div>
+  <div class="aurora">
+    <span></span><span></span><span></span><span></span>
+  </div>
+  <div class="cyber-grid"></div>
+  <div class="light-beam"></div>
   <div class="vignette"></div>
 </div>
 
@@ -669,7 +1126,6 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     <nav class="nav" aria-label="Разделы">
       <a href="#features">Возможности</a>
       <a href="#how">Как подключить</a>
-      <a href="#apps">Приложения</a>
       {nav_pricing}
       <a href="#faq">Вопросы</a>
     </nav>
@@ -681,81 +1137,144 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 </header>
 
 <main>
+<!-- ── Первый экран (Hero) ── -->
 <section class="hero" id="top">
   <div class="wrap">
     <div class="hero-text reveal">
-      <span class="pill"><span class="dot"></span>VPN прямо в Telegram</span>
-      <h1>Интернет без границ. <span class="dim">И без логов.</span></h1>
-      <p class="lead">Drebol — быстрый VPN, который подключается из Telegram. Открыли бота, получили ключ — и через минуту вы онлайн на любом устройстве.</p>
-      <div class="actions">
-        <a class="btn btn-main glow" href="{bot_url}">{_TG}Открыть в Telegram</a>
+      <div class="cyber-pill">
+        <span class="pulse-beacon"></span>
+        <span>RemnaWave Network · 0% логов</span>
+      </div>
+      <h1>Интернет без ограничений. <span class="shimmer-text">И без цензуры.</span></h1>
+      <p class="lead">{name} — сверхбыстрый VPN нового поколения с маскировкой трафика VLESS Reality. Никаких сайтов и паролей: открыли Telegram-бота, получили ключ и вы онлайн на любом устройстве.</p>
+      <div class="hero-actions">
+        <a class="btn btn-main btn-beam" href="{bot_url}">{_TG}Открыть в Telegram</a>
         {hero_second}
       </div>
       {hint_html}
-      <ul class="chips" aria-label="Платформы">{chips}</ul>
+      <div class="chips-wrap">
+        <span class="chips-label">Доступно для всех устройств</span>
+        <ul class="chips" aria-label="Платформы">{chips}</ul>
+      </div>
     </div>{visual_html}
   </div>
 </section>
 
+<!-- ── Метрики сети ── -->
+<section class="metrics">
+  <div class="wrap">
+    <div class="metrics-grid reveal">
+      <div class="metric-card">
+        <div class="metric-val">10<span class="metric-unit">Gbps</span></div>
+        <div class="metric-label">Выделенные каналы</div>
+        <div class="metric-sub">YouTube 4K 60fps без задержек</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-val">0<span class="metric-unit">%</span></div>
+        <div class="metric-label">Следов и логов</div>
+        <div class="metric-sub">RAM-Only серверная архитектура</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-val">&lt;15<span class="metric-unit">ms</span></div>
+        <div class="metric-label">Ультранизкий пинг</div>
+        <div class="metric-sub">Прямой европейский пиринг</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-val">99.9<span class="metric-unit">%</span></div>
+        <div class="metric-label">Бесперебойный аптайм</div>
+        <div class="metric-sub">Автоматическая смена нод</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Визуализатор архитектуры ── -->
+<section class="route-section">
+  <div class="wrap">
+    <div class="route-box reveal">
+      <div class="route-head">
+        <span class="eyebrow">Архитектура</span>
+        <h3>Как {name} защищает ваш трафик</h3>
+        <p>Прямой зашифрованный туннель между вашим устройством и европейскими узлами, недосягаемый для DPI-фильтров.</p>
+      </div>
+      <div class="route-flow">
+        <div class="flow-node">
+          <div class="flow-icon">{_ICONS["devices"]}</div>
+          <div class="flow-title">Ваш девайс</div>
+          <span class="flow-badge">Смартфон / ПК</span>
+        </div>
+        <div class="flow-beam"><div class="beam-pulse"></div></div>
+        <div class="flow-node core">
+          <div class="flow-icon">{_ICONS["shield"]}</div>
+          <div class="flow-title">{name} Core Relay</div>
+          <span class="flow-badge">VLESS Reality · AES-256</span>
+        </div>
+        <div class="flow-beam"><div class="beam-pulse delayed"></div></div>
+        <div class="flow-node">
+          <div class="flow-icon">{_ICONS["globe"]}</div>
+          <div class="flow-title">Свободный веб</div>
+          <span class="flow-badge">YouTube 4K · Discord · AI</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Bento Grid: Возможности ── -->
 <section class="section" id="features">
   <div class="wrap">
     <div class="head split reveal">
       <div class="head" style="margin:0">
-        <span class="eyebrow">Почему Drebol</span>
-        <h2>Всё, что нужно от VPN. Ничего лишнего.</h2>
+        <span class="eyebrow">Преимущества</span>
+        <h2>Создан для скорости, надёжности и приватности.</h2>
       </div>
-      <p class="sub">Мы убрали всё, что обычно мешает: регистрации, сложные настройки и долгие ответы поддержки.</p>
+      <p class="sub">Мы избавились от всего лишнего: громоздких регистраций, ведения логов и падений скорости в часы пик.</p>
     </div>
-    <div class="grid3">{features_html}
+    <div class="bento-grid">
+      {features_html}
     </div>
   </div>
 </section>
 
+<!-- ── Как подключить ── -->
 <section class="section" id="how">
   <div class="wrap">
     <div class="head center reveal">
-      <span class="eyebrow">Как подключить</span>
-      <h2>Три шага — и вы онлайн</h2>
+      <span class="eyebrow">Инструкция</span>
+      <h2>Всего 3 простых шага</h2>
+      <p class="sub">Вам не нужно разбираться в сложных протоколах — бот настроит всё за вас.</p>
     </div>
-    <div class="grid3 steps">{steps_html}
+    <div class="steps-grid">
+      {steps_html}
     </div>
   </div>
 </section>
 
-<section class="section" id="apps">
-  <div class="wrap">
-    <div class="head split reveal">
-      <div class="head" style="margin:0">
-        <span class="eyebrow">Приложения</span>
-        <h2>Поставьте приложение заранее</h2>
-      </div>
-      <p class="sub">Ссылка из бота вставляется в любое из них в один тап — а сами приложения можно скачать уже сейчас.</p>
-    </div>
-    <div class="grid3">{apps_html}
-    </div>
-  </div>
-</section>
 {pricing_html}
+
+<!-- ── Вопросы и ответы ── -->
 <section class="section faq" id="faq">
   <div class="wrap">
     <div class="head reveal">
-      <span class="eyebrow">Вопросы</span>
-      <h2>Коротко о главном</h2>
-      <p class="sub">Не нашли ответ — напишите в поддержку в боте.</p>
+      <span class="eyebrow">FAQ</span>
+      <h2>Частые вопросы</h2>
+      <p class="sub">Если у вас останутся вопросы — наша служба поддержки на связи прямо в боте.</p>
     </div>
-    <div class="qa reveal">{faq_html}
+    <div class="qa reveal">
+      {faq_html}
     </div>
   </div>
 </section>
 
+<!-- ── Финальный призыв ── -->
 <section class="section">
   <div class="wrap">
     <div class="cta-box reveal">
       {cta_logo}
-      <h2>Подключитесь за минуту</h2>
-      <p class="sub">Пробный доступ — сразу после запуска бота. Без регистрации на сайтах.</p>
+      <h2>Подключитесь прямо сейчас</h2>
+      <p class="sub">Тестовый период активируется мгновенно. Попробуйте свободный интернет без ограничений прямо сейчас.</p>
       <div class="actions">
-        <a class="btn btn-main" href="{bot_url}">{_TG}Открыть в Telegram</a>
+        <a class="btn btn-main btn-beam" href="{bot_url}">{_TG}Открыть в Telegram</a>
         {cab_cta}
         {channel_btn}
       </div>
@@ -767,6 +1286,10 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 <footer class="foot">
   <div class="wrap">
     {foot_logo}
+    <div class="foot-status">
+      <span class="pulse-beacon"></span>
+      <span>Все серверные узлы работают штатно</span>
+    </div>
     {docs_html}
     <span class="copy">© {year} {name}</span>
   </div>

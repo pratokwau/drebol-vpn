@@ -4,8 +4,7 @@ from config import ADMIN_ID, load_config, save_config
 from states import AWAITING_SUPPORT_MSG
 from subscription import is_subscribed, subscribe_keyboard, subscribe_text
 from handlers.user import (
-    handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_my_lte,
-    handle_app_add,
+    handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_app_add,
     handle_how_to, handle_renew_sub, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_qr_code, handle_reissue_key, handle_reissue_do, handle_prices, handle_info,
@@ -16,7 +15,7 @@ from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
     handle_set_privacy_url, handle_set_terms_url, handle_documents_menu,
     handle_channel_menu, handle_dashboard, handle_healthcheck,
-    handle_find_user, handle_user_profile,
+    handle_find_user, handle_user_profile, handle_unban_user,
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
     handle_remind_settings, handle_toggle_remind, handle_set_remind,
     handle_toggle_remind_trials, handle_remind_test, handle_set_remind_quiet,
@@ -33,11 +32,7 @@ from fraud import (
 from remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
     handle_rw_squads, handle_rw_squad_toggle,
-    handle_rw_usage, handle_rw_usage_node, handle_rw_usage_all,
-    handle_rw_usage_period, handle_rw_usage_set, handle_rw_usage_custom,
-    handle_panel_sync, handle_panel_sync_schedule, handle_panel_sync_set,
-    handle_panel_sync_off, handle_panel_sync_daily, handle_panel_sync_interval,
-    handle_panel_sync_menu, handle_panel_names_sync,
+    handle_rw_notify, handle_rw_notify_go,
 )
 from backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
@@ -61,7 +56,6 @@ from handlers.control import (
     handle_control_menu, handle_activity_feed, handle_user_activity,
     handle_online, handle_traffic, handle_digest_toggle,
     handle_digest_hour_menu, handle_digest_set_hour, handle_digest_now,
-    handle_digest_custom,
     handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
 )
 from staff import (
@@ -73,6 +67,7 @@ from blacklist import (
     handle_bl_menu, handle_bl_list, handle_bl_view, handle_bl_add_start, handle_bl_new,
     handle_bl_check_start, handle_bl_add_apply, handle_bl_del, handle_bl_stop, handle_bl_readd,
     handle_bl_sync_now, handle_bl_remote_toggle, handle_bl_reason, handle_bl_term,
+    handle_bl_bans, handle_bl_unban,
 )
 from promos import (
     handle_promo_give_start, handle_promo_give_for, handle_promo_give_custom,
@@ -86,7 +81,6 @@ from promos import (
 )
 from handlers.payments import (
     handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
-    handle_refund_partial_start, handle_refund_partial_do, handle_payment_sync_run,
 )
 from handlers.tariffs import (
     handle_tariffs_menu, handle_tariff_view, handle_tariff_toggle,
@@ -112,10 +106,9 @@ from handlers.tickets import (
 from adminsub.handlers import (
     handle_admin_subs_menu, handle_presets_menu,
     handle_preset_expire, handle_preset_hwid, handle_preset_traffic,
-    handle_preset_lte,
     handle_create_sub, handle_sub_view, handle_sub_delete, handle_sub_toggle,
     handle_sub_settings, handle_sub_edit_expire,
-    handle_sub_edit_hwid, handle_sub_edit_traffic, handle_sub_edit_lte,
+    handle_sub_edit_hwid, handle_sub_edit_traffic,
     handle_sub_extend, handle_sub_reduce, handle_sub_devices, handle_sub_ips,
     handle_sub_hwid_del, handle_sub_hwid_clear, handle_sub_reissue,
     handle_subs_names_sync,
@@ -123,24 +116,19 @@ from adminsub.handlers import (
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
     handle_paid_preset_hwid, handle_paid_preset_traffic,
-    handle_paid_preset_lte, handle_paid_lte_fallback,
-    handle_paid_lte_fallback_set, handle_paid_lte_check_now,
-    handle_paid_squads_menu, handle_paid_issued_squads,
-    handle_paid_issued_squad_toggle, handle_paid_lte_squads,
-    handle_paid_lte_squad_toggle,
     handle_paid_preset_trial,
     handle_paid_create_sub, handle_paid_create_type,
     handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
     handle_approve, handle_reject, handle_request_sub,
     handle_paid_sub_freeze, handle_paid_sub_extend, handle_paid_sub_reduce,
     handle_paid_bulk_menu, handle_paid_bulk_extend, handle_paid_bulk_reduce,
-    handle_paid_bulk_hwid, handle_paid_bulk_lte, handle_paid_bulk_limits_apply,
+    handle_paid_bulk_hwid, handle_paid_bulk_limits_apply,
     handle_paid_device_price, handle_paid_device_max,
     handle_paid_devices, handle_paid_ips, handle_paid_hwid_del,
     handle_paid_hwid_clear,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
-    handle_paid_sub_edit_lte, handle_paid_sub_edit_trial,
+    handle_paid_sub_edit_trial,
     handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
     handle_toggle_auto_trial, handle_paid_bulk_apply,
 )
@@ -183,6 +171,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             feat = "subscription" if has_sub else "trial"
         if feat and not mnt.feature_enabled(feat):
             await mnt.show_feature_off(feat, query=query)
+            return
+
+    # Проверка бана
+    if not adm and data != "check_sub":
+        from database import is_banned
+        if await is_banned(update.effective_user.id):
+            await query.edit_message_text(
+                "🚫 <b>Аккаунт заблокирован</b>\n\n"
+                "<i>Если это ошибка — свяжитесь с администратором.</i>", parse_mode="HTML")
             return
 
     # Чёрный список: остаётся только поддержка — чтобы можно было оспорить
@@ -253,10 +250,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                  int(_p[2]) if len(_p) > 2 else None)
     elif data == "my_sub":
         await handle_my_sub(query)
-    elif data == "my_lte":
-        await handle_my_lte(query, "paid")
-    elif data == "my_lte_admin":
-        await handle_my_lte(query, "admin")
     elif data == "news_no_channel":
         await query.answer("Канал пока не настроен.", show_alert=True)
     elif data == "how_to":
@@ -372,8 +365,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_digest_set_hour(query, context, int(data.split(":")[1]))
     elif data == "ctl_digest_now":
         await handle_digest_now(query, context)
-    elif data == "ctl_digest_custom":
-        await handle_digest_custom(query, context)
     elif data == "ctl_ch_menu":
         await handle_connect_help_menu(query, context)
     elif data == "ctl_ch_toggle":
@@ -405,11 +396,17 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "bl_check":
         await handle_bl_check_start(query, context)
     elif data.startswith("bl_add_for:"):
-        await handle_bl_new(query, context, int(data.split(":")[1]))
+        await handle_bl_new(query, context, "bl", int(data.split(":")[1]))
+    elif data.startswith("bl_ban:"):
+        await handle_bl_new(query, context, "ban", int(data.split(":")[1]))
+    elif data.startswith("bl_unban:"):
+        await handle_bl_unban(query, context, int(data.split(":")[1]))
     elif data.startswith("bl_reason:"):
         await handle_bl_reason(query, context, data.split(":")[1])
     elif data.startswith("bl_term:"):
         await handle_bl_term(query, context, data.split(":")[1])
+    elif data.startswith("bl_bans:"):
+        await handle_bl_bans(query, int(data.split(":")[1]))
     elif data == "bl_add_apply":
         await handle_bl_add_apply(query, context)
     elif data.startswith("bl_del:"):
@@ -432,19 +429,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("refund_do:"):
         _, pid, rv = data.split(":")
         await handle_refund_do(query, context, int(pid), rv == "1")
-    elif data.startswith("refund_partial_start:"):
-        await handle_refund_partial_start(query, context, int(data.split(":")[1]))
-    elif data.startswith("refund_partial_do:"):
-        _, pid, amt = data.split(":")
-        await handle_refund_partial_do(query, context, int(pid), int(amt))
-    elif data == "payment_sync":
-        await handle_payment_sync_run(query, context)
     elif data == "healthcheck":
         await handle_healthcheck(query)
     elif data == "find_user":
         await handle_find_user(query, context)
     elif data.startswith("user_profile:"):
         await handle_user_profile(query, int(data.split(":")[1]))
+    elif data.startswith("ban_user:"):
+        await handle_bl_new(query, context, "ban", int(data.split(":")[1]))
+    elif data.startswith("unban_user:"):
+        await handle_unban_user(query, context, int(data.split(":")[1]))
     elif data.startswith("dm_user:"):
         await handle_dm_user(query, int(data.split(":")[1]), context)
     elif data.startswith("payment_stats:"):
@@ -452,6 +446,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "cab_menu":
         from webapi import handle_cabinet_menu
         await handle_cabinet_menu(query, context)
+    elif data == "cab_menubtn":
+        from webapi import handle_cabinet_menu_button
+        await handle_cabinet_menu_button(query, context)
     elif data == "cab_find":
         from webapi import handle_cabinet_find
         await handle_cabinet_find(query, context)
@@ -488,38 +485,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_rw_squads(query, context)
     elif data.startswith("rw_squad:"):
         await handle_rw_squad_toggle(query, context, data.split(":", 1)[1])
-    elif data == "rw_usage":
-        await handle_rw_usage(query, context)
-    elif data == "rw_usage_period":
-        await handle_rw_usage_period(query, context)
-    elif data.startswith("rw_usage_set:"):
-        await handle_rw_usage_set(query, context, data.split(":", 1)[1])
-    elif data == "rw_usage_custom":
-        await handle_rw_usage_custom(query, context)
-    elif data.startswith("rw_usage_node:"):
-        _parts = data.split(":")
-        await handle_rw_usage_node(query, context, _parts[1],
-                                   int(_parts[2]) if len(_parts) > 2 else 1)
-    elif data.startswith("rw_usage_all:"):
-        await handle_rw_usage_all(query, context,
-                                  int(data.split(":", 1)[1] or 1))
-    elif data == "panel_sync_menu":
-        await handle_panel_sync_menu(query, context)
-    elif data == "panel_names_sync":
-        await handle_panel_names_sync(query, context)
-    elif data == "panel_sync":
-        await handle_panel_sync(query, context)
-    elif data == "panel_sync_schedule":
-        await handle_panel_sync_schedule(query, context)
-    elif data == "panel_sync_off":
-        await handle_panel_sync_off(query, context)
-    elif data.startswith("panel_sync_set:"):
-        _parts = data.split(":")
-        await handle_panel_sync_set(query, context, _parts[1], _parts[2])
-    elif data == "panel_sync_daily":
-        await handle_panel_sync_daily(query, context)
-    elif data == "panel_sync_interval":
-        await handle_panel_sync_interval(query, context)
+    elif data == "rw_notify":
+        await handle_rw_notify(query, context)
+    elif data == "rw_notify_go":
+        await handle_rw_notify_go(query, context)
     elif data == "backup_menu":
         await handle_backup_menu(query, context)
     elif data == "backup_export":
@@ -660,8 +629,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_preset_hwid(query, context)
     elif data == "preset_traffic":
         await handle_preset_traffic(query, context)
-    elif data == "preset_lte":
-        await handle_preset_lte(query, context)
     elif data.startswith("sub_view:"):
         await handle_sub_view(query, int(data.split(":")[1]))
     elif data.startswith("sub_toggle:"):
@@ -691,8 +658,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_sub_edit_hwid(query, int(data.split(":")[1]), context)
     elif data.startswith("sub_edit_traffic:"):
         await handle_sub_edit_traffic(query, int(data.split(":")[1]), context)
-    elif data.startswith("sub_edit_lte:"):
-        await handle_sub_edit_lte(query, int(data.split(":")[1]), context)
 
     # Платные подписки
     elif data == "paid_subs":
@@ -742,28 +707,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_preset_hwid(query, context)
     elif data == "paid_preset_traffic":
         await handle_paid_preset_traffic(query, context)
-    elif data == "paid_preset_lte":
-        await handle_paid_preset_lte(query, context)
-    elif data == "paid_squads_menu" or data == "paid_lte_settings":
-        # paid_lte_settings — старый колбэк, на случай открытых сообщений
-        # со старыми кнопками: ведёт на тот же объединённый экран
-        await handle_paid_squads_menu(query, context)
-    elif data == "paid_issued_squads":
-        await handle_paid_issued_squads(query, context)
-    elif data.startswith("paid_issued_squad:"):
-        await handle_paid_issued_squad_toggle(query, context, data.split(":")[1])
-    elif data == "paid_lte_squads":
-        await handle_paid_lte_squads(query, context)
-    elif data.startswith("paid_lte_squad:"):
-        await handle_paid_lte_squad_toggle(query, context, data.split(":", 1)[1])
-    elif data == "paid_lte_fallback":
-        await handle_paid_lte_fallback(query, context)
-    elif data == "paid_lte_fallback_off":
-        await handle_paid_lte_fallback_set(query, context, None)
-    elif data.startswith("paid_lte_fallback:"):
-        await handle_paid_lte_fallback_set(query, context, data.split(":", 1)[1])
-    elif data == "paid_lte_check_now":
-        await handle_paid_lte_check_now(query, context)
     elif data.startswith("paid_sub_view:"):
         await handle_paid_sub_view(query, int(data.split(":")[1]))
     elif data.startswith("paid_devices:"):
@@ -797,8 +740,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_device_max(query, context)
     elif data == "paid_bulk_hwid":
         await handle_paid_bulk_hwid(query, context)
-    elif data == "paid_bulk_lte":
-        await handle_paid_bulk_lte(query, context)
     elif data == "paid_bulk_limits_apply":
         await handle_paid_bulk_limits_apply(query, context)
     elif data == "paid_bulk_apply":
@@ -811,8 +752,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_edit_hwid(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_traffic:"):
         await handle_paid_sub_edit_traffic(query, int(data.split(":")[1]), context)
-    elif data.startswith("paid_sub_edit_lte:"):
-        await handle_paid_sub_edit_lte(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_edit_trial:"):
         await handle_paid_sub_edit_trial(query, int(data.split(":")[1]), context)
     elif data == "referral_settings":

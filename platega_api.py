@@ -35,10 +35,6 @@ STATUS_PENDING = "PENDING"
 STATUS_CONFIRMED = "CONFIRMED"
 STATUS_CANCELED = "CANCELED"
 STATUS_CHARGEBACKED = "CHARGEBACKED"
-# частичный возврат: сумма исходного платежа не меняется, статус —
-# PARTIALLY_REFUNDED (в схеме GET /transaction/{id} его пока нет,
-# но страница колбэков его уже использует)
-STATUS_PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
 FINAL_STATUSES = {STATUS_CONFIRMED, STATUS_CANCELED, STATUS_CHARGEBACKED}
 
 
@@ -64,18 +60,14 @@ def _return_url() -> str:
 
 
 async def _request(method: str, path: str, payload: dict | None = None,
-                   timeout: int = 30, headers: dict | None = None
-                   ) -> tuple[int | None, dict | str | None, str]:
+                   timeout: int = 30) -> tuple[int | None, dict | str | None, str]:
     """Возвращает (http_код, разобранное_тело, текст_ошибки)."""
     url = f"{BASE_URL}{path}"
-    merged = _headers()
-    if headers:
-        merged.update(headers)
     try:
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=timeout)
         ) as s:
-            async with s.request(method, url, json=payload, headers=merged) as r:
+            async with s.request(method, url, json=payload, headers=_headers()) as r:
                 text = await r.text()
                 try:
                     body = await r.json(content_type=None)
@@ -103,14 +95,8 @@ def _err_text(status: int, body) -> str:
 async def create_payment(amount: int, description: str, tg_id: int,
                          username: str | None = None,
                          order_id: str | None = None,
-                         method: int | None = None,
-                         return_url: str | None = None) -> dict:
-    """Создаёт платёж и возвращает ссылку на оплату.
-
-    return_url — куда вернуть человека после оплаты. По умолчанию бот
-    (t.me), а кабинетные платежи передают адрес кабинета, чтобы человек
-    после оплаты попал обратно в кабинет, а не в бот.
-    """
+                         method: int | None = None) -> dict:
+    """Создаёт платёж и возвращает ссылку на оплату."""
     if not is_configured():
         return {"ok": False, "error": "Platega не настроена (нет MerchantId или ключа)"}
 
@@ -118,7 +104,7 @@ async def create_payment(amount: int, description: str, tg_id: int,
     if method is None:
         method = int(cfg.get("platega_method", DEFAULT_METHOD) or DEFAULT_METHOD)
 
-    ret = return_url or _return_url()
+    ret = _return_url()
     payload = {
         "paymentMethod": method,
         "paymentDetails": {"amount": amount, "currency": "RUB"},
@@ -175,9 +161,6 @@ async def get_status(transaction_id: str) -> dict:
         "status": (body.get("status") or "").upper(),
         "amount": amount,
         "payload": body.get("payload"),
-        # сырое тело — для сверки платежей: Platega может отдавать
-        # суммы возвратов (refundedAmount и подобные) вне схемы
-        "raw": body,
     }
 
 
@@ -199,9 +182,6 @@ async def refund_supported(transaction_id: str) -> dict:
     return {
         "ok": True,
         "supported": bool(body.get("supported")),
-        # та же проверка покрывает и частичный возврат: отдельного
-        # cancel-partial-supported в документации нет
-        "partial_supported": body.get("partialSupported"),
         "deduct_usdt": body.get("totalDeductUsdt"),
         "penalty_usdt": body.get("penaltyUsdt"),
         "block_reason": body.get("blockReason"),
@@ -229,37 +209,6 @@ async def refund(transaction_id: str) -> dict:
         "accepted": bool(body.get("accepted")),
         "manual": bool(body.get("manualControlRequired")),
         "message": body.get("message") or "",
-    }
-
-
-async def refund_partial(transaction_id: str, amount: int) -> dict:
-    """Частичный возврат: POST /transaction/{id}/cancel-partial.
-
-    amount — целое число в валюте исходной транзакции (для бота — рубли);
-    отдельного поля валюты у эндпоинта нет. Сумма не может превысить
-    доступный остаток — иначе Platega вернёт AMOUNT_EXCEEDS_REFUNDABLE.
-    Частичных возвратов по одному платежу может быть несколько, пока
-    их сумма не превысит исходную. Idempotency-Key обязателен по
-    документации — генерируем уникальный на операцию.
-    Ответ повторяет форму полного возврата + refundOperationId.
-    """
-    if not is_configured():
-        return {"ok": False, "error": "Platega не настроена"}
-    status, body, err = await _request(
-        "POST", f"/transaction/{transaction_id}/cancel-partial",
-        {"amount": int(amount)}, timeout=30,
-        headers={"Idempotency-Key": f"partial-refund-{uuid.uuid4().hex}"},
-    )
-    if err:
-        return {"ok": False, "error": err}
-    if status != 200 or not isinstance(body, dict):
-        return {"ok": False, "error": _err_text(status, body)}
-    return {
-        "ok": True,
-        "accepted": bool(body.get("accepted")),
-        "manual": bool(body.get("manualControlRequired")),
-        "message": body.get("message") or "",
-        "refund_operation_id": body.get("refundOperationId"),
     }
 
 
