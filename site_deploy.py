@@ -156,7 +156,7 @@ CABINET_PAGE = r"""<!doctype html>
  body.tg-fullscreen .wrap { padding-top:116px; }
  body.tg-fullscreen .tabs { top:96px; }
  .brand { display:flex; align-items:center; min-height:36px; text-decoration:none; }
- .brand img { height:24px; width:auto; display:block; filter:drop-shadow(0 2px 8px rgba(79,140,255,.3)); }
+ .brand img { height:28px; max-height:28px; width:auto; max-width:160px; object-fit:contain; display:block; filter:drop-shadow(0 2px 8px rgba(79,140,255,.3)); }
  .logo { display:flex; align-items:center; gap:10px; }
  .logo .mark { width:28px; height:28px; }
  .logo .mark circle, .logo .mark ellipse { fill:none; stroke:#4f8cff; stroke-width:7; }
@@ -551,23 +551,6 @@ CABINET_PAGE = r"""<!doctype html>
               '<button class="btn btn-ghost btn-danger" type="button" id="reissue">🔁 Новый ключ</button></div></div>');
    }
 
-   // Платежи: карточка на оплату — сумма, статус-пилюля, дата, провайдер
-   var payCards = (p.payments || []).map(function (x) {
-     var st = PAY_STATUS[x.status] || {text: esc(x.status), kind: ""};
-     var meta = [];
-     if (x.provider) { meta.push('<span class="chip">' + esc(payProvider(x.provider)) + "</span>"); }
-     if (x.promo) { meta.push('<span class="chip">🎟 ' + esc(x.promo) + "</span>"); }
-     return '<div class="pay"><div class="pay-head"><span class="pay-amount">' + esc(x.amount) +
-            " ₽</span>" + pill(st.text, st.kind) + "</div>" +
-            '<div class="pay-date">' + esc(fmtDate(x.date)) + "</div>" +
-            (meta.length ? '<div class="pay-meta">' + meta.join("") + "</div>" : "") + "</div>";
-   }).join("");
-   var payTotal = p.payments_total
-     ? '<p class="card-sub">Всего оплачено: <b style="color:#fff">' + esc(p.payments_total.sum) +
-       " ₽</b> · успешных оплат: " + esc(p.payments_total.count) + "</p>" : "";
-   out.push('<div data-sec="payments"><div class="card">' + title("card", "Платежи") + payTotal +
-            (payCards || '<p class="card-sub">Платежей пока нет — первая оплата появится ' +
-             "здесь сразу после оплаты.</p>") + "</div></div>");
 
    var ref = referralCard(p);
    if (ref) { out.push('<div data-sec="friends">' + ref + "</div>"); }
@@ -883,36 +866,6 @@ CABINET_PAGE = r"""<!doctype html>
    tg.ready(); tg.expand();
    // внутри Telegram красим шапку в цвет страницы
    try { tg.setHeaderColor("#05070c"); tg.setBackgroundColor("#05070c"); } catch (e) {}
-   // Полный экран (Bot API 8.0+): вместо маленького окошка-панели
-   // приложение занимает всё окно, как у BotFather. На старых клиентах
-   // метода нет — просто остаёмся в раскрытом expand() выше.
-   // В полноэкранном режиме шапка прозрачная, поэтому цвет шапки
-   // задан выше — он определяет контраст системных элементов.
-   try {
-     if (tg.isVersionAtLeast && tg.isVersionAtLeast("8.0") &&
-         tg.requestFullscreen && !tg.isFullscreen) {
-       tg.requestFullscreen();
-     }
-   } catch (e) {}
-   // Фиксированный отступ шапки в полном экране: класс ставится,
-   // когда клиент реально перешёл в полный экран, и снимается при
-   // выходе из него. requestFullscreen асинхронен, поэтому ловим
-   // и событие, и повторную проверку через 800 мс.
-   try {
-     document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
-   } catch (e) {}
-   try {
-     if (tg.onEvent) { tg.onEvent("fullscreenChanged", function () {
-       try {
-         document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
-       } catch (e) {}
-     }); }
-   } catch (e) {}
-   setTimeout(function () {
-     try {
-       document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
-     } catch (e) {}
-   }, 800);
    // Безопасная зона Telegram: в полном экране шапка клиента
    // (закрыть, меню) висит поверх страницы. Скрипт Telegram сам
    // выставляет --tg-content-safe-area-inset-top, но на старых
