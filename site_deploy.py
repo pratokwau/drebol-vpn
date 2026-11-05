@@ -949,13 +949,7 @@ def cabinet_page(bot_username: str) -> str:
     """Готовая страница кабинета: подставлены адрес API, имя бота и точный логотип с основного сайта."""
     from config import load_config
     api = (load_config().get("webapi_public") or "").rstrip("/")
-    if has_logo():
-        logo_html = f'<img src="{LOGO_NAME}" alt="Drebol VPN" width="492" height="132">'
-    else:
-        logo_html = ('<span class="logo"><svg class="mark" viewBox="0 0 100 100" aria-hidden="true">'
-                     '<circle cx="50" cy="50" r="40"/>'
-                     '<ellipse cx="50" cy="50" rx="40" ry="13"/></svg>'
-                     '<span class="word">drebol</span></span>')
+    logo_html = f'<img src="{LOGO_NAME}" alt="Drebol VPN" width="492" height="132">'
     return (CABINET_PAGE.replace("__API__", api or "")
             .replace("__BOT__", bot_username or "")
             .replace("__LOGO__", logo_html))
