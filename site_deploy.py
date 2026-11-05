@@ -94,116 +94,179 @@ CABINET_PAGE = r"""<!doctype html>
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#05070c">
 <title>Личный кабинет · Drebol VPN</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='white' stroke-width='7'%3E%3Ccircle cx='50' cy='50' r='40'/%3E%3Cellipse cx='50' cy='50' rx='40' ry='13'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%234f8cff' stroke-width='7'%3E%3Ccircle cx='50' cy='50' r='40'/%3E%3Cellipse cx='50' cy='50' rx='40' ry='13'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700;800&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
- /* Цвета, шрифт и «шёлк» — как на главной странице сайта */
  :root {
    color-scheme: dark;
    --bg: #05070c; --ink: #ffffff;
-   --muted: rgba(255,255,255,.64); --soft: rgba(255,255,255,.52);
-   --line: rgba(255,255,255,.10); --card: rgba(255,255,255,.035);
+   --muted: rgba(255,255,255,.72); --soft: rgba(255,255,255,.48);
+   --line: rgba(255,255,255,.08); --line-strong: rgba(255,255,255,.16);
+   --card: rgba(13,18,30,.70); --card-hover: rgba(20,28,48,.85);
    --accent: #4f8cff; --accent-soft: rgba(79,140,255,.14);
-   --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+   --ok: #38ef7d; --warn: #fbbf24; --bad: #f87171;
  }
  * { box-sizing: border-box; }
  body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); overflow-x:hidden;
-        font:16px/1.55 Manrope,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+        font:15px/1.55 "Plus Jakarta Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
         -webkit-font-smoothing:antialiased; }
+ body { min-height:var(--tg-viewport-height, 100vh); }
  a { color:inherit; text-decoration:none; }
  h1, h2, p { margin:0; }
 
  .bg { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
- .silk { position:absolute; inset:-20%; filter:blur(60px); opacity:.85; }
- .silk span { position:absolute; border-radius:50%;
-   background:radial-gradient(circle at 30% 30%, rgba(79,140,255,.5), transparent 60%);
-   animation:drift 26s ease-in-out infinite; }
- .silk span:nth-child(1) { width:60vmax; height:60vmax; top:-15%; left:-10%; }
- .silk span:nth-child(2) { width:50vmax; height:50vmax; bottom:-20%; right:-15%;
-   background:radial-gradient(circle at 60% 40%, rgba(120,140,190,.38), transparent 62%);
-   animation-duration:32s; animation-delay:-8s; }
- @keyframes drift {
+ .aurora { position:absolute; inset:-30%; filter:blur(80px); opacity:.85; }
+ .aurora span { position:absolute; border-radius:50%; animation:floatOrb 24s ease-in-out infinite; mix-blend-mode:screen; }
+ .aurora span:nth-child(1) { width:60vmax; height:60vmax; top:-15%; left:-10%;
+   background:radial-gradient(circle at center, rgba(79,140,255,.35), transparent 70%); }
+ .aurora span:nth-child(2) { width:50vmax; height:50vmax; bottom:-20%; right:-15%;
+   background:radial-gradient(circle at center, rgba(121,82,255,.25), transparent 75%);
+   animation-duration:30s; animation-delay:-6s; }
+ .aurora span:nth-child(3) { width:45vmax; height:45vmax; top:25%; left:30%;
+   background:radial-gradient(circle at center, rgba(56,239,125,.1), transparent 70%);
+   animation-duration:34s; animation-delay:-12s; }
+ @keyframes floatOrb {
    0%,100% { transform:translate3d(0,0,0) scale(1); }
    33% { transform:translate3d(5vw,-4vh,0) scale(1.1); }
    66% { transform:translate3d(-4vw,5vh,0) scale(.95); } }
+ .cyber-grid {
+   position:absolute; inset:0;
+   background-image:
+     linear-gradient(to right, rgba(255,255,255,0.035) 1px, transparent 1px),
+     linear-gradient(to bottom, rgba(255,255,255,0.035) 1px, transparent 1px);
+   background-size:48px 48px;
+   mask-image:radial-gradient(ellipse at center, black 30%, transparent 80%);
+   -webkit-mask-image:radial-gradient(ellipse at center, black 30%, transparent 80%);
+ }
  .vignette { position:absolute; inset:0;
-   background:radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,.7) 100%); }
+   background:radial-gradient(ellipse at center, transparent 40%, rgba(5,7,12,.85) 100%); }
 
  .wrap { position:relative; z-index:1; max-width:560px; margin:0 auto;
-         padding:18px 16px 48px; padding-top:max(18px, env(safe-area-inset-top)); }
+         padding:18px 16px 48px;
+         padding-top:max(18px, env(safe-area-inset-top, 0px),
+                          var(--tg-content-safe-area-inset-top, 0px)); }
 
- /* шапка */
  .top { display:flex; align-items:center; justify-content:space-between; gap:12px;
-        min-height:48px; margin-bottom:22px; }
+        min-height:52px; margin-bottom:22px; background:rgba(10,14,24,.85);
+        border:1px solid var(--line); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+        padding:10px 16px; border-radius:18px; }
+ body.tg-fullscreen .wrap { padding-top:124px; }
+ body.tg-fullscreen .tabs { top:104px; }
  .brand { display:flex; align-items:center; min-height:44px; }
- .brand img { height:26px; width:auto; display:block; }
- .logo { display:none; align-items:center; gap:10px; font-weight:800; font-size:22px; letter-spacing:-.02em; }
+ .brand img { height:28px; width:auto; display:block; filter:drop-shadow(0 2px 8px rgba(79,140,255,.3)); }
+ .logo { display:none; align-items:center; gap:10px; font-weight:800; font-size:22px; letter-spacing:-.02em; font-family:"Space Grotesk",sans-serif; }
  .logo svg { width:28px; height:28px; }
- .logo svg * { fill:none; stroke:#fff; stroke-width:7; }
+ .logo svg * { fill:none; stroke:#4f8cff; stroke-width:7; }
 
- /* кнопки */
  .btn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%;
-        min-height:54px; padding:0 22px; border-radius:999px; border:1px solid transparent;
-        font:inherit; font-size:16px; font-weight:800; cursor:pointer; text-align:center;
+        min-height:52px; padding:0 22px; border-radius:999px; border:1px solid transparent;
+        font:inherit; font-size:15px; font-weight:800; cursor:pointer; text-align:center;
         transition:transform .2s ease, box-shadow .2s ease, background .2s, border-color .2s; }
  .btn svg { width:19px; height:19px; flex:none; }
- .btn-main { background:#fff; color:var(--bg); box-shadow:0 10px 36px rgba(255,255,255,.16); }
- .btn-main:hover { transform:translateY(-1px); box-shadow:0 14px 44px rgba(255,255,255,.26); }
- .btn-ghost { background:transparent; color:#fff; border-color:rgba(255,255,255,.2); font-weight:700; }
- .btn-ghost:hover { background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.32); }
- .btn-sm { width:auto; min-height:44px; padding:0 18px; font-size:14px; }
+ .btn-main { background:linear-gradient(135deg, #ffffff 0%, #e2e8f5 100%); color:#05070c;
+             box-shadow:0 0 0 1px rgba(255,255,255,.4), 0 8px 30px rgba(255,255,255,.16); }
+ .btn-main:hover { transform:translateY(-2px); box-shadow:0 0 0 1px #fff, 0 12px 40px rgba(79,140,255,.4); }
+ .btn-ghost { background:rgba(255,255,255,.05); color:#fff; border-color:var(--line-strong); font-weight:700; }
+ .btn-ghost:hover { background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.35); transform:translateY(-2px); }
+ .btn-sm { width:auto; min-height:40px; padding:0 16px; font-size:13px; }
  .stack { display:flex; flex-direction:column; gap:10px; }
  .pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 
- /* карточки */
  .card { background:var(--card); border:1px solid var(--line); border-radius:24px;
-         padding:22px; margin:14px 0; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
- .card.hero { border-color:rgba(79,140,255,.35);
-              background:linear-gradient(180deg, rgba(79,140,255,.14), rgba(79,140,255,.02)); }
+         padding:22px; margin:14px 0; backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+         box-shadow:0 12px 32px rgba(0,0,0,.4); }
+ .card.hero { border-color:rgba(79,140,255,.45);
+              background:linear-gradient(180deg, rgba(79,140,255,.16), rgba(13,18,30,.92));
+              box-shadow:0 20px 50px rgba(0,0,0,.5), 0 0 35px rgba(79,140,255,.15); }
  .card-title { display:flex; align-items:center; gap:10px; font-size:17px; font-weight:800; margin-bottom:4px; }
- .card-title .ico { width:34px; height:34px; border-radius:11px; display:flex; align-items:center;
+ .card-title .ico { width:36px; height:36px; border-radius:12px; display:flex; align-items:center;
                     justify-content:center; background:var(--accent-soft); color:var(--accent); }
  .card-title .ico svg { width:18px; height:18px; }
  .card-sub { color:var(--muted); font-size:14px; margin-bottom:16px; }
 
- .eyebrow { font-size:12px; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); }
- .hello { font-size:clamp(28px, 7vw, 36px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:6px 0 4px; }
+ .eyebrow { font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); }
+ .hello { font-size:clamp(26px, 7vw, 34px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:6px 0 4px; }
  .muted { color:var(--muted); font-size:14px; }
 
  .hero-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
  .plan { font-weight:700; color:rgba(255,255,255,.9); }
- .big { font-size:clamp(30px, 8vw, 40px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:14px 0 2px; }
+ .big { font-size:clamp(28px, 8vw, 38px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:14px 0 2px; font-family:"Space Grotesk",sans-serif; }
  .big-sub { color:var(--muted); font-size:14px; }
  .stats { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin-top:18px; }
- .stat { background:rgba(5,7,12,.35); border:1px solid var(--line); border-radius:16px; padding:12px; min-width:0; }
- .stat b { display:block; font-size:15px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+ .stat { background:rgba(5,7,12,.45); border:1px solid var(--line); border-radius:16px; padding:12px; min-width:0; }
+ .stat b { display:block; font-size:15px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:"Space Grotesk",sans-serif; }
  .stat span { display:block; font-size:12px; color:var(--soft); margin-top:2px; }
 
  .pill { display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border-radius:999px;
-         font-size:13px; font-weight:700; white-space:nowrap; }
- .pill::before { content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
- .ok { background:rgba(74,222,128,.12); color:var(--ok); }
- .warn { background:rgba(251,191,36,.12); color:var(--warn); }
- .bad { background:rgba(248,113,113,.12); color:var(--bad); }
+         font-size:12px; font-weight:700; white-space:nowrap; }
+ .pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+ .ok { background:rgba(56,239,125,.14); color:var(--ok); }
+ .warn { background:rgba(251,191,36,.14); color:var(--warn); }
+ .bad { background:rgba(248,113,113,.14); color:var(--bad); }
 
  .link { display:flex; align-items:center; gap:10px; margin-top:12px; padding:10px 10px 10px 14px;
-         background:rgba(5,7,12,.55); border:1px solid var(--line); border-radius:16px; }
+         background:rgba(5,7,12,.65); border:1px solid var(--line); border-radius:16px; }
  .link code { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
               color:var(--muted); font-size:13px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
- .copy { flex:none; min-height:40px; padding:0 14px; border-radius:999px; border:1px solid rgba(255,255,255,.2);
-         background:transparent; color:#fff; font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
- .copy:hover { background:rgba(255,255,255,.07); }
+ .copy { flex:none; min-height:40px; padding:0 14px; border-radius:999px; border:1px solid var(--line-strong);
+         background:rgba(255,255,255,.05); color:#fff; font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+ .copy:hover { background:rgba(255,255,255,.1); }
 
  .row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:11px 0;
-        border-top:1px solid var(--line); font-size:15px; }
+        border-top:1px solid var(--line); font-size:14px; }
  .row:first-of-type { border-top:0; }
  .row span:first-child { color:rgba(255,255,255,.88); min-width:0; overflow-wrap:anywhere; }
  .row span:last-child { color:var(--soft); text-align:right; }
 
- /* вход */
+ .bar { height:10px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:14px; }
+ .bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, var(--accent), #7fb0ff); }
+ .bar-fill.full { background:linear-gradient(90deg, #fbbf24, #f87171); }
+ .bar-note { display:flex; justify-content:space-between; gap:12px; margin-top:8px; font-size:13px; color:var(--soft); }
+
+ .dev { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 0;
+        border-top:1px solid var(--line); }
+ .dev:first-of-type { border-top:0; }
+ .dev b { display:block; font-size:15px; overflow-wrap:anywhere; }
+ .dev small { color:var(--soft); font-size:13px; }
+ .btn-mini { flex:none; min-height:36px; padding:0 14px; border-radius:999px;
+             border:1px solid rgba(248,113,113,.4); background:transparent; color:#fca5a5;
+             font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+ .btn-mini:hover { background:rgba(248,113,113,.12); }
+ .btn-mini:disabled { opacity:.5; }
+ .btn-danger { border-color:rgba(248,113,113,.45); color:#fca5a5; }
+ .btn-danger:hover { background:rgba(248,113,113,.10); border-color:rgba(248,113,113,.6); }
+
+ .tabs { position:sticky; top:var(--tg-content-safe-area-inset-top, 0px); z-index:5; display:flex; gap:8px; overflow-x:auto;
+         margin:0 -16px; padding:12px 16px;
+         background:rgba(5,7,12,.88); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+         scrollbar-width:none; }
+ .tabs::-webkit-scrollbar { display:none; }
+ .tab { flex:none; min-height:40px; padding:0 16px; border-radius:999px;
+        border:1px solid var(--line-strong); background:transparent; color:rgba(255,255,255,.75);
+        font:inherit; font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap;
+        transition:all .25s ease; }
+ .tab:active { transform:scale(.96); }
+ .tab.active { background:#fff; color:#05070c; border-color:#fff; box-shadow:0 4px 18px rgba(255,255,255,.2); }
+
+ .pay { padding:14px 0; border-top:1px solid var(--line); }
+ .pay:first-of-type { border-top:0; }
+ .pay-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+ .pay-amount { font-size:18px; font-weight:800; letter-spacing:-.01em; font-family:"Space Grotesk",sans-serif; }
+ .pay-date { font-size:13px; color:var(--soft); margin-top:2px; }
+ .pay-meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+ .chip { padding:4px 10px; border-radius:999px; border:1px solid var(--line);
+         font-size:12px; font-weight:600; color:var(--muted); }
+
+ @keyframes secIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+ @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+ #app:not(.hide) { animation:fadeIn .35s ease both; }
+ [data-sec].sec-show { animation:secIn .35s ease both; }
+ @media (prefers-reduced-motion: reduce) {
+   #app:not(.hide), [data-sec].sec-show { animation:none; } }
+
  #login { text-align:center; padding:6vh 0 0; }
  #login .card { padding:30px 22px; }
  #login h1 { font-size:clamp(28px, 7vw, 36px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:10px 0 10px; }
@@ -222,10 +285,21 @@ CABINET_PAGE = r"""<!doctype html>
    .pair { grid-template-columns:1fr; }
    .card { padding:20px 18px; }
  }
- @media (prefers-reduced-motion: reduce) { .silk span { animation:none; } .btn { transition:none; } }
+
+ @media (min-width: 900px) {
+   .wrap { max-width:960px; }
+   [data-sec="sub"] { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; align-items:start; }
+   [data-sec="sub"] > .card { margin:14px 0; }
+   [data-sec="sub"] > .card.hero { grid-column:1 / -1; }
+ }
+ @media (prefers-reduced-motion: reduce) { .aurora span { animation:none; } .btn { transition:none; } }
 </style></head>
 <body>
-<div class="bg" aria-hidden="true"><div class="silk"><span></span><span></span></div><div class="vignette"></div></div>
+<div class="bg" aria-hidden="true">
+  <div class="aurora"><span></span><span></span><span></span></div>
+  <div class="cyber-grid"></div>
+  <div class="vignette"></div>
+</div>
 
 <div class="wrap">
  <header class="top">
@@ -240,7 +314,7 @@ CABINET_PAGE = r"""<!doctype html>
    <div class="card">
      <span class="eyebrow">Личный кабинет</span>
      <h1>Войдите через Telegram</h1>
-     <p class="muted">Увидите срок подписки, ссылку для подключения<br>и свои устройства.</p>
+     <p class="muted">Увидите срок и трафик подписки, остаток LTE,<br>свои устройства, платежи и рефералку.</p>
      <div id="widget"></div>
      <p class="muted" id="loginerr"></p>
      <div class="perks"><span>Без паролей</span><span>Данные только ваши</span><span>Вход за секунду</span></div>
@@ -265,7 +339,6 @@ CABINET_PAGE = r"""<!doctype html>
  var tg = window.Telegram && window.Telegram.WebApp;
  function esc(s) { return String(s == null ? "" : s).replace(/[<>&"]/g, function (c) {
    return {"<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;"}[c]; }); }
- var BR = "<" + "br>";
  var memToken = "";
  function token() {
    if (memToken) { return memToken; }
@@ -308,8 +381,8 @@ CABINET_PAGE = r"""<!doctype html>
  // Причину видно сразу: иначе вход «проходит», а страница молча остаётся формой
  function fail(where, err) {
    var addr = API || location.origin;
-   say("Не получилось " + where + "." + BR + "Адрес: <code>" + esc(addr) + "</code>" +
-       BR + esc(err && err.message ? err.message : err || "нет ответа"));
+   say("Не получилось " + where + ".<code>" + esc(addr) + "</code>" +
+       esc(err && err.message ? err.message : err || "нет ответа"));
  }
 
  function login(payload) {
@@ -328,6 +401,25 @@ CABINET_PAGE = r"""<!doctype html>
  function pill(text, kind) { return '<span class="pill ' + kind + '">' + esc(text) + "</span>"; }
  function row(a, b) { return '<div class="row"><span>' + a + "</span><span>" + b + "</span></div>"; }
  function stat(value, label) { return '<div class="stat"><b>' + value + "</b><span>" + esc(label) + "</span></div>"; }
+
+ // Статусы платежей — человеческим языком, а не кодами из базы
+ var PAY_STATUS = {
+   paid: {text: "Оплачено", kind: "ok"},
+   pending: {text: "Ожидает оплаты", kind: "warn"},
+   failed: {text: "Не прошла", kind: "bad"},
+   cancelled: {text: "Отменена", kind: "bad"},
+   refunded: {text: "Возврат", kind: "warn"},
+   refund_pending: {text: "Возврат в обработке", kind: "warn"}
+ };
+ function payProvider(raw) {
+   var map = {platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
+   return map[String(raw).toLowerCase()] || String(raw);
+ }
+ // "2026-10-20 10:00" -> "20.10.2026 · 10:00"
+ function fmtDate(raw) {
+   var m = String(raw || "").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
+   return m ? m[3] + "." + m[2] + "." + m[1] + " · " + m[4] : String(raw || "");
+ }
 
  function render(p) {
    document.getElementById("login").className = "hide";
@@ -351,7 +443,11 @@ CABINET_PAGE = r"""<!doctype html>
      out.push('<div class="card hero">' + title("key", "Подписки пока нет") +
               '<p class="card-sub">Оформите её в боте — пробный период выдаётся сразу.</p>' +
               '<a class="btn btn-main" href="' + botUrl() + '">' + ICON.tg + "Оформить в боте</a></div>");
+     var ref0 = referralCard(p);
+     if (ref0) { out.push('<div data-sec="friends">' + ref0 + "</div>"); }
      document.getElementById("body").innerHTML = out.join("");
+     buildTabs();
+     bindActions();
      return;
    }
 
@@ -361,12 +457,19 @@ CABINET_PAGE = r"""<!doctype html>
    var plan = s.plan === "paid" ? "⭐️ Премиум" : "🆓 Пробный период";
    var big = s.status === "expired" ? "Подписка закончилась"
            : (s.left_text ? esc(s.left_text) : "до " + esc(s.until));
-   var bigSub = s.status === "expired" ? "Продлите в боте — доступ вернётся сразу."
+   var bigSub = s.status === "expired" ? "Продлите здесь — доступ вернётся сразу."
               : (s.left_text ? "осталось · до " + esc(s.until) : "действует");
    var traffic = esc(s.traffic_used_text) + (s.traffic_limit_gb ? " / " + esc(s.traffic_limit_gb) + " ГБ" : "");
+   var trafficBar = "";
+   if (s.traffic_limit_gb) {
+     var pct = Math.min(100, Math.round(s.traffic_used / (s.traffic_limit_gb * 1024 * 1024 * 1024) * 100));
+     trafficBar = '<div class="bar"><div class="bar-fill' + (pct >= 100 ? " full" : "") +
+                  '" style="width:' + pct + '%"></div></div>' +
+                  '<div class="bar-note"><span>Использовано ' + pct + "%</span><span>" + traffic + "</span></div>";
+   }
 
    // Главная карточка: статус и сколько осталось
-   out.push('<div class="card hero">' +
+   out.push('<div data-sec="sub"><div class="card hero">' +
             '<div class="hero-head"><span class="plan">' + plan + "</span>" + mark + "</div>" +
             '<div class="big">' + big + "</div>" +
             '<div class="big-sub">' + bigSub + "</div>" +
@@ -374,13 +477,46 @@ CABINET_PAGE = r"""<!doctype html>
               stat(esc(s.until), "действует до") +
               stat(s.devices_limit ? "до " + esc(s.devices_limit) : "∞", "устройств") +
               stat(traffic || "—", s.traffic_limit_gb ? "трафик" : "трафик · безлимит") +
-            "</div>" +
-            '<div class="stack" style="margin-top:16px"><a class="btn btn-main" href="' + botUrl() + '">' +
-            ICON.card + (s.status === "expired" ? "Продлить в боте" : "Продлить подписку") + "</a></div>" +
-            "</div>");
+            "</div>" + trafficBar +
+            '<div class="stack" style="margin-top:16px"><button class="btn btn-main" type="button" id="renew-open">' +
+            ICON.card + "Продлить подписку</button></div>" +
+            "</div></div>");
+
+   // Продление: тарифы и оплата прямо здесь, без ухода в бот
+   out.push('<div data-sec="sub"><div class="card" id="renew-card">' + title("card", "Продление") +
+            '<div id="renew-body"><p class="card-sub">Загружаем тарифы…</p></div></div></div>');
+
+   // Детали подписки: что не влезло в главную карточку
+   var details = [row("Продлений", esc(s.renewed))];
+   if (s.created_at) { details.push(row("Подписка с", esc(s.created_at))); }
+   if (s.devices_extra) { details.push(row("Докуплено мест", "+" + esc(s.devices_extra))); }
+   out.push('<div data-sec="sub"><div class="card">' + title("key", "О подписке") +
+            '<p class="card-sub">Цифры на сейчас — кнопка «Обновить» внизу пересчитает их.</p>' +
+            details.join("") + "</div></div>");
+
+   // LTE: остаток за текущий месяц, как в боте на экране «LTE-интернет»
+   if (p.lte && p.lte.available) {
+     var lteBody;
+     if (p.lte.closed) {
+       lteBody = '<p class="card-sub">LTE-серверы для этой подписки закрыты.</p>';
+     } else {
+       var lpct = Math.min(100, Math.round(p.lte.used / (p.lte.limit_gb * 1024 * 1024 * 1024) * 100));
+       lteBody = '<p class="card-sub">Использовано ' + esc(p.lte.used_text) + " из " +
+                 esc(p.lte.limit_gb) + " ГБ · осталось <b style=\"color:#fff\">" +
+                 esc(p.lte.left_gb) + " ГБ</b></p>" +
+                 '<div class="bar"><div class="bar-fill' + (lpct >= 100 ? " full" : "") +
+                 '" style="width:' + lpct + '%"></div></div>' +
+                 '<div class="bar-note"><span>Лимит обновляется каждый месяц</span><span>' + lpct + "%</span></div>" +
+                 (p.lte.fallback_active
+                   ? '<p class="card-sub" style="margin-top:12px">⚠️ LTE на этот месяц закончился — ' +
+                     "сейчас работают обычные серверы, в новом месяце LTE вернётся.</p>"
+                   : "");
+     }
+     out.push('<div data-sec="lte"><div class="card">' + title("lock", "LTE-интернет") + lteBody + "</div></div>");
+   }
 
    // Подключение: приложение в одно нажатие и ссылка с копированием
-   out.push('<div class="card">' + title("key", "Подключение") +
+   out.push('<div data-sec="sub"><div class="card">' + title("key", "Подключение") +
             '<p class="card-sub">Добавьте подписку в приложение одним нажатием.</p>' +
             '<div class="pair">' +
               '<a class="btn btn-main" href="happ://add/' + encodeURI(s.url) + '">Добавить в Happ</a>' +
@@ -388,17 +524,297 @@ CABINET_PAGE = r"""<!doctype html>
             "</div>" +
             '<div class="link"><code id="suburl">' + esc(s.url) + "</code>" +
             '<button class="copy" type="button" data-copy="' + esc(s.url) + '">Скопировать</button></div>' +
-            "</div>");
+            "</div></div>");
 
-   if (p.devices && p.devices.length) {
-     var d = p.devices.map(function (x) { return row(esc(x.model), esc(x.seen)); }).join("");
-     out.push('<div class="card">' + title("dev", "Мои устройства") +
-              '<p class="card-sub">Подключено: ' + p.devices.length +
-              (s.devices_limit ? " из " + esc(s.devices_limit) : "") + "</p>" + d + "</div>");
+   // Устройства: каждое можно отключить прямо здесь
+   var devList = (p.devices || []).map(function (x) {
+     return '<div class="dev"><div><b>' + esc(x.model) + "</b><small>" +
+            esc(x.seen || "был недавно") + "</small></div>" +
+            '<button class="btn-mini" type="button" data-del="' + esc(x.id) +
+            '" data-name="' + esc(x.model) + '">Отключить</button></div>';
+   }).join("");
+   out.push('<div data-sec="devices"><div class="card">' + title("dev", "Мои устройства") +
+            '<p class="card-sub">Подключено: ' + (p.devices ? p.devices.length : 0) +
+            (s.devices_limit ? " из " + esc(s.devices_limit) : "") +
+            (s.devices_limit && p.devices && p.devices.length >= s.devices_limit
+              ? " · все места заняты" : "") + "</p>" +
+            (devList || '<p class="card-sub">Пока ни одного — подключитесь в приложении.</p>') + "</div></div>");
+
+   // Действия: перевыпуск ключа — как кнопка «Новый ключ» в боте
+   if ((s.status === "active" || s.status === "renewal") && s.enabled) {
+     out.push('<div data-sec="sub"><div class="card">' + title("key", "Действия") +
+              '<p class="card-sub">Старая ссылка перестанет работать на всех устройствах — ' +
+              "пригодится, если она попала в чужие руки.</p>" +
+              '<button class="btn btn-ghost btn-danger" type="button" id="reissue">🔁 Новый ключ</button></div></div>');
    }
-   out.push('<div class="stack" style="margin-top:6px"><a class="btn btn-ghost" href="' + botUrl() + '">' +
+
+   // Платежи: карточка на оплату — сумма, статус-пилюля, дата, провайдер
+   var payCards = (p.payments || []).map(function (x) {
+     var st = PAY_STATUS[x.status] || {text: esc(x.status), kind: ""};
+     var meta = [];
+     if (x.provider) { meta.push('<span class="chip">' + esc(payProvider(x.provider)) + "</span>"); }
+     if (x.promo) { meta.push('<span class="chip">🎟 ' + esc(x.promo) + "</span>"); }
+     return '<div class="pay"><div class="pay-head"><span class="pay-amount">' + esc(x.amount) +
+            " ₽</span>" + pill(st.text, st.kind) + "</div>" +
+            '<div class="pay-date">' + esc(fmtDate(x.date)) + "</div>" +
+            (meta.length ? '<div class="pay-meta">' + meta.join("") + "</div>" : "") + "</div>";
+   }).join("");
+   var payTotal = p.payments_total
+     ? '<p class="card-sub">Всего оплачено: <b style="color:#fff">' + esc(p.payments_total.sum) +
+       " ₽</b> · успешных оплат: " + esc(p.payments_total.count) + "</p>" : "";
+   out.push('<div data-sec="payments"><div class="card">' + title("card", "Платежи") + payTotal +
+            (payCards || '<p class="card-sub">Платежей пока нет — первая оплата появится ' +
+             "здесь сразу после оплаты.</p>") + "</div></div>");
+
+   var ref = referralCard(p);
+   if (ref) { out.push('<div data-sec="friends">' + ref + "</div>"); }
+
+   out.push('<div class="stack" style="margin-top:6px">' +
+            '<button class="btn btn-ghost" type="button" onclick="load()">🔄 Обновить данные</button>' +
+            '<a class="btn btn-ghost" href="' + botUrl() + '">' +
             ICON.tg + "Открыть бота</a></div>");
-   document.getElementById("body").innerHTML = out.join("");
+   document.getElementById("body").innerHTML = '<div class="tabs" id="tabs"></div>' + out.join("");
+   buildTabs();
+   bindActions();
+ }
+
+ // Разделы: лента вкладок собирается из того, что реально есть на странице.
+ // Один раздел — ленту не показываем, запоминаем выбор между заходами.
+ // Разделы открываются и прямыми ссылками: /cabinet/lte, /cabinet/devices
+ // и т.д. — адрес из ссылки важнее запомненного. Переключение вкладок
+ // тихое: раздел меняется на месте, без перезагрузки, а адрес просто
+ // подстраивается под текущий раздел, чтобы ссылку можно было взять.
+ var SEC_LABELS = {sub: "Подписка", lte: "LTE", devices: "Устройства",
+                   payments: "Платежи", friends: "Друзья"};
+ function cabinetBase() {
+   var p = location.pathname.replace(/\/+$/, "");
+   if (p.slice(-13) === "/cabinet.html") { return p.slice(0, -13) + "/cabinet"; }
+   var i = p.lastIndexOf("/cabinet");
+   return i !== -1 ? p.slice(0, i + 8) : "/cabinet";
+ }
+ function sectionFromPath() {
+   var parts = location.pathname.replace(/\/+$/, "").split("/");
+   var last = parts[parts.length - 1];
+   return (last && last !== "cabinet" && last !== "cabinet.html") ? last : "";
+ }
+ function buildTabs() {
+   var tabs = document.getElementById("tabs");
+   if (!tabs) { return; }
+   var seen = [];
+   document.querySelectorAll("#body [data-sec]").forEach(function (el) {
+     var name = el.getAttribute("data-sec");
+     if (seen.indexOf(name) === -1) { seen.push(name); }
+   });
+   if (seen.length <= 1) { tabs.style.display = "none"; return; }
+   tabs.style.display = "";
+   var saved = "";
+   try { saved = localStorage.getItem("drebol_tab") || ""; } catch (e) {}
+   var pathSec = sectionFromPath();
+   var active = seen.indexOf(pathSec) !== -1 ? pathSec
+     : seen.indexOf(saved) !== -1 ? saved : seen[0];
+   tabs.innerHTML = "";
+   seen.forEach(function (name) {
+     var b = document.createElement("button");
+     b.className = "tab" + (name === active ? " active" : "");
+     b.type = "button";
+     b.textContent = SEC_LABELS[name] || name;
+     b.onclick = function () { showTab(name); };
+     tabs.appendChild(b);
+   });
+   showTab(active, true);
+   if (seen.indexOf(pathSec) !== -1) {
+     try { localStorage.setItem("drebol_tab", pathSec); } catch (e) {}
+   }
+ }
+ function showTab(name, silent) {
+   document.querySelectorAll("#body [data-sec]").forEach(function (el) {
+     var show = el.getAttribute("data-sec") === name;
+     el.style.display = show ? "" : "none";
+     if (show) {
+       // перезапускаем анимацию появления при каждом переключении
+       el.classList.remove("sec-show");
+       void el.offsetWidth;
+       el.classList.add("sec-show");
+     }
+   });
+   document.querySelectorAll("#tabs .tab").forEach(function (b) {
+     b.classList.toggle("active", b.textContent === (SEC_LABELS[name] || name));
+   });
+   if (!silent) {
+     try { localStorage.setItem("drebol_tab", name); } catch (e) {}
+     try { history.replaceState(null, "", cabinetBase() + "/" + name); } catch (e) {}
+   }
+ }
+
+ // Рефералка: статистика и ссылка — имя бота страница уже знает (BOT)
+ function referralCard(p) {
+   if (!p.referral) { return ""; }
+   var r = p.referral;
+   var link = "https://t.me/" + BOT + "?start=ref_" + p.user.id;
+   var share = "https://t.me/share/url?url=" + encodeURIComponent(link) +
+               "&text=" + encodeURIComponent("Попробуй Drebol VPN — быстрый и безопасный VPN!");
+   return '<div class="card">' + title("tg", "Приглашайте друзей") +
+     '<p class="card-sub">Приглашено: <b style="color:#fff">' + esc(r.invited) + "</b>" +
+     " · бонус получили: <b style=\"color:#fff\">" + esc(r.rewarded) + "</b>" +
+     (r.bonus_text ? " · вам начислено: <b style=\"color:#fff\">+" + esc(r.bonus_text) + "</b>" : "") + "</p>" +
+     '<div class="link"><code id="reflink">' + esc(link) + "</code>" +
+     '<button class="copy" type="button" data-copy="' + esc(link) + '">Скопировать</button></div>' +
+     '<div class="stack" style="margin-top:12px"><a class="btn btn-ghost" href="' + share +
+     '">📤 Поделиться ссылкой</a></div></div>';
+ }
+
+ // Кнопки действий после отрисовки: отключение устройства и перевыпуск
+ function bindActions() {
+   document.querySelectorAll("[data-del]").forEach(function (btn) {
+     btn.onclick = function () {
+       var name = btn.getAttribute("data-name") || "это устройство";
+       if (!confirm("Отключить " + name + "? Оно потеряет доступ, слот освободится.")) { return; }
+       btn.disabled = true; btn.textContent = "Отключаем…";
+       api("/api/device/delete", {method: "POST",
+           body: JSON.stringify({hwid: btn.getAttribute("data-del")})})
+         .then(function (r) {
+           if (r.status === 200) { return load(); }
+           alert(r.data && r.data.error === "already_gone"
+             ? "Это устройство уже отключено." : "Не получилось — попробуйте позже.");
+           load();
+         })
+         .catch(function () { alert("Не получилось — попробуйте позже."); load(); });
+     };
+   });
+   var re = document.getElementById("reissue");
+   if (re) {
+     re.onclick = function () {
+       if (!confirm("Перевыпустить ключ? Старая ссылка перестанет работать на всех устройствах, " +
+                    "новую нужно будет заново вставить в приложение.")) { return; }
+       re.disabled = true; re.textContent = "Перевыпускаем…";
+       api("/api/reissue", {method: "POST", body: "{}"})
+         .then(function (r) {
+           if (r.status === 200) { alert("Готово — новая ссылка уже в карточке «Подключение»."); }
+           else { alert("Не получилось — попробуйте позже."); }
+           load();
+         })
+         .catch(function () { alert("Не получилось — попробуйте позже."); load(); });
+     };
+   }
+   var ro = document.getElementById("renew-open");
+   if (ro) {
+     ro.onclick = function () {
+       var c = document.getElementById("renew-card");
+       if (c) { c.scrollIntoView({behavior: "smooth", block: "start"}); }
+       loadRenew();
+     };
+   }
+   if (document.getElementById("renew-card")) { loadRenew(); }
+ }
+
+ // Продление: тарифы, счёт, ожидание подтверждения. Подтверждение
+ // приходит опросом: бот сам спрашивает Platega раз в минуту, вебхуков нет,
+ // поэтому страница опрашивает статус счёта каждые 10 секунд, пока ждёт.
+ var renewTimer = null;
+ var renewPayUrl = "";
+ var pendingPayUrl = "";
+ function stopRenewPoll() { if (renewTimer) { clearTimeout(renewTimer); renewTimer = null; } }
+ function openPay(url) {
+   if (tg && tg.openLink) { tg.openLink(url); }
+   else { window.open(url, "_blank"); }
+ }
+ function loadRenew() {
+   stopRenewPoll();
+   var body = document.getElementById("renew-body");
+   if (!body) { return; }
+   api("/api/renew-options").then(function (r) {
+     if (r.status !== 200 || !r.data.tariffs) {
+       body.innerHTML = '<p class="card-sub">Продление сейчас недоступно. ' +
+                        "Попробуйте позже или продлите в боте.</p>";
+       return;
+     }
+     var d = r.data;
+     var html = "";
+     if (d.promo) {
+       html += '<p class="card-sub">🎟 Промокод ' + esc(d.promo.code) + " (−" +
+               esc(d.promo.percent) + "%) уже учтён в цене.</p>";
+     }
+     if (d.devices && d.devices.count && d.devices.price) {
+       html += '<p class="card-sub">В цену включены ваши места: ' + esc(d.devices.count) +
+               " × " + esc(d.devices.price) + " ₽.</p>";
+     }
+     if (d.pending) {
+       pendingPayUrl = d.pending.url;
+       html += '<p class="card-sub">⏳ У вас есть неоплаченный счёт на <b style="color:#fff">' +
+               esc(d.pending.amount) + " ₽</b>.</p>" +
+               '<div class="stack"><button class="btn btn-main" type="button" ' +
+               'onclick="openPay(pendingPayUrl)">Продолжить оплату</button>' +
+               '<button class="btn btn-ghost" type="button" onclick="pollPayment(' +
+               d.pending.id + ', 90)">Проверить оплату</button></div>';
+     }
+     html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через Platega.</p>';
+     d.tariffs.forEach(function (t) {
+       html += '<button class="btn btn-ghost" type="button" style="margin-top:8px" onclick="renewPay(' +
+               t.id + ')">' + esc(t.name) + " — " + esc(t.period) + " — " +
+               esc(t.price) + " ₽</button>";
+     });
+     body.innerHTML = html;
+   }).catch(function () {
+     body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
+   });
+ }
+ function renewPay(tariffId) {
+   var body = document.getElementById("renew-body");
+   if (!body) { return; }
+   body.innerHTML = '<p class="card-sub">Создаём счёт…</p>';
+   api("/api/renew", {method: "POST", body: JSON.stringify({tariff_id: tariffId})})
+     .then(function (r) {
+       if (r.status !== 200 || !r.data.url) {
+         var msg = "Не получилось создать счёт. Попробуйте позже.";
+         if (r.data.error === "bad_tariff") { msg = "Тариф больше недоступен."; }
+         else if (r.data.error === "pay_unavailable") { msg = "Оплата временно недоступна."; }
+         body.innerHTML = '<p class="card-sub">' + msg + '</p>' +
+           '<button class="btn btn-ghost" type="button" onclick="loadRenew()">Попробовать ещё раз</button>';
+         return;
+       }
+       renewPayUrl = r.data.url;
+       body.innerHTML = '<div id="renew-wait"><p class="card-sub">Счёт на <b style="color:#fff">' +
+         esc(r.data.amount) + " ₽</b> готов. Оплатите его — подтверждение придёт само, " +
+         "обычно в течение минуты.</p>" +
+         '<button class="btn btn-main" type="button" onclick="openPay(renewPayUrl)">Оплатить</button></div>';
+       openPay(r.data.url);
+       pollPayment(r.data.payment_id, 90);
+     })
+     .catch(function () {
+       body.innerHTML = '<p class="card-sub">Не получилось создать счёт. Попробуйте позже.</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="loadRenew()">Попробовать ещё раз</button>';
+     });
+ }
+ function pollPayment(id, tries) {
+   stopRenewPoll();
+   api("/api/payment?id=" + id).then(function (r) {
+     var box = document.getElementById("renew-wait");
+     if (r.status !== 200) {
+       if (box) { box.innerHTML = '<p class="card-sub">Не удалось проверить статус. Попробуйте позже.</p>'; }
+       return;
+     }
+     var st = r.data.status;
+     if (st === "paid" || st === "refund_pending") {
+       if (box) { box.innerHTML = '<p class="card-sub">✅ Оплата прошла! Обновляем данные…</p>'; }
+       load();
+       return;
+     }
+     if (st === "canceled" || st === "expired" || st === "error" ||
+         st === "refunded" || st === "chargebacked") {
+       if (box) { box.innerHTML = '<p class="card-sub">Счёт не оплачен. Создайте новый счёт.</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="loadRenew()">К тарифам</button>'; }
+       return;
+     }
+     if (tries <= 0) {
+       if (box) { box.innerHTML = '<p class="card-sub">Пока не оплачено. Если вы уже оплатили, ' +
+         'подождите немного и нажмите «Проверить».</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="pollPayment(' + id + ', 90)">Проверить</button>'; }
+       return;
+     }
+     renewTimer = setTimeout(function () { pollPayment(id, tries - 1); }, 10000);
+   }).catch(function () {
+     renewTimer = setTimeout(function () { pollPayment(id, tries - 1); }, 10000);
+   });
  }
 
  // Копирование ссылки. Где буфер недоступен — просто выделяем её
@@ -421,6 +837,7 @@ CABINET_PAGE = r"""<!doctype html>
  });
 
  function load() {
+   stopRenewPoll();
    return api("/api/me").then(function (r) {
      if (r.status === 200) { say(""); return render(r.data); }
      setToken("");
@@ -461,6 +878,63 @@ CABINET_PAGE = r"""<!doctype html>
    tg.ready(); tg.expand();
    // внутри Telegram красим шапку в цвет страницы
    try { tg.setHeaderColor("#05070c"); tg.setBackgroundColor("#05070c"); } catch (e) {}
+   // Полный экран (Bot API 8.0+): вместо маленького окошка-панели
+   // приложение занимает всё окно, как у BotFather. На старых клиентах
+   // метода нет — просто остаёмся в раскрытом expand() выше.
+   // В полноэкранном режиме шапка прозрачная, поэтому цвет шапки
+   // задан выше — он определяет контраст системных элементов.
+   try {
+     if (tg.isVersionAtLeast && tg.isVersionAtLeast("8.0") &&
+         tg.requestFullscreen && !tg.isFullscreen) {
+       tg.requestFullscreen();
+     }
+   } catch (e) {}
+   // Фиксированный отступ шапки в полном экране: класс ставится,
+   // когда клиент реально перешёл в полный экран, и снимается при
+   // выходе из него. requestFullscreen асинхронен, поэтому ловим
+   // и событие, и повторную проверку через 800 мс.
+   try {
+     document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
+   } catch (e) {}
+   try {
+     if (tg.onEvent) { tg.onEvent("fullscreenChanged", function () {
+       try {
+         document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
+       } catch (e) {}
+     }); }
+   } catch (e) {}
+   setTimeout(function () {
+     try {
+       document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
+     } catch (e) {}
+   }, 800);
+   // Безопасная зона Telegram: в полном экране шапка клиента
+   // (закрыть, меню) висит поверх страницы. Скрипт Telegram сам
+   // выставляет --tg-content-safe-area-inset-top, но на старых
+   // клиентах переменной может не быть — продублируем её из
+   // contentSafeAreaInset и обновим при изменении зоны.
+   (function applySafeArea() {
+     try {
+       var top = tg.contentSafeAreaInset && tg.contentSafeAreaInset.top;
+       if (typeof top === "number" && top > 0) {
+         document.documentElement.style.setProperty(
+           "--tg-content-safe-area-inset-top", top + "px");
+       }
+     } catch (e) {}
+   })();
+   try {
+     if (tg.onEvent) {
+       tg.onEvent("contentSafeAreaChanged", function () {
+         try {
+           var top = tg.contentSafeAreaInset && tg.contentSafeAreaInset.top;
+           if (typeof top === "number") {
+             document.documentElement.style.setProperty(
+               "--tg-content-safe-area-inset-top", top + "px");
+           }
+         } catch (e) {}
+       });
+     }
+   } catch (e) {}
    login({initData: tg.initData});
  } else if (token()) {
    load();
@@ -724,8 +1198,20 @@ chmod 755 {WEB_ROOT}
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html
 mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
 mv /tmp/drebol_add.html {WEB_ROOT}/add.html
+# Кабинет — по чистому адресу /cabinet: nginx отдаёт index.html из папки
+# сам (try_files $uri $uri/). Старый cabinet.html оставляем — закладки
+# и старые кнопки из бота не сломаются. Разделы — отдельными адресами
+# /cabinet/lte, /cabinet/devices и т.д.: та же страница, нужный раздел
+# она выбирает сама по адресу (см. sectionFromPath в её JS).
+mkdir -p {WEB_ROOT}/cabinet
+cp /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet/index.html
+for sec in sub lte devices payments friends; do
+  mkdir -p {WEB_ROOT}/cabinet/$sec
+  cp /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet/$sec/index.html
+done
 mv /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet.html
-chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html
+chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html {WEB_ROOT}/cabinet/index.html
+chmod 644 {WEB_ROOT}/cabinet/*/index.html || true
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
@@ -920,8 +1406,8 @@ async def build_current(bot_username: str) -> tuple:
     cfg = load_config()
     og_bytes = _asset("og.webp")
     logo_bytes = _asset(LOGO_NAME)
-    # кабинет лежит рядом со страницей — ссылка относительная
-    cabinet = "cabinet.html" if cfg.get("webapi_public") else ""
+    # кабинет лежит рядом со страницей — ссылка относительная, без .html
+    cabinet = "cabinet" if cfg.get("webapi_public") else ""
     page = build_page(
         bot_username=bot_username,
         cabinet_url=cabinet,
@@ -931,6 +1417,7 @@ async def build_current(bot_username: str) -> tuple:
         logo_file=LOGO_NAME if logo_bytes else "",
         tariffs=await site_tariffs(cfg),
         poster_file="og.webp" if og_bytes else "",
+        site_texts=cfg.get("site_texts") or {},
     )
     return page, og_bytes, logo_bytes
 
@@ -943,12 +1430,7 @@ def cabinet_ready() -> bool:
 
 
 def cabinet_link() -> str:
-    """Ссылка на кабинет. Хвост с датой выкладки сбивает кэш вебвью телеграма."""
-    if not cabinet_ready():
-        return ""
-    stamp = str(load_config().get("site_deployed_at") or "").replace(" ", "").replace(":", "")
-    tail = f"?v={stamp[-8:]}" if stamp else ""
-    return f"{site_url()}/cabinet.html{tail}"
+    return f"{site_url()}/cabinet" if cabinet_ready() else ""
 
 
 def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes) -> str:
@@ -1105,6 +1587,7 @@ async def handle_site_menu(query):
     kb.append([InlineKeyboardButton("🖥 Сервер", callback_data="site_server"),
                InlineKeyboardButton("🌍 Домен", callback_data="site_domain"),
                InlineKeyboardButton("🖼 Логотип", callback_data="site_logo")])
+    kb.append([InlineKeyboardButton("✍️ Тексты сайта", callback_data="site_texts")])
     if configured():
         extra = []
         if c["domain"] and c["deployed_at"] and not c["https"]:
@@ -1328,3 +1811,221 @@ async def handle_site_delete(query, context):
         return
     await query.answer("Сайт удалён")
     await handle_site_menu(query)
+
+
+# ── Редактор текстов сайта ───────────────────────────────────────────────────
+
+SITE_SECTIONS = {
+    "hero": ("👑 Главный экран", [
+        ("hero_pill", "Бейдж над заголовком"),
+        ("hero_title", "Главный заголовок"),
+        ("hero_shimmer", "Акцентный текст заголовка"),
+        ("hero_lead", "Описание (лид)"),
+        ("hero_btn", "Текст кнопки действия"),
+        ("hero_hud_status", "Статус на постере"),
+        ("hero_hud_speed", "Скорость на постере"),
+    ]),
+    "metrics": ("📊 Метрики сети (4 показателя)", [
+        ("metric1_val", "Метрика 1: Число"),
+        ("metric1_unit", "Метрика 1: Единица"),
+        ("metric1_label", "Метрика 1: Название"),
+        ("metric1_sub", "Метрика 1: Подпись"),
+        ("metric2_val", "Метрика 2: Число"),
+        ("metric2_unit", "Метрика 2: Единица"),
+        ("metric2_label", "Метрика 2: Название"),
+        ("metric2_sub", "Метрика 2: Подпись"),
+        ("metric3_val", "Метрика 3: Число"),
+        ("metric3_unit", "Метрика 3: Единица"),
+        ("metric3_label", "Метрика 3: Название"),
+        ("metric3_sub", "Метрика 3: Подпись"),
+        ("metric4_val", "Метрика 4: Число"),
+        ("metric4_unit", "Метрика 4: Единица"),
+        ("metric4_label", "Метрика 4: Название"),
+        ("metric4_sub", "Метрика 4: Подпись"),
+    ]),
+    "route": ("⚡ Схема защиты (маршрут)", [
+        ("route_title", "Заголовок схемы"),
+        ("route_sub", "Подзаголовок схемы"),
+        ("route_node1", "Узел 1: Название"),
+        ("route_badge1", "Узел 1: Бейдж"),
+        ("route_node2", "Узел 2: Название"),
+        ("route_badge2", "Узел 2: Бейдж"),
+        ("route_node3", "Узел 3: Название"),
+        ("route_badge3", "Узел 3: Бейдж"),
+    ]),
+    "features": ("🌟 Преимущества (6 карточек)", [
+        ("feat1_title", "Карточка 1: Заголовок"),
+        ("feat1_desc", "Карточка 1: Описание"),
+        ("feat1_tag", "Карточка 1: Тег"),
+        ("feat2_title", "Карточка 2: Заголовок"),
+        ("feat2_desc", "Карточка 2: Описание"),
+        ("feat2_tag", "Карточка 2: Тег"),
+        ("feat3_title", "Карточка 3: Заголовок"),
+        ("feat3_desc", "Карточка 3: Описание"),
+        ("feat3_tag", "Карточка 3: Тег"),
+        ("feat4_title", "Карточка 4: Заголовок"),
+        ("feat4_desc", "Карточка 4: Описание"),
+        ("feat4_tag", "Карточка 4: Тег"),
+        ("feat5_title", "Карточка 5: Заголовок"),
+        ("feat5_desc", "Карточка 5: Описание"),
+        ("feat5_tag", "Карточка 5: Тег"),
+        ("feat6_title", "Карточка 6: Заголовок"),
+        ("feat6_desc", "Карточка 6: Описание"),
+        ("feat6_tag", "Карточка 6: Тег"),
+    ]),
+    "steps": ("🚀 Инструкция (3 шага)", [
+        ("step1_title", "Шаг 1: Заголовок"),
+        ("step1_desc", "Шаг 1: Описание"),
+        ("step2_title", "Шаг 2: Заголовок"),
+        ("step2_desc", "Шаг 2: Описание"),
+        ("step3_title", "Шаг 3: Заголовок"),
+        ("step3_desc", "Шаг 3: Описание"),
+    ]),
+    "tariffs": ("💳 Блок тарифов", [
+        ("tariffs_title", "Заголовок блока"),
+        ("tariffs_sub", "Подзаголовок блока"),
+        ("tariffs_note", "Примечание внизу"),
+    ]),
+    "faq": ("❓ Вопросы и ответы (FAQ)", [
+        ("faq1_q", "Вопрос 1: Заголовок"),
+        ("faq1_a", "Вопрос 1: Ответ"),
+        ("faq2_q", "Вопрос 2: Заголовок"),
+        ("faq2_a", "Вопрос 2: Ответ"),
+        ("faq3_q", "Вопрос 3: Заголовок"),
+        ("faq3_a", "Вопрос 3: Ответ"),
+        ("faq4_q", "Вопрос 4: Заголовок"),
+        ("faq4_a", "Вопрос 4: Ответ"),
+        ("faq5_q", "Вопрос 5: Заголовок"),
+        ("faq5_a", "Вопрос 5: Ответ"),
+    ]),
+    "cta": ("🎯 Финальный призыв (CTA)", [
+        ("cta_title", "Заголовок призыва"),
+        ("cta_sub", "Подзаголовок призыва"),
+    ]),
+}
+
+
+def get_site_field_name(field: str) -> str:
+    for _, items in SITE_SECTIONS.values():
+        for k, name in items:
+            if k == field:
+                return name
+    return field
+
+
+def get_field_section(field: str) -> str:
+    for sec_id, (_, items) in SITE_SECTIONS.items():
+        for k, _ in items:
+            if k == field:
+                return sec_id
+    return "hero"
+
+
+def save_site_text(field: str, text: str) -> None:
+    cfg = load_config()
+    texts = cfg.get("site_texts") or {}
+    if text.strip() == "-":
+        texts.pop(field, None)
+    else:
+        texts[field] = text.strip()
+    cfg["site_texts"] = texts
+    save_config(cfg)
+
+
+async def handle_site_texts_menu(query, context, section: str | None = None):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from site_page import get_site_texts
+    cfg = load_config()
+    texts = get_site_texts(cfg.get("site_texts"))
+
+    if not section or section not in SITE_SECTIONS:
+        # Главное меню разделов текстов
+        kb = []
+        for sec_id, (title, _) in SITE_SECTIONS.items():
+            kb.append([InlineKeyboardButton(title, callback_data=f"site_txt_sec:{sec_id}")])
+        kb.append([InlineKeyboardButton("🔄 Сбросить все тексты", callback_data="site_txt_reset")])
+        kb.append([InlineKeyboardButton("◀️ В меню сайта", callback_data="site_menu")])
+
+        await query.edit_message_text(
+            "✍️ <b>Редактор текстов сайта</b>\n\n"
+            "Выберите раздел, чтобы изменить текст на сайте. "
+            "Каждый заголовок, карточку и ответ на вопрос можно настроить под себя.\n\n"
+            "<blockquote>💡 <i>После редактирования текстов нажмите «Обновить сайт» в меню сайта, чтобы изменения появились онлайн.</i></blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(kb),
+        )
+        return
+
+    # Меню полей конкретного раздела
+    sec_title, fields = SITE_SECTIONS[section]
+    kb = []
+    summary_lines = []
+    for k, name in fields:
+        val = texts.get(k, "")
+        short_val = (val[:35] + "…") if len(val) > 35 else val
+        summary_lines.append(f"• <b>{escape(name)}</b>: <i>{escape(short_val)}</i>")
+        kb.append([InlineKeyboardButton(f"✏️ {name}", callback_data=f"site_txt_edit:{k}")])
+
+    kb.append([InlineKeyboardButton("◀️ К разделам", callback_data="site_texts")])
+
+    text_msg = (
+        f"✍️ <b>{escape(sec_title)}</b>\n\n"
+        "Нажмите на нужный пункт, чтобы изменить его текст:\n\n"
+        "<blockquote>" + "\n".join(summary_lines[:8]) + "</blockquote>"
+    )
+    if len(summary_lines) > 8:
+        text_msg += "\n<blockquote>" + "\n".join(summary_lines[8:]) + "</blockquote>"
+
+    await query.edit_message_text(
+        text_msg,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb),
+    )
+
+
+async def handle_site_text_edit_ask(query, context, field: str):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from states import AWAITING_SITE_TEXT
+    from site_page import get_site_texts
+    cfg = load_config()
+    texts = get_site_texts(cfg.get("site_texts"))
+    cur = texts.get(field, "")
+    field_name = get_site_field_name(field)
+    sec_id = get_field_section(field)
+
+    context.user_data["state"] = AWAITING_SITE_TEXT
+    context.user_data["site_text_field"] = field
+    context.user_data["site_text_sec"] = sec_id
+
+    await query.edit_message_text(
+        f"✏️ <b>Редактирование: {escape(field_name)}</b>\n\n"
+        f"<blockquote>Сейчас:\n<b>{escape(cur)}</b></blockquote>\n\n"
+        "Отправьте новый текст следующим сообщением в чат.\n\n"
+        "<i>Если хотите вернуть стандартное значение этого поля, отправьте знак <code>-</code>.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ Отмена", callback_data=f"site_txt_sec:{sec_id}")],
+        ]),
+    )
+
+
+async def handle_site_text_reset_ask(query, context):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    await query.edit_message_text(
+        "⚠️ <b>Сброс всех текстов сайта</b>\n\n"
+        "Вы действительно хотите сбросить абсолютно все тексты сайта к исходным стандартным значениям?",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Да, сбросить все тексты", callback_data="site_txt_do_reset")],
+            [InlineKeyboardButton("◀️ Отмена", callback_data="site_texts")],
+        ]),
+    )
+
+
+async def handle_site_text_reset_do(query, context):
+    cfg = load_config()
+    cfg["site_texts"] = {}
+    save_config(cfg)
+    await query.answer("Все тексты сброшены к стандартным", show_alert=True)
+    await handle_site_texts_menu(query, context)
+

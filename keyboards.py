@@ -76,7 +76,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b(tickets_label, "ticket_list:1"), b("📣 Рассылка", "broadcast")],
         [b("👥 Помощники", "helpers_menu"), b("📢 Канал", "channel_menu")],
         # удержание и защита
-        [b("🎯 Winback", "winback_settings"), b("⏰ Напоминания", "remind_settings")],
+        [b("🎯 Возврат ушедших", "winback_settings"), b("⏰ Напоминания", "remind_settings")],
         [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
         # инфраструктура
         [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Сайт", "site_menu")],

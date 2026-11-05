@@ -22,6 +22,11 @@ async def post_init(app: Application):
         from paidsub.handlers import expiry_reminder_tick
         app.job_queue.run_repeating(expiry_reminder_tick, interval=1800, first=180)
 
+        # LTE: раз в 30 минут переводим подписки без LTE на fallback-сквад
+        # и возвращаем их, когда месяц сменился или лимит вырос
+        from paidsub.handlers import lte_fallback_tick
+        app.job_queue.run_repeating(lte_fallback_tick, interval=1800, first=300)
+
         async def _healthcheck_job(ctx):
             """Следит за панелью, выдачей подписок и узлами.
 
@@ -280,12 +285,16 @@ async def post_init(app: Application):
         from webapi import sessions_tick
         app.job_queue.run_repeating(sessions_tick, interval=24 * 3600, first=900)
 
+        # синхронизация с панелью по расписанию: тик каждые 15 минут
+        # проверяет, подошло ли время, и запускает сверку, если пора
+        from remnawave import panel_sync_tick
+        app.job_queue.run_repeating(panel_sync_tick, interval=900, first=900)
+
     # Личный кабинет: http-api для сайта и мини-приложения
-    from webapi import refresh_menu_button, start_server
+    from webapi import start_server
     started = await start_server()
     if started.get("ok"):
         print(f"Кабинет слушает порт {started.get('port')}")
-    await refresh_menu_button(app.bot)
 
 
 

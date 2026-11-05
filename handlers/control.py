@@ -50,13 +50,11 @@ CB_LABELS = {
     "cab_toggle": "🪪 API кабинета вкл/выкл",
     "cab_check": "🩺 Проверил кабинет",
     "cab_find": "🔎 Искал адрес бота",
-    "cab_menubtn": "📱 Кнопка меню вкл/выкл",
     "cab_public": "🔗 Адрес API кабинета",
     "cab_port": "🔌 Порт API кабинета",
     "backup_menu": "💾 Бэкап",
     "rw_menu": "🆕 Remnawave",
     "rw_test": "🔌 Проверка Remnawave",
-    "rw_notify_go": "📨 Рассылка новых ссылок",
     "backup_export": "📤 Выгрузка базы",
     "backup_apply": "♻️ Восстановление из бэкапа",
     "site_logo": "🖼 Логотип сайта",
@@ -89,9 +87,10 @@ CB_LABELS = {
     "paid_approve": "✅ Одобрил триал",
     "paid_reject": "❌ Отклонил триал",
     "refund_do": "💸 Возврат",
-    # бан, удаления, вкл/выкл подписок и техработ идут через «Точно?» —
+    "refund_partial_start": "💸 Частичный возврат (начало)",
+    "refund_partial_do": "💸 Частичный возврат",
+    # удаления, вкл/выкл подписок и техработ идут через «Точно?» —
     # их подписи в handlers/confirm.py (CONFIRM_TITLES)
-    "unban_user": "✅ Разбан",
     "bcast_send": "📣 Отправил рассылку",
     "paid_bulk_apply": "📦 Массовое изменение срока",
     "paid_bulk_limits_apply": "📱 Массовая смена лимита устройств",
@@ -108,10 +107,13 @@ CB_LABELS = {
     "sub_hwid_clear": "🧹 Очистка устройств (админская)",
     "sub_reissue": "🔁 Перевыпуск ключа (админская)",
     "subs_names_sync": "🔄 Сверил ники с панелью",
+    "panel_names_sync": "👤 Актуализировал юзернеймы и ники в панели",
+    "panel_sync": "🔄 Точечная синхронизация с панелью",
+    "payment_sync": "💳 Синхронизация платежей с Platega",
+    "panel_sync_menu": "🔄 Открыл синхронизацию",
     "sub_hwid_del": "📱 Отключил устройство (админская)",
-    "bl_add_apply": "⛔ Заблокировал (ЧС или бан)",
+    "bl_add_apply": "⛔ Внёс в ЧС",
     "bl_sync": "🔄 Обновил общий ЧС",
-    "bl_bans": "🚫 Смотрел баны",
     "promo_give_do": "🎁 Выдал промокод",
     "promo_seg_do": "📤 Раздал промокоды",
     "promo_income": "📊 Что принесли промокоды",
@@ -125,7 +127,7 @@ CB_LABELS = {
     "act_feed": "📜 Смотрел ленту",
     "ctl_online": "🔌 Смотрел, кто онлайн",
     "ctl_traffic": "📊 Смотрел трафик",
-    "ctl_digest_now": "📤 Сводка вручную",
+    "ctl_digest_now": "📤 Сводка вручную + бэкап",
     "ctl_digest_toggle": "📨 Сводка вкл/выкл",
     "ctl_digest_hour": "🕘 Время сводки",
     "dashboard": "📊 Смотрел статистику",
@@ -167,8 +169,6 @@ CB_LABELS = {
     "bl_menu": "⛔ Чёрный список",
     "bl_view": "⛔ Открыл карточку блокировок",
     "bl_new": "⛔ Начал блокировку",
-    "bl_ban": "🚫 Начал бан",
-    "bl_unban": "✅ Разбан",
     "bl_reason": "📝 Выбрал причину блокировки",
     "bl_term": "⏳ Выбрал срок блокировки",
     "bl_check": "🔍 Проверка в ЧС",
@@ -176,15 +176,15 @@ CB_LABELS = {
     "fraud_list": "🕵 Список находок",
     "fraud_pair": "🕵 Открыл находку",
     "fraud_ip_toggle": "🌐 Адрес как улика вкл/выкл",
-    "winback_settings": "🎯 Winback",
-    "winback_test": "📨 Пример письма winback",
-    "toggle_winback": "🎯 Winback вкл/выкл",
-    "toggle_winback_paid": "👤 Winback: кому писать",
+    "winback_settings": "🎯 Возврат ушедших",
+    "winback_test": "📨 Пример письма возврата",
+    "toggle_winback": "🎯 Возврат ушедших вкл/выкл",
+    "toggle_winback_paid": "👤 Возврат ушедших: кому писать",
     "set_winback_days": "1️⃣ Срок первой волны",
     "set_winback_percent": "1️⃣ Скидка первой волны",
     "set_winback_days2": "2️⃣ Срок второй волны",
     "set_winback_percent2": "2️⃣ Скидка второй волны",
-    "set_winback_life": "⏳ Срок промокода winback",
+    "set_winback_life": "⏳ Срок промокода возврата",
     "remind_test": "📨 Пример напоминания",
     "toggle_remind": "⏰ Напоминания вкл/выкл",
     "toggle_remind_trials": "🆓 Напоминания пробным",
@@ -452,12 +452,11 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
         lines.append("<blockquote expandable>" + "\n".join(ev) + "</blockquote>")
 
     digest_on = cfg.get("digest_enabled", True)
-    hour = int(cfg.get("digest_hour", 9))
     ch_label = (f"через {int(cfg.get('connect_help_hours', 3))} ч"
                 if cfg.get("connect_help_enabled", True) else "выключена")
     lines.append("\n⚙️ <b>Автоматика</b>")
     lines.append("<blockquote>"
-                 f"📨 Сводка в личку: <b>{f'каждый день в {hour}:00' if digest_on else 'выключена'}</b>\n"
+                 f"📨 Сводка в личку: <b>{f'каждый день в {digest_time_text(cfg)}, с бэкапом' if digest_on else 'выключена'}</b>\n"
                  f"🆘 Помощь с подключением: <b>{ch_label}</b>\n"
                  f"🗄 Журнал хранится <b>{int(cfg.get('activity_retention_days', 90))}</b> дней"
                  "</blockquote>")
@@ -470,7 +469,7 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
          InlineKeyboardButton("👥 Помощники", callback_data="act_feed:helpers:1")],
         [
             InlineKeyboardButton("🔌 Кто онлайн", callback_data="ctl_online"),
-            InlineKeyboardButton("📊 Трафик", callback_data="ctl_traffic"),
+            InlineKeyboardButton("📊 Трафик", callback_data="rw_usage"),
         ],
         [InlineKeyboardButton("🔍 Найти человека", callback_data="find_user"),
          InlineKeyboardButton("🆘 Помощь с подключением", callback_data="ctl_ch_menu")],
@@ -480,7 +479,7 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
         )],
         [
             InlineKeyboardButton("🕘 Время сводки", callback_data="ctl_digest_hour"),
-            InlineKeyboardButton("📤 Сводка сейчас", callback_data="ctl_digest_now"),
+            InlineKeyboardButton("📤 Сводка сейчас + бэкап", callback_data="ctl_digest_now"),
         ],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ]
@@ -691,39 +690,23 @@ async def handle_online(query):
                                   reply_markup=kb)
 
 
-async def handle_traffic(query):
-    from panel import get_traffic_snapshot
-    from database import users_by_emails
-    await query.edit_message_text("📊 Считаю трафик...")
-    r = await get_traffic_snapshot()
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔄 Обновить", callback_data="ctl_traffic")],
-        _back("ctl_menu"),
-    ])
-    if not r.get("ok"):
-        await query.edit_message_text(
-            f"📊 <b>Трафик</b>\n\n❌ Панель не ответила:\n<code>{_esc(r.get('error'))}</code>",
-            parse_mode="HTML", reply_markup=kb)
-        return
-
-    clients = r["clients"]
-    total = sum(up + down for up, down in clients.values())
-    top = sorted(clients.items(), key=lambda kv: kv[1][0] + kv[1][1], reverse=True)[:10]
-    known = await users_by_emails([e for e, _ in top])
-
-    lines = [
-        "📊 <b>Трафик</b>\n",
-        f"Всего по всем клиентам: <b>{_fmt_bytes(total)}</b> · клиентов: <b>{len(clients)}</b>",
-        "<i>Счётчики панели с последнего сброса.</i>\n",
-        "<b>Топ-10:</b>",
-    ]
-    for i, (email, (up, down)) in enumerate(top, 1):
-        who = _who(*known[email][1:], known[email][0]) if email in known else f"<code>{_esc(email)}</code>"
-        lines.append(f"{i}. {who} — <b>{_fmt_bytes(up + down)}</b> (⬆{_fmt_bytes(up)} ⬇{_fmt_bytes(down)})")
-    await query.edit_message_text("\n".join(lines), parse_mode="HTML", reply_markup=kb)
+async def handle_traffic(query, context=None):
+    """Старое имя экрана «Трафик»: теперь это тот же единый экран, что и
+    «Потребление ГБ» — сводка за всё время плюс потребление по узлам
+    и периодам. Алиас оставлен для старых клавиатур и selftest."""
+    from remnawave import handle_rw_usage
+    await handle_rw_usage(query, context)
 
 
 # ── Ежедневная сводка ────────────────────────────────────────────────────────
+
+def digest_time_text(cfg: dict) -> str:
+    """Время сводки одной строкой: «9:30». Минуты появились со вводом
+    своего времени; у старых настроек их нет — тогда ровно час."""
+    hour = int(cfg.get("digest_hour", 9) or 9)
+    minute = int(cfg.get("digest_minute", 0) or 0)
+    return f"{hour}:{minute:02d}"
+
 
 async def build_digest(day_offset: int = 1) -> str:
     from database import digest_stats
@@ -757,22 +740,46 @@ async def digest_tick(context):
 
     Не планируем задачу на точное время — так сводка не потеряется, если в
     назначенный час бот лежал: уйдёт, как только он поднимется.
+
+    Сводка уходит одним сообщением вместе со свежим бэкапом дня: архив
+    собирается в момент отправки (тот же make_archive, что и в «Бэкапе»),
+    а текст сводки становится подписью к файлу. Если архив не собрался
+    или подпись не влезла в лимит Telegram (1024 символа) — сводка всё
+    равно уйдёт обычным текстовым сообщением, без файла.
     """
+    import io
     from config import ADMIN_ID
     cfg = load_config()
     if not cfg.get("digest_enabled", True):
         return
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
-    if now.hour < int(cfg.get("digest_hour", 9)) or cfg.get("digest_last") == today:
+    hour = int(cfg.get("digest_hour", 9))
+    minute = int(cfg.get("digest_minute", 0) or 0)
+    if (now.hour, now.minute) < (hour, minute) or cfg.get("digest_last") == today:
         return
     cfg["digest_last"] = today
     save_config(cfg)
     try:
-        await context.bot.send_message(chat_id=ADMIN_ID, text=await build_digest(1),
-                                       parse_mode="HTML")
+        text = await build_digest(1)
     except Exception:
-        pass
+        return
+    caption = (text + "\n\n💾 К сводке приложен свежий бэкап дня "
+               "(внутри ключи — не пересылай).")
+    try:
+        from backup import make_archive
+        blob, name, _counts = make_archive()
+        if len(caption) > 1024:
+            raise ValueError("подпись длиннее 1024 символов")
+        await context.bot.send_document(
+            chat_id=ADMIN_ID, document=io.BytesIO(blob), filename=name,
+            caption=caption, parse_mode="HTML")
+    except Exception:
+        try:
+            await context.bot.send_message(chat_id=ADMIN_ID, text=text,
+                                           parse_mode="HTML")
+        except Exception:
+            pass
 
 
 async def purge_tick(context):
@@ -789,36 +796,101 @@ async def handle_digest_toggle(query, context):
 
 
 async def handle_digest_hour_menu(query):
-    cur = int(load_config().get("digest_hour", 9))
+    cfg = load_config()
+    cur = int(cfg.get("digest_hour", 9))
+    cur_min = int(cfg.get("digest_minute", 0) or 0)
     hours = [7, 8, 9, 10, 12, 15, 18, 21]
     rows = [[
         InlineKeyboardButton(("• " if h == cur else "") + f"{h}:00",
                              callback_data=f"ctl_digest_set:{h}")
         for h in hours[i:i + 4]
     ] for i in range(0, len(hours), 4)]
+    rows.append([InlineKeyboardButton("⌨️ Своё время", callback_data="ctl_digest_custom")])
     rows.append(_back("ctl_menu"))
     await query.edit_message_text(
-        "🕘 <b>Во сколько присылать сводку?</b>\n\nСводка приходит за прошедшие сутки.",
+        "🕘 <b>Во сколько присылать сводку?</b>\n\n"
+        f"Сейчас: <b>{cur}:{cur_min:02d}</b>\n"
+        "Сводка приходит за прошедшие сутки.",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
     )
+
+
+async def handle_digest_custom(query, context):
+    """Просит ввести своё время сводки текстом: час или час и минуты."""
+    from states import AWAITING_DIGEST_HOUR
+    context.user_data["state"] = AWAITING_DIGEST_HOUR
+    await query.edit_message_text(
+        "🕘 <b>Своё время сводки</b>\n\n"
+        "Пришли время, когда присылать сводку: просто час "
+        "(<code>9</code>) или час и минуты (<code>9:30</code>).\n\n"
+        "<i>Проверка ходит каждые 10 минут, поэтому сводка придёт "
+        "в первый проход после указанного времени.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([_back("ctl_digest_hour")]),
+    )
+
+
+def parse_digest_time(text: str) -> tuple | None:
+    """«9», «09», «9:30» → (час, минуты). Всё остальное — None."""
+    import re
+    m = re.fullmatch(r"\s*(\d{1,2})(?::(\d{1,2}))?\s*", text or "")
+    if not m:
+        return None
+    hour, minute = int(m.group(1)), int(m.group(2) or 0)
+    if not 0 <= hour <= 23:
+        return None
+    if not 0 <= minute <= 59:
+        return None
+    return hour, minute
 
 
 async def handle_digest_set_hour(query, context, hour: int):
     if not 0 <= hour <= 23:
         return
     cfg = load_config()
+    cfg["digest_minute"] = 0
     cfg["digest_hour"] = hour
     save_config(cfg)
     await handle_control_menu(query, context)
 
 
 async def handle_digest_now(query, context):
+    """Сводка вручную: текст — в сообщении, бэкап — файлом следом.
+
+    В отличие от плановой сводки, здесь текст нельзя сделать подписью
+    к файлу: сообщение уже открыто в меню, поэтому сводка остаётся
+    текстом на месте, а архив уходит отдельным сообщением сразу за ним.
+    """
+    import io
+    from html import escape
     await query.edit_message_text("📤 Собираю сводку...")
-    text = await build_digest(0)
+    try:
+        text = await build_digest(0)
+    except Exception as e:
+        await query.edit_message_text(
+            f"❌ <b>Не собрать сводку</b>\n\n<code>{escape(str(e)[:200])}</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([_back("ctl_menu")]),
+        )
+        return
     await query.edit_message_text(
         text, parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([_back("ctl_menu")]),
     )
+    try:
+        from backup import make_archive
+        blob, name, _counts = make_archive()
+        await context.bot.send_document(
+            chat_id=query.from_user.id, document=io.BytesIO(blob), filename=name,
+            caption=("💾 <b>Бэкап Drebol VPN на сегодня</b>\n\n"
+                     "<i>Внутри ключи — не пересылай.</i>"),
+            parse_mode="HTML")
+    except Exception as e:
+        await query.edit_message_text(
+            text + f"\n\n⚠️ Бэкап не собрался: <code>{escape(str(e)[:150])}</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([_back("ctl_menu")]),
+        )
 
 
 # ── Помощь с подключением ────────────────────────────────────────────────────
@@ -898,7 +970,7 @@ async def connect_help_tick(context):
     from config import ADMIN_ID
     import maintenance as mnt
     from database import (
-        recent_subs_for_connect_help, mark_connect_help, log_activity, is_banned,
+        recent_subs_for_connect_help, mark_connect_help, log_activity,
     )
     from blacklist import is_blacklisted
     from panel import get_last_online
@@ -947,7 +1019,7 @@ async def connect_help_tick(context):
     )
 
     for tg_id in due - seen:
-        if tg_id == ADMIN_ID or await is_banned(tg_id) or await is_blacklisted(tg_id):
+        if tg_id == ADMIN_ID or await is_blacklisted(tg_id):
             continue
         if not await mark_connect_help(tg_id, "sent"):
             continue

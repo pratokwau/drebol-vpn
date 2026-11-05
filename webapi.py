@@ -11,8 +11,12 @@
 себя и шлёт в заголовке. Никаких паролей, куки и чужих данных: по токену
 видно только одного человека — того, кто вошёл.
 
-Кабинет только показывает. Менять что-либо через него нельзя: все действия
-остались в боте, где их видно в журнале.
+Кабинет показывает срок, трафик, LTE, устройства, платежи и рефералку.
+Действия — те же, что уже есть в боте для самого человека: отключить
+своё устройство, перевыпустить свой ключ и продлить подписку. Продление
+идёт через тот же Platega-счёт, что и в боте, а подтверждение — опросом
+статусов фоновой задачей бота (вебхуки Platega не используются, как и
+в боте). После оплаты Platega возвращает человека обратно в кабинет.
 """
 
 from __future__ import annotations
@@ -114,7 +118,7 @@ def _fmt_bytes(value) -> str:
 async def profile(tg_id: int) -> dict:
     """Всё, что кабинет показывает человеку о нём самом."""
     from blacklist import entry as bl_entry, public_reason
-    from database import get_user_info, is_banned, user_payments
+    from database import get_user_info, user_payments
     from paidsub.storage import base_hwid, get_paid_sub_by_tg_id, parse_sub_date
     from paidsub.time_parser import fmt_duration_precise
 
@@ -122,10 +126,20 @@ async def profile(tg_id: int) -> dict:
     out = {
         "user": {"id": tg_id, "name": (u[1] if u else "") or "", "username": (u[2] if u else "") or ""},
         "blocked": None, "subscription": None, "devices": [], "payments": [],
+        "referral": None, "lte": None,
     }
-    if await is_banned(tg_id):
-        out["blocked"] = {"kind": "ban", "reason": "Доступ к сервису закрыт"}
-        return out
+    # Рефералка не зависит от подписки: её видно и без неё
+    try:
+        from paidsub.storage import get_referral_stats
+        from paidsub.time_parser import fmt_duration
+        rs = await get_referral_stats(tg_id)
+        out["referral"] = {
+            "invited": int(rs["total"] or 0),
+            "rewarded": int(rs["rewarded"] or 0),
+            "bonus_text": fmt_duration(rs["total_bonus"]) if rs["total_bonus"] else "",
+        }
+    except Exception:
+        pass
     ble = await bl_entry(tg_id)
     if ble:
         out["blocked"] = {"kind": "blacklist", "reason": public_reason(ble["reason"])}
@@ -156,6 +170,7 @@ async def profile(tg_id: int) -> dict:
         "left": max(0, left),
         "left_text": fmt_duration_precise(max(0, left)) if left > 0 else "",
         "url": sub_url,
+        "created_at": str(row[10] or "")[:16],
         "devices_limit": int(limit_hwid or 0),
         "devices_own": base_hwid(limit_hwid, extra),
         "devices_extra": int(extra or 0),
@@ -165,19 +180,96 @@ async def profile(tg_id: int) -> dict:
         "renewed": int(renewed or 0),
     }
 
+    # LTE: остаток за текущий месяц и переведён ли человек на fallback-сквад.
+    # Панель может не ответить — тогда карточку просто не показываем.
+    try:
+        from config import load_config
+        from remnawave import (is_configured, lte_limit_gb,
+                               make_username, user_cdn_usage)
+        lte_limit = lte_limit_gb(row[19] if len(row) > 19 else None,
+                                 load_config().get("paid_preset_lte"))
+        fb_raw = row[20] if len(row) > 20 else ""
+        fb_month = (fb_raw or "").partition(":")[0]
+        if lte_limit == 0:
+            out["lte"] = {"available": True, "closed": True, "limit_gb": 0}
+        elif is_configured():
+            r = await user_cdn_usage(make_username(email or "", 0))
+            if r.get("ok") and r.get("cdn_nodes"):
+                lte_used = int(r["used_bytes"] or 0)
+                out["lte"] = {
+                    "available": True, "closed": False,
+                    "limit_gb": int(lte_limit),
+                    "used": lte_used, "used_text": _fmt_bytes(lte_used),
+                    "left_gb": round(max(0.0, lte_limit - lte_used / 1024 ** 3), 2),
+                    "fallback_active": bool(fb_month) and fb_month == datetime.now().strftime("%Y-%m"),
+                }
+    except Exception:
+        pass
+
     hw = await get_client_hwids(email)
     if hw.get("ok"):
         for d in hw.get("items", [])[:20]:
             out["devices"].append({
+                "id": str(d.get("id") or ""),
                 "model": d.get("deviceModel") or d.get("platform") or "Устройство",
                 "platform": d.get("platform") or "",
                 "seen": str(d.get("lastSeen") or "")[:16].replace("T", " "),
             })
     rows, pays_count, pays_sum = await user_payments(tg_id, 10)
-    out["payments"] = [{"amount": r[2], "status": r[3], "date": str(r[4] or "")[:16]}
-                       for r in rows]
+    # строки user_payments: id, provider, amount, status, date, promo_code —
+    # провайдера и промокод тоже отдаём: из них складывается карточка платежа
+    out["payments"] = [{"id": r[0], "provider": r[1] or "", "amount": r[2],
+                        "status": r[3], "date": str(r[4] or "")[:16],
+                        "promo": r[5] or ""} for r in rows]
     out["payments_total"] = {"count": pays_count, "sum": pays_sum}
     return out
+
+
+# ── Продление ────────────────────────────────────────────────────────────────
+
+async def _renew_quote(tg_id: int, tariff: tuple) -> dict:
+    """Цена и состав счёта за продление — ровно как кнопка оплаты в боте:
+    тариф, плюс уже купленные места (если места вообще продаются), минус
+    висящий промокод из бота, если он есть и ещё действует. Скидка, как
+    и в боте, считается только от тарифа, а не от мест."""
+    from config import load_config
+    from paidsub.handlers import apply_discount, validate_promo
+    from paidsub.storage import base_hwid, get_paid_sub_by_tg_id, get_pending_promo
+    row = await get_paid_sub_by_tg_id(tg_id)
+    cfg = load_config()
+    dev_price = int(cfg.get("device_price", 0) or 0)
+    dev_max = int(cfg.get("device_max_extra", 0) or 0)
+    limit_now = int(row[8] or 0) if row else 0
+    bought = int(row[18] or 0) if row and len(row) > 18 else 0
+    if not base_hwid(limit_now, bought):
+        dev_price = 0
+    devices = max(0, min(bought, dev_max if dev_price else 0))
+    base_price = int(tariff[3])
+    promo_code = None
+    promo_percent = 0
+    pending = await get_pending_promo(tg_id)
+    if pending:
+        promo, _err = await validate_promo(pending, tg_id)
+        if promo:
+            promo_code = promo[1]
+            promo_percent = int(promo[2])
+            base_price = apply_discount(base_price, promo[2])
+    return {"price": base_price + devices * dev_price,
+            "seconds": int(tariff[2]), "name": tariff[1],
+            "kind": "period_dev" if dev_price else "period", "extra": devices,
+            "dev_price": dev_price, "promo_code": promo_code,
+            "promo_percent": promo_percent}
+
+
+def _cabinet_return_url() -> str | None:
+    """Куда Platega вернёт человека после оплаты — раздел платежей
+    кабинета. Сайта нет — None, и счёт вернёт его в бот, как обычно."""
+    try:
+        from site_deploy import site_url
+        site = site_url()
+    except Exception:
+        site = ""
+    return f"{site}/cabinet/payments" if site else None
 
 
 # ── Сервер ───────────────────────────────────────────────────────────────────
@@ -235,11 +327,15 @@ def build_app():
         token = await web_session_new(who["id"], source, SESSION_DAYS)
         return web.json_response({"token": token, "days": SESSION_DAYS})
 
-    async def me(request):
+    async def session_user(request):
+        """tg_id по токену сессии — или None, если сессии нет."""
         from database import web_session_user
         token = (request.headers.get("Authorization", "").replace("Bearer ", "").strip()
                  or request.query.get("token", ""))
-        tg_id = await web_session_user(token)
+        return await web_session_user(token)
+
+    async def me(request):
+        tg_id = await session_user(request)
         if not tg_id:
             return web.json_response({"error": "no_session"}, status=401)
         return web.json_response(await profile(tg_id))
@@ -250,11 +346,188 @@ def build_app():
         await web_session_drop(token)
         return web.json_response({"ok": True})
 
+    async def device_delete(request):
+        """Человек отключает своё устройство — то же, что кнопка в боте."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        ref = str(body.get("hwid") or "")
+        if not ref:
+            return web.json_response({"error": "no_device"}, status=400)
+        from paidsub.storage import add_history, get_paid_sub_by_tg_id
+        from panel import delete_client_hwid, get_client_hwids, resolve_hwid
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        hwid_id = await resolve_hwid(row[2], ref)
+        if hwid_id is None:
+            return web.json_response({"error": "already_gone"}, status=404)
+        model = ""
+        hw = await get_client_hwids(row[2])
+        if hw.get("ok"):
+            for d in hw.get("items", []):
+                if str(d.get("id")) == str(hwid_id):
+                    model = d.get("deviceModel") or d.get("platform") or ""
+        res = await delete_client_hwid(row[2], hwid_id)
+        if not res.get("success"):
+            return web.json_response({"error": "panel"}, status=502)
+        await add_history(tg_id, "device_removed",
+                          f"Устройство отключено из кабинета: {model or hwid_id}")
+        return web.json_response({"ok": True})
+
+    async def reissue(request):
+        """Перевыпуск ключа — та же операция, что кнопка «Новый ключ» в боте.
+
+        Старая ссылка перестаёт работать на всех устройствах, поэтому
+        фронт спрашивает подтверждение до запроса.
+        """
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from paidsub.storage import add_history, get_paid_sub_by_tg_id, update_paid_sub_field
+        from panel import get_client_info, reissue_subscription
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        status = row[11] if len(row) > 11 else "active"
+        info = await get_client_info(row[2])
+        enabled = info.get("enabled", True) if info.get("success") else True
+        if status not in ("active", "renewal") or not enabled:
+            return web.json_response({"error": "not_available"}, status=409)
+        res = await reissue_subscription(row[2])
+        if not res.get("success"):
+            return web.json_response({"error": "panel"}, status=502)
+        await update_paid_sub_field(row[0], "uuid", res["new_uuid"])
+        await update_paid_sub_field(row[0], "sub_id", res["sub_id"])
+        await update_paid_sub_field(row[0], "sub_url", res["sub_url"])
+        await add_history(tg_id, "key_reissued", "Ключ перевыпущен из кабинета")
+        return web.json_response({"ok": True, "url": res["sub_url"]})
+
+    async def renew_options(request):
+        """Тарифы с посчитанными для этого человека ценами, висящий
+        промокод из бота и неоплаченный счёт, если такой уже есть."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        from database import get_active_payment, list_tariffs
+        from paidsub.storage import get_paid_sub_by_tg_id
+        from paidsub.time_parser import fmt_duration
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        tariffs = await list_tariffs(only_active=True)
+        if not tariffs:
+            return web.json_response({"error": "no_tariffs"}, status=409)
+        out = []
+        quote0 = None
+        for t in tariffs:
+            q = await _renew_quote(tg_id, t)
+            if quote0 is None:
+                quote0 = q
+            out.append({"id": t[0], "name": t[1],
+                        "period": fmt_duration(q["seconds"]),
+                        "price": q["price"]})
+        pending = await get_active_payment(tg_id, "platega")
+        return web.json_response({
+            "tariffs": out,
+            "devices": {"count": quote0["extra"], "price": quote0["dev_price"]},
+            "promo": ({"code": quote0["promo_code"],
+                       "percent": quote0["promo_percent"]}
+                      if quote0["promo_code"] else None),
+            "pending": ({"id": pending[0], "amount": pending[4],
+                         "url": pending[8], "period": pending[5]}
+                        if pending and pending[8] else None),
+        })
+
+    async def renew(request):
+        """Создаёт счёт за продление — тот же Platega-счёт, что и в боте.
+        Повторное нажатие на тот же тариф не плодит счета: возвращается
+        уже созданная ссылка. Подтверждение — опросом, без вебхуков."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            tariff_id = int(body.get("tariff_id") or 0)
+        except (TypeError, ValueError):
+            tariff_id = 0
+        from blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        from database import (add_payment, get_active_payment, get_tariff,
+                              get_user_info)
+        from paidsub.storage import get_paid_sub_by_tg_id
+        import platega_api as pg
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        tariff = await get_tariff(tariff_id) if tariff_id else None
+        if not tariff or not tariff[4]:
+            return web.json_response({"error": "bad_tariff"}, status=400)
+        if not pg.is_configured():
+            return web.json_response({"error": "pay_unavailable"}, status=503)
+        q = await _renew_quote(tg_id, tariff)
+        existing = await get_active_payment(tg_id, "platega")
+        if (existing and existing[4] == q["price"]
+                and existing[5] == q["seconds"] and existing[8]
+                and (len(existing) < 12 or existing[11] == q["extra"])):
+            return web.json_response({"payment_id": existing[0],
+                                      "url": existing[8],
+                                      "amount": existing[4], "reused": True})
+        user = await get_user_info(tg_id)
+        res = await pg.create_payment(
+            amount=q["price"],
+            description=f"Подписка Drebol VPN · {q['name']} · {tg_id}",
+            tg_id=tg_id, username=user[2] if user else None,
+            return_url=_cabinet_return_url())
+        if not res.get("ok"):
+            logging.error("кабинет: счёт Platega не создан для %s: %s",
+                          tg_id, res.get("error"))
+            return web.json_response({"error": "pay_failed"}, status=502)
+        pid = await add_payment(
+            tg_id, "platega", res["transaction_id"], q["price"], q["seconds"],
+            res["url"], promo_code=q["promo_code"], kind=q["kind"],
+            extra=q["extra"])
+        return web.json_response({"payment_id": pid, "url": res["url"],
+                                  "amount": q["price"]})
+
+    async def payment_status(request):
+        """Статус своего счёта — его опрашивает страница, пока ждёт
+        подтверждения. Чужие счета не отдаём: только свои."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            pid = int(request.query.get("id") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        from database import get_payment
+        p = await get_payment(pid) if pid else None
+        if not p or p[1] != tg_id:
+            return web.json_response({"error": "no_payment"}, status=404)
+        return web.json_response({"id": p[0], "status": p[7], "amount": p[4],
+                                  "url": p[8], "period": p[5]})
+
     app = web.Application(middlewares=[web.middleware(guard)])
     app.router.add_get("/api/health", health)
     app.router.add_post("/api/auth", auth)
     app.router.add_get("/api/me", me)
     app.router.add_post("/api/logout", logout)
+    app.router.add_post("/api/device/delete", device_delete)
+    app.router.add_post("/api/reissue", reissue)
+    app.router.add_get("/api/renew-options", renew_options)
+    app.router.add_post("/api/renew", renew)
+    app.router.add_get("/api/payment", payment_status)
     return app
 
 
@@ -318,7 +591,6 @@ async def handle_cabinet_menu(query, context=None, note: str = ""):
         ("🛰 API работает", is_running()),
         ("🔗 Адрес API задан", bool(public)),
         ("🪪 Кабинет опубликован", site.cabinet_ready()),
-        ("📱 Кнопка слева в боте", bool(cfg.get("webapi_menu_button"))),
     ]
     lines = ["🪪 <b>Личный кабинет</b>", ""]
     if note:
@@ -349,9 +621,6 @@ async def handle_cabinet_menu(query, context=None, note: str = ""):
     kb = [[InlineKeyboardButton("🔴 Выключить API" if s["enabled"] else "🟢 Включить API",
                                 callback_data="cab_toggle"),
            InlineKeyboardButton("🩺 Проверить", callback_data="cab_check")],
-          [InlineKeyboardButton(
-              "📱 Кнопка слева · вкл ✅" if cfg.get("webapi_menu_button") else "📱 Кнопка слева",
-              callback_data="cab_menubtn")],
           [InlineKeyboardButton("🔎 Найти адрес бота", callback_data="cab_find")],
           [InlineKeyboardButton("🔀 Через сайт", callback_data="cab_upstream"),
            InlineKeyboardButton("🔗 Адрес API", callback_data="cab_public"),
@@ -687,49 +956,3 @@ async def handle_cabinet_find(query, context):
             [InlineKeyboardButton("🌐 К сайту", callback_data="site_menu"),
              InlineKeyboardButton("🩺 Проверить", callback_data="cab_check")],
             [InlineKeyboardButton("🪪 К кабинету", callback_data="cab_menu")]]))
-
-
-async def set_menu_button(bot, on: bool) -> dict:
-    """Кнопка слева от поля ввода: открывает кабинет мини-приложением.
-
-    Открытый так кабинет получает подписанные данные телеграма и логинит
-    человека сам — форму входа он не увидит.
-    """
-    import site_deploy as site
-    from telegram import MenuButtonCommands, MenuButtonWebApp, WebAppInfo
-    link = site.cabinet_link()
-    if on and not link:
-        return {"ok": False, "error": "кабинет ещё не опубликован"}
-    try:
-        if on:
-            await bot.set_chat_menu_button(
-                menu_button=MenuButtonWebApp(text="Кабинет", web_app=WebAppInfo(url=link)))
-        else:
-            await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-        return {"ok": True, "link": link}
-    except Exception as ex:
-        return {"ok": False, "error": f"{type(ex).__name__}: {ex}"}
-
-
-async def refresh_menu_button(bot):
-    """Проставляет кнопку заново — например, когда сменился адрес кабинета."""
-    from config import load_config
-    if load_config().get("webapi_menu_button"):
-        await set_menu_button(bot, True)
-
-
-async def handle_cabinet_menu_button(query, context):
-    from config import load_config, save_config
-    cfg = load_config()
-    turn_on = not cfg.get("webapi_menu_button", False)
-    res = await set_menu_button(context.bot, turn_on)
-    if not res.get("ok"):
-        await handle_cabinet_menu(query, context,
-                                  note=f"<i>⚠️ {html.escape(str(res.get('error')))}</i>")
-        return
-    cfg["webapi_menu_button"] = turn_on
-    save_config(cfg)
-    note = ("<i>📱 Кнопка слева от поля ввода открывает кабинет. "
-            "У тех, кто уже писал боту, она появится в течение пары минут.</i>"
-            if turn_on else "<i>📱 Кнопка слева вернулась к обычному меню команд.</i>")
-    await handle_cabinet_menu(query, context, note=note)

@@ -27,7 +27,7 @@ async def handle_my_sub(query):
             reply_markup=back_main(),
         )
         return
-    _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row
+    _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row[:11]
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
     from panel import get_client_info
@@ -38,6 +38,7 @@ async def handle_my_sub(query):
     else:
         status_line = "⚪ Статус: <b>неизвестен</b>"
 
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     await query.edit_message_text(
         "📋 <b>Админская подписка</b>\n\n"
         f"📅 Действует до: <b>{expire}</b>\n"
@@ -46,7 +47,10 @@ async def handle_my_sub(query):
         f"🔗 <b>Ссылка подписки:</b>\n<code>{sub_url}</code>\n\n"
         "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)",
         parse_mode="HTML",
-        reply_markup=back_main(),
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🌐 LTE-интернет", callback_data="my_lte_admin")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
+        ]),
     )
 
 
@@ -67,6 +71,108 @@ def _progress_bar(used_gb: float, total_gb: int) -> str:
     bar = "▓" * filled + "░" * empty
     pct = int(ratio * 100)
     return f"[{bar}] {pct}%"
+
+
+# Название месяца в предложном падеже: «в октябре», «в ноябре»…
+_MONTH_PREP = ("", "январе", "феврале", "марте", "апреле", "мае", "июне",
+               "июле", "августе", "сентябре", "октябре", "ноябре", "декабре")
+
+
+def _format_lte(result: dict, limit: int, month: int | None = None) -> str:
+    """Текст блока LTE-трафика по уже полученному результату статистики.
+
+    Разбивки по узлам здесь нет сознательно: человеку важен только
+    итог за месяц и остаток. Заголовок — с названием текущего месяца.
+    """
+    from datetime import datetime
+    month_name = _MONTH_PREP[month or datetime.now().month]
+    used_gb = result["used_bytes"] / 1024 ** 3
+    left_gb = max(0.0, limit - used_gb)
+    lines = [f"🌐 <b>LTE-трафик в {month_name}</b>",
+             f"Использовано: <b>{used_gb:.2f} ГБ</b> "
+             f"из <b>{limit} ГБ</b>",
+             f"Осталось: <b>{left_gb:.2f} ГБ</b>"]
+    bar = _progress_bar(used_gb, limit)
+    if bar:
+        lines.append(bar)
+    lines.append(f"<i>Лимит {limit} ГБ на LTE-серверы обновляется каждый месяц.</i>")
+    if result.get("failed"):
+        lines.append("<i>Часть LTE-серверов не ответила — "
+                     "цифра может быть неполной.</i>")
+    return "\n".join(lines)
+
+
+async def handle_my_lte(query, kind: str = "paid"):
+    """Отдельный экран «🌐 LTE-интернет»: вся LTE-информация и кнопка назад.
+
+    kind="paid" — платная подписка (назад в «Моя подписка»),
+    kind="admin" — админская (назад в «Админская подписка»).
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    user_id = query.from_user.id
+    if kind == "admin":
+        from adminsub.storage import get_sub_by_tg_id
+        from config import load_config as _lc
+        from remnawave import lte_limit_gb as _lim
+        row = await get_sub_by_tg_id(user_id)
+        if not row:
+            await query.edit_message_text(
+                "🌐 <b>LTE-интернет</b>\n\n<blockquote>Админской подписки пока нет.</blockquote>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("◀️ Назад", callback_data="back_start")]]),
+            )
+            return
+        email = row[2]
+        limit = _lim(row[11] if len(row) > 11 else None, _lc().get("preset_lte"))
+        back_cb, refresh_cb = "my_sub", "my_lte_admin"
+    else:
+        from paidsub.storage import get_paid_sub_by_tg_id
+        from config import load_config as _lc
+        from remnawave import lte_limit_gb as _lim
+        row = await get_paid_sub_by_tg_id(user_id)
+        if not row:
+            await query.edit_message_text(
+                "🌐 <b>LTE-интернет</b>\n\n<blockquote>Подписки пока нет.</blockquote>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("◀️ Назад", callback_data="back_start")]]),
+            )
+            return
+        email = row[2]
+        limit = _lim(row[19] if len(row) > 19 else None, _lc().get("paid_preset_lte"))
+        back_cb, refresh_cb = "my_paid_sub", "my_lte"
+
+    try:
+        from remnawave import is_configured, make_username, user_cdn_usage
+        if not is_configured():
+            body = "<i>Панель не настроена — статистику LTE показать не могу.</i>"
+        else:
+            r = await user_cdn_usage(make_username(email or "", 0))
+            if not r.get("ok"):
+                body = ("⚠️ <i>Не удалось получить статистику LTE. "
+                        "Попробуй обновить через минуту.</i>")
+            elif not r.get("cdn_nodes"):
+                body = ("<i>В панели пока нет LTE-узлов — узлов, чьё название "
+                        "кончается на [CDN]. Как только появятся, расход "
+                        "будет считаться здесь.</i>")
+            else:
+                body = _format_lte(r, limit)
+    except Exception:
+        body = "⚠️ <i>Не удалось получить статистику LTE. Попробуй обновить через минуту.</i>"
+
+    await query.edit_message_text(
+        "🌐 <b>LTE-интернет</b>\n\n"
+        + body + "\n\n"
+        "<i>LTE-серверы — используйте только тогда, когда в вашем городе "
+        "включают ограничения интернета.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Обновить", callback_data=refresh_cb)],
+            [InlineKeyboardButton("◀️ Назад", callback_data=back_cb)],
+        ]),
+        disable_web_page_preview=True,
+    )
 
 
 async def handle_my_paid_sub(query):
@@ -135,6 +241,7 @@ async def handle_my_paid_sub(query):
     cab = _cabinet_row()
     if cab:
         kb_rows.append(cab)
+    kb_rows.append([InlineKeyboardButton("🌐 LTE-интернет", callback_data="my_lte")])
     kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
@@ -1417,7 +1524,7 @@ async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
 
 
 async def _sub_facts(row) -> list:
-    """Трафик и устройства — то, что человек хочет видеть сразу.
+    """Трафик, остаток LTE и устройства — то, что человек хочет видеть сразу.
 
     Панель может не ответить: тогда просто не показываем строку,
     а не пугаем ошибкой на главном экране.
@@ -1434,6 +1541,25 @@ async def _sub_facts(row) -> list:
                 lines.append(f"<code>{_progress_bar(used / 1024 ** 3, total_gb)}</code>")
             else:
                 lines.append(f"📊 Трафик: <b>{_fmt_bytes_user(used)}</b> · без лимита")
+    except Exception:
+        pass
+    # Остаток LTE-серверов — той же строкой в цитате подписки.
+    # Панель может не ответить или LTE-узлов может не быть: тогда строку
+    # просто не показываем, а не пугаем ошибкой на главном экране.
+    try:
+        from config import load_config
+        from remnawave import (is_configured, lte_limit_gb,
+                               make_username, user_cdn_usage)
+        lte_limit = lte_limit_gb(row[19] if len(row) > 19 else None,
+                                 load_config().get("paid_preset_lte"))
+        if lte_limit == 0:
+            lines.append("🌐 LTE-серверы: <b>закрыты</b>")
+        elif is_configured():
+            r = await user_cdn_usage(make_username(email or "", 0))
+            if r.get("ok") and r.get("cdn_nodes"):
+                left_gb = max(0.0, lte_limit - r["used_bytes"] / 1024 ** 3)
+                lines.append(f"🌐 Остаток LTE-серверов: <b>{left_gb:.2f} ГБ</b> "
+                             f"из {lte_limit} ГБ")
     except Exception:
         pass
     if limit_hwid:

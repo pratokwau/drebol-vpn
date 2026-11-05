@@ -104,8 +104,9 @@ async def paid_counts() -> dict:
 
 # ВНИМАНИЕ: у двух выборок подписки поля совпадают только до 11-го индекса.
 # Дальше они расходятся, и ряд нельзя передавать «куда попало»:
-#   get_paid_sub:          12 payment_pending … 18 period_end
-#   get_paid_sub_by_tg_id: 12 times_renewed   … 18 extra_devices
+#   get_paid_sub:          12 payment_pending … 18 period_end, 19 lte_gb
+#   get_paid_sub_by_tg_id: 12 times_renewed   … 18 extra_devices, 19 lte_gb,
+#                            20 lte_fallback_month (добавлен в конец — старые индексы не трогаем)
 # Общее у них — ind_*-поля с 13 по 17, на них и опирается sub_settings().
 
 async def get_paid_sub(sub_id: int) -> tuple | None:
@@ -113,7 +114,7 @@ async def get_paid_sub(sub_id: int) -> tuple | None:
         async with db.execute("""
             SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at,
                    status, payment_pending, ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url,
-                   period_end
+                   period_end, lte_gb
             FROM paid_subs WHERE id = ?
         """, (sub_id,)) as cur:
             return await cur.fetchone()
@@ -131,7 +132,7 @@ async def get_paid_sub_by_tg_id(tg_id: int) -> tuple | None:
         async with db.execute("""
             SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at, status, times_renewed,
                    ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url,
-                   extra_devices
+                   extra_devices, lte_gb, lte_fallback_month
             FROM paid_subs WHERE tg_id = ?
             ORDER BY created_at DESC LIMIT 1
         """, (tg_id,)) as cur:
@@ -227,11 +228,25 @@ async def live_paid_subs() -> list:
             return await cur.fetchall()
 
 
+async def lte_watch_subs() -> list:
+    """Платные подписки для проверки LTE: живые, со своим лимитом
+    и отметкой о переводе на fallback-сквад.
+    Возвращает (id, tg_id, email, lte_gb, lte_fallback_month)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, email, lte_gb, lte_fallback_month
+            FROM paid_subs
+            WHERE tg_id IS NOT NULL AND status IN ('active', 'renewal')
+            ORDER BY id
+        """) as cur:
+            return await cur.fetchall()
+
+
 async def update_paid_sub_field(sub_id: int, field: str, value):
     allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending",
                 "ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url",
                 "times_renewed", "pending_promo", "uuid", "period_end", "extra_devices",
-                "sub_id", "sub_url", "remind_stage"}
+                "sub_id", "sub_url", "remind_stage", "lte_gb", "lte_fallback_month"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:

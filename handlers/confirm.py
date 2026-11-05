@@ -20,7 +20,6 @@ CONFIRM_TITLES = {
     "paid_sub_toggle": "Вкл/выкл подписки",
     "sub_toggle": "Вкл/выкл админской подписки",
     "paid_sub_freeze": "Заморозка подписки",
-    "bl_unban": "Разбан пользователя",
     "promo_delete": "Удаление промокода",
     "helper_del": "Снятие помощника",
     "mnt_toggle": "Вкл/выкл техработ",
@@ -171,12 +170,6 @@ async def _clear_log_channel(arg):
             "🗑 Да, отключить", "log_channel_settings", "admin_panel")
 
 
-async def _bl_unban(arg):
-    return (f"✅ <b>Разбанить в боте?</b>\n\n👤 {await _who(int(arg))}\n\n"
-            "Бот снова начнёт ему отвечать. Чёрный список это не снимает.",
-            "✅ Да, разбанить", f"bl_view:{arg}", "bl_menu")
-
-
 async def _bl_del(arg):
     from blacklist import entry
     from database import bl_holds
@@ -275,7 +268,6 @@ RULES = {
     "paid_sub_toggle": lambda arg: _toggle(arg, admin_sub=False),
     "sub_toggle": lambda arg: _toggle(arg, admin_sub=True),
     "paid_sub_freeze": _paid_sub_freeze,
-    "bl_unban": _bl_unban,
     "promo_delete": _promo_delete,
     "helper_del": _helper_del,
     "mnt_toggle": _mnt_toggle,

@@ -3,6 +3,7 @@
 Футуристичный кибер-дизайн (deep space, neo-aurora, glassmorphism, border-beam,
 bento grid с курсорным spotlight, интерактивный визуализатор маршрута,
 3D-tilt эффект и живой HUD статус).
+Все тексты полностью настраиваются через админку бота.
 """
 
 from __future__ import annotations
@@ -50,50 +51,123 @@ _CHECK = ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-wid
           'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
           '<path d="M5 12.5l4.5 4.5L19 7.5"/></svg>')
 
-# ── Контент разделов ────────────────────────────────────────────────────────
-
-FEATURES = [
-    ("nolog", "Без логов и следов",
-     "Мы не сохраняем историю посещений, DNS-запросы и IP-адреса. Сервера работают в оперативной памяти (RAM-only): нечего хранить — нечего отдать.",
-     "RAM-ONLY SERVERS"),
-    ("bolt", "Подключение за 60 секунд",
-     "Никаких регистраций, подтверждений по почте и паролей. Открыли бота, получили ключ в один клик — и вы сразу в защищённой сети.",
-     "1-CLICK TELEGRAM"),
-    ("devices", "Все ваши устройства",
-     "Один ключ безупречно работает на iOS, Android, Windows, macOS, Linux и Android TV. Поддерживаются современные клиенты Happ, Streisand, v2ray.",
-     "CROSS-PLATFORM"),
-    ("shield", "VLESS Reality протокол",
-     "Продвинутая маскировка под обычный легитимный TLS-трафик зарубежных сервисов. Не распознаётся DPI-фильтрами и обходит любые блокировки.",
-     "NEXT-GEN PROTOCOL"),
-    ("gift", "Бесплатный тест-драйв",
-     "Попробуйте максимальную скорость до оплаты. Пробный доступ выдаётся автоматически при первом запуске бота без привязки карт.",
-     "ZERO COMMITMENT"),
-    ("card", "Оплата российскими картами",
-     "СБП, Т-Банк, Сбер и любые карты банков РФ, а также криптовалюта. Моментальное зачисление и продление подписки без потери оставшихся дней.",
-     "SBP & MIR READY"),
-]
-
-STEPS = [
-    ("Запустите бота", "Нажмите «Открыть в Telegram» и отправьте боту команду /start для старта.", "01"),
-    ("Получите ключ", "Подпишитесь на новостной канал — бот мгновенно выдаст персональный ключ доступа.", "02"),
-    ("Подключитесь", "Вставьте ключ в приложение на телефоне или компьютере в одно нажатие. Всё работает!", "03"),
-]
-
-FAQ = [
-    ("Вы ведёте логи посещений?",
-     "Категорически нет. Архитектура Drebol VPN построена на принципах Zero-Logs: трафик не логируется, не перехватывается и не хранится на дисках. Узлы работают исключительно в оперативной памяти."),
-    ("Как оплатить подписку из России?",
-     "Оплата проходит через российские платёжные шлюзы: доступны СБП, любые карты Visa, Mastercard и МИР. Оплата в рублях без зарубежных карт."),
-    ("Какие приложения нужны для подключения?",
-     "Мы поддерживаем удобные современные клиенты: Happ, Streisand, v2rayNG, Hiddify, FoXray и другие. Бот предоставит прямую ссылку для автоматического добавления конфигурации в один клик."),
-    ("Есть ли ограничения по скорости или трафику?",
-     "Трафик и скорость безлимитны. Каждый сервер подключён к выделенным 10-гигабитным оптическим каналам в Европе, поэтому YouTube 4K 60fps и Twitch стримят без буферизации."),
-    ("Что делать, если возникнут вопросы?",
-     "Прямо в боте работает тикет-служба поддержки. Напишите нам свой вопрос или отправьте скриншот — дежурный специалист ответит в течение нескольких минут."),
-]
-
 PLATFORMS = ["iOS", "Android", "Windows", "macOS", "Linux", "Android TV"]
-TARIFF_PERKS = ["Без ограничений скорости и трафика", "Протокол VLESS Reality", "Все платформы (iOS, Android, PC)", "RAM-Only сервера без логов", "Поддержка в Telegram 24/7"]
+TARIFF_PERKS = ["Без ограничений по скорости", "Простая настройка в 1 клик", "Все платформы (iOS, Android, PC)", "Полная защита приватности", "Поддержка в Telegram 24/7"]
+
+# ── Стандартные понятные тексты (без сложного IT-жаргона) ─────────────────────
+
+DEFAULT_TEXTS = {
+    # Главный экран (Hero)
+    "hero_pill": "Быстрый VPN в Telegram · Без ограничений",
+    "hero_title": "Интернет без ограничений.",
+    "hero_shimmer": "И без цензуры.",
+    "hero_lead": "Удобный и быстрый VPN прямо в Telegram. Подключение в пару нажатий: запустили бота, получили ключ и наслаждайтесь свободным интернетом на всех устройствах.",
+    "hero_btn": "Открыть в Telegram",
+    "hero_hud_status": "Защищённое соединение",
+    "hero_hud_speed": "Высокая скорость · 4K Ready",
+
+    # Метрики сети (4 показателя)
+    "metric1_val": "4K",
+    "metric1_unit": "HDR",
+    "metric1_label": "Видео без задержек",
+    "metric1_sub": "YouTube и фильмы в лучшем качестве",
+
+    "metric2_val": "0",
+    "metric2_unit": "%",
+    "metric2_label": "Сохранения истории",
+    "metric2_sub": "Полная приватность в интернете",
+
+    "metric3_val": "< 15",
+    "metric3_unit": "мс",
+    "metric3_label": "Быстрый отклик",
+    "metric3_sub": "Моментальная загрузка любых сайтов",
+
+    "metric4_val": "99.9",
+    "metric4_unit": "%",
+    "metric4_label": "Стабильная работа",
+    "metric4_sub": "VPN всегда онлайн и доступен",
+
+    # Схема работы
+    "route_title": "Как работает защита",
+    "route_sub": "Прямое зашифрованное соединение между вашим устройством и нашими скоростными серверами.",
+    "route_node1": "Ваш телефон или ПК",
+    "route_badge1": "iOS · Android · PC",
+    "route_node2": "Серверы Drebol",
+    "route_badge2": "Безопасное соединение",
+    "route_node3": "Свободный интернет",
+    "route_badge3": "YouTube · Discord · Сайты",
+
+    # Преимущества (6 карточек)
+    "feat1_title": "Без сохранения истории",
+    "feat1_desc": "Мы не следим за вами и не записываем, какие сайты вы открываете. Ваши действия в интернете остаются только вашими.",
+    "feat1_tag": "ПРИВАТНОСТЬ",
+
+    "feat2_title": "Подключение за минуту",
+    "feat2_desc": "Никаких сайтов, подтверждений по почте и сложных паролей. Запустили бота в Telegram, нажали одну кнопку — и вы в сети.",
+    "feat2_tag": "БЕЗ РЕГИСТРАЦИИ",
+
+    "feat3_title": "Все ваши устройства",
+    "feat3_desc": "Один ключ подходит для смартфона, планшета и компьютера: iOS, Android, Windows и macOS. Простая настройка в одно нажатие.",
+    "feat3_tag": "ДЛЯ ВСЕХ УСТРОЙСТВ",
+
+    "feat4_title": "Быстро и без зависаний",
+    "feat4_desc": "Смотрите ролики в 4K 60fps, общайтесь в голосовых каналах Discord и открывайте нужные сервисы без падений скорости.",
+    "feat4_tag": "ВЫСОКАЯ СКОРОСТЬ",
+
+    "feat5_title": "Бесплатный тест-драйв",
+    "feat5_desc": "Оцените скорость до оплаты: бесплатный пробный период выдаётся автоматически сразу после запуска бота без привязки карт.",
+    "feat5_tag": "ТЕСТ БЕСПЛАТНО",
+
+    "feat6_title": "Оплата через СБП",
+    "feat6_desc": "Оплата за пару секунд через СБП с любого банка без комиссий. Моментальное зачисление и продление подписки в пару кликов.",
+    "feat6_tag": "ОПЛАТА СБП",
+
+    # Шаги (3 шага)
+    "step1_title": "Запустите бота",
+    "step1_desc": "Нажмите кнопку «Открыть в Telegram» и отправьте боту команду старт.",
+    "step2_title": "Получите ключ",
+    "step2_desc": "Подпишитесь на новостной канал — бот мгновенно выдаст персональный ключ доступа.",
+    "step3_title": "Подключитесь",
+    "step3_desc": "Нажмите кнопку «Подключить» или вставьте ключ в приложение на телефоне или ПК. Всё готово!",
+
+    # Тарифы
+    "tariffs_title": "Честные цены. Без скрытых платежей.",
+    "tariffs_sub": "Все серверы и платформы доступны на любом тарифе. Разница только в длительности подписки.",
+    "tariffs_note": "Не готовы сразу покупать? Начните с бесплатного пробного периода — он активируется мгновенно в боте.",
+
+    # FAQ
+    "faq1_q": "Вы сохраняете историю моих посещений?",
+    "faq1_a": "Нет, никогда. Мы не сохраняем историю сайтов, которые вы открываете, и не ведём журналы подключений. Ваша приватность полностью защищена.",
+    "faq2_q": "Как оплатить подписку?",
+    "faq2_a": "Оплата происходит прямо в Telegram через СБП — быстро, безопасно и с любого удобного вам банка без комиссий.",
+    "faq3_q": "Как настроить VPN на телефоне или компьютере?",
+    "faq3_a": "Бот выдаст вам персональный ключ и готовую ссылку для быстрого подключения: нажимаете одну кнопку, и всё настраивается автоматически.",
+    "faq4_q": "Хватит ли скорости для видео в высоком качестве?",
+    "faq4_a": "Да, у нас нет ограничений по скорости или объёму трафика. Видео в YouTube 4K 60fps и фильмы воспроизводятся без пауз и буферизации.",
+    "faq5_q": "Что делать, если возникнут трудности с подключением?",
+    "faq5_a": "Прямо в боте работает служба заботы. Напишите нам свой вопрос — мы на связи и сразу поможем всё настроить.",
+
+    # CTA
+    "cta_title": "Подключитесь прямо сейчас",
+    "cta_sub": "Пробный период активируется мгновенно. Попробуйте быстрый и надёжный VPN прямо сейчас.",
+}
+
+
+def get_site_texts(custom_texts: dict | None = None) -> dict:
+    """Объединяет базовые тексты с пользовательскими настройками из админки."""
+    if custom_texts is None:
+        try:
+            from config import load_config
+            custom_texts = load_config().get("site_texts") or {}
+        except Exception:
+            custom_texts = {}
+    merged = dict(DEFAULT_TEXTS)
+    if custom_texts:
+        for k, v in custom_texts.items():
+            if v is not None and str(v).strip():
+                merged[k] = str(v).strip()
+    return merged
+
 
 # ── Стили ────────────────────────────────────────────────────────────────────
 
@@ -167,7 +241,6 @@ h1, h2, h3, h4, p { margin: 0; }
   66%      { transform: translate3d(-6vw, 4vh, 0) scale(0.92) rotate(120deg); }
 }
 
-/* Космическая сетка с затуханием */
 .cyber-grid {
   position: absolute; inset: 0;
   background-image: 
@@ -249,16 +322,6 @@ header, main, footer { position: relative; z-index: 1; }
   transform: translateY(-2px);
 }
 
-.btn-accent {
-  background: linear-gradient(135deg, #4f8cff 0%, #2968f5 100%);
-  color: #fff;
-  box-shadow: 0 0 30px rgba(79, 140, 255, 0.45);
-}
-.btn-accent:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 45px rgba(79, 140, 255, 0.65);
-}
-
 .btn-sm { height: 42px; padding: 0 18px; font-size: 14px; }
 .btn-sm svg { width: 16px; height: 16px; }
 
@@ -320,7 +383,6 @@ h1 {
 @keyframes shine {
   to { background-position: 200% center; }
 }
-h1 .dim { color: rgba(255, 255, 255, 0.45); font-weight: 700; }
 
 .lead {
   max-width: 540px; font-size: clamp(16px, 1.4vw, 19px); line-height: 1.6;
@@ -363,10 +425,10 @@ h1 .dim { color: rgba(255, 255, 255, 0.45); font-weight: 700; }
 }
 .visual-card img {
   width: 100%; height: 100%; object-fit: cover; display: block;
-  mix-blend-mode: luminosity; opacity: 0.92;
+  opacity: 0.94;
   transition: opacity 0.3s ease;
 }
-.visual-card:hover img { opacity: 1; mix-blend-mode: normal; }
+.visual-card:hover img { opacity: 1; }
 
 /* Угловые кибер-метки HUD */
 .hud-corner {
@@ -539,7 +601,7 @@ h2 {
 .sub { max-width: 580px; font-size: 17px; line-height: 1.6; color: var(--muted); }
 .head.split .sub { max-width: 400px; }
 
-/* ── Bento Grid (Возможности) ── */
+/* ── Bento Grid (Преимущества) ── */
 .bento-grid {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;
 }
@@ -647,7 +709,6 @@ h2 {
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
 }
 
-/* Выделенный лучший тариф */
 .plan.best {
   border-color: rgba(79, 140, 255, 0.6);
   background: linear-gradient(180deg, rgba(79, 140, 255, 0.18), rgba(13, 18, 30, 0.95));
@@ -659,7 +720,6 @@ h2 {
   box-shadow: 0 35px 100px rgba(79, 140, 255, 0.35);
 }
 
-/* Бейдж популярного тарифа */
 .best-tag {
   align-self: flex-start;
   display: inline-flex; align-items: center; gap: 6px;
@@ -694,7 +754,7 @@ h2 {
 .plan .btn { margin-top: auto; }
 .note { margin-top: 32px; text-align: center; font-size: 15px; color: var(--soft); }
 
-/* ── FAQ (Вопросы и ответы) ── */
+/* ── FAQ ── */
 .faq .wrap { display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 70px; }
 .qa { display: flex; flex-direction: column; gap: 12px; }
 .qa details {
@@ -765,11 +825,6 @@ h2 {
   padding-block: 36px 44px;
 }
 .foot img { height: 26px; width: auto; opacity: 0.85; }
-.foot-status {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-size: 13px; font-weight: 600; color: var(--muted);
-}
-.foot-status .pulse-beacon { width: 7px; height: 7px; }
 .foot nav { display: flex; flex-wrap: wrap; gap: 12px 28px; font-size: 14px; font-weight: 600; }
 .foot nav a { color: var(--muted); transition: color 0.2s; }
 .foot nav a:hover { color: #fff; }
@@ -861,7 +916,6 @@ JS_HEAD = "document.documentElement.classList.add('js');"
 
 JS = """
 (function () {
-  // Появление элементов при прокрутке
   var items = document.querySelectorAll('.reveal');
   if ('IntersectionObserver' in window) {
     var io = new IntersectionObserver(function (entries) {
@@ -877,7 +931,6 @@ JS = """
     items.forEach(function (el) { el.classList.add('in'); });
   }
 
-  // Интерактивный курсорный Spotlight на карточках Bento
   var bentoCards = document.querySelectorAll('.bento-card');
   bentoCards.forEach(function (card) {
     card.addEventListener('mousemove', function (e) {
@@ -889,7 +942,6 @@ JS = """
     });
   });
 
-  // 3D Tilt эффект на постере в Hero
   var visual = document.querySelector('.visual');
   var visualCard = document.querySelector('.visual-card');
   if (visual && visualCard && window.matchMedia('(min-width: 768px)').matches) {
@@ -904,7 +956,6 @@ JS = """
     });
   }
 
-  // Живая микрофлуктуация пинга (кибер-эффект)
   var pingEl = document.getElementById('heroPing');
   if (pingEl) {
     setInterval(function () {
@@ -930,12 +981,16 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
                channel_url: str = "", logo_file: str = "",
                tariffs: list | None = None,
                poster_file: str = "og.webp",
-               cabinet_url: str = "") -> str:
-    """Собирает ультрасовременную страницу."""
+               cabinet_url: str = "",
+               site_texts: dict | None = None) -> str:
+    """Собирает ультрасовременную страницу с поддержкой динамических текстов."""
     handle = bot_username.lstrip("@")
     bot_url = escape(f"https://t.me/{handle}" if handle else "https://t.me/")
     name = escape(title)
     tariffs = tariffs or []
+
+    # Получаем актуальные тексты (с учётом правок из админки)
+    txt = get_site_texts(site_texts)
 
     # Логотип
     if logo_file:
@@ -971,22 +1026,29 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
       <div class="hud-badge hud-speed">
         <div class="hud-icon">{_ICONS["speed"]}</div>
         <div class="hud-text">
-          <b>10 Gbps Uplink</b>
-          <small>4K 60fps Ready</small>
+          <b>{escape(txt['hero_hud_speed'])}</b>
         </div>
       </div>
       <div class="hud-badge hud-status">
         <div class="hud-icon success">{_ICONS["shield"]}</div>
         <div class="hud-text">
-          <b>VLESS Reality Protected</b>
-          <small><span class="ping-dot"></span>Пинг: <span id="heroPing">12</span> ms · 0% потерь</small>
+          <b>{escape(txt['hero_hud_status'])}</b>
+          <small><span class="ping-dot"></span>Пинг: <span id="heroPing">12</span> ms</small>
         </div>
       </div>
     </div>"""
 
     # Bento карточки возможностей
+    features_data = [
+        ("nolog", txt["feat1_title"], txt["feat1_desc"], txt["feat1_tag"]),
+        ("bolt", txt["feat2_title"], txt["feat2_desc"], txt["feat2_tag"]),
+        ("devices", txt["feat3_title"], txt["feat3_desc"], txt["feat3_tag"]),
+        ("shield", txt["feat4_title"], txt["feat4_desc"], txt["feat4_tag"]),
+        ("gift", txt["feat5_title"], txt["feat5_desc"], txt["feat5_tag"]),
+        ("card", txt["feat6_title"], txt["feat6_desc"], txt["feat6_tag"]),
+    ]
     bento_items = []
-    for i, (icon, h, t, tag) in enumerate(FEATURES):
+    for i, (icon, h, t, tag) in enumerate(features_data):
         is_wide = (i == 0 or i == 3)
         bento_items.append(f"""
       <article class="bento-card{' wide' if is_wide else ''} reveal">
@@ -1001,7 +1063,12 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
       </article>""")
     features_html = "".join(bento_items)
 
-    # Шаги
+    # Шаги подключения
+    steps_data = [
+        (txt["step1_title"], txt["step1_desc"], "01"),
+        (txt["step2_title"], txt["step2_desc"], "02"),
+        (txt["step3_title"], txt["step3_desc"], "03"),
+    ]
     steps_html = "".join(f"""
       <article class="step-card reveal">
         <span class="step-num">{num}</span>
@@ -1009,7 +1076,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
           <h3>{escape(h)}</h3>
           <p>{escape(t)}</p>
         </div>
-      </article>""" for h, t, num in STEPS)
+      </article>""" for h, t, num in steps_data)
 
     perks_html = "".join(f"<li>{_CHECK}{escape(p)}</li>" for p in TARIFF_PERKS)
 
@@ -1054,11 +1121,11 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
   <div class="wrap">
     <div class="head center reveal">
       <span class="eyebrow">Тарифы</span>
-      <h2>Честные цены. Без скрытых платежей.</h2>
-      <p class="sub">Все серверы, протоколы и платформы доступны на любом тарифе. Разница только в длительности подписки.</p>
+      <h2>{escape(txt['tariffs_title'])}</h2>
+      <p class="sub">{escape(txt['tariffs_sub'])}</p>
     </div>
     <div class="plans">{"".join(cards)}</div>
-    <p class="note">Не готовы сразу покупать? Начните с бесплатного пробного периода — он активируется мгновенно в боте.</p>
+    <p class="note">{escape(txt['tariffs_note'])}</p>
   </div>
 </section>"""
         nav_pricing = '<a href="#pricing">Тарифы</a>'
@@ -1066,6 +1133,13 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     elif channel_url:
         hero_second = f'<a class="btn btn-ghost" href="{escape(channel_url)}">Наш канал</a>'
 
+    faq_data = [
+        (txt["faq1_q"], txt["faq1_a"]),
+        (txt["faq2_q"], txt["faq2_a"]),
+        (txt["faq3_q"], txt["faq3_a"]),
+        (txt["faq4_q"], txt["faq4_a"]),
+        (txt["faq5_q"], txt["faq5_a"]),
+    ]
     faq_html = "".join(f"""
       <details{' open' if i == 0 else ''}>
         <summary>
@@ -1073,7 +1147,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
           <span class="qa-toggle" aria-hidden="true"></span>
         </summary>
         <p>{escape(a)}</p>
-      </details>""" for i, (q, a) in enumerate(FAQ))
+      </details>""" for i, (q, a) in enumerate(faq_data))
 
     channel_btn = (f'<a class="btn btn-ghost" href="{escape(channel_url)}">Наш канал</a>'
                    if channel_url else "")
@@ -1097,7 +1171,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{name} — {escape(tagline)}</title>
-<meta name="description" content="{escape(tagline)}. Мгновенное подключение по протоколу VLESS Reality прямо в Telegram. Поддержка iOS, Android, Windows и macOS.">
+<meta name="description" content="{escape(tagline)}. Быстрое и надёжное подключение прямо в Telegram. Поддержка iOS, Android, Windows и macOS.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="{name}">
 <meta property="og:description" content="{escape(tagline)}">
@@ -1143,12 +1217,12 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     <div class="hero-text reveal">
       <div class="cyber-pill">
         <span class="pulse-beacon"></span>
-        <span>RemnaWave Network · 0% логов</span>
+        <span>{escape(txt['hero_pill'])}</span>
       </div>
-      <h1>Интернет без ограничений. <span class="shimmer-text">И без цензуры.</span></h1>
-      <p class="lead">{name} — сверхбыстрый VPN нового поколения с маскировкой трафика VLESS Reality. Никаких сайтов и паролей: открыли Telegram-бота, получили ключ и вы онлайн на любом устройстве.</p>
+      <h1>{escape(txt['hero_title'])} <span class="shimmer-text">{escape(txt['hero_shimmer'])}</span></h1>
+      <p class="lead">{escape(txt['hero_lead'])}</p>
       <div class="hero-actions">
-        <a class="btn btn-main btn-beam" href="{bot_url}">{_TG}Открыть в Telegram</a>
+        <a class="btn btn-main btn-beam" href="{bot_url}">{_TG}{escape(txt['hero_btn'])}</a>
         {hero_second}
       </div>
       {hint_html}
@@ -1165,24 +1239,24 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
   <div class="wrap">
     <div class="metrics-grid reveal">
       <div class="metric-card">
-        <div class="metric-val">10<span class="metric-unit">Gbps</span></div>
-        <div class="metric-label">Выделенные каналы</div>
-        <div class="metric-sub">YouTube 4K 60fps без задержек</div>
+        <div class="metric-val">{escape(txt['metric1_val'])}<span class="metric-unit">{escape(txt['metric1_unit'])}</span></div>
+        <div class="metric-label">{escape(txt['metric1_label'])}</div>
+        <div class="metric-sub">{escape(txt['metric1_sub'])}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-val">0<span class="metric-unit">%</span></div>
-        <div class="metric-label">Следов и логов</div>
-        <div class="metric-sub">RAM-Only серверная архитектура</div>
+        <div class="metric-val">{escape(txt['metric2_val'])}<span class="metric-unit">{escape(txt['metric2_unit'])}</span></div>
+        <div class="metric-label">{escape(txt['metric2_label'])}</div>
+        <div class="metric-sub">{escape(txt['metric2_sub'])}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-val">&lt;15<span class="metric-unit">ms</span></div>
-        <div class="metric-label">Ультранизкий пинг</div>
-        <div class="metric-sub">Прямой европейский пиринг</div>
+        <div class="metric-val">{escape(txt['metric3_val'])}<span class="metric-unit">{escape(txt['metric3_unit'])}</span></div>
+        <div class="metric-label">{escape(txt['metric3_label'])}</div>
+        <div class="metric-sub">{escape(txt['metric3_sub'])}</div>
       </div>
       <div class="metric-card">
-        <div class="metric-val">99.9<span class="metric-unit">%</span></div>
-        <div class="metric-label">Бесперебойный аптайм</div>
-        <div class="metric-sub">Автоматическая смена нод</div>
+        <div class="metric-val">{escape(txt['metric4_val'])}<span class="metric-unit">{escape(txt['metric4_unit'])}</span></div>
+        <div class="metric-label">{escape(txt['metric4_label'])}</div>
+        <div class="metric-sub">{escape(txt['metric4_sub'])}</div>
       </div>
     </div>
   </div>
@@ -1194,41 +1268,41 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     <div class="route-box reveal">
       <div class="route-head">
         <span class="eyebrow">Архитектура</span>
-        <h3>Как {name} защищает ваш трафик</h3>
-        <p>Прямой зашифрованный туннель между вашим устройством и европейскими узлами, недосягаемый для DPI-фильтров.</p>
+        <h3>{escape(txt['route_title'])}</h3>
+        <p>{escape(txt['route_sub'])}</p>
       </div>
       <div class="route-flow">
         <div class="flow-node">
           <div class="flow-icon">{_ICONS["devices"]}</div>
-          <div class="flow-title">Ваш девайс</div>
-          <span class="flow-badge">Смартфон / ПК</span>
+          <div class="flow-title">{escape(txt['route_node1'])}</div>
+          <span class="flow-badge">{escape(txt['route_badge1'])}</span>
         </div>
         <div class="flow-beam"><div class="beam-pulse"></div></div>
         <div class="flow-node core">
           <div class="flow-icon">{_ICONS["shield"]}</div>
-          <div class="flow-title">{name} Core Relay</div>
-          <span class="flow-badge">VLESS Reality · AES-256</span>
+          <div class="flow-title">{escape(txt['route_node2'])}</div>
+          <span class="flow-badge">{escape(txt['route_badge2'])}</span>
         </div>
         <div class="flow-beam"><div class="beam-pulse delayed"></div></div>
         <div class="flow-node">
           <div class="flow-icon">{_ICONS["globe"]}</div>
-          <div class="flow-title">Свободный веб</div>
-          <span class="flow-badge">YouTube 4K · Discord · AI</span>
+          <div class="flow-title">{escape(txt['route_node3'])}</div>
+          <span class="flow-badge">{escape(txt['route_badge3'])}</span>
         </div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ── Bento Grid: Возможности ── -->
+<!-- ── Bento Grid: Преимущества ── -->
 <section class="section" id="features">
   <div class="wrap">
     <div class="head split reveal">
       <div class="head" style="margin:0">
         <span class="eyebrow">Преимущества</span>
-        <h2>Создан для скорости, надёжности и приватности.</h2>
+        <h2>Создан для скорости, простоты и надёжности.</h2>
       </div>
-      <p class="sub">Мы избавились от всего лишнего: громоздких регистраций, ведения логов и падений скорости в часы пик.</p>
+      <p class="sub">Мы избавились от всего лишнего: громоздких регистраций, ведения истории и падений скорости в часы пик.</p>
     </div>
     <div class="bento-grid">
       {features_html}
@@ -1242,7 +1316,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     <div class="head center reveal">
       <span class="eyebrow">Инструкция</span>
       <h2>Всего 3 простых шага</h2>
-      <p class="sub">Вам не нужно разбираться в сложных протоколах — бот настроит всё за вас.</p>
+      <p class="sub">Вам не нужно разбираться в настройках — бот подготовит всё за вас в один клик.</p>
     </div>
     <div class="steps-grid">
       {steps_html}
@@ -1258,7 +1332,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     <div class="head reveal">
       <span class="eyebrow">FAQ</span>
       <h2>Частые вопросы</h2>
-      <p class="sub">Если у вас останутся вопросы — наша служба поддержки на связи прямо в боте.</p>
+      <p class="sub">Если у вас останутся вопросы — наша служба заботы на связи прямо в боте.</p>
     </div>
     <div class="qa reveal">
       {faq_html}
@@ -1271,10 +1345,10 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
   <div class="wrap">
     <div class="cta-box reveal">
       {cta_logo}
-      <h2>Подключитесь прямо сейчас</h2>
-      <p class="sub">Тестовый период активируется мгновенно. Попробуйте свободный интернет без ограничений прямо сейчас.</p>
+      <h2>{escape(txt['cta_title'])}</h2>
+      <p class="sub">{escape(txt['cta_sub'])}</p>
       <div class="actions">
-        <a class="btn btn-main btn-beam" href="{bot_url}">{_TG}Открыть в Telegram</a>
+        <a class="btn btn-main btn-beam" href="{bot_url}">{_TG}{escape(txt['hero_btn'])}</a>
         {cab_cta}
         {channel_btn}
       </div>
@@ -1286,10 +1360,6 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 <footer class="foot">
   <div class="wrap">
     {foot_logo}
-    <div class="foot-status">
-      <span class="pulse-beacon"></span>
-      <span>Все серверные узлы работают штатно</span>
-    </div>
     {docs_html}
     <span class="copy">© {year} {name}</span>
   </div>
