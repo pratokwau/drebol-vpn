@@ -248,7 +248,7 @@ async def handle_sub_view(query, sub_id: int):
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _ip, limit_hwid, total_gb, created_at = row
+    _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _ip, limit_hwid, total_gb, created_at = row[:11]
 
     # расход и статус спрашиваем у панели: в базе их нет
     from services.panel import get_client_traffic, get_client_info
