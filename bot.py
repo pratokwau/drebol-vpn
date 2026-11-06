@@ -1,7 +1,23 @@
+import logging
+
 from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, TypeHandler, filters,
 )
+
+logger = logging.getLogger(__name__)
+
+
+async def _on_error(update, context):
+    """Логирует ошибку обработчика и показывает алерт, вместо мёртвой кнопки."""
+    logger.exception("Ошибка обработчика: %s", context.error)
+    if update and update.callback_query:
+        try:
+            await update.callback_query.answer("⚠️ Ошибка, смотри лог", show_alert=True)
+        except Exception:
+            pass
+
+
 from config import BOT_TOKEN
 from core.database import init_db
 from handlers.start import start
@@ -320,6 +336,7 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/h\d+$"), hist_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
+    app.add_error_handler(_on_error)
 
     print("Бот запущен...")
     app.run_polling(drop_pending_updates=True)
