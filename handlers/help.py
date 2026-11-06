@@ -1,6 +1,6 @@
 from telegram import Update
 from telegram.ext import ContextTypes
-from keyboards import back_main
+from core.keyboards import back_main
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):

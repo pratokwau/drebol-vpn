@@ -149,28 +149,35 @@ python bot.py
 drebol-vpn/
 ├── bot.py            # Точка входа: polling, задачи по расписанию
 ├── config.py         # .env + config.json
-├── database.py       # SQLite (bot.db): подписки, платежи, ЧС, сессии
-├── panel.py          # Обёртки над Remnawave: клиенты, HWID, трафик
-├── remnawave.py      # Клиент API панели + экраны «Панель и узлы»
-├── platega_api.py    # Клиент Platega: счета, возвраты (в т.ч. частичные)
-├── webapi.py         # API личного кабинета (aiohttp)
-├── site_deploy.py    # Деплой сайта и кабинета по SSH + страница кабинета
-├── site_page.py      # Лендинг
-├── blacklist.py      # Чёрный список: списки, остановки, автовозврат
-├── winback.py        # «Возврат ушедших»
-├── backup.py         # Бэкап и перенос
-├── fraud.py          # Повторные триалы
-├── staff.py          # Помощники и их права
-├── maintenance.py    # Техработы и отключение функций
-├── selftest.py       # Встроенные проверки бота
-├── subscription.py   # Общая логика подписок
-├── keyboards.py      # Общие клавиатуры
-├── states.py         # Состояния ввода
-├── log_channel.py    # Лог-канал
+├── core/             # Общая инфраструктура
+│   ├── database.py   # SQLite (bot.db): подписки, платежи, ЧС, сессии
+│   ├── states.py     # Состояния ввода
+│   ├── keyboards.py  # Общие клавиатуры
+│   ├── subscription.py # Проверка подписки на канал
+│   ├── log_channel.py # Лог-канал
+│   └── maintenance.py # Техработы и отключение функций
+├── services/         # Внешние API
+│   ├── panel.py      # Обёртки над Remnawave: клиенты, HWID, трафик
+│   ├── remnawave.py  # Клиент API панели + экраны «Панель и узлы»
+│   └── platega_api.py # Клиент Platega: счета, возвраты (в т.ч. частичные)
+├── features/         # Доменные модули со своими хендлерами/тиками
+│   ├── blacklist.py  # Чёрный список: списки, остановки, автовозврат
+│   ├── winback.py    # «Возврат ушедших»
+│   ├── backup.py     # Бэкап и перенос
+│   ├── fraud.py      # Повторные триалы
+│   ├── promos.py     # Промокоды
+│   └── staff.py      # Помощники и их права
+├── web/              # Сайт и личный кабинет
+│   ├── webapi.py     # API личного кабинета (aiohttp)
+│   ├── site_deploy.py # Деплой сайта и кабинета по SSH + страница кабинета
+│   ├── site_page.py  # Лендинг
+│   ├── preview.html  # Рендер лендинга (для предпросмотра)
+│   └── preview_cabinet.html # Рендер кабинета (для предпросмотра)
 ├── handlers/         # Хендлеры: start, user, admin, control, payments,
 │                     #   callbacks, messages, tickets, support, broadcast…
 ├── paidsub/          # Платные подписки: экраны, клавиатуры, хранилище
 ├── adminsub/         # Админские подписки
+├── tests/            # selftest.py — встроенные проверки бота
 ├── docs/             # Политика конфиденциальности, оферта
 ├── assets/           # Логотип и OG-картинка сайта
 ├── scripts/          # notify_failure.sh — сторож сервиса

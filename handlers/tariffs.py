@@ -9,12 +9,12 @@ from html import escape
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from keyboards import back_admin
-from database import (
+from core.keyboards import back_admin
+from core.database import (
     add_tariff, list_tariffs, get_tariff, update_tariff_field, delete_tariff,
 )
 from paidsub.time_parser import parse_duration, fmt_duration
-from states import (
+from core.states import (
     AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
 )

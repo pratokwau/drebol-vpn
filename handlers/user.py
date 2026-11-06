@@ -1,7 +1,7 @@
 from html import escape
 
 from config import ADMIN_ID, load_config
-from keyboards import main_keyboard, back_main, back_info
+from core.keyboards import main_keyboard, back_main, back_info
 
 
 def _support_row() -> list:
@@ -30,7 +30,7 @@ async def handle_my_sub(query):
     _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row[:11]
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
-    from panel import get_client_info
+    from services.panel import get_client_info
     info = await get_client_info(email)
     if info.get("success"):
         enabled = info.get("enabled", True)
@@ -113,7 +113,7 @@ async def handle_my_lte(query, kind: str = "paid"):
     if kind == "admin":
         from adminsub.storage import get_sub_by_tg_id
         from config import load_config as _lc
-        from remnawave import lte_limit_gb as _lim
+        from services.remnawave import lte_limit_gb as _lim
         row = await get_sub_by_tg_id(user_id)
         if not row:
             await query.edit_message_text(
@@ -129,7 +129,7 @@ async def handle_my_lte(query, kind: str = "paid"):
     else:
         from paidsub.storage import get_paid_sub_by_tg_id
         from config import load_config as _lc
-        from remnawave import lte_limit_gb as _lim
+        from services.remnawave import lte_limit_gb as _lim
         row = await get_paid_sub_by_tg_id(user_id)
         if not row:
             await query.edit_message_text(
@@ -144,7 +144,7 @@ async def handle_my_lte(query, kind: str = "paid"):
         back_cb, refresh_cb = "my_paid_sub", "my_lte"
 
     try:
-        from remnawave import is_configured, make_username, user_cdn_usage
+        from services.remnawave import is_configured, make_username, user_cdn_usage
         if not is_configured():
             body = "<i>Панель не настроена — статистику LTE показать не могу.</i>"
         else:
@@ -193,7 +193,7 @@ async def handle_my_paid_sub(query):
     status = row[11] if len(row) > 11 else "active"
     renewed = row[12] if len(row) > 12 else 0
 
-    from panel import get_client_info
+    from services.panel import get_client_info
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
 
@@ -208,7 +208,7 @@ async def handle_my_paid_sub(query):
         mark = "🟢 Активна"
 
     # выключенные функции прячем от пользователей, админ видит всё
-    import maintenance as mnt
+    import core.maintenance as mnt
     _is_adm = user_id == ADMIN_ID
 
     def _on(key: str) -> bool:
@@ -269,7 +269,7 @@ APPS = {
 def _cabinet_row() -> list:
     """Кнопка личного кабинета: внутри телеграма — мини-приложением."""
     from telegram import InlineKeyboardButton
-    import site_deploy as site
+    import web.site_deploy as site
     link = site.cabinet_link()
     if not link:
         return []
@@ -289,7 +289,7 @@ def _app_rows(sub_url: str) -> list:
     приложения умеют импорт из буфера обмена.
     """
     from telegram import InlineKeyboardButton
-    import site_deploy as site
+    import web.site_deploy as site
     if not sub_url:
         return []
     row = []
@@ -311,7 +311,7 @@ def _app_rows(sub_url: str) -> list:
 async def handle_app_add(query, app_key: str):
     """Запасной экран: ссылка схемой и что с ней делать."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    import site_deploy as site
+    import web.site_deploy as site
     from paidsub.storage import get_paid_sub_by_tg_id
     app = APPS.get(app_key) or APPS["happ"]
     row = await get_paid_sub_by_tg_id(query.from_user.id)
@@ -429,9 +429,9 @@ async def handle_renew_sub(query):
             await update_paid_sub_field(row[0], "pending_promo", None)
 
     # Счёт выставляет бот, оплата засчитывается автоматически
-    import platega_api as pg
+    import services.platega_api as pg
     if pg.is_configured():
-        from database import last_paid_period, list_tariffs
+        from core.database import last_paid_period, list_tariffs
         tariffs = await list_tariffs(only_active=True)
 
         # Есть тарифы — клиент выбирает срок сам
@@ -516,7 +516,7 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
     """Карточка тарифа: цена, до какого числа продлится, устройства — и сразу оплата."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from datetime import timedelta
-    from database import get_tariff
+    from core.database import get_tariff
     from paidsub.storage import get_paid_sub_by_tg_id, sub_settings, get_pending_promo
     from paidsub.handlers import validate_promo, apply_discount
     from paidsub.time_parser import fmt_duration
@@ -636,8 +636,8 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
                              devices=None):
     """Создаёт счёт в Platega и отдаёт ссылку на оплату."""
     from telegram import InlineKeyboardButton
-    import platega_api as pg
-    from database import add_payment, get_active_payment, get_tariff
+    import services.platega_api as pg
+    from core.database import add_payment, get_active_payment, get_tariff
     from paidsub.storage import get_paid_sub_by_tg_id, sub_settings, get_pending_promo
     from paidsub.handlers import validate_promo, apply_discount
 
@@ -778,7 +778,7 @@ async def _send_invoice(query, url: str, price: int,
 
 async def handle_enter_promo(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from states import AWAITING_PROMO_CODE
+    from core.states import AWAITING_PROMO_CODE
     context.user_data["state"] = AWAITING_PROMO_CODE
     await query.edit_message_text(
         "🎟 <b>Промокод</b>\n\n"
@@ -880,7 +880,7 @@ async def handle_prices(query):
 
     # Тарифы — то же, что человек увидит при продлении.
     # Пока их нет, показываем одну цену из общих настроек.
-    from database import list_tariffs
+    from core.database import list_tariffs
     tariffs = await list_tariffs(only_active=True)
     if tariffs:
         lines.append("💳 <b>Тарифы</b>")
@@ -989,7 +989,7 @@ async def handle_reissue_do(query, context):
     """Меняет ссылку подписки: новый subId и UUID, данные подписки на месте."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field, add_history
-    from log_channel import send_log
+    from core.log_channel import send_log
 
     user_id = query.from_user.id
     row = await get_paid_sub_by_tg_id(user_id)
@@ -1000,7 +1000,7 @@ async def handle_reissue_do(query, context):
 
     await query.edit_message_text("⏳ Перевыпускаю ключ…")
 
-    from panel import reissue_subscription
+    from services.panel import reissue_subscription
     result = await reissue_subscription(email)
     if not result["success"]:
         # техническая причина нужна админу, человеку — что делать дальше
@@ -1056,7 +1056,7 @@ async def handle_referral(query, context):
 
     from paidsub.storage import get_referral_stats, get_referral_list
     from paidsub.time_parser import fmt_duration
-    from database import get_user_info
+    from core.database import get_user_info
 
     stats = await get_referral_stats(user.id)
     ref_rows = await get_referral_list(user.id)
@@ -1209,7 +1209,7 @@ async def handle_my_devices(query, context=None):
     """Устройства клиента: что подключено, откуда и чем — и что можно отключить."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import get_paid_sub_by_tg_id
-    from panel import get_client_hwids
+    from services.panel import get_client_hwids
     user = query.from_user
     row = await get_paid_sub_by_tg_id(user.id)
     if not row:
@@ -1305,7 +1305,7 @@ def _when_ms(value) -> str:
 async def handle_dev_del(query, context, ref: str):
     """Клиент сам отключает своё устройство и освобождает слот."""
     from paidsub.storage import get_paid_sub_by_tg_id
-    from panel import delete_client_hwid, resolve_hwid
+    from services.panel import delete_client_hwid, resolve_hwid
     row = await get_paid_sub_by_tg_id(query.from_user.id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -1351,8 +1351,8 @@ async def handle_dev_buy_menu(query, context):
 async def handle_dev_buy(query, context, count: int):
     """Счёт на докуп устройств — теми же платежами, что и продление."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    import platega_api as pg
-    from database import add_payment
+    import services.platega_api as pg
+    from core.database import add_payment
     from paidsub.storage import get_paid_sub_by_tg_id
     user = query.from_user
     cfg = load_config()
@@ -1426,7 +1426,7 @@ async def ensure_trial(user, context, on_start=None) -> bool:
     помощникам не выдаём. True — подписку только что создали.
     on_start вызывается перед созданием: показать «⏳ …», пока идёт панель.
     """
-    from staff import is_helper
+    from features.staff import is_helper
     if user.id == ADMIN_ID or is_helper(user.id):
         return False
     from paidsub.storage import (get_paid_sub_by_tg_id, get_pending_request,
@@ -1436,7 +1436,7 @@ async def ensure_trial(user, context, on_start=None) -> bool:
     cfg = load_config()
     if not cfg.get("auto_approve_trial", False):
         return False
-    import maintenance as mnt
+    import core.maintenance as mnt
     if not mnt.feature_enabled("trial"):
         return False
     from paidsub.handlers import _paid_presets_ready, do_create_paid_sub, _process_referral_bonus
@@ -1467,7 +1467,7 @@ async def ensure_trial(user, context, on_start=None) -> bool:
         await do_create_paid_sub(None, user.id, context, _collect, trial=True, for_user=True)
         created = bool(await get_paid_sub_by_tg_id(user.id))
 
-        from log_channel import send_log
+        from core.log_channel import send_log
         uname = escape(f"@{user.username}" if user.username else f"id{user.id}")
         who = escape(str(user.first_name or user.id))
         if created:
@@ -1532,7 +1532,7 @@ async def _sub_facts(row) -> list:
     email, limit_hwid, total_gb = row[2], int(row[8] or 0), int(row[9] or 0)
     lines = []
     try:
-        from panel import get_client_traffic
+        from services.panel import get_client_traffic
         t = await get_client_traffic(email)
         if t.get("success"):
             used = t.get("up", 0) + t.get("down", 0)
@@ -1548,7 +1548,7 @@ async def _sub_facts(row) -> list:
     # просто не показываем, а не пугаем ошибкой на главном экране.
     try:
         from config import load_config
-        from remnawave import (is_configured, lte_limit_gb,
+        from services.remnawave import (is_configured, lte_limit_gb,
                                make_username, user_cdn_usage)
         lte_limit = lte_limit_gb(row[19] if len(row) > 19 else None,
                                  load_config().get("paid_preset_lte"))
@@ -1576,7 +1576,7 @@ def _link_block(sub_url) -> str:
 
 async def start_screen(user, fresh: bool = False):
     """Главный экран: приветствие, состояние подписки и меню."""
-    from staff import is_helper
+    from features.staff import is_helper
     from adminsub.storage import get_sub_by_tg_id
     from paidsub.storage import get_paid_sub_by_tg_id
     is_admin = user.id == ADMIN_ID
@@ -1588,7 +1588,7 @@ async def start_screen(user, fresh: bool = False):
     if row:
         enabled = True
         try:
-            from panel import get_client_info
+            from services.panel import get_client_info
             info = await get_client_info(row[2])
             enabled = info.get("enabled", True) if info.get("success") else True
         except Exception:

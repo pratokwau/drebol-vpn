@@ -2,8 +2,8 @@ import subprocess
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from config import INSTALL_DIR, load_config, save_config
-from keyboards import admin_keyboard, back_admin, documents_keyboard, channel_keyboard
-from states import (
+from core.keyboards import admin_keyboard, back_admin, documents_keyboard, channel_keyboard
+from core.states import (
     AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_DM_USER,
@@ -11,12 +11,12 @@ from states import (
 
 
 async def handle_admin_panel(query):
-    from database import get_unread_tickets_count
+    from core.database import get_unread_tickets_count
     unread = await get_unread_tickets_count()
     # короткая сводка дня прямо на входе — чтобы не ходить в статистику ради цифр
     summary = ""
     try:
-        from database import get_dashboard_stats
+        from core.database import get_dashboard_stats
         s = await get_dashboard_stats()
         todo = []
         if unread:
@@ -41,8 +41,8 @@ async def handle_admin_panel(query):
 
 
 async def handle_dashboard(query):
-    from database import get_dashboard_stats
-    from panel import count_panel_clients
+    from core.database import get_dashboard_stats
+    from services.panel import count_panel_clients
     s = await get_dashboard_stats()
     cfg = load_config()
     price = cfg.get("paid_price", 0) or 0
@@ -130,7 +130,7 @@ async def handle_healthcheck(query):
     """
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import probe_servers
+    from services.panel import probe_servers
 
     await query.edit_message_text("🩺 Проверяю панель и узлы…")
     r = await probe_servers()
@@ -181,7 +181,7 @@ async def handle_healthcheck(query):
             lines.append("<blockquote expandable>" + "\n".join(rows) + "</blockquote>")
             lines.append("<i>Сколько человек на узле — по данным панели.</i>")
 
-    import panel as panel_mod
+    import services.panel as panel_mod
     fail = panel_mod.LAST_EXPIRE_FAIL
     if fail:
         lines.append("\n⚠️ <b>Срок не применился</b>")
@@ -327,7 +327,7 @@ def _found_label(tg_id, first_name, username, sub_status) -> str:
 
 async def handle_find_user(query, context: ContextTypes.DEFAULT_TYPE):
     """Поиск человека: по ID, @username, имени или имени клиента в панели."""
-    from database import recent_visitors
+    from core.database import recent_visitors
     context.user_data["state"] = AWAITING_FIND_USER
     kb = []
     for tg_id, fn, un, _ts in await recent_visitors(6):
@@ -348,7 +348,7 @@ async def handle_find_user(query, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_user_search(target, context, needle: str, edit: bool = False):
     """Показывает найденных. Один точный — сразу открываем карточку."""
-    from database import get_user_info, search_users
+    from core.database import get_user_info, search_users
     rows = await search_users(needle, 12)
     token = needle.strip().lstrip("@")
     if token.isdigit() and not rows and await get_user_info(int(token)):
@@ -379,12 +379,12 @@ async def handle_user_search(target, context, needle: str, edit: bool = False):
 
 
 async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
-    from database import get_user_info
+    from core.database import get_user_info
     from paidsub.storage import (
         get_paid_sub_by_tg_id, get_referral_stats,
     )
     import aiosqlite
-    from database import DB_PATH
+    from core.database import DB_PATH
 
     user_info = await get_user_info(tg_id)
     if not user_info:
@@ -402,7 +402,7 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     first_name = escape(str(first_name or tg_id))
     uname = escape(f"@{username}" if username else f"id{tg_id}")
     # помощнику карточка без денег и без управления подпиской
-    from staff import is_helper
+    from features.staff import is_helper
     viewer = getattr(query_or_msg, "from_user", None)
     limited = bool(viewer) and is_helper(viewer.id)
 
@@ -411,7 +411,7 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         f"{uname}  ·  <code>{tg_id}</code>",
     ]
 
-    from blacklist import entry as bl_entry, public_reason
+    from features.blacklist import entry as bl_entry, public_reason
     ble = await bl_entry(tg_id)
     if ble:
         from html import escape
@@ -425,7 +425,7 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         status = sub[11] if len(sub) > 11 else "active"
         status_labels = {"active": "🟢 активна", "expired": "🔴 истекла"}
         times = sub[12] if len(sub) > 12 else 0
-        from panel import get_last_online
+        from services.panel import get_last_online
         from handlers.control import last_seen_text
         lo = await get_last_online(timeout=5)
         vpn = (last_seen_text(lo["last"].get(sub[2])) if lo.get("ok")
@@ -550,7 +550,7 @@ async def handle_clear_log_channel(query):
 async def handle_remind_settings(query):
     cfg = load_config()
     from paidsub.time_parser import fmt_duration
-    from database import remind_stats
+    from core.database import remind_stats
     enabled = cfg.get("remind_enabled", True)
     stages = [int(cfg.get("remind_first", 3 * 86400) or 0),
               int(cfg.get("remind_second", 86400) or 0),
@@ -624,7 +624,7 @@ async def handle_remind_test(query, context):
 
 
 async def handle_set_remind_quiet(query, context: ContextTypes.DEFAULT_TYPE):
-    from states import AWAITING_REMIND_QUIET
+    from core.states import AWAITING_REMIND_QUIET
     context.user_data["state"] = AWAITING_REMIND_QUIET
     await query.edit_message_text(
         "🌙 <b>Тихие часы</b>\n\n"
@@ -646,7 +646,7 @@ async def handle_toggle_remind(query):
 
 
 async def handle_set_remind(query, context: ContextTypes.DEFAULT_TYPE, which: str):
-    from states import AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD
+    from core.states import AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD
     context.user_data["state"] = {"first": AWAITING_REMIND_FIRST,
                                   "second": AWAITING_REMIND_SECOND,
                                   "third": AWAITING_REMIND_THIRD}[which]
@@ -677,7 +677,7 @@ async def handle_dm_user(query, tg_id: int, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_DM_USER
     context.user_data["dm_target"] = tg_id
     from html import escape
-    from database import get_user_info
+    from core.database import get_user_info
     u = await get_user_info(tg_id)
     name = escape(str(u[1] if u else tg_id))
     await query.edit_message_text(
@@ -693,7 +693,7 @@ async def handle_dm_user(query, tg_id: int, context: ContextTypes.DEFAULT_TYPE):
 # ── Статистика оплат по дням ────────────────────────────────────────────────
 
 async def handle_payment_stats(query, days: int = 30):
-    from database import get_payments_by_day
+    from core.database import get_payments_by_day
     rows = await get_payments_by_day(days)
     cfg = load_config()
     price = cfg.get("paid_price", 0) or 0

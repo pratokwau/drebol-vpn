@@ -12,13 +12,13 @@ from html import escape
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from config import load_config, save_config
-from database import (
+from core.database import (
     get_ticket_users, get_support_messages, get_user_info, add_support_message,
     mark_ticket_read, count_support_files, get_support_files,
     get_ticket, ticket_counts, ticket_closed, ticket_answered, user_payment_total,
 )
-from keyboards import ticket_list_keyboard, ticket_view_keyboard, cancel_admin
-from states import AWAITING_ADMIN_REPLY
+from core.keyboards import ticket_list_keyboard, ticket_view_keyboard, cancel_admin
+from core.states import AWAITING_ADMIN_REPLY
 
 
 def _support_row() -> list:
@@ -312,7 +312,7 @@ async def handle_quick_menu(query):
 
 
 async def handle_quick_add(query, context):
-    from states import AWAITING_QUICK_REPLY
+    from core.states import AWAITING_QUICK_REPLY
     context.user_data["state"] = AWAITING_QUICK_REPLY
     await query.edit_message_text(
         "➕ <b>Новый шаблон</b>\n\n"

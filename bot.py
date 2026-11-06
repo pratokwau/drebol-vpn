@@ -3,7 +3,7 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, TypeHandler, filters,
 )
 from config import BOT_TOKEN
-from database import init_db
+from core.database import init_db
 from handlers.start import start
 from handlers.help import help_cmd
 from handlers.callbacks import callback_router
@@ -33,8 +33,8 @@ async def post_init(app: Application):
             Уведомляет только при смене состояния, чтобы не спамить каждые 5 минут.
             """
             from config import ADMIN_ID, load_config, save_config
-            from panel import probe_servers, is_configured
-            from log_channel import send_log
+            from services.panel import probe_servers, is_configured
+            from core.log_channel import send_log
 
             cfg = load_config()
             if not is_configured():
@@ -99,8 +99,8 @@ async def post_init(app: Application):
             Колбэки Platega требуют публичный HTTPS с валидным сертификатом,
             поэтому статус выясняем опросом — не зависит от занятости 443.
             """
-            import platega_api as pg
-            from database import (
+            import services.platega_api as pg
+            from core.database import (
                 get_pending_payments, set_payment_status, expire_stale_payments,
             )
             if not pg.is_configured():
@@ -202,8 +202,8 @@ async def post_init(app: Application):
             Здесь же доводятся возвраты из бота, которые Platega проводила вручную.
             """
             import asyncio
-            import platega_api as pg
-            from database import get_refund_watchlist
+            import services.platega_api as pg
+            from core.database import get_refund_watchlist
             if not pg.is_configured():
                 return
             days = int(load_config().get("refund_watch_days", 30) or 30)
@@ -266,32 +266,32 @@ async def post_init(app: Application):
         app.job_queue.run_repeating(connect_help_tick, interval=1800, first=240)
 
         # сайт сам подхватывает новые цены и настройки
-        from site_deploy import site_sync_tick
+        from web.site_deploy import site_sync_tick
         app.job_queue.run_repeating(site_sync_tick, interval=120, first=300)
 
-        from fraud import fraud_tick
+        from features.fraud import fraud_tick
         app.job_queue.run_repeating(fraud_tick, interval=1800, first=420)
 
-        from blacklist import blacklist_sync_tick
+        from features.blacklist import blacklist_sync_tick
         bl_hours = int(load_config().get("blacklist_sync_hours", 6) or 6)
         app.job_queue.run_repeating(blacklist_sync_tick, interval=bl_hours * 3600, first=120)
 
-        from blacklist import blacklist_expire_tick
+        from features.blacklist import blacklist_expire_tick
         app.job_queue.run_repeating(blacklist_expire_tick, interval=300, first=150)
 
-        from winback import winback_tick
+        from features.winback import winback_tick
         app.job_queue.run_repeating(winback_tick, interval=3600, first=600)
 
-        from webapi import sessions_tick
+        from web.webapi import sessions_tick
         app.job_queue.run_repeating(sessions_tick, interval=24 * 3600, first=900)
 
         # синхронизация с панелью по расписанию: тик каждые 15 минут
         # проверяет, подошло ли время, и запускает сверку, если пора
-        from remnawave import panel_sync_tick
+        from services.remnawave import panel_sync_tick
         app.job_queue.run_repeating(panel_sync_tick, interval=900, first=900)
 
     # Личный кабинет: http-api для сайта и мини-приложения
-    from webapi import start_server
+    from web.webapi import start_server
     started = await start_server()
     if started.get("ok"):
         print(f"Кабинет слушает порт {started.get('port')}")

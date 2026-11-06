@@ -1,8 +1,8 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID, load_config, save_config
-from states import AWAITING_SUPPORT_MSG
-from subscription import is_subscribed, subscribe_keyboard, subscribe_text
+from core.states import AWAITING_SUPPORT_MSG
+from core.subscription import is_subscribed, subscribe_keyboard, subscribe_text
 from handlers.user import (
     handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_my_lte,
     handle_app_add,
@@ -22,15 +22,15 @@ from handlers.admin import (
     handle_toggle_remind_trials, handle_remind_test, handle_set_remind_quiet,
     handle_dm_user, handle_payment_stats,
 )
-from winback import (
+from features.winback import (
     handle_winback_settings, handle_toggle_winback, handle_toggle_winback_paid,
     handle_set_winback, handle_winback_test,
 )
-from fraud import (
+from features.fraud import (
     handle_fraud_menu, handle_fraud_toggle, handle_fraud_scan, handle_fraud_ok,
     handle_fraud_list, handle_fraud_pair, handle_fraud_stop, handle_fraud_ip_toggle,
 )
-from remnawave import (
+from services.remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
     handle_rw_squads, handle_rw_squad_toggle,
     handle_rw_usage, handle_rw_usage_node, handle_rw_usage_all,
@@ -39,11 +39,11 @@ from remnawave import (
     handle_panel_sync_off, handle_panel_sync_daily, handle_panel_sync_interval,
     handle_panel_sync_menu, handle_panel_names_sync,
 )
-from backup import (
+from features.backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
     handle_backup_apply,
 )
-from site_deploy import (
+from web.site_deploy import (
     handle_site_menu, handle_site_server, handle_site_domain,
     handle_site_deploy, handle_site_cert, handle_site_delete, handle_site_logo,
     handle_site_check, handle_site_auto,
@@ -53,7 +53,7 @@ from handlers.support import (
     start_writing, handle_support_close,
     handle_support_settings, handle_support_mode, handle_support_contact_ask,
 )
-from maintenance import (
+from core.maintenance import (
     handle_maintenance_menu, handle_maintenance_toggle,
     handle_maintenance_text, handle_feature_toggle,
 )
@@ -64,17 +64,17 @@ from handlers.control import (
     handle_digest_custom,
     handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
 )
-from staff import (
+from features.staff import (
     is_helper, helper_can, handle_helper_panel, handle_helper_card, handle_helper_perm,
     handle_helpers_menu, handle_helper_add, handle_helper_del,
 )
 from handlers.confirm import confirm_gate
-from blacklist import (
+from features.blacklist import (
     handle_bl_menu, handle_bl_list, handle_bl_view, handle_bl_add_start, handle_bl_new,
     handle_bl_check_start, handle_bl_add_apply, handle_bl_del, handle_bl_stop, handle_bl_readd,
     handle_bl_sync_now, handle_bl_remote_toggle, handle_bl_reason, handle_bl_term,
 )
-from promos import (
+from features.promos import (
     handle_promo_give_start, handle_promo_give_for, handle_promo_give_custom,
     handle_promo_give_pick, handle_promo_give_do, handle_promo_seg, handle_promo_seg_pick,
     handle_promo_seg_preview, handle_promo_seg_do, handle_promo_income,
@@ -170,7 +170,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Техработы и выключенные функции. На админа и на работу помощника не действуют.
     if not adm and not staff_cb:
-        import maintenance as mnt
+        import core.maintenance as mnt
         if mnt.is_maintenance():
             context.user_data.pop("state", None)
             await mnt.show_maintenance(query=query)
@@ -187,7 +187,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Чёрный список: остаётся только поддержка — чтобы можно было оспорить
     if not adm and not staff_cb:
-        from blacklist import entry as bl_entry, user_may, show_blocked
+        from features.blacklist import entry as bl_entry, user_may, show_blocked
         if not user_may(data):
             ble = await bl_entry(update.effective_user.id)
             if ble:
@@ -450,19 +450,19 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("payment_stats:"):
         await handle_payment_stats(query, int(data.split(":")[1]))
     elif data == "cab_menu":
-        from webapi import handle_cabinet_menu
+        from web.webapi import handle_cabinet_menu
         await handle_cabinet_menu(query, context)
     elif data == "cab_find":
-        from webapi import handle_cabinet_find
+        from web.webapi import handle_cabinet_find
         await handle_cabinet_find(query, context)
     elif data == "cab_check":
-        from webapi import handle_cabinet_check
+        from web.webapi import handle_cabinet_check
         await handle_cabinet_check(query, context)
     elif data == "cab_toggle":
-        from webapi import handle_cabinet_toggle
+        from web.webapi import handle_cabinet_toggle
         await handle_cabinet_toggle(query, context)
     elif data in ("cab_public", "cab_port", "cab_upstream"):
-        from webapi import handle_cabinet_ask
+        from web.webapi import handle_cabinet_ask
         await handle_cabinet_ask(query, context, data.split("_")[1])
     elif data == "support_settings":
         await handle_support_settings(query, context)
@@ -533,21 +533,21 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_site_menu(query)
     elif data == "site_texts":
         context.user_data.pop("state", None)
-        from site_deploy import handle_site_texts_menu
+        from web.site_deploy import handle_site_texts_menu
         await handle_site_texts_menu(query, context)
     elif data.startswith("site_txt_sec:"):
         sec = data.split(":", 1)[1]
-        from site_deploy import handle_site_texts_menu
+        from web.site_deploy import handle_site_texts_menu
         await handle_site_texts_menu(query, context, section=sec)
     elif data.startswith("site_txt_edit:"):
         field = data.split(":", 1)[1]
-        from site_deploy import handle_site_text_edit_ask
+        from web.site_deploy import handle_site_text_edit_ask
         await handle_site_text_edit_ask(query, context, field)
     elif data == "site_txt_reset":
-        from site_deploy import handle_site_text_reset_ask
+        from web.site_deploy import handle_site_text_reset_ask
         await handle_site_text_reset_ask(query, context)
     elif data == "site_txt_do_reset":
-        from site_deploy import handle_site_text_reset_do
+        from web.site_deploy import handle_site_text_reset_do
         await handle_site_text_reset_do(query, context)
     elif data == "site_server":
         await handle_site_server(query, context)

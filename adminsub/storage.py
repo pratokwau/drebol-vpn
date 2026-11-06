@@ -1,5 +1,5 @@
 import aiosqlite
-from database import DB_PATH
+from core.database import DB_PATH
 
 SUBS_PER_PAGE = 8
 

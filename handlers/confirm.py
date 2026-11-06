@@ -51,7 +51,7 @@ def confirm_keyboard(yes_label: str, yes_cb: str, no_cb: str, back_cb: str) -> I
 async def _who(tg_id) -> str:
     if not tg_id:
         return "без привязки к Telegram"
-    from database import get_user_info
+    from core.database import get_user_info
     u = await get_user_info(tg_id)
     if not u:
         return f"<code>{tg_id}</code>"
@@ -61,7 +61,7 @@ async def _who(tg_id) -> str:
 
 async def _panel_enabled(email) -> bool | None:
     """Включён ли клиент в панели; None — панель не ответила."""
-    from panel import get_client_info
+    from services.panel import get_client_info
     try:
         info = await get_client_info(email)
     except Exception:
@@ -139,7 +139,7 @@ async def _helper_del(arg):
 
 
 async def _mnt_toggle(arg):
-    import maintenance as mnt
+    import core.maintenance as mnt
     if mnt.is_maintenance():
         return ("✅ <b>Выключить техработы?</b>\n\nБот снова заработает для всех пользователей.",
                 "✅ Да, выключить", "mnt_menu", "admin_panel")
@@ -156,7 +156,7 @@ async def _git_update(arg):
 
 
 async def _site_delete(arg):
-    from site_deploy import site_url
+    from web.site_deploy import site_url
     url = site_url()
     return ("🗑 <b>Удалить сайт?</b>\n\n"
             f"Страница {url} и её настройки nginx будут стёрты со второго сервера.\n"
@@ -171,8 +171,8 @@ async def _clear_log_channel(arg):
 
 
 async def _bl_del(arg):
-    from blacklist import entry
-    from database import bl_holds
+    from features.blacklist import entry
+    from core.database import bl_holds
     from paidsub.time_parser import fmt_duration
     tg_id = int(arg)
     e = await entry(tg_id)
@@ -203,7 +203,7 @@ async def _bl_stop(arg):
 
 
 async def _bl_readd(arg):
-    from database import bl_lookup
+    from core.database import bl_lookup
     from paidsub.storage import get_paid_sub_by_tg_id
     tg_id = int(arg)
     info = await bl_lookup(tg_id)
@@ -216,7 +216,7 @@ async def _bl_readd(arg):
 
 
 async def _bl_remote_toggle(arg):
-    from blacklist import remote_on
+    from features.blacklist import remote_on
     if remote_on():
         return ("🌐 <b>Выключить общий список?</b>\n\n"
                 "Люди из него снова смогут брать триал и платить, остановленные из-за него "

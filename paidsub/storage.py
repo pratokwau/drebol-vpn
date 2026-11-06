@@ -1,5 +1,5 @@
 import aiosqlite
-from database import DB_PATH
+from core.database import DB_PATH
 
 SUBS_PER_PAGE = 8
 
@@ -308,7 +308,7 @@ async def add_history(tg_id: int, action: str, details: str | None = None):
         await db.commit()
     # то же событие — в общий журнал, чтобы лента видела жизненный цикл подписки
     if tg_id:
-        from database import log_activity
+        from core.database import log_activity
         first_line = details.splitlines()[0] if details else None
         await log_activity(tg_id, f"ev:{action}", first_line)
 

@@ -4,7 +4,7 @@ from telegram import Bot
 from telegram.ext import ContextTypes
 
 from config import load_config
-from keyboards import back_admin
+from core.keyboards import back_admin
 
 
 async def _notify_user(bot: Bot, tg_id: int | None, text: str):
@@ -80,7 +80,7 @@ async def handle_presets_menu(query):
     cfg = load_config()
     squad_names = {}
     if cfg.get("rw_squads"):
-        import remnawave as rw
+        import services.remnawave as rw
         got = await rw.list_squads()
         if got.get("ok"):
             for sq in got["squads"]:
@@ -97,7 +97,7 @@ async def handle_presets_menu(query):
 
 
 async def handle_preset_expire(query, context: ContextTypes.DEFAULT_TYPE):
-    from states import AWAITING_PRESET_EXPIRE
+    from core.states import AWAITING_PRESET_EXPIRE
     context.user_data["state"] = AWAITING_PRESET_EXPIRE
     await query.edit_message_text(
         "📅 <b>Дата окончания</b>\n\nВведи в формате <code>дд.мм.гггг</code>:",
@@ -107,7 +107,7 @@ async def handle_preset_expire(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_preset_hwid(query, context: ContextTypes.DEFAULT_TYPE):
-    from states import AWAITING_PRESET_HWID
+    from core.states import AWAITING_PRESET_HWID
     context.user_data["state"] = AWAITING_PRESET_HWID
     await query.edit_message_text(
         "🖥 <b>Лимит устройств</b>\n\nВведи число (0 = безлимит):",
@@ -117,7 +117,7 @@ async def handle_preset_hwid(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_preset_traffic(query, context: ContextTypes.DEFAULT_TYPE):
-    from states import AWAITING_PRESET_TRAFFIC
+    from core.states import AWAITING_PRESET_TRAFFIC
     context.user_data["state"] = AWAITING_PRESET_TRAFFIC
     await query.edit_message_text(
         "📶 <b>Трафик (ГБ)</b>\n\nВведи число в ГБ или <code>-</code> для безлимита:",
@@ -127,7 +127,7 @@ async def handle_preset_traffic(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_preset_lte(query, context: ContextTypes.DEFAULT_TYPE):
-    from states import AWAITING_PRESET_LTE
+    from core.states import AWAITING_PRESET_LTE
     context.user_data["state"] = AWAITING_PRESET_LTE
     cfg = load_config()
     cur = cfg.get("preset_lte")
@@ -151,7 +151,7 @@ async def handle_create_sub(query, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=back_admin(),
         )
         return
-    from states import AWAITING_SUB_TG_ID
+    from core.states import AWAITING_SUB_TG_ID
     context.user_data["state"] = AWAITING_SUB_TG_ID
     await query.edit_message_text(
         "👤 <b>Введи Telegram ID пользователя</b>\n\n"
@@ -167,8 +167,8 @@ async def do_create_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_
     cfg = load_config()
     await reply_func("⏳ Создаю подписку…")
 
-    from panel import create_client, build_email
-    from database import get_user_info
+    from services.panel import create_client, build_email
+    from core.database import get_user_info
     user_row = await get_user_info(tg_id)
     username = user_row[2] if user_row else None
     email = build_email(tg_id, username)
@@ -234,7 +234,7 @@ def _fmt_bytes(b: int) -> str:
 
 
 def _lte_label(row) -> str:
-    from remnawave import lte_limit_label
+    from services.remnawave import lte_limit_label
     sub_lte = row[11] if len(row) > 11 else None
     return lte_limit_label(sub_lte, load_config().get("preset_lte"))
 
@@ -251,7 +251,7 @@ async def handle_sub_view(query, sub_id: int):
     _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _ip, limit_hwid, total_gb, created_at = row
 
     # расход и статус спрашиваем у панели: в базе их нет
-    from panel import get_client_traffic, get_client_info
+    from services.panel import get_client_traffic, get_client_info
     t = await get_client_traffic(email)
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
     if t.get("success"):
@@ -266,7 +266,7 @@ async def handle_sub_view(query, sub_id: int):
     status_label = "активна" if enabled else "отключена"
 
     # кто это
-    from database import get_user_info
+    from core.database import get_user_info
     user_info = await get_user_info(tg_id) if tg_id else None
     uname = user_info[2] if user_info and user_info[2] else None
     shown = escape(str(user_info[1])) if user_info and user_info[1] else str(tg_id or "—")
@@ -321,7 +321,7 @@ async def handle_sub_toggle(query, sub_id: int, context=None):
         return
     tg_id = row[1]
     email = row[2]
-    from panel import get_client_info, toggle_client
+    from services.panel import get_client_info, toggle_client
     info = await get_client_info(email)
     if not info.get("success"):
         await query.answer("❌ Клиент не найден в панели", show_alert=True)
@@ -352,7 +352,7 @@ async def handle_sub_delete(query, sub_id: int, context=None):
     email = row[2] if row else None
 
     if email:
-        from panel import delete_client
+        from services.panel import delete_client
         await query.edit_message_text("⏳ Удаляю из панели...")
         panel_result = await delete_client(email)
         panel_status = "✅ удалена из панели" if panel_result["success"] else f"⚠️ панель: {panel_result.get('error', '?')}"
@@ -382,7 +382,7 @@ async def handle_sub_settings(query, sub_id: int):
     _, tg_id, email, _, _, _, expire, _limit_ip, limit_hwid, total_gb, _ = row[:11]
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
     hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
-    from remnawave import lte_limit_label
+    from services.remnawave import lte_limit_label
     sub_lte = row[11] if len(row) > 11 else None
     lte_str = lte_limit_label(sub_lte, load_config().get("preset_lte"))
     await query.edit_message_text(
@@ -400,7 +400,7 @@ async def handle_sub_settings(query, sub_id: int):
 
 
 async def handle_sub_edit_expire(query, sub_id: int, context):
-    from states import AWAITING_SUB_EDIT_EXPIRE
+    from core.states import AWAITING_SUB_EDIT_EXPIRE
     context.user_data["state"] = AWAITING_SUB_EDIT_EXPIRE
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -412,7 +412,7 @@ async def handle_sub_edit_expire(query, sub_id: int, context):
 
 
 async def handle_sub_edit_hwid(query, sub_id: int, context):
-    from states import AWAITING_SUB_EDIT_HWID
+    from core.states import AWAITING_SUB_EDIT_HWID
     context.user_data["state"] = AWAITING_SUB_EDIT_HWID
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -423,7 +423,7 @@ async def handle_sub_edit_hwid(query, sub_id: int, context):
 
 
 async def handle_sub_edit_traffic(query, sub_id: int, context):
-    from states import AWAITING_SUB_EDIT_TRAFFIC
+    from core.states import AWAITING_SUB_EDIT_TRAFFIC
     context.user_data["state"] = AWAITING_SUB_EDIT_TRAFFIC
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -434,12 +434,12 @@ async def handle_sub_edit_traffic(query, sub_id: int, context):
 
 
 async def handle_sub_edit_lte(query, sub_id: int, context):
-    from states import AWAITING_SUB_EDIT_LTE
+    from core.states import AWAITING_SUB_EDIT_LTE
     context.user_data["state"] = AWAITING_SUB_EDIT_LTE
     context.user_data["edit_sub_id"] = sub_id
     row = await get_sub(sub_id)
     sub_lte = row[11] if row and len(row) > 11 else None
-    from remnawave import lte_limit_label
+    from services.remnawave import lte_limit_label
     cur = lte_limit_label(sub_lte, load_config().get("preset_lte"))
     await query.edit_message_text(
         f"🌐 <b>LTE-трафик подписки #{sub_id} (ГБ в месяц)</b>\n\n"
@@ -454,7 +454,7 @@ async def handle_sub_edit_lte(query, sub_id: int, context):
 # ── Срок: добавить и убавить ──────────────────────────────────────────────────
 
 async def handle_sub_extend(query, sub_id: int, context):
-    from states import AWAITING_SUB_EXTEND
+    from core.states import AWAITING_SUB_EXTEND
     context.user_data["state"] = AWAITING_SUB_EXTEND
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -464,7 +464,7 @@ async def handle_sub_extend(query, sub_id: int, context):
 
 
 async def handle_sub_reduce(query, sub_id: int, context):
-    from states import AWAITING_SUB_REDUCE
+    from core.states import AWAITING_SUB_REDUCE
     context.user_data["state"] = AWAITING_SUB_REDUCE
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -480,7 +480,7 @@ async def shift_sub_expire(sub_id: int, seconds: int, direction: int, context) -
     «добавить неделю» просроченной подписке ничего бы не дало.
     """
     from datetime import datetime, timedelta
-    from panel import update_client_expire, get_client_info, toggle_client
+    from services.panel import update_client_expire, get_client_info, toggle_client
     from paidsub.time_parser import fmt_duration
 
     row = await get_sub(sub_id)
@@ -561,7 +561,7 @@ async def handle_sub_devices(query, sub_id: int):
     """Устройства, которые панель запомнила по этой подписке."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import get_client_hwids
+    from services.panel import get_client_hwids
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -603,7 +603,7 @@ async def handle_sub_devices(query, sub_id: int):
 
 
 async def handle_sub_hwid_del(query, context, sub_id: int, ref: str):
-    from panel import delete_client_hwid, resolve_hwid
+    from services.panel import delete_client_hwid, resolve_hwid
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -621,7 +621,7 @@ async def handle_sub_hwid_del(query, context, sub_id: int, ref: str):
 
 
 async def handle_sub_hwid_clear(query, context, sub_id: int):
-    from panel import clear_client_hwids
+    from services.panel import clear_client_hwids
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -643,7 +643,7 @@ async def handle_sub_ips(query, sub_id: int):
     """С каких адресов подключалась подписка."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import get_client_ips
+    from services.panel import get_client_ips
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -680,7 +680,7 @@ async def handle_sub_reissue(query, context, sub_id: int):
     """Меняет ссылку подписки. Старая перестаёт работать, поэтому спрашиваем."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import reissue_subscription
+    from services.panel import reissue_subscription
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -705,7 +705,7 @@ async def handle_sub_reissue(query, context, sub_id: int):
     await update_sub_field(sub_id, "sub_id", result.get("sub_id", ""))
     await update_sub_field(sub_id, "sub_url", new_url)
 
-    from log_channel import send_log
+    from core.log_channel import send_log
     await send_log(context.bot,
                    f"🔁 Перевыпущен ключ админской подписки #{sub_id} "
                    f"(<code>{escape(email)}</code>)")
@@ -746,7 +746,7 @@ async def refresh_panel_names(context=None) -> dict:
     клиента узнаёшь в панели. Если есть доступ к боту, ники проверяются
     живой проверкой в Telegram, а не берутся из базы.
     """
-    from panel import refresh_panel_descriptions, tg_chat_resolver
+    from services.panel import refresh_panel_descriptions, tg_chat_resolver
     bot = getattr(context, "bot", None) if context else None
     resolver = await tg_chat_resolver(bot) if bot else None
     res = await refresh_panel_descriptions(("admin_subs",),
@@ -758,7 +758,7 @@ async def refresh_panel_names(context=None) -> dict:
 async def handle_subs_names_sync(query, context):
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    import remnawave as rw
+    import services.remnawave as rw
     if not rw.is_configured():
         await query.answer("Сначала задай адрес панели и токен", show_alert=True)
         return

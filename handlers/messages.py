@@ -4,9 +4,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from config import ADMIN_ID, load_config, save_config
-from database import add_support_message, get_support_messages
-from keyboards import back_admin, support_keyboard
-from states import (
+from core.database import add_support_message, get_support_messages
+from core.keyboards import back_admin, support_keyboard
+from core.states import (
     AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
@@ -77,7 +77,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     is_admin = user.id == ADMIN_ID
     # Ввод помощника: ответ в тикет, поиск юзера, сообщение юзеру
-    from staff import HELPER_STATES, is_helper, helper_states, staff_chat_ids
+    from features.staff import HELPER_STATES, is_helper, helper_states, staff_chat_ids
     helper_input = state in HELPER_STATES and not is_admin
     # право могли снять, пока ввод был не закончен
     if helper_input and is_helper(user.id) and state not in helper_states(user.id):
@@ -91,7 +91,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Техработы и выключенные функции ─────────────────────────────────────
     if not is_admin and not helper_input:
-        import maintenance as mnt
+        import core.maintenance as mnt
         if mnt.is_maintenance():
             context.user_data.pop("state", None)
             await mnt.show_maintenance(message=update.message)
@@ -113,7 +113,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                             disable_web_page_preview=True)
             return
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from database import get_unread_tickets_count, ticket_opened, count_support_files
+        from core.database import get_unread_tickets_count, ticket_opened, count_support_files
         from handlers.support import topic_label
         topic = context.user_data.pop("support_topic", None)
         await add_support_message(user.id, text, from_admin=False)
@@ -127,7 +127,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=support_keyboard(total_pages, total_pages, has_files),
         )
         from html import escape
-        from log_channel import send_log
+        from core.log_channel import send_log
         # имя и текст пишет человек: «<» без экранирования срывает отправку целиком
         who = escape(str(user.first_name or user.id))
         await send_log(context.bot,
@@ -162,7 +162,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Чёрный список: писать можно только в поддержку (она выше) ────────────
     if not is_admin and not helper_input:
-        from blacklist import entry as bl_entry, show_blocked
+        from features.blacklist import entry as bl_entry, show_blocked
         ble = await bl_entry(user.id)
         if ble:
             context.user_data.pop("state", None)
@@ -203,7 +203,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if kind == "days":
             # подарочные дни начисляем сразу — платить за них не нужно
             from paidsub.storage import record_promo_use
-            from promos import apply_days
+            from features.promos import apply_days
             days = promo[9] if len(promo) > 9 else 0
             res = await apply_days(user.id, days)
             if not res.get("ok"):
@@ -310,7 +310,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Пользователь не найден.", reply_markup=back_admin())
             return
         await add_support_message(reply_to, text, from_admin=True)
-        from database import ticket_answered
+        from core.database import ticket_answered
         await ticket_answered(reply_to)
         delivered = True
         try:
@@ -344,7 +344,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Адрес должен начинаться с http.",
                                             reply_markup=back_admin())
             return
-        from remnawave import save_settings
+        from services.remnawave import save_settings
         save_settings(rw_url=url)
         context.user_data.pop("state", None)
         await update.message.reply_text(
@@ -357,7 +357,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == AWAITING_RW_TOKEN:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from remnawave import save_settings
+        from services.remnawave import save_settings
         save_settings(rw_token=text.strip())
         context.user_data.pop("state", None)
         # токен не должен остаться в переписке
@@ -376,7 +376,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == AWAITING_RW_USAGE_PERIOD:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from remnawave import parse_custom_period, _period_label
+        from services.remnawave import parse_custom_period, _period_label
         parsed = parse_custom_period(text)
         if not parsed:
             await update.message.reply_text(
@@ -434,7 +434,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == AWAITING_PANEL_SYNC_INTERVAL:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from remnawave import _parse_interval_hours, panel_sync_schedule_text
+        from services.remnawave import _parse_interval_hours, panel_sync_schedule_text
         from config import load_config, save_config
         hours = _parse_interval_hours(text)
         if hours is None:
@@ -573,7 +573,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         note = ""
         if sub_id:
             from adminsub.storage import update_sub_field, get_sub
-            from panel import update_client_expire
+            from services.panel import update_client_expire
             await update_sub_field(sub_id, "expire_date", text)
             row = await get_sub(sub_id)
             # без этого дата менялась только в базе, а панель жила со старой
@@ -594,7 +594,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         note = ""
         if sub_id:
             from adminsub.storage import update_sub_field, get_sub
-            from panel import update_client_limits
+            from services.panel import update_client_limits
             await update_sub_field(sub_id, "limit_hwid", int(text))
             row = await get_sub(sub_id)
             if row:
@@ -620,7 +620,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         note = ""
         if sub_id:
             from adminsub.storage import update_sub_field, get_sub
-            from panel import update_client_traffic
+            from services.panel import update_client_traffic
             await update_sub_field(sub_id, "total_gb", val)
             row = await get_sub(sub_id)
             if row:
@@ -768,7 +768,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state == AWAITING_SITE_TEXT:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from site_deploy import save_site_text, get_site_field_name, get_field_section
+        from web.site_deploy import save_site_text, get_site_field_name, get_field_section
         field = context.user_data.get("site_text_field", "")
         sec_id = context.user_data.get("site_text_sec") or get_field_section(field)
         context.user_data.pop("state", None)
@@ -795,7 +795,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  AWAITING_SITE_DOMAIN):
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         from html import escape
-        from site_deploy import save_creds, check_connection
+        from web.site_deploy import save_creds, check_connection
         back = InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")]])
 
@@ -935,7 +935,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 from paidsub.storage import set_expire_date
                 await set_expire_date(sub_id, new_expire_str)
                 await update_paid_sub_field(sub_id, "status", "active")
-                from panel import update_client_expire, toggle_client, get_client_info
+                from services.panel import update_client_expire, toggle_client, get_client_info
                 pushed = await update_client_expire(row[2], new_expire_str)
                 if not pushed.get("success"):
                     await update.message.reply_text(
@@ -1004,7 +1004,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
                 from paidsub.storage import set_expire_date
                 await set_expire_date(sub_id, new_expire_str)
-                from panel import update_client_expire
+                from services.panel import update_client_expire
                 await update_client_expire(row[2], new_expire_str)
                 from paidsub.time_parser import fmt_duration as fmt_dur
                 await update.message.reply_text(
@@ -1095,7 +1095,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update_paid_sub_field(sub_id, "status", "active")
             r = await get_paid_sub(sub_id)
             if r:
-                from panel import update_client_expire
+                from services.panel import update_client_expire
                 await update_client_expire(r[2], text)
                 from paidsub.storage import add_history
                 await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: дата окончания → {text}")
@@ -1154,7 +1154,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if sub_id:
             from paidsub.storage import (update_paid_sub_field, get_paid_sub,
                                          add_history, get_paid_sub_by_tg_id)
-            from panel import update_client_limits
+            from services.panel import update_client_limits
             r = await get_paid_sub(sub_id)
             # оплаченные устройства идут сверх лимита, который ставит админ
             extra = 0
@@ -1190,7 +1190,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         panel_note = ""
         if sub_id:
             from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
-            from panel import update_client_traffic
+            from services.panel import update_client_traffic
             await update_paid_sub_field(sub_id, "total_gb", val)
             r = await get_paid_sub(sub_id)
             if r:
@@ -1277,7 +1277,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Личный кабинет ────────────────────────────────────────────────────────
     if state in (AWAITING_CABINET_PORT, AWAITING_CABINET_PUBLIC,
                  AWAITING_CABINET_UPSTREAM) and is_admin:
-        from webapi import handle_cabinet_input
+        from web.webapi import handle_cabinet_input
         await handle_cabinet_input(update, context, state, text)
         return
 
@@ -1295,7 +1295,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Новый помощник ────────────────────────────────────────────────────────
     if state == AWAITING_HELPER_ID and is_admin:
-        from staff import handle_helper_input
+        from features.staff import handle_helper_input
         await handle_helper_input(update, context, text)
         return
 
@@ -1303,7 +1303,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # помощник с правом на ЧС тоже вводит — право проверено выше
     if state in (AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK,
                  AWAITING_BL_UNTIL) and (is_admin or helper_input):
-        from blacklist import handle_bl_input
+        from features.blacklist import handle_bl_input
         await handle_bl_input(update, context, state, text)
         return
 
@@ -1312,7 +1312,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                  AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
                  AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE,
                  AWAITING_PROMO_FIND) and is_admin:
-        from promos import handle_promo_input
+        from features.promos import handle_promo_input
         await handle_promo_input(update, context, state, text)
         return
 
@@ -1387,7 +1387,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Адрес узла ───────────────────────────────────────────────────────────
     if state == AWAITING_MAINTENANCE_TEXT:
-        from maintenance import apply_maintenance_text
+        from core.maintenance import apply_maintenance_text
         await apply_maintenance_text(update.message, context)
         return
 
@@ -1428,7 +1428,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Пришли сумму целым числом в рублях, например <code>500</code>.",
                 parse_mode="HTML")
             return
-        from database import get_payment_full, get_partial_refunded
+        from core.database import get_payment_full, get_partial_refunded
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         p = await get_payment_full(pid)
         if not p or p[7] != "paid":
@@ -1465,7 +1465,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="HTML",
                 )
                 from html import escape
-                from log_channel import send_log
+                from core.log_channel import send_log
                 await send_log(context.bot,
                     f"📌 Админ → <code>{dm_target}</code>: {escape(text[:100])}"
                 )
@@ -1487,7 +1487,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     is_admin = user.id == ADMIN_ID
     msg = update.message
-    from staff import is_helper, staff_chat_ids
+    from features.staff import is_helper, staff_chat_ids
     helper_reply = state == AWAITING_ADMIN_REPLY and not is_admin
     if helper_reply and not is_helper(user.id):
         # доступ сняли, пока ответ был не закончен
@@ -1495,7 +1495,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state, helper_reply = None, False
 
     if not is_admin and not helper_reply:
-        import maintenance as mnt
+        import core.maintenance as mnt
         if mnt.is_maintenance():
             context.user_data.pop("state", None)
             await mnt.show_maintenance(message=msg)
@@ -1529,7 +1529,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Файл с бэкапом ──────────────────────────────────────────────────────
     if is_admin and state == AWAITING_BACKUP_FILE:
-        from backup import offer_restore
+        from features.backup import offer_restore
         context.user_data.pop("state", None)
         if not msg.document:
             await msg.reply_text("📥 Пришли именно файл .zip, который выгружал бот.")
@@ -1547,7 +1547,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Логотип для сайта ───────────────────────────────────────────────────
     if is_admin and state == AWAITING_SITE_LOGO:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from site_deploy import process_logo, save_logo
+        from web.site_deploy import process_logo, save_logo
         context.user_data.pop("state", None)
         tg_file = await context.bot.get_file(file_id)
         raw = bytes(await tg_file.download_as_bytearray())
@@ -1577,8 +1577,8 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Юзер отправляет файл в поддержку ────────────────────────────────────
     if state == AWAITING_SUPPORT_MSG and not is_admin:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from database import get_unread_tickets_count, get_support_messages, count_support_files
-        from database import ticket_opened
+        from core.database import get_unread_tickets_count, get_support_messages, count_support_files
+        from core.database import ticket_opened
         text_to_save = caption if caption else fallback_label
         await add_support_message(user.id, text_to_save, from_admin=False,
                                   file_id=file_id, file_type=file_type)
@@ -1592,7 +1592,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=support_keyboard(total_pages, total_pages, has_files),
         )
         from html import escape
-        from log_channel import send_log
+        from core.log_channel import send_log
         # имя и подпись к файлу задаёт человек — экранируем, иначе уведомление не уйдёт
         who = escape(str(user.first_name or user.id))
         await send_log(context.bot,
@@ -1636,7 +1636,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text_to_save = caption if caption else fallback_label
         await add_support_message(reply_to, text_to_save, from_admin=True,
                                   file_id=file_id, file_type=file_type)
-        from database import ticket_answered
+        from core.database import ticket_answered
         await ticket_answered(reply_to)
         delivered = True
         try:

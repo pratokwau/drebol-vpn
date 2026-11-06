@@ -11,11 +11,11 @@ from __future__ import annotations
 from datetime import datetime
 from html import escape
 
-from database import (
+from core.database import (
     get_support_messages, count_support_files, get_support_files,
     get_ticket, ticket_closed,
 )
-from keyboards import support_keyboard, support_topics_keyboard
+from core.keyboards import support_keyboard, support_topics_keyboard
 
 # Темы обращения: эмодзи, название и подсказка, которую бот даёт до переписки.
 # Кнопки в подсказке ведут туда, где вопрос решается сам.
@@ -103,7 +103,7 @@ def support_button(text: str = "💬 Поддержка", force: bool = False):
     None означает, что кнопки быть не должно.
     """
     from telegram import InlineKeyboardButton
-    import maintenance as mnt
+    import core.maintenance as mnt
     if not force and not mnt.feature_enabled("support"):
         return None
     if contact_mode():
@@ -243,7 +243,7 @@ async def show_topic_hint(query, context, topic: str):
 async def start_writing(query, context, topic: str):
     """Ставит тему и ждёт текст обращения."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from states import AWAITING_SUPPORT_MSG
+    from core.states import AWAITING_SUPPORT_MSG
     if contact_mode():
         text, kb = contact_screen()
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb,
@@ -313,7 +313,7 @@ def _valid_contact(raw: str) -> str:
 async def handle_support_settings(query, context=None, note: str = ""):
     """Две поддержки на выбор: переписка в боте или аккаунт в телеграме."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from database import get_unread_tickets_count, ticket_counts
+    from core.database import get_unread_tickets_count, ticket_counts
     if context:
         context.user_data.pop("state", None)
     mode = support_mode()
@@ -368,7 +368,7 @@ async def handle_support_mode(query, context, mode: str):
     cfg = load_config()
     cfg["support_mode"] = MODE_CONTACT if mode == MODE_CONTACT else MODE_TICKETS
     save_config(cfg)
-    from log_channel import send_log
+    from core.log_channel import send_log
     await send_log(context.bot, "💬 Поддержка: " + (
         f"переключена на аккаунт @{support_contact()}" if mode == MODE_CONTACT
         else "переписка в боте"))
@@ -380,7 +380,7 @@ async def handle_support_mode(query, context, mode: str):
 
 async def handle_support_contact_ask(query, context, note: str = ""):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from states import AWAITING_SUPPORT_CONTACT
+    from core.states import AWAITING_SUPPORT_CONTACT
     context.user_data["state"] = AWAITING_SUPPORT_CONTACT
     name = support_contact()
     await query.edit_message_text(

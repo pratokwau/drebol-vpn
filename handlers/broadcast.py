@@ -2,9 +2,9 @@ import re
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from database import get_users_by_segment
-from keyboards import cancel_admin
-from states import AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO
+from core.database import get_users_by_segment
+from core.keyboards import cancel_admin
+from core.states import AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO
 
 # В подпись к картинке Telegram пускает 1024 символа, в обычное сообщение — 4096
 CAPTION_LIMIT = 1024
@@ -351,7 +351,7 @@ async def handle_bcast_edit_text(query, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_bcast_cancel(query, context: ContextTypes.DEFAULT_TYPE):
     _reset(context)
-    from keyboards import back_admin
+    from core.keyboards import back_admin
     await query.edit_message_text(
         "❌ <b>Рассылка отменена</b>", parse_mode="HTML",
         reply_markup=back_admin(),
@@ -377,8 +377,8 @@ async def handle_bcast_send(query, context: ContextTypes.DEFAULT_TYPE):
     )
     ok, fail = await do_broadcast(context.bot, text, segment, build_markup(spec), photo)
 
-    from keyboards import back_admin
-    from log_channel import send_log
+    from core.keyboards import back_admin
+    from core.log_channel import send_log
     await send_log(context.bot,
         f"📣 Рассылка ({SEGMENTS.get(segment, segment)}): "
         f"доставлено {ok}, ошибок {fail}"

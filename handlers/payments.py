@@ -5,7 +5,7 @@ from datetime import datetime
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from database import (
+from core.database import (
     payments_summary, list_payments, get_payment_full, user_payments,
 )
 from paidsub.time_parser import fmt_duration
@@ -156,7 +156,7 @@ async def handle_payment_view(query, payment_id: int):
     if status == "pending" and pay_url:
         kb.append([InlineKeyboardButton("🔗 Ссылка на оплату", url=pay_url)])
     if provider == "platega" and status == "paid" and ext_id:
-        from database import get_partial_refunded
+        from core.database import get_partial_refunded
         partial = await get_partial_refunded(p_id)
         if partial:
             lines.append(f"↩️ Частично возвращено: <b>{partial} ₽</b> "
@@ -236,8 +236,8 @@ async def run_payment_sync(context) -> dict:
       сумму в кабинете Platega руками.
     Срок подписок не трогается: частичный возврат его не меняет.
     """
-    import platega_api as pg
-    from database import (get_refund_watchlist, get_partial_refunded,
+    import services.platega_api as pg
+    from core.database import (get_refund_watchlist, get_partial_refunded,
                           set_partial_refunded, get_payment_full)
     if not pg.is_configured():
         return {"ok": False, "error": "Platega не настроена"}
@@ -313,7 +313,7 @@ async def handle_payment_sync_run(query, context):
 
 async def handle_refund_start(query, payment_id: int):
     """Проверяет, можно ли вернуть платёж, и спрашивает, что делать со сроком."""
-    import platega_api as pg
+    import services.platega_api as pg
     p = await get_payment_full(payment_id)
     if not p:
         await query.answer("Платёж не найден", show_alert=True)
@@ -372,8 +372,8 @@ async def handle_refund_start(query, payment_id: int):
 
 async def handle_refund_do(query, context: ContextTypes.DEFAULT_TYPE,
                            payment_id: int, revoke: bool):
-    import platega_api as pg
-    from database import mark_refund_pending
+    import services.platega_api as pg
+    from core.database import mark_refund_pending
 
     p = await get_payment_full(payment_id)
     if not p or p[7] != "paid":
@@ -422,8 +422,8 @@ async def handle_refund_partial_start(query, context, payment_id: int):
     сколько ещё можно вернуть (Platega и сама не даст превысить остаток:
     AMOUNT_EXCEEDS_REFUNDABLE).
     """
-    import platega_api as pg
-    from database import get_partial_refunded
+    import services.platega_api as pg
+    from core.database import get_partial_refunded
     p = await get_payment_full(payment_id)
     if not p:
         await query.answer("Платёж не найден", show_alert=True)
@@ -467,7 +467,7 @@ async def handle_refund_partial_start(query, context, payment_id: int):
             parse_mode="HTML", reply_markup=back)
         return
 
-    from states import AWAITING_REFUND_PARTIAL
+    from core.states import AWAITING_REFUND_PARTIAL
     if context is not None:
         context.user_data["state"] = AWAITING_REFUND_PARTIAL
         context.user_data["refund_partial_payment"] = p_id
@@ -489,9 +489,9 @@ async def handle_refund_partial_start(query, context, payment_id: int):
 
 
 async def handle_refund_partial_do(query, context, payment_id: int, amount: int):
-    import platega_api as pg
-    from database import add_partial_refunded, get_partial_refunded
-    from log_channel import send_log
+    import services.platega_api as pg
+    from core.database import add_partial_refunded, get_partial_refunded
+    from core.log_channel import send_log
     from config import ADMIN_ID
 
     p = await get_payment_full(payment_id)
@@ -566,8 +566,8 @@ async def finalize_refund(context, payment_id: int, revoke: bool | None = None) 
     refund_revokes_period.
     """
     from config import load_config, ADMIN_ID
-    from database import claim_refund, get_refund_revoke
-    from log_channel import send_log
+    from core.database import claim_refund, get_refund_revoke
+    from core.log_channel import send_log
 
     p = await get_payment_full(payment_id)
     if not p:

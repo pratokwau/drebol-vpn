@@ -367,8 +367,8 @@ async def log_update(update, context):
     Хранится только тип действия — какая кнопка, команда или вид сообщения.
     Текст сообщений не сохраняется: обращения в поддержку и так лежат в тикетах.
     """
-    from staff import is_staff
-    from database import log_activity
+    from features.staff import is_staff
+    from core.database import log_activity
     try:
         user = update.effective_user
         if not user:
@@ -406,8 +406,8 @@ def _back(cb: str, label: str = "◀️ К контролю") -> list:
 async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
     if context:
         context.user_data.pop("state", None)
-    from database import activity_summary, control_today
-    from panel import get_online_emails
+    from core.database import activity_summary, control_today
+    from services.panel import get_online_emails
 
     s = await activity_summary()
     t = await control_today()
@@ -536,7 +536,7 @@ async def _subs_feed(page: int, tg_id: int | None = None):
 
 async def handle_activity_feed(query, scope: str = "all", page: int = 1):
     from config import ADMIN_ID
-    from database import list_activity
+    from core.database import list_activity
     if scope not in FEED_TITLES:
         scope = "all"
 
@@ -577,7 +577,7 @@ async def handle_activity_feed(query, scope: str = "all", page: int = 1):
 
 async def handle_hist_entry(target, entry_id: int, edit: bool = True):
     """Подробности записи истории подписок."""
-    from database import get_user_info
+    from core.database import get_user_info
     from paidsub.storage import get_history_entry
     entry = await get_history_entry(entry_id)
     if not entry:
@@ -607,7 +607,7 @@ async def handle_hist_entry(target, entry_id: int, edit: bool = True):
 
 async def hist_command(update, context):
     """/h123 из ленты истории — подробности записи одним нажатием."""
-    from staff import helper_can, is_helper
+    from features.staff import helper_can, is_helper
     from config import ADMIN_ID
     uid = update.effective_user.id
     if uid != ADMIN_ID and not (is_helper(uid) and helper_can("ctl_hist:0", uid)):
@@ -622,7 +622,7 @@ USER_TABS = {"all": "📜 Всё", "important": "⭐ Важное", "subs": "�
 
 async def handle_user_activity(query, tg_id: int, page: int = 1, scope: str = "all"):
     """Что человек делал в боте — то же, что в «Контроле», но про одного."""
-    from database import get_user_info, list_activity
+    from core.database import get_user_info, list_activity
     if scope not in USER_TABS:
         scope = "all"
     u = await get_user_info(tg_id)
@@ -657,8 +657,8 @@ async def handle_user_activity(query, tg_id: int, page: int = 1, scope: str = "a
 
 
 async def handle_online(query):
-    from panel import get_online_emails
-    from database import users_by_emails
+    from services.panel import get_online_emails
+    from core.database import users_by_emails
     await query.edit_message_text("🔌 Спрашиваю панель...")
     r = await get_online_emails()
     kb = InlineKeyboardMarkup([
@@ -694,7 +694,7 @@ async def handle_traffic(query, context=None):
     """Старое имя экрана «Трафик»: теперь это тот же единый экран, что и
     «Потребление ГБ» — сводка за всё время плюс потребление по узлам
     и периодам. Алиас оставлен для старых клавиатур и selftest."""
-    from remnawave import handle_rw_usage
+    from services.remnawave import handle_rw_usage
     await handle_rw_usage(query, context)
 
 
@@ -709,8 +709,8 @@ def digest_time_text(cfg: dict) -> str:
 
 
 async def build_digest(day_offset: int = 1) -> str:
-    from database import digest_stats
-    from panel import get_online_emails
+    from core.database import digest_stats
+    from services.panel import get_online_emails
     d = await digest_stats(day_offset)
     online = await get_online_emails()
 
@@ -767,7 +767,7 @@ async def digest_tick(context):
     caption = (text + "\n\n💾 К сводке приложен свежий бэкап дня "
                "(внутри ключи — не пересылай).")
     try:
-        from backup import make_archive
+        from features.backup import make_archive
         blob, name, _counts = make_archive()
         if len(caption) > 1024:
             raise ValueError("подпись длиннее 1024 символов")
@@ -783,7 +783,7 @@ async def digest_tick(context):
 
 
 async def purge_tick(context):
-    from database import purge_activity
+    from core.database import purge_activity
     days = int(load_config().get("activity_retention_days", 90) or 90)
     await purge_activity(days)
 
@@ -817,7 +817,7 @@ async def handle_digest_hour_menu(query):
 
 async def handle_digest_custom(query, context):
     """Просит ввести своё время сводки текстом: час или час и минуты."""
-    from states import AWAITING_DIGEST_HOUR
+    from core.states import AWAITING_DIGEST_HOUR
     context.user_data["state"] = AWAITING_DIGEST_HOUR
     await query.edit_message_text(
         "🕘 <b>Своё время сводки</b>\n\n"
@@ -878,7 +878,7 @@ async def handle_digest_now(query, context):
         reply_markup=InlineKeyboardMarkup([_back("ctl_menu")]),
     )
     try:
-        from backup import make_archive
+        from features.backup import make_archive
         blob, name, _counts = make_archive()
         await context.bot.send_document(
             chat_id=query.from_user.id, document=io.BytesIO(blob), filename=name,
@@ -917,7 +917,7 @@ def last_seen_text(ms) -> str:
 
 
 async def handle_connect_help_menu(query, context=None):
-    from database import connect_help_stats
+    from core.database import connect_help_stats
     cfg = load_config()
     on = cfg.get("connect_help_enabled", True)
     hours = int(cfg.get("connect_help_hours", 3))
@@ -968,12 +968,12 @@ async def connect_help_tick(context):
     пересоздаёт клиента в панели, и её счётчик подключений обнуляется.
     """
     from config import ADMIN_ID
-    import maintenance as mnt
-    from database import (
+    import core.maintenance as mnt
+    from core.database import (
         recent_subs_for_connect_help, mark_connect_help, log_activity,
     )
-    from blacklist import is_blacklisted
-    from panel import get_last_online
+    from features.blacklist import is_blacklisted
+    from services.panel import get_last_online
 
     cfg = load_config()
     if not cfg.get("connect_help_enabled", True) or mnt.is_maintenance():

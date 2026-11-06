@@ -8,8 +8,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from config import load_config, save_config
-from keyboards import back_admin
-from states import AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET
+from core.keyboards import back_admin
+from core.states import AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET
 
 
 def provider_label() -> str:
@@ -18,7 +18,7 @@ def provider_label() -> str:
 
 def provider_line() -> str:
     """Строка о платёжке для админских экранов."""
-    import platega_api as pg
+    import services.platega_api as pg
     cfg = load_config()
     if not pg.is_configured():
         return "💳 Platega  ·  ⚠️ <b>ключи не заданы</b>"
@@ -39,7 +39,7 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
         context.user_data.pop("state", None)
     cfg = load_config()
 
-    import platega_api as pg
+    import services.platega_api as pg
     ready = pg.is_configured()
     method_id = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
     lines = ["💳 <b>Платёжная система</b>", "",
@@ -92,7 +92,7 @@ async def handle_platega_set_secret(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_platega_methods(query, context: ContextTypes.DEFAULT_TYPE):
-    import platega_api as pg
+    import services.platega_api as pg
     cfg = load_config()
     cur = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
     rows = [
@@ -120,7 +120,7 @@ async def handle_platega_method_set(query, context: ContextTypes.DEFAULT_TYPE, c
 
 
 async def handle_platega_test(query, context: ContextTypes.DEFAULT_TYPE):
-    import platega_api as pg
+    import services.platega_api as pg
     await query.edit_message_text("🔌 Проверяю подключение к Platega…")
     r = await pg.test_connection()
     if r["ok"]:

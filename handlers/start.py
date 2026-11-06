@@ -3,22 +3,22 @@ from html import escape
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID
-from database import upsert_user
-from subscription import is_subscribed, subscribe_keyboard, subscribe_text
+from core.database import upsert_user
+from core.subscription import is_subscribed, subscribe_keyboard, subscribe_text
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop("state", None)
     user = update.effective_user
 
-    from database import get_user_info
+    from core.database import get_user_info
     is_new = not await get_user_info(user.id)
     await upsert_user(user.id, user.first_name, user.username)
     if is_new:
-        from database import log_activity
+        from core.database import log_activity
         await log_activity(user.id, "ev:registered",
                            context.args[0] if context.args else None)
-        from log_channel import send_log
+        from core.log_channel import send_log
         # имя человек задаёт сам — без экранирования запись в лог-канал пропадёт
         uname = escape(f"@{user.username}" if user.username else f"id{user.id}")
         await send_log(context.bot,
@@ -39,17 +39,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Техработы: пользователь видит сообщение, админ работает как обычно.
     # Регистрацию и реферала выше сохраняем, иначе пришедшие во время работ потеряются.
     # Помощник проходит, чтобы попасть в панель поддержки.
-    from staff import is_helper
+    from features.staff import is_helper
     helper = is_helper(user.id)
     if user.id != ADMIN_ID and not helper:
-        import maintenance as mnt
+        import core.maintenance as mnt
         if mnt.is_maintenance():
             await mnt.show_maintenance(message=update.message)
             return
 
     # Чёрный список: вместо меню — причина и кнопка поддержки
     if user.id != ADMIN_ID and not helper:
-        from blacklist import entry as bl_entry, show_blocked
+        from features.blacklist import entry as bl_entry, show_blocked
         ble = await bl_entry(user.id)
         if ble:
             await show_blocked(ble, message=update.message)

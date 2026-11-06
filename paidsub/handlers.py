@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from telegram import Bot
 
 from config import ADMIN_ID, load_config, save_config
-from keyboards import back_admin, back_main
+from core.keyboards import back_admin, back_main
 
 from paidsub.storage import (
     add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
@@ -102,7 +102,7 @@ STATES_TTL = 60
 
 async def panel_states(force: bool = False) -> dict:
     import time
-    from panel import get_client_states
+    from services.panel import get_client_states
     if not force and _PANEL_STATES["ok"] and time.time() - _PANEL_STATES["at"] < STATES_TTL:
         return _PANEL_STATES
     got = await get_client_states()
@@ -185,7 +185,7 @@ async def handle_paid_presets_menu(query):
     cfg = load_config()
     squad_names = {}
     if cfg.get("rw_squads"):
-        import remnawave as rw
+        import services.remnawave as rw
         got = await rw.list_squads()
         if got.get("ok"):
             for sq in got["squads"]:
@@ -209,7 +209,7 @@ _TIME_HINT = (
 
 
 async def handle_paid_preset_trial(query, context):
-    from states import AWAITING_PAID_TRIAL_PERIOD
+    from core.states import AWAITING_PAID_TRIAL_PERIOD
     context.user_data["state"] = AWAITING_PAID_TRIAL_PERIOD
     cfg = load_config()
     current = cfg.get("paid_trial_period")
@@ -230,7 +230,7 @@ async def handle_paid_preset_trial(query, context):
 
 
 async def handle_paid_preset_hwid(query, context):
-    from states import AWAITING_PAID_PRESET_HWID
+    from core.states import AWAITING_PAID_PRESET_HWID
     context.user_data["state"] = AWAITING_PAID_PRESET_HWID
     await query.edit_message_text(
         "🖥 <b>Лимит HWID</b>\n\n<i>Пришли число (0 = безлимит).</i>",
@@ -240,7 +240,7 @@ async def handle_paid_preset_hwid(query, context):
 
 
 async def handle_paid_preset_traffic(query, context):
-    from states import AWAITING_PAID_PRESET_TRAFFIC
+    from core.states import AWAITING_PAID_PRESET_TRAFFIC
     context.user_data["state"] = AWAITING_PAID_PRESET_TRAFFIC
     await query.edit_message_text(
         "📶 <b>Трафик (ГБ)</b>\n\n<i>Пришли число в ГБ или <code>-</code> для безлимита.</i>",
@@ -250,7 +250,7 @@ async def handle_paid_preset_traffic(query, context):
 
 
 async def handle_paid_preset_lte(query, context):
-    from states import AWAITING_PAID_PRESET_LTE
+    from core.states import AWAITING_PAID_PRESET_LTE
     context.user_data["state"] = AWAITING_PAID_PRESET_LTE
     cfg = load_config()
     cur = cfg.get("paid_preset_lte")
@@ -277,7 +277,7 @@ async def handle_paid_preset_lte(query, context):
 
 async def handle_paid_squads_menu(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    import remnawave as rw
+    import services.remnawave as rw
     cfg = load_config()
     lte_raw = cfg.get("paid_preset_lte")
     lte_str = f"{lte_raw} ГБ" if lte_raw is not None else "30 ГБ (по умолчанию)"
@@ -333,7 +333,7 @@ async def handle_paid_issued_squads(query, context):
     платных настроек.
     """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    import remnawave as rw
+    import services.remnawave as rw
     await query.edit_message_text("👥 Загружаю сквады…")
     r = await rw.list_squads()
     if not r["ok"]:
@@ -374,7 +374,7 @@ async def handle_paid_issued_squad_toggle(query, context, uuid: str):
 
 async def handle_paid_lte_squads(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    import remnawave as rw
+    import services.remnawave as rw
     await query.edit_message_text("👥 Загружаю сквады…")
     r = await rw.list_squads()
     if not r["ok"]:
@@ -421,7 +421,7 @@ async def handle_paid_lte_squad_toggle(query, context, uuid: str):
 
 async def handle_paid_lte_fallback(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    import remnawave as rw
+    import services.remnawave as rw
     await query.edit_message_text("👥 Загружаю сквады…")
     r = await rw.list_squads()
     if not r["ok"]:
@@ -514,10 +514,10 @@ async def lte_fallback_tick(context) -> dict:
     """
     import logging
     from datetime import datetime
-    from blacklist import blacklisted_ids
-    from panel import update_client_squads
+    from features.blacklist import blacklisted_ids
+    from services.panel import update_client_squads
     from paidsub.storage import lte_watch_subs, update_paid_sub_field, add_history
-    import remnawave as rw
+    import services.remnawave as rw
     cfg = load_config()
     fallback = cfg.get("paid_lte_fallback_squad")
     lte_squads = set(cfg.get("paid_lte_squads") or [])
@@ -618,7 +618,7 @@ async def handle_paid_create_sub(query, context):
     context.user_data.pop("create_trial", None)
 
     trial_period = cfg.get("paid_trial_period", 86400)
-    from database import list_tariffs
+    from core.database import list_tariffs
     tariffs = await list_tariffs(only_active=True)
 
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -646,7 +646,7 @@ async def handle_paid_create_sub(query, context):
 
 async def handle_paid_create_type(query, context, kind: str):
     """Админ выбрал, что выдать: пробную или конкретный тариф."""
-    from states import AWAITING_PAID_SUB_TG_ID
+    from core.states import AWAITING_PAID_SUB_TG_ID
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     cfg = load_config()
     context.user_data["state"] = AWAITING_PAID_SUB_TG_ID
@@ -657,7 +657,7 @@ async def handle_paid_create_type(query, context, kind: str):
         label = "🆓 <b>Пробная подписка</b>"
         period = fmt_duration(cfg.get("paid_trial_period", 86400))
     else:
-        from database import get_tariff
+        from core.database import get_tariff
         tariff = await get_tariff(int(kind))
         if not tariff:
             await query.answer("Тариф не найден", show_alert=True)
@@ -684,8 +684,8 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
     cfg = load_config()
     await reply_func("⏳ Создаю подписку…")
 
-    from panel import create_client, build_email
-    from database import get_user_info
+    from services.panel import create_client, build_email
+    from core.database import get_user_info
     user_row = await get_user_info(tg_id)
     username = user_row[2] if user_row else None
     email = build_email(tg_id, username, prefix="paid_")
@@ -816,7 +816,7 @@ async def handle_request_sub(query, context):
             await do_create_paid_sub(query, user.id, context, _edit, trial=True, for_user=True)
             await _process_referral_bonus(user.id, context)
             from html import escape
-            from log_channel import send_log
+            from core.log_channel import send_log
             uname_a = escape(f"@{user.username}" if user.username else f"id{user.id}")
             await send_log(context.bot,
                 f"⚡ Авто-триал выдан: {escape(str(user.first_name or user.id))} "
@@ -870,7 +870,7 @@ async def _process_referral_bonus(invited_tg_id: int, context):
     if not bonus_seconds and not invited_bonus:
         return
 
-    from panel import update_client_expire
+    from services.panel import update_client_expire
     bot = context.bot if hasattr(context, 'bot') else None
 
     # ── Бонус рефереру ──────────────────────────────────────────────────────
@@ -900,7 +900,7 @@ async def _process_referral_bonus(invited_tg_id: int, context):
                 await set_expire_date(ref_sub_id, new_expire_str)
                 ref_panel = await update_client_expire(ref_email, new_expire_str)
                 if not ref_panel.get("success"):
-                    from log_channel import send_log as _log
+                    from core.log_channel import send_log as _log
                     await _log(context.bot,
                         f"⚠️ Бонус за друга: срок не применился в панели у "
                         f"<code>{ref_email}</code> — {ref_panel.get('error', '?')}")
@@ -948,7 +948,7 @@ async def _process_referral_bonus(invited_tg_id: int, context):
                 await set_expire_date(inv_sub_id, new_inv_str)
                 inv_panel = await update_client_expire(inv_email, new_inv_str)
                 if not inv_panel.get("success"):
-                    from log_channel import send_log as _log
+                    from core.log_channel import send_log as _log
                     await _log(context.bot,
                         f"⚠️ Приветственный бонус: срок не применился в панели у "
                         f"<code>{inv_email}</code> — {inv_panel.get('error', '?')}")
@@ -987,8 +987,8 @@ async def handle_approve(query, tg_id: int, context):
 
     await do_create_paid_sub(query, tg_id, context, _edit, trial=True)
 
-    from log_channel import send_log
-    from database import get_user_info
+    from core.log_channel import send_log
+    from core.database import get_user_info
     u = await get_user_info(tg_id)
     u_name = _esc_name(u[1] if u else None, tg_id)
     await send_log(context.bot, f"✅ Триал одобрен: {u_name} (<code>{tg_id}</code>)")
@@ -1033,7 +1033,7 @@ async def _lte_view_line(row) -> str:
     тем же путём, что и на экране «LTE-интернет»: сумма по узлам [CDN].
     Если панель не отвечает или LTE-узлов нет — карточка не ломается,
     показывается только лимит, а при ошибке панели — пометка об этом."""
-    from remnawave import (is_configured, lte_limit_gb, lte_limit_label,
+    from services.remnawave import (is_configured, lte_limit_gb, lte_limit_label,
                            make_username, user_cdn_usage)
     from datetime import datetime as _dt
     email = row[2]
@@ -1079,7 +1079,7 @@ async def handle_paid_sub_view(query, sub_id: int):
 
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
-    from panel import get_client_traffic, get_client_info
+    from services.panel import get_client_traffic, get_client_info
     t = await get_client_traffic(email)
     if t["success"]:
         up = t.get("up", 0)
@@ -1107,7 +1107,7 @@ async def handle_paid_sub_view(query, sub_id: int):
     sub_type = "оплаченная" if times_renewed > 0 else "пробная"
 
     # Юзер инфо
-    from database import get_user_info
+    from core.database import get_user_info
     user_info = await get_user_info(tg_id) if tg_id else None
     uname = user_info[2] if user_info and user_info[2] else None
     first_name = user_info[1] if user_info and user_info[1] else None
@@ -1197,7 +1197,7 @@ async def handle_paid_sub_toggle(query, sub_id: int, context=None):
         return
     tg_id = row[1]
     email = row[2]
-    from panel import get_client_info, toggle_client
+    from services.panel import get_client_info, toggle_client
     info = await get_client_info(email)
     if not info.get("success"):
         await query.answer("❌ Клиент не найден в панели", show_alert=True)
@@ -1236,7 +1236,7 @@ async def handle_paid_sub_delete(query, sub_id: int, context=None):
     email = row[2] if row else None
 
     if email:
-        from panel import delete_client
+        from services.panel import delete_client
         await query.edit_message_text("⏳ Удаляю из панели...")
         panel_result = await delete_client(email)
         panel_status = "✅ удалена из панели" if panel_result["success"] else f"⚠️ панель: {panel_result.get('error', '?')}"
@@ -1268,7 +1268,7 @@ async def handle_paid_sub_freeze(query, sub_id: int, context=None):
         return
     tg_id = row[1]
     email = row[2]
-    from panel import get_client_info, toggle_client
+    from services.panel import get_client_info, toggle_client
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
     if not enabled:
@@ -1297,7 +1297,7 @@ async def handle_paid_sub_freeze(query, sub_id: int, context=None):
 # ── Продление срока ──────────────────────────────────────────────────────────
 
 async def handle_paid_sub_extend(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EXTEND
+    from core.states import AWAITING_PAID_SUB_EXTEND
     context.user_data["state"] = AWAITING_PAID_SUB_EXTEND
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -1310,7 +1310,7 @@ async def handle_paid_sub_extend(query, sub_id: int, context):
 
 
 async def handle_paid_sub_reduce(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_REDUCE
+    from core.states import AWAITING_PAID_SUB_REDUCE
     context.user_data["state"] = AWAITING_PAID_SUB_REDUCE
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -1327,7 +1327,7 @@ async def handle_paid_sub_reduce(query, sub_id: int, context):
 async def handle_paid_bulk_menu(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     import aiosqlite
-    from database import DB_PATH
+    from core.database import DB_PATH
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT COUNT(*) FROM paid_subs") as cur:
             total = (await cur.fetchone())[0]
@@ -1347,7 +1347,7 @@ async def handle_paid_bulk_menu(query):
 
 
 async def handle_paid_bulk_extend(query, context):
-    from states import AWAITING_PAID_BULK_EXTEND
+    from core.states import AWAITING_PAID_BULK_EXTEND
     context.user_data["state"] = AWAITING_PAID_BULK_EXTEND
     await query.edit_message_text(
         "➕ <b>Добавить срок всем подпискам</b>\n\n"
@@ -1359,7 +1359,7 @@ async def handle_paid_bulk_extend(query, context):
 
 
 async def handle_paid_bulk_reduce(query, context):
-    from states import AWAITING_PAID_BULK_REDUCE
+    from core.states import AWAITING_PAID_BULK_REDUCE
     context.user_data["state"] = AWAITING_PAID_BULK_REDUCE
     await query.edit_message_text(
         "➖ <b>Убавить срок всем подпискам</b>\n\n"
@@ -1400,7 +1400,7 @@ async def apply_devices_payment(tg_id: int, count: int, context, amount: int = 0
     человек взял на новый период. Ноль возвращает лимит к своему значению
     подписки, и платить за устройства больше не нужно.
     """
-    from panel import update_client_limits
+    from services.panel import update_client_limits
     from paidsub.storage import base_hwid
     row = await get_paid_sub_by_tg_id(tg_id)
     if not row:
@@ -1481,7 +1481,7 @@ async def handle_paid_devices(query, sub_id: int):
     """Устройства (HWID), которые панель запомнила по этой подписке."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import get_client_hwids
+    from services.panel import get_client_hwids
     row = await get_paid_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -1528,7 +1528,7 @@ async def handle_paid_ips(query, sub_id: int):
     """С каких адресов подключалась подписка."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from panel import get_client_ips
+    from services.panel import get_client_ips
     row = await get_paid_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -1563,7 +1563,7 @@ async def handle_paid_ips(query, sub_id: int):
 
 
 async def handle_paid_hwid_del(query, context, sub_id: int, ref: str):
-    from panel import delete_client_hwid, resolve_hwid
+    from services.panel import delete_client_hwid, resolve_hwid
     row = await get_paid_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -1584,7 +1584,7 @@ async def handle_paid_hwid_del(query, context, sub_id: int, ref: str):
 
 
 async def handle_paid_hwid_clear(query, context, sub_id: int):
-    from panel import clear_client_hwids
+    from services.panel import clear_client_hwids
     row = await get_paid_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -1605,7 +1605,7 @@ async def handle_paid_hwid_clear(query, context, sub_id: int):
 
 
 async def handle_paid_device_price(query, context):
-    from states import AWAITING_DEVICE_PRICE
+    from core.states import AWAITING_DEVICE_PRICE
     context.user_data["state"] = AWAITING_DEVICE_PRICE
     cur = int(load_config().get("device_price") or 0)
     await query.edit_message_text(
@@ -1618,7 +1618,7 @@ async def handle_paid_device_price(query, context):
 
 
 async def handle_paid_device_max(query, context):
-    from states import AWAITING_DEVICE_MAX
+    from core.states import AWAITING_DEVICE_MAX
     context.user_data["state"] = AWAITING_DEVICE_MAX
     cur = int(load_config().get("device_max_extra") or 5)
     await query.edit_message_text(
@@ -1632,7 +1632,7 @@ async def handle_paid_device_max(query, context):
 
 
 async def handle_paid_bulk_hwid(query, context):
-    from states import AWAITING_PAID_BULK_HWID
+    from core.states import AWAITING_PAID_BULK_HWID
     context.user_data["state"] = AWAITING_PAID_BULK_HWID
     await query.edit_message_text(
         "🔑 <b>Лимит устройств (HWID) для всех подписок</b>\n\n"
@@ -1648,7 +1648,7 @@ LIMIT_KINDS = {"hwid": ("🔑", "устройств", "limit_hwid"),
 
 
 async def handle_paid_bulk_lte(query, context):
-    from states import AWAITING_PAID_BULK_LTE
+    from core.states import AWAITING_PAID_BULK_LTE
     context.user_data["state"] = AWAITING_PAID_BULK_LTE
     cfg = load_config()
     cur = cfg.get("paid_preset_lte")
@@ -1667,8 +1667,8 @@ async def handle_paid_bulk_lte(query, context):
 async def preview_bulk_limits(message, context, kind: str, value: int | None):
     """Показывает, кого затронет смена лимита, и спрашивает подтверждение."""
     import aiosqlite
-    from blacklist import blacklisted_ids
-    from database import DB_PATH
+    from features.blacklist import blacklisted_ids
+    from core.database import DB_PATH
     from handlers.confirm import confirm_keyboard
     emoji, label, field = LIMIT_KINDS[kind]
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1685,7 +1685,7 @@ async def preview_bulk_limits(message, context, kind: str, value: int | None):
     if kind == "lte":
         # NULL у подписки — это пресет (или 30 ГБ по умолчанию): сравниваем
         # с действующим лимитом, а не с NULL, иначе предпросмотр врёт
-        from remnawave import lte_limit_gb
+        from services.remnawave import lte_limit_gb
         preset = load_config().get("paid_preset_lte")
         default = lte_limit_gb(None, preset)
         new_eff = default if value is None else value
@@ -1742,9 +1742,9 @@ async def bulk_set_limits(kind: str, value: int | None, context) -> dict:
     """Ставит лимит всем платным подпискам: устройства — в базе и в панели,
     LTE — только в базе (панель о LTE-лимите не знает)."""
     import aiosqlite
-    from blacklist import blacklisted_ids
-    from database import DB_PATH
-    from panel import update_client_limits
+    from features.blacklist import blacklisted_ids
+    from core.database import DB_PATH
+    from services.panel import update_client_limits
     emoji, label, field = LIMIT_KINDS[kind]
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -1757,7 +1757,7 @@ async def bulk_set_limits(kind: str, value: int | None, context) -> dict:
     updated = panel_fail = skipped = 0
     tightened = []
     if kind == "lte":
-        from remnawave import lte_limit_gb
+        from services.remnawave import lte_limit_gb
         preset = load_config().get("paid_preset_lte")
         new_eff = lte_limit_gb(None, preset) if value is None else value
     for sub_id, tg_id, email, old, extra in rows:
@@ -1811,9 +1811,9 @@ async def bulk_set_limits(kind: str, value: int | None, context) -> dict:
 async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
     """Сдвигает дату окончания у всех платных подписок.
     direction = +1 (добавить) или -1 (убавить). Возвращает отчёт."""
-    from panel import update_client_expire, get_client_info, toggle_client
+    from services.panel import update_client_expire, get_client_info, toggle_client
     import aiosqlite
-    from database import DB_PATH
+    from core.database import DB_PATH
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT id FROM paid_subs") as cur:
             all_ids = [r[0] for r in await cur.fetchall()]
@@ -1821,7 +1821,7 @@ async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
     updated = 0
     errors = 0
     # подписки людей из ЧС не трогаем: добавление срока включило бы их обратно
-    from blacklist import blacklisted_ids
+    from features.blacklist import blacklisted_ids
     skip_ids = await blacklisted_ids()
     skipped = 0
 
@@ -1915,7 +1915,7 @@ async def handle_paid_sub_settings(query, sub_id: int):
     trial_str = fmt_duration(eff["trial_period"])
     from handlers.payprovider import provider_label
     pay_line = f"💳 Оплата: <b>{provider_label()}</b> — счёт выставляет бот\n"
-    from remnawave import lte_limit_label
+    from services.remnawave import lte_limit_label
     sub_lte = row[19] if len(row) > 19 else None
     lte_str = lte_limit_label(sub_lte, load_config().get("paid_preset_lte"))
 
@@ -1934,7 +1934,7 @@ async def handle_paid_sub_settings(query, sub_id: int):
 
 
 async def handle_paid_sub_edit_expire(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EDIT_EXPIRE
+    from core.states import AWAITING_PAID_SUB_EDIT_EXPIRE
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_EXPIRE
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -1949,7 +1949,7 @@ async def handle_paid_sub_edit_expire(query, sub_id: int, context):
 
 
 async def handle_paid_sub_edit_hwid(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EDIT_HWID
+    from core.states import AWAITING_PAID_SUB_EDIT_HWID
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_HWID
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -1959,7 +1959,7 @@ async def handle_paid_sub_edit_hwid(query, sub_id: int, context):
 
 
 async def handle_paid_sub_edit_traffic(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EDIT_TRAFFIC
+    from core.states import AWAITING_PAID_SUB_EDIT_TRAFFIC
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_TRAFFIC
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -1969,12 +1969,12 @@ async def handle_paid_sub_edit_traffic(query, sub_id: int, context):
 
 
 async def handle_paid_sub_edit_lte(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EDIT_LTE
+    from core.states import AWAITING_PAID_SUB_EDIT_LTE
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_LTE
     context.user_data["edit_sub_id"] = sub_id
     row = await get_paid_sub(sub_id)
     sub_lte = row[19] if row and len(row) > 19 else None
-    from remnawave import lte_limit_label
+    from services.remnawave import lte_limit_label
     cur = lte_limit_label(sub_lte, load_config().get("paid_preset_lte"))
     await query.edit_message_text(
         f"🌐 <b>LTE-трафик подписки #{sub_id} (ГБ в месяц)</b>\n\n"
@@ -1988,7 +1988,7 @@ async def handle_paid_sub_edit_lte(query, sub_id: int, context):
 
 
 async def handle_paid_sub_edit_trial(query, sub_id: int, context):
-    from states import AWAITING_PAID_SUB_EDIT_TRIAL
+    from core.states import AWAITING_PAID_SUB_EDIT_TRIAL
     context.user_data["state"] = AWAITING_PAID_SUB_EDIT_TRIAL
     context.user_data["edit_sub_id"] = sub_id
     await query.edit_message_text(
@@ -2039,7 +2039,7 @@ async def expiry_reminder_tick(context):
     """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import get_subs_for_reminder, parse_sub_date
-    from blacklist import blacklisted_ids
+    from features.blacklist import blacklisted_ids
     cfg = load_config()
     if not cfg.get("remind_enabled", True):
         return
@@ -2097,7 +2097,7 @@ async def expiry_reminder_tick(context):
                     [InlineKeyboardButton(f"💳 {action}", callback_data="renew_sub")]
                 ]),
             )
-            from database import log_activity
+            from core.database import log_activity
             await log_activity(tg_id, "ev:reminded", f"этап {target}")
         except Exception:
             pass
@@ -2135,7 +2135,7 @@ async def check_expired_subs(context):
         # Срок вышел: помечаем истёкшей и один раз говорим об этом человеку
         await update_paid_sub_field(sub_id, "status", "expired")
         if tg_id:
-            from database import log_activity
+            from core.database import log_activity
             await log_activity(tg_id, "ev:period_ended",
                                "триал" if times_renewed == 0 else "оплаченный")
             await log_activity(tg_id, "ev:expired")
@@ -2143,10 +2143,10 @@ async def check_expired_subs(context):
         # Единственное, что делаем в панели, — ещё раз отдаём ей ту же дату
         # окончания. Запрос идемпотентный, зато если срок в панели когда-то
         # разъехался с базой (например, правили руками), он снова сойдётся.
-        from panel import update_client_expire
+        from services.panel import update_client_expire
         synced = await update_client_expire(email, expire_str)
         if not synced.get("success"):
-            from log_channel import send_log as _send_log
+            from core.log_channel import send_log as _send_log
             await _send_log(context.bot,
                 f"⚠️ Срок в панели не сошёлся с базой: <code>{email}</code> — "
                 f"{synced.get('error', '?')}\nПроверь, закрыт ли доступ.")
@@ -2196,7 +2196,7 @@ async def revoke_paid_period(tg_id: int, period_seconds: int | None, context,
     # Деньги вернули — доступ должен закрыться, поэтому ответ панели проверяем,
     # а не выбрасываем: иначе бот отчитается новой датой, а человек продолжит
     # пользоваться VPN по старому сроку.
-    from panel import update_client_expire, toggle_client
+    from services.panel import update_client_expire, toggle_client
     panel_error = ""
     r = await update_client_expire(email, new_expire_str)
     if not r.get("success"):
@@ -2251,7 +2251,7 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     """
     # Человек из ЧС: деньги пришли, но срок не начисляем — иначе оплата по
     # счёту, выставленному до внесения в ЧС, включила бы подписку обратно
-    from blacklist import is_blacklisted
+    from features.blacklist import is_blacklisted
     if await is_blacklisted(tg_id):
         return {"ok": False, "error": "пользователь в чёрном списке — срок не начислен: "
                                       "верни деньги или убери из ЧС"}
@@ -2271,7 +2271,7 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     if not pay_seconds:
         # у платежа нет срока (старый счёт или сбой) — берём первый активный
         # тариф, чтобы деньги не повисли, и говорим об этом админу
-        from database import list_tariffs
+        from core.database import list_tariffs
         tariffs = await list_tariffs(only_active=True)
         pay_seconds = int(tariffs[0][2]) if tariffs else 30 * 86400
         guessed = (f"⚠️ У платежа не было срока — начислил "
@@ -2291,7 +2291,7 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     cur_renewed = row[12] if len(row) > 12 else 0
     await update_paid_sub_field(sub_id, "times_renewed", cur_renewed + 1)
 
-    from panel import get_client_info, toggle_client, update_client_expire
+    from services.panel import get_client_info, toggle_client, update_client_expire
     info = await get_client_info(email)
     if info.get("success") and not info.get("enabled", True):
         await toggle_client(email, True)
@@ -2299,7 +2299,7 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     if not paid_panel.get("success"):
         # оплата прошла, а срок в панели не сдвинулся — человек остался
         # без доступа, и знать об этом надо немедленно
-        from log_channel import send_log as _log
+        from core.log_channel import send_log as _log
         await _log(context.bot,
             f"🛑 Оплата зачтена, но панель не приняла новый срок: "
             f"<code>{email}</code> — {paid_panel.get('error', '?')}\n"
@@ -2321,8 +2321,8 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
         f"Сумма: {amount} ₽{promo_note}\nЧерез: {source}\nДо: {new_expire_str}",
     )
 
-    from log_channel import send_log
-    from database import get_user_info
+    from core.log_channel import send_log
+    from core.database import get_user_info
     u = await get_user_info(tg_id)
     u_name = _esc_name(u[1] if u else None, tg_id)
     await send_log(context.bot,
@@ -2375,7 +2375,7 @@ async def handle_referral_settings(query):
     invited_str = fmt_duration(invited_bonus) if invited_bonus else "не задан"
     stats = await get_all_referral_stats()
 
-    from database import get_user_info
+    from core.database import get_user_info
     top_lines = []
     for ref_id, cnt in stats["top_referrers"]:
         u = await get_user_info(ref_id)
@@ -2413,7 +2413,7 @@ async def handle_referral_settings(query):
 
 
 async def handle_set_referral_bonus(query, context):
-    from states import AWAITING_REFERRAL_BONUS
+    from core.states import AWAITING_REFERRAL_BONUS
     context.user_data["state"] = AWAITING_REFERRAL_BONUS
     cfg = load_config()
     bonus = cfg.get("referral_bonus")
@@ -2429,7 +2429,7 @@ async def handle_set_referral_bonus(query, context):
 
 
 async def handle_set_referral_invited_bonus(query, context):
-    from states import AWAITING_REFERRAL_INVITED_BONUS
+    from core.states import AWAITING_REFERRAL_INVITED_BONUS
     context.user_data["state"] = AWAITING_REFERRAL_INVITED_BONUS
     cfg = load_config()
     bonus = cfg.get("referral_invited_bonus")
