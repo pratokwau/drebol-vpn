@@ -239,7 +239,7 @@ async def handle_tariff_edit(query, context: ContextTypes.DEFAULT_TYPE,
     await query.edit_message_text(
         body, parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Отмена", callback_data=f"tariff_view:{tariff_id}")],
+            [InlineKeyboardButton("❌ Отмена", callback_data=f"tariff_view:{tariff_id}")],
         ]),
     )
 

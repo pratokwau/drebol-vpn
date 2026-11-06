@@ -9,7 +9,7 @@ PAID_TABS = {
     "expired": ("🔴", "Истёкшие"),
     "off": ("⏸", "Выключены в панели"),
     "trial": ("🆓", "Пробные"),
-    "paying": ("⭐", "Платящие"),
+    "paying": ("💳", "Платящие"),
 }
 
 SORT_LABELS = {"new": "новые сверху", "expire": "по сроку", "name": "по имени"}
@@ -62,7 +62,7 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
     ])
     kb.append([
         InlineKeyboardButton("🎟 Промокоды", callback_data="promo_menu"),
-        InlineKeyboardButton("👥 Рефералы", callback_data="referral_settings"),
+        InlineKeyboardButton("🎁 Рефералы", callback_data="referral_settings"),
     ])
     kb.append([InlineKeyboardButton("⚙️ Настройки подписок", callback_data="paid_sub_presets")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
@@ -98,7 +98,7 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
         *_devices_rows(b),
         [b("📶 Трафик (ГБ)", "paid_preset_traffic")],
         # панель: выдаваемые сквады и LTE — одним экраном «Сквады Remnawave»
-        [b("👥 Сквады Remnawave", "paid_squads_menu")],
+        [b("🗂 Сквады Remnawave", "paid_squads_menu")],
         [b("◀️ Назад к подпискам", "paid_subs")],
     ])
 
@@ -132,7 +132,7 @@ def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:
         [b("📅 Дата окончания", "paid_sub_edit_expire")],
         [b("🖥 Лимит устройств", "paid_sub_edit_hwid")],
         [b("📶 Трафик (ГБ)", "paid_sub_edit_traffic"), b("🆓 Пробный период", "paid_sub_edit_trial")],
-        [b("🌐 LTE-трафик (ГБ/мес)", "paid_sub_edit_lte")],
+        [b("📡 LTE-трафик (ГБ/мес)", "paid_sub_edit_lte")],
         [InlineKeyboardButton("◀️ Назад к подписке", callback_data=f"paid_sub_view:{sub_id}")],
     ])
 

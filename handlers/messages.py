@@ -327,7 +327,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             status_line,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Ещё ответить", callback_data=f"ticket_reply:{reply_to}")],
+                [InlineKeyboardButton("✏️ Ещё ответить", callback_data=f"ticket_reply:{reply_to}")],
                 [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{reply_to}:1")],
                 [InlineKeyboardButton("◀️ К тикетам", callback_data="ticket_list:1")],
             ]),
@@ -1664,7 +1664,7 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text(
             status_line,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💬 Ещё ответить", callback_data=f"ticket_reply:{reply_to}")],
+                [InlineKeyboardButton("✏️ Ещё ответить", callback_data=f"ticket_reply:{reply_to}")],
                 [InlineKeyboardButton("👀 Открыть переписку", callback_data=f"ticket_view:{reply_to}:1")],
                 [InlineKeyboardButton("◀️ К тикетам", callback_data="ticket_list:1")],
             ]),

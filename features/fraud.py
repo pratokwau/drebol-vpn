@@ -158,7 +158,7 @@ async def report_pair(context, tg_id: int, other_tg: int, kind: str,
         ),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔎 Разобрать",
+            [InlineKeyboardButton("🔍 Разобрать",
                                   callback_data=f"fraud_pair:{tg_id}:{other_tg}")],
             [InlineKeyboardButton("⛔ В ЧС первого", callback_data=f"bl_add_for:{tg_id}"),
              InlineKeyboardButton("🙈 Не фрод", callback_data=f"fraud_ok:{tg_id}:{other_tg}")],

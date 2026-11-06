@@ -614,14 +614,14 @@ async def handle_cabinet_menu(query, context=None, note: str = ""):
     lines.append(
         "\n<i>Кабинет только показывает: срок, ссылку подписки, устройства и платежи. "
         "Менять что-либо можно только в боте.\n\n"
-        "Порядок такой: «🔎 Найти адрес бота» (бот подберёт его сам) → "
+        "Порядок такой: «🔍 Найти адрес бота» (бот подберёт его сам) → "
         "«🟢 Включить API» → развернуть сайт заново. И скажи @BotFather команду "
         "/setdomain с доменом сайта — без неё кнопка входа не появится.</i>")
 
     kb = [[InlineKeyboardButton("🔴 Выключить API" if s["enabled"] else "🟢 Включить API",
                                 callback_data="cab_toggle"),
            InlineKeyboardButton("🩺 Проверить", callback_data="cab_check")],
-          [InlineKeyboardButton("🔎 Найти адрес бота", callback_data="cab_find")],
+          [InlineKeyboardButton("🔍 Найти адрес бота", callback_data="cab_find")],
           [InlineKeyboardButton("🔀 Через сайт", callback_data="cab_upstream"),
            InlineKeyboardButton("🔗 Адрес API", callback_data="cab_public"),
            InlineKeyboardButton("🔌 Порт", callback_data="cab_port")]]
@@ -722,14 +722,14 @@ async def handle_cabinet_input(update, context, state: str, text: str):
         host, _, port = target.partition(":")
         if not host or not port.isdigit():
             await msg.reply_text("❌ <b>Нужен адрес вида <code>10.0.0.5:8088</code></b>\n\n"
-                                 "<i>Или нажми «🔎 Найти адрес бота» — подберу сам.</i>",
+                                 "<i>Или нажми «🔍 Найти адрес бота» — подберу сам.</i>",
                                  parse_mode="HTML", reply_markup=back)
             return
         if host in SAMPLE_HOSTS:
             await msg.reply_text(
                 f"❌ <b>{html.escape(host)} — это адрес из примера</b>\n\n"
                 "<i>Нужен настоящий адрес сервера с ботом. Проще всего нажать "
-                "«🔎 Найти адрес бота» — бот подберёт его сам.</i>",
+                "«🔍 Найти адрес бота» — бот подберёт его сам.</i>",
                 parse_mode="HTML", reply_markup=back)
             return
         # спрашиваем сам сервер сайта: дойдёт ли он туда
@@ -745,10 +745,10 @@ async def handle_cabinet_input(update, context, state: str, text: str):
             tail = "<i>Сервер сайта туда дозвонился. Осталось развернуть сайт заново.</i>"
         elif code and code != "000":
             tail = (f"⚠️ <i>Сервер сайта получил оттуда ответ {html.escape(code)} — "
-                    "похоже, это не бот. Проверь адрес или нажми «🔎 Найти адрес бота».</i>")
+                    "похоже, это не бот. Проверь адрес или нажми «🔍 Найти адрес бота».</i>")
         else:
             tail = ("⚠️ <i>Сервер сайта туда не дозвонился: закрыт порт или не тот адрес. "
-                    "Нажми «🔎 Найти адрес бота» — подберу сам.</i>")
+                    "Нажми «🔍 Найти адрес бота» — подберу сам.</i>")
         await msg.reply_text(
             f"✅ <b>Сайт будет слать /api/ на {html.escape(target)}</b>\n\n"
             f"<blockquote>🔗 Адрес API: "
@@ -821,7 +821,7 @@ async def probe() -> dict:
             how = ("связи нет" if got in ("", "000") else f"ответ {got}")
             out["advice"].append(
                 f"Сервер сайта не достучался до <code>{html.escape(out['upstream'])}</code> "
-                f"({how}). Нажми «🔎 Найти адрес бота» — подберу рабочий сам.")
+                f"({how}). Нажми «🔍 Найти адрес бота» — подберу рабочий сам.")
             return out
     if out["outside"]["status"] in (404, 403):
         out["advice"].append("Адрес отвечает, но не тем: сайт не пересылает <code>/api/</code>. "

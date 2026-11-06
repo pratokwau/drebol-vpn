@@ -457,7 +457,7 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
     lines.append("\n⚙️ <b>Автоматика</b>")
     lines.append("<blockquote>"
                  f"📨 Сводка в личку: <b>{f'каждый день в {digest_time_text(cfg)}, с бэкапом' if digest_on else 'выключена'}</b>\n"
-                 f"🆘 Помощь с подключением: <b>{ch_label}</b>\n"
+                 f"🛟 Помощь с подключением: <b>{ch_label}</b>\n"
                  f"🗄 Журнал хранится <b>{int(cfg.get('activity_retention_days', 90))}</b> дней"
                  "</blockquote>")
 
@@ -472,7 +472,7 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
             InlineKeyboardButton("📊 Трафик", callback_data="rw_usage"),
         ],
         [InlineKeyboardButton("🔍 Найти человека", callback_data="find_user"),
-         InlineKeyboardButton("🆘 Помощь с подключением", callback_data="ctl_ch_menu")],
+         InlineKeyboardButton("🛟 Помощь с подключением", callback_data="ctl_ch_menu")],
         [InlineKeyboardButton(
             "📨 Сводка · вкл ✅" if digest_on else "📨 Сводка · выкл",
             callback_data="ctl_digest_toggle",
@@ -1004,15 +1004,15 @@ async def connect_help_tick(context):
     support_on = mnt.feature_enabled("support")
     kb = [
         [InlineKeyboardButton("❓ Как подключиться", callback_data="how_to")],
-        [InlineKeyboardButton("👤 Моя подписка", callback_data="my_paid_sub")],
+        [InlineKeyboardButton("🔐 Моя подписка", callback_data="my_paid_sub")],
     ]
     if support_on:
-        kb.append([InlineKeyboardButton("💬 Написать в поддержку", callback_data="support_open")])
+        kb.append([InlineKeyboardButton("🛟 Написать в поддержку", callback_data="support_open")])
     text = (
         "🔌 <b>Получилось подключиться?</b>\n\n"
         "Похоже, VPN ещё ни разу не подключался. Настройка занимает пару минут:\n\n"
         "1. Установите приложение INCY\n"
-        "2. В «👤 Моя подписка» скопируйте ссылку\n"
+        "2. В «🔐 Моя подписка» скопируйте ссылку\n"
         "3. Вставьте её в приложение и подключитесь\n\n"
         + ("Если не выходит — напишите нам, поможем." if support_on
            else "Подробная инструкция — по кнопке ниже.")

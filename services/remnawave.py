@@ -728,7 +728,7 @@ async def handle_rw_usage(query, context=None):
         rows.append([InlineKeyboardButton(
             f"{mark}{n['name']}",
             callback_data=f"rw_usage_node:{n['uuid']}:1")])
-    rows.append([InlineKeyboardButton("🌐 Все ноды",
+    rows.append([InlineKeyboardButton("🖥 Все ноды",
                                       callback_data="rw_usage_all:1")])
     rows.append([InlineKeyboardButton(f"📅 Период: {period}",
                                       callback_data="rw_usage_period")])

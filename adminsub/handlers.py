@@ -53,7 +53,7 @@ def _fmt_presets(cfg: dict, squad_names: dict | None = None) -> str:
         f"🖥 Устройств: <b>{hwid}</b>\n"
         f"📶 Трафик: <b>{traf}</b>\n"
         f"🌐 LTE-трафик: <b>{lte}</b></blockquote>\n\n"
-        "👥 <b>Сквады Remnawave</b>\n<blockquote>"
+        "🗂 <b>Сквады Remnawave</b>\n<blockquote>"
         + ("Выдаём: <b>{}</b>".format(", ".join(escape(str(c)) for c in chosen))
            if chosen else "Выдаём: <b>не выбраны</b>")
         + "</blockquote>"

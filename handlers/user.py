@@ -48,7 +48,7 @@ async def handle_my_sub(query):
         "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🌐 LTE-интернет", callback_data="my_lte_admin")],
+            [InlineKeyboardButton("📡 LTE-интернет", callback_data="my_lte_admin")],
             [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
         ]),
     )
@@ -117,7 +117,7 @@ async def handle_my_lte(query, kind: str = "paid"):
         row = await get_sub_by_tg_id(user_id)
         if not row:
             await query.edit_message_text(
-                "🌐 <b>LTE-интернет</b>\n\n<blockquote>Админской подписки пока нет.</blockquote>",
+                "📡 <b>LTE-интернет</b>\n\n<blockquote>Админской подписки пока нет.</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("◀️ Назад", callback_data="back_start")]]),
@@ -133,7 +133,7 @@ async def handle_my_lte(query, kind: str = "paid"):
         row = await get_paid_sub_by_tg_id(user_id)
         if not row:
             await query.edit_message_text(
-                "🌐 <b>LTE-интернет</b>\n\n<blockquote>Подписки пока нет.</blockquote>",
+                "📡 <b>LTE-интернет</b>\n\n<blockquote>Подписки пока нет.</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("◀️ Назад", callback_data="back_start")]]),
@@ -162,7 +162,7 @@ async def handle_my_lte(query, kind: str = "paid"):
         body = "⚠️ <i>Не удалось получить статистику LTE. Попробуй обновить через минуту.</i>"
 
     await query.edit_message_text(
-        "🌐 <b>LTE-интернет</b>\n\n"
+        "📡 <b>LTE-интернет</b>\n\n"
         + body + "\n\n"
         "<i>LTE-серверы — используйте только тогда, когда в вашем городе "
         "включают ограничения интернета.</i>",
@@ -197,7 +197,7 @@ async def handle_my_paid_sub(query):
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
 
-    plan = "⭐️ Премиум" if renewed else "🆓 Пробный период"
+    plan = "💎 Премиум" if renewed else "🆓 Пробный период"
     if status == "expired":
         mark = "🔴 Закончилась"
     elif not enabled:
@@ -241,7 +241,7 @@ async def handle_my_paid_sub(query):
     cab = _cabinet_row()
     if cab:
         kb_rows.append(cab)
-    kb_rows.append([InlineKeyboardButton("🌐 LTE-интернет", callback_data="my_lte")])
+    kb_rows.append([InlineKeyboardButton("📡 LTE-интернет", callback_data="my_lte")])
     kb_rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
@@ -980,7 +980,7 @@ async def handle_reissue_key(query, context):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔁 Да, перевыпустить", callback_data="reissue_do")],
-            [InlineKeyboardButton("◀️ Отмена", callback_data="my_paid_sub")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="my_paid_sub")],
         ]),
     )
 

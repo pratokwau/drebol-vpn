@@ -67,7 +67,7 @@ def _fmt_presets(cfg: dict, squad_names=None) -> str:
     names = squad_names or {}
     chosen = [names.get(u, u) for u in (cfg.get("rw_squads") or [])]
     panel_block = (
-        "👥 <b>Сквады Remnawave</b>\n<blockquote>"
+        "🗂 <b>Сквады Remnawave</b>\n<blockquote>"
         + ("Выдаём: <b>{}</b>".format(_esc_name(", ".join(chosen)))
            if chosen else "Выдаём: <b>не выбраны</b>")
         + "</blockquote>"
@@ -294,8 +294,8 @@ async def handle_paid_squads_menu(query, context):
     issued_label = ("не выбраны" if not issued else
                     ", ".join(names.get(u) or f"{str(u)[:8]}…" for u in issued))
     await query.edit_message_text(
-        "👥 <b>Сквады Remnawave</b>\n\n"
-        "👥 <b>Выдаваемые сквады</b>\n<blockquote>"
+        "🗂 <b>Сквады Remnawave</b>\n\n"
+        "🗂 <b>Выдаваемые сквады</b>\n<blockquote>"
         f"Новые подписки получают: <b>{_esc_name(issued_label)}</b>"
         "</blockquote>\n\n"
         "🌐 <b>LTE</b>\n<blockquote>"
@@ -313,13 +313,13 @@ async def handle_paid_squads_menu(query, context):
         "сквадов отключать.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("👥 Выдаваемые сквады",
+            [InlineKeyboardButton("🗂 Выдаваемые сквады",
                                   callback_data="paid_issued_squads")],
-            [InlineKeyboardButton(f"🌐 LTE-трафик: {lte_str}",
+            [InlineKeyboardButton(f"📡 LTE-трафик: {lte_str}",
                                   callback_data="paid_preset_lte")],
             [InlineKeyboardButton("📡 Сквад LTE-серверов", callback_data="paid_lte_squads")],
             [InlineKeyboardButton("🔀 Сквад после конца LTE", callback_data="paid_lte_fallback")],
-            [InlineKeyboardButton("▶️ Проверить LTE сейчас", callback_data="paid_lte_check_now")],
+            [InlineKeyboardButton("🔍 Проверить LTE сейчас", callback_data="paid_lte_check_now")],
             [InlineKeyboardButton("◀️ Назад к настройкам", callback_data="paid_sub_presets")],
         ]),
     )
@@ -352,7 +352,7 @@ async def handle_paid_issued_squads(query, context):
     rows.append([InlineKeyboardButton("◀️ Назад к сквадам",
                                       callback_data="paid_squads_menu")])
     await query.edit_message_text(
-        "👥 <b>Выдаваемые сквады</b>\n\n"
+        "🗂 <b>Выдаваемые сквады</b>\n\n"
         "Отметь, какие сквады выдавать новым платным подпискам. "
         "В их число должен входить и сквад LTE-серверов — иначе "
         "у подписок не будет LTE-доступа.",
@@ -440,7 +440,7 @@ async def handle_paid_lte_fallback(query, context):
             callback_data=f"paid_lte_fallback:{sq['uuid']}")])
     rows.append([InlineKeyboardButton("🚫 Не переключать",
                                       callback_data="paid_lte_fallback_off")])
-    rows.append([InlineKeyboardButton("▶️ Проверить LTE сейчас",
+    rows.append([InlineKeyboardButton("🔍 Проверить LTE сейчас",
                                       callback_data="paid_lte_check_now")])
     rows.append([InlineKeyboardButton("◀️ Назад к сквадам",
                                       callback_data="paid_squads_menu")])
@@ -1339,8 +1339,8 @@ async def handle_paid_bulk_menu(query):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("➕ Добавить срок", callback_data="paid_bulk_extend"),
              InlineKeyboardButton("➖ Убавить срок", callback_data="paid_bulk_reduce")],
-            [InlineKeyboardButton("🔑 Лимит устройств всем", callback_data="paid_bulk_hwid")],
-            [InlineKeyboardButton("🌐 LTE-трафик всем", callback_data="paid_bulk_lte")],
+            [InlineKeyboardButton("🖥 Лимит устройств всем", callback_data="paid_bulk_hwid")],
+            [InlineKeyboardButton("📡 LTE-трафик всем", callback_data="paid_bulk_lte")],
             [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
         ]),
     )
@@ -1643,8 +1643,8 @@ async def handle_paid_bulk_hwid(query, context):
 
 
 # что именно правим оптом: подпись для экрана и колонка в базе
-LIMIT_KINDS = {"hwid": ("🔑", "устройств", "limit_hwid"),
-               "lte": ("🌐", "LTE-трафика", "lte_gb")}
+LIMIT_KINDS = {"hwid": ("🖥", "устройств", "limit_hwid"),
+               "lte": ("📡", "LTE-трафика", "lte_gb")}
 
 
 async def handle_paid_bulk_lte(query, context):

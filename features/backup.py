@@ -268,7 +268,7 @@ async def handle_backup_import(query, context):
         "Текущее состояние сохраню отдельным файлом на сервере.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Отмена", callback_data="backup_menu")]]),
+            [InlineKeyboardButton("❌ Отмена", callback_data="backup_menu")]]),
     )
 
 
@@ -302,7 +302,7 @@ async def offer_restore(message, context, blob: bytes):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("♻️ Заменить данные", callback_data="backup_apply")],
-            [InlineKeyboardButton("◀️ Отмена", callback_data="backup_menu")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="backup_menu")],
         ]),
     )
 

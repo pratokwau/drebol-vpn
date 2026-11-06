@@ -148,7 +148,7 @@ async def _user_context(user_id: int) -> str:
         renewed = row[12] if len(row) > 12 else 0
         limit_hwid = int(row[8] or 0)
         extra = int(row[18] or 0) if len(row) > 18 else 0
-        plan = "⭐️ Премиум" if renewed else "🆓 Триал"
+        plan = "💎 Премиум" if renewed else "🆓 Триал"
         mark = {"active": "🟢", "renewal": "🟡", "expired": "🔴"}.get(status, "⚪")
         end = parse_sub_date(row[6])
         left = ""

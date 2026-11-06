@@ -457,7 +457,7 @@ CABINET_PAGE = r"""<!doctype html>
    var s = p.subscription;
    var mark = s.status === "expired" ? pill("закончилась", "bad")
             : !s.enabled ? pill("на паузе", "warn") : pill("активна", "ok");
-   var plan = s.plan === "paid" ? "⭐️ Премиум" : "🆓 Пробный период";
+   var plan = s.plan === "paid" ? "💎 Премиум" : "🆓 Пробный период";
    var big = s.status === "expired" ? "Подписка закончилась"
            : (s.left_text ? esc(s.left_text) : "до " + esc(s.until));
    var bigSub = s.status === "expired" ? "Продлите здесь — доступ вернётся сразу."
@@ -1579,7 +1579,7 @@ async def handle_site_server(query, context):
         "<i>Если SSH на другом порту — <code>1.2.3.4:2222</code></i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Отмена", callback_data="site_menu")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="site_menu")],
         ]),
     )
 
@@ -1964,7 +1964,7 @@ async def handle_site_text_edit_ask(query, context, field: str):
         "<i>Если хотите вернуть стандартное значение этого поля, отправьте знак <code>-</code>.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Отмена", callback_data=f"site_txt_sec:{sec_id}")],
+            [InlineKeyboardButton("❌ Отмена", callback_data=f"site_txt_sec:{sec_id}")],
         ]),
     )
 
@@ -1977,7 +1977,7 @@ async def handle_site_text_reset_ask(query, context):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ Да, сбросить все тексты", callback_data="site_txt_do_reset")],
-            [InlineKeyboardButton("◀️ Отмена", callback_data="site_texts")],
+            [InlineKeyboardButton("❌ Отмена", callback_data="site_texts")],
         ]),
     )
 

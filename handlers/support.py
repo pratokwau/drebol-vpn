@@ -96,7 +96,7 @@ def contact_mode() -> bool:
     return support_mode() == MODE_CONTACT
 
 
-def support_button(text: str = "💬 Поддержка", force: bool = False):
+def support_button(text: str = "🛟 Поддержка", force: bool = False):
     """Кнопка поддержки: ссылка на аккаунт или вход в переписку в боте.
 
     force — показать даже если функция выключена в техработах (для админа).
@@ -111,7 +111,7 @@ def support_button(text: str = "💬 Поддержка", force: bool = False):
     return InlineKeyboardButton(text, callback_data="support_open")
 
 
-def support_row(text: str = "💬 Поддержка") -> list:
+def support_row(text: str = "🛟 Поддержка") -> list:
     """Готовый ряд кнопок — пустой, если поддержка выключена."""
     btn = support_button(text)
     return [btn] if btn else []
@@ -126,7 +126,7 @@ def contact_screen() -> tuple:
             "<i>Нажмите кнопку — откроется чат с поддержкой. "
             "Опишите вопрос одним сообщением, так ответим быстрее.</i>")
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✍️ Написать в поддержку", url=support_url())],
+        [InlineKeyboardButton("🛟 Написать в поддержку", url=support_url())],
         [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")],
     ])
     return text, kb
@@ -228,7 +228,7 @@ async def show_topic_hint(query, context, topic: str):
     t = TOPICS.get(topic) or TOPICS["other"]
     rows = [[InlineKeyboardButton(label, callback_data=data)]
             for label, data in t["buttons"]]
-    rows.append([InlineKeyboardButton("✍️ Написать нам",
+    rows.append([InlineKeyboardButton("🛟 Написать нам",
                                       callback_data=f"support_write:{topic}")])
     rows.append([InlineKeyboardButton("◀️ К темам", callback_data="support_open")])
     await query.edit_message_text(
@@ -271,8 +271,8 @@ async def handle_support_close(query, user_id: int):
         "<blockquote>Спасибо, что написали! Если что-то ещё — мы на связи.</blockquote>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Новый вопрос", callback_data="support_open"),
-             InlineKeyboardButton("◀️ Меню", callback_data="back_start")],
+            [InlineKeyboardButton("🛟 Новый вопрос", callback_data="support_open"),
+             InlineKeyboardButton("🏠 Меню", callback_data="back_start")],
         ]),
     )
 
@@ -422,5 +422,5 @@ async def handle_support_contact_input(update, context, text: str):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(f"🔗 Открыть @{name}", url=support_url())],
-            [InlineKeyboardButton("💬 К настройкам поддержки", callback_data="support_settings")],
+            [InlineKeyboardButton("🛟 К настройкам поддержки", callback_data="support_settings")],
         ]))
