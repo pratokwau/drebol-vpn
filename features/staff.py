@@ -241,7 +241,7 @@ async def handle_helper_panel(query):
             pair = []
     if pair:
         rows.append(pair)
-    rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
+    rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")])
 
     what = [PERMS[k]["label"] for k in PERMS if k in perms]
     await query.edit_message_text(

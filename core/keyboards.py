@@ -33,7 +33,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
     if paid_sub_status and on("payments"):
         pair.append(InlineKeyboardButton("💳 Продлить", callback_data="renew_sub"))
     if paid_sub_status and on("referral"):
-        pair.append(InlineKeyboardButton("👥 Пригласить друга", callback_data="referral"))
+        pair.append(InlineKeyboardButton("🎁 Пригласить друга", callback_data="referral"))
     if pair:
         rows.append(pair)
     if has_sub:
@@ -42,7 +42,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
     if on("support"):
         # в режиме «аккаунт в телеграме» кнопка уводит прямо в личку поддержки
         from handlers.support import support_button
-        rows.append([support_button(force=is_admin), info_btn])
+        rows.append([support_button(text="🛟 Поддержка", force=is_admin), info_btn])
     else:
         rows.append([info_btn])
     rows.append([news_btn])
@@ -85,7 +85,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b("💬 Поддержка", "support_settings"), b("🧾 Лог-канал", "log_channel_settings")],
         [b(mnt_label, "mnt_menu")],
         [b("🔄 Обновиться с GitHub", "git_update")],
-        [b("◀️ Главное меню", "back_start")],
+        [b("🏠 Главное меню", "back_start")],
     ])
 
 
@@ -131,7 +131,7 @@ def support_keyboard(page: int, total_pages: int, has_files: bool = False,
     if can_close:
         extra.append(InlineKeyboardButton("✅ Вопрос решён", callback_data="support_close"))
     rows.append(extra)
-    rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
+    rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -146,7 +146,7 @@ def support_topics_keyboard(topics: dict) -> InlineKeyboardMarkup:
             pair = []
     if pair:
         rows.append(pair)
-    rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
+    rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")])
     return InlineKeyboardMarkup(rows)
 
 

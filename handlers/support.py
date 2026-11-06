@@ -127,7 +127,7 @@ def contact_screen() -> tuple:
             "Опишите вопрос одним сообщением, так ответим быстрее.</i>")
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ Написать в поддержку", url=support_url())],
-        [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")],
     ])
     return text, kb
 

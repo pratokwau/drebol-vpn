@@ -242,7 +242,7 @@ async def handle_my_paid_sub(query):
     if cab:
         kb_rows.append(cab)
     kb_rows.append([InlineKeyboardButton("🌐 LTE-интернет", callback_data="my_lte")])
-    kb_rows.append([InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")])
+    kb_rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")])
 
     await query.edit_message_text(
         "⚙️ <b>Моя подписка</b>\n\n"
@@ -1106,7 +1106,7 @@ async def handle_referral(query, context):
     share_url = f"https://t.me/share/url?url={ref_link}&text={share_text}"
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("📤 Поделиться с другом", url=share_url)],
-        [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
+        [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")],
     ])
 
     await query.edit_message_text(
@@ -1138,7 +1138,7 @@ async def handle_info(query):
             [InlineKeyboardButton("❓ Как подключиться", callback_data="how_to")],
             [InlineKeyboardButton("💰 Цены", callback_data="prices"),
              InlineKeyboardButton("📕 О сервисе", callback_data="about")],
-            [InlineKeyboardButton("◀️ Главное меню", callback_data="back_start")],
+            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")],
         ]),
     )
 
@@ -1498,7 +1498,7 @@ async def _sub_summary(row, frozen: bool = False, extra=None) -> tuple:
     from paidsub.time_parser import fmt_duration_precise
     status = row[11] if len(row) > 11 else "active"
     renewed = row[12] if len(row) > 12 else 0
-    plan = "⭐️ <b>Премиум</b>" if renewed else "🆓 <b>Пробный период</b>"
+    plan = "💎 <b>Премиум</b>" if renewed else "🆓 <b>Пробный период</b>"
 
     full = await get_paid_sub(row[0])
     end = parse_sub_date(full[18]) if full and len(full) > 18 and full[18] else None
@@ -1553,12 +1553,12 @@ async def _sub_facts(row) -> list:
         lte_limit = lte_limit_gb(row[19] if len(row) > 19 else None,
                                  load_config().get("paid_preset_lte"))
         if lte_limit == 0:
-            lines.append("🌐 LTE-серверы: <b>закрыты</b>")
+            lines.append("📡 LTE-серверы: <b>закрыты</b>")
         elif is_configured():
             r = await user_cdn_usage(make_username(email or "", 0))
             if r.get("ok") and r.get("cdn_nodes"):
                 left_gb = max(0.0, lte_limit - r["used_bytes"] / 1024 ** 3)
-                lines.append(f"🌐 Остаток LTE-серверов: <b>{left_gb:.2f} ГБ</b> "
+                lines.append(f"📡 Остаток LTE-серверов: <b>{left_gb:.2f} ГБ</b> "
                              f"из {lte_limit} ГБ")
     except Exception:
         pass
@@ -1569,7 +1569,7 @@ async def _sub_facts(row) -> list:
 
 def _link_block(sub_url) -> str:
     """Ссылка подписки отдельным блоком: нажатие по <code> копирует её."""
-    return ("🔑 <b>Ссылка для подключения</b>\n"
+    return ("🔗 <b>Ссылка для подключения</b>\n"
             f"<code>{escape(str(sub_url))}</code>\n"
             "<i>Нажмите на ссылку — она скопируется.</i>")
 
@@ -1613,7 +1613,7 @@ async def start_screen(user, fresh: bool = False):
                 "Это <b>Drebol VPN</b> — быстрый VPN без логов 🔒\n\n"
                 "<blockquote>⚡ Подключение за минуту\n"
                 "📱 iOS · Android · Windows · macOS\n"
-                "💬 Поддержка прямо в боте</blockquote>\n\n"
+                "🛟 Поддержка прямо в боте</blockquote>\n\n"
                 "Выберите, что сделать 👇")
     return text, main_keyboard(is_admin, has_sub, paid_status, is_helper(user.id))
 
