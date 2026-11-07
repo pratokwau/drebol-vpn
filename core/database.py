@@ -2038,12 +2038,21 @@ async def fraud_stats() -> dict:
 # ── Картинки к экранам меню ──────────────────────────────────────────────────
 async def get_screen_image(key: str) -> str | None:
     """file_id картинки экрана или None, если картинка не задана."""
+    row = await get_screen_image_full(key)
+    return row[0] if row else None
+
+
+async def get_screen_image_full(key: str) -> tuple | None:
+    """(file_id, kind) картинки экрана или None.
+
+    kind — 'photo' (прислана фото) или 'document' (прислана файлом):
+    file_id документа нельзя отправить как фото, у него свой метод.
+    """
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT file_id FROM screen_images WHERE key = ?", (key,),
+            "SELECT file_id, kind FROM screen_images WHERE key = ?", (key,),
         ) as cur:
-            row = await cur.fetchone()
-            return row[0] if row else None
+            return await cur.fetchone()
 
 
 async def set_screen_image(key: str, file_id: str, kind: str = "photo") -> None:
