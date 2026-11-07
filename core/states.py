@@ -67,6 +67,8 @@ AWAITING_SUPPORT_CONTACT = "awaiting_support_contact"
 AWAITING_CABINET_PORT = "awaiting_cabinet_port"
 AWAITING_CABINET_PUBLIC = "awaiting_cabinet_public"
 AWAITING_CABINET_UPSTREAM = "awaiting_cabinet_upstream"
+AWAITING_TURNSTILE_SITE = "awaiting_turnstile_site"
+AWAITING_TURNSTILE_SECRET = "awaiting_turnstile_secret"
 
 # Winback
 AWAITING_QUICK_REPLY = "awaiting_quick_reply"

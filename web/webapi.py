@@ -168,8 +168,8 @@ def _pw_fail_clear(key: str):
 
 async def _turnstile_ok(token: str, ip: str) -> bool:
     """Проверяет капчу у Cloudflare. Нет ключа — вход по паролю выключен."""
-    from config import TURNSTILE_SECRET_KEY
-    secret = TURNSTILE_SECRET_KEY or ""
+    from config import turnstile_keys
+    _, secret = turnstile_keys()
     if not secret or not token:
         return False
     try:
@@ -436,7 +436,7 @@ def build_app():
 
     async def auth_password(request):
         """Вход по почте и паролю + капча. Выдаёт ту же сессию, что и Telegram."""
-        from config import TURNSTILE_SECRET_KEY
+        from config import turnstile_keys
         from core.database import get_user_by_login_email, web_session_new
         try:
             body = await request.json()
@@ -446,7 +446,7 @@ def build_app():
         password = str(body.get("password") or "")
         if not email or not password:
             return web.json_response({"error": "bad_request"}, status=400)
-        if not TURNSTILE_SECRET_KEY:
+        if not turnstile_keys()[1]:
             return web.json_response({"error": "captcha_not_configured"}, status=503)
         if _pw_locked(email):
             return web.json_response({"error": "too_many"}, status=429)
@@ -465,7 +465,7 @@ def build_app():
     async def auth_forgot(request):
         """Код сброса пароля: приходит человеку в Telegram. Почту не выдаём:
         ответ одинаковый, есть такая почта или нет."""
-        from config import TURNSTILE_SECRET_KEY
+        from config import turnstile_keys
         from core.database import get_user_by_login_email, password_reset_new
         try:
             body = await request.json()
@@ -474,7 +474,7 @@ def build_app():
         email = _valid_email(body.get("email"))
         if not email:
             return web.json_response({"error": "bad_request"}, status=400)
-        if not TURNSTILE_SECRET_KEY:
+        if not turnstile_keys()[1]:
             return web.json_response({"error": "captcha_not_configured"}, status=503)
         key = "forgot:" + email
         if _pw_locked(key):
@@ -808,7 +808,7 @@ async def sessions_tick(context):
 async def handle_web_menu(query, context=None, note: str = ""):
     """Веб-доступ: сайт и личный кабинет на одном экране."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from config import load_config
+    from config import load_config, turnstile_keys
     from core.database import web_sessions_stats
     import web.site_deploy as site
     if context:
@@ -867,6 +867,13 @@ async def handle_web_menu(query, context=None, note: str = ""):
         f"👥 Живых сессий: <b>{stats['live']}</b>  ·  людей: <b>{stats['people']}</b>  ·  "
         f"входов сегодня: <b>{stats['today']}</b>"
         "</blockquote>")
+    ts_site, ts_secret = turnstile_keys()
+    lines.append(
+        "<blockquote>"
+        "🔑 Капча Turnstile: "
+        f"site key <b>{html.escape(ts_site[:8] + '…') if ts_site else 'не задан'}</b>"
+        f"  ·  secret: <b>{'задан' if ts_secret else 'не задан'}</b>"
+        "</blockquote>")
     if link:
         lines.append(f"<blockquote>🪪 Кабинет: {html.escape(link)}</blockquote>")
     if upstream:
@@ -907,6 +914,7 @@ async def handle_web_menu(query, context=None, note: str = ""):
     kb.append([InlineKeyboardButton("🔀 Через сайт", callback_data="cab_upstream"),
            InlineKeyboardButton("🔗 Адрес API", callback_data="cab_public"),
            InlineKeyboardButton("🔌 Порт", callback_data="cab_port")])
+    kb.append([InlineKeyboardButton("🔑 Капча Turnstile", callback_data="cab_turnstile")])
     if link:
         kb.append([InlineKeyboardButton("🪪 Открыть кабинет", url=link)])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
@@ -934,6 +942,55 @@ async def handle_cabinet_toggle(query, context):
         await stop_server()
         note = "<i>🔴 API выключен — кабинет перестал отвечать.</i>"
     await handle_cabinet_menu(query, context, note=note)
+
+
+async def handle_turnstile_menu(query, context=None, note: str = ""):
+    """Капча для входа в кабинет по почте: ключи Cloudflare Turnstile."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from config import turnstile_keys
+    if context:
+        context.user_data.pop("state", None)
+    site_key, secret = turnstile_keys()
+    lines = ["🔑 <b>Капча Turnstile</b>", ""]
+    if note:
+        lines += [note, ""]
+    lines.append(
+        "<blockquote>"
+        f"🔑 Site key: <b>{html.escape(site_key[:8] + '…') if site_key else 'не задан'}</b>\n"
+        f"🔒 Secret key: <b>{'задан' if secret else 'не задан'}</b>"
+        "</blockquote>")
+    lines.append(
+        "<i>Ключи берутся в Cloudflare: dash.cloudflare.com → Turnstile → Add site. "
+        "Site key публичный — он вставляется в страницу входа, secret никому не показываем. "
+        "Без ключей вход по почте выключен, вход через Telegram работает. "
+        "После смены site key разверни сайт заново — страница кабинета уедет с новым ключом.</i>")
+    kb = [[InlineKeyboardButton("🔑 Site key", callback_data="cab_turnstile_site"),
+           InlineKeyboardButton("🔒 Secret key", callback_data="cab_turnstile_secret")],
+          [InlineKeyboardButton("◀️ Назад", callback_data="cab_menu")]]
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb),
+                                  disable_web_page_preview=True)
+
+
+async def handle_turnstile_ask(query, context, what: str):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from core.states import AWAITING_TURNSTILE_SECRET, AWAITING_TURNSTILE_SITE
+    if what == "site":
+        context.user_data["state"] = AWAITING_TURNSTILE_SITE
+        text = ("🔑 <b>Site key Turnstile</b>\n\n"
+                "<blockquote>Пришли site key из Cloudflare (Turnstile → твой сайт → Settings). "
+                "Он публичный — вставляется в страницу входа.</blockquote>\n\n"
+                "<i>Пришли <code>-</code>, чтобы убрать ключ.</i>")
+    else:
+        context.user_data["state"] = AWAITING_TURNSTILE_SECRET
+        text = ("🔒 <b>Secret key Turnstile</b>\n\n"
+                "<blockquote>Пришли secret key из Cloudflare. Его никому не показываем — "
+                "он нужен боту, чтобы проверять капчу.</blockquote>\n\n"
+                "<i>Пришли <code>-</code>, чтобы убрать ключ.</i>")
+    await query.edit_message_text(
+        text, parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Отмена", callback_data="cab_turnstile")]]))
 
 
 async def handle_cabinet_ask(query, context, what: str):
@@ -975,11 +1032,40 @@ async def handle_cabinet_ask(query, context, what: str):
 async def handle_cabinet_input(update, context, state: str, text: str):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from config import load_config, save_config
-    from core.states import AWAITING_CABINET_PORT, AWAITING_CABINET_UPSTREAM
+    from core.states import (AWAITING_CABINET_PORT, AWAITING_CABINET_UPSTREAM,
+                             AWAITING_TURNSTILE_SECRET, AWAITING_TURNSTILE_SITE)
     import web.site_deploy as site
     msg = update.message
     back = InlineKeyboardMarkup([[InlineKeyboardButton("🪪 К кабинету", callback_data="cab_menu")]])
     cfg = load_config()
+    if state in (AWAITING_TURNSTILE_SITE, AWAITING_TURNSTILE_SECRET):
+        key = ("turnstile_site_key" if state == AWAITING_TURNSTILE_SITE
+               else "turnstile_secret_key")
+        name = "Site key" if state == AWAITING_TURNSTILE_SITE else "Secret key"
+        back_ts = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🔑 К капче", callback_data="cab_turnstile")]])
+        value = text.strip()
+        if value == "-":
+            cfg[key] = ""
+            save_config(cfg)
+            context.user_data.pop("state", None)
+            await msg.reply_text(
+                f"✅ <b>{name} убран</b>\n\n"
+                "<i>Вход по почте выключен, пока ключей нет.</i>",
+                parse_mode="HTML", reply_markup=back_ts)
+            return
+        if not value or " " in value:
+            await msg.reply_text("❌ <b>Ключ — одна строка без пробелов</b>",
+                                 parse_mode="HTML", reply_markup=back_ts)
+            return
+        cfg[key] = value
+        save_config(cfg)
+        context.user_data.pop("state", None)
+        tail = ("\n\n<i>Разверни сайт заново — страница кабинета уедет с новым ключом.</i>"
+                if state == AWAITING_TURNSTILE_SITE else "")
+        await msg.reply_text(f"✅ <b>{name} сохранён</b>{tail}",
+                             parse_mode="HTML", reply_markup=back_ts)
+        return
     if state == AWAITING_CABINET_PORT:
         if not text.strip().isdigit() or not (1024 <= int(text.strip()) <= 65535):
             await msg.reply_text("❌ <b>Нужен порт от 1024 до 65535</b>", parse_mode="HTML",

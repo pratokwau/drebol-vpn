@@ -21,6 +21,15 @@ def load_config() -> dict:
     return {}
 
 
+def turnstile_keys() -> tuple[str, str]:
+    """Ключи капчи Cloudflare Turnstile: сначала config.json (задаются
+    в админке), потом .env. Пустые — вход по паролю выключен."""
+    cfg = load_config()
+    site = str(cfg.get("turnstile_site_key") or "") or TURNSTILE_SITE_KEY
+    secret = str(cfg.get("turnstile_secret_key") or "") or TURNSTILE_SECRET_KEY
+    return site, secret
+
+
 def save_config(data: dict) -> None:
     with open(CONFIG_FILE, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

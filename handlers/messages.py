@@ -35,6 +35,7 @@ from core.states import (
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_CONTACT,
     AWAITING_GIFT_USER,
     AWAITING_CABINET_PORT, AWAITING_CABINET_PUBLIC, AWAITING_CABINET_UPSTREAM,
+    AWAITING_TURNSTILE_SITE, AWAITING_TURNSTILE_SECRET,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_WINBACK_DAYS2, AWAITING_WINBACK_PERCENT2, AWAITING_WINBACK_LIFE,
     AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD,
@@ -1273,7 +1274,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Создание промокода ───────────────────────────────────────────────────────
     # ── Личный кабинет ────────────────────────────────────────────────────────
     if state in (AWAITING_CABINET_PORT, AWAITING_CABINET_PUBLIC,
-                 AWAITING_CABINET_UPSTREAM) and is_admin:
+                 AWAITING_CABINET_UPSTREAM, AWAITING_TURNSTILE_SITE,
+                 AWAITING_TURNSTILE_SECRET) and is_admin:
         from web.webapi import handle_cabinet_input
         await handle_cabinet_input(update, context, state, text)
         return

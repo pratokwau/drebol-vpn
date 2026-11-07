@@ -469,6 +469,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data in ("cab_public", "cab_port", "cab_upstream"):
         from web.webapi import handle_cabinet_ask
         await handle_cabinet_ask(query, context, data.split("_")[1])
+    elif data == "cab_turnstile":
+        from web.webapi import handle_turnstile_menu
+        await handle_turnstile_menu(query, context)
+    elif data in ("cab_turnstile_site", "cab_turnstile_secret"):
+        from web.webapi import handle_turnstile_ask
+        await handle_turnstile_ask(query, context, data.split("_")[2])
     elif data == "support_settings":
         await handle_support_settings(query, context)
     elif data.startswith("support_mode:"):

@@ -1165,14 +1165,14 @@ CABINET_PAGE = r"""<!doctype html>
 
 def cabinet_page(bot_username: str) -> str:
     """Готовая страница кабинета: подставлены адрес API, имя бота и точный логотип с основного сайта."""
-    from config import TURNSTILE_SITE_KEY, load_config
+    from config import load_config, turnstile_keys
     from web.site_page import LOGO_URL
     api = (load_config().get("webapi_public") or "").rstrip("/")
     logo_html = f'<img src="{LOGO_URL}" alt="Drebol VPN" width="492" height="132">'
     return (CABINET_PAGE.replace("__API__", api or "")
             .replace("__BOT__", bot_username or "")
             .replace("__LOGO__", logo_html)
-            .replace("__TURNSTILE__", TURNSTILE_SITE_KEY or ""))
+            .replace("__TURNSTILE__", turnstile_keys()[0]))
 
 
 def add_ready() -> bool:
