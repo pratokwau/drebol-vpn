@@ -526,6 +526,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_backup_import(query, context)
     elif data == "backup_apply":
         await handle_backup_apply(query, context)
+    elif data == "web_menu":
+        from web.webapi import handle_web_menu
+        await handle_web_menu(query, context)
     elif data == "site_menu":
         context.user_data.pop("state", None)
         await handle_site_menu(query)

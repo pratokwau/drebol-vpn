@@ -45,6 +45,7 @@ CB_LABELS = {
     "reissue_do": "🔁 Подтвердил перевыпуск",
     "remind_settings": "⏰ Напоминания",
     "fraud_menu": "🕵 Повторные триалы",
+    "web_menu": "🌐 Веб-доступ",
     "site_menu": "🌐 Сайт",
     "cab_menu": "🪪 Личный кабинет",
     "cab_toggle": "🪪 API кабинета вкл/выкл",

@@ -1442,74 +1442,9 @@ def paramiko_ready() -> bool:
 # ── Экраны админки ────────────────────────────────────────────────────────────
 
 async def handle_site_menu(query):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    c = creds()
-    ready = paramiko_ready()
-
-    if not ready:
-        await query.edit_message_text(
-            "🌐 <b>Сайт</b>\n\n"
-            "Нужна библиотека для SSH. Ставить её надо в тот же Python, "
-            "из которого работает бот:\n\n"
-            f"<blockquote><code>{escape(pip_path())} install paramiko</code>\n"
-            "<code>systemctl restart drebol-vpn</code></blockquote>\n\n"
-            "<i>Обычный «pip install» ставит в системный Python, "
-            "а бот живёт в своём venv — поэтому и не видит библиотеку.</i>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Проверить снова", callback_data="site_menu"),
-                 InlineKeyboardButton("◀️ В админку", callback_data="admin_panel")],
-            ]),
-        )
-        return
-
-    server = (f"<code>{escape(c['host'])}</code> · {escape(c['user'])}"
-              if c["host"] else "не задан")
-    domain = f"<code>{escape(c['domain'])}</code>" if c["domain"] else "не задан"
-    state = (f"🟢 развёрнут {c['deployed_at']}" if c["deployed_at"]
-             else "⚪️ ещё не разворачивали")
-    url = site_url()
-
-    card = [f"🚀 Статус: <b>{state}</b>",
-            f"🖥 Сервер: {server}",
-            f"🌍 Домен: {domain}" + ("  ·  🔒 HTTPS" if c.get("https") else ""),
-            "⚡ Автообновление: "
-            + ("вкл" if load_config().get("site_auto", True) else "выкл")]
-    if url and c["deployed_at"]:
-        card.append(f"🔗 {escape(url)}")
-    lines = ["🌐 <b>Сайт</b>", "", "<blockquote>" + "\n".join(card) + "</blockquote>",
-             "", "<i>Лендинг Drebol VPN: разделы, тарифы из бота, кнопка в Telegram. "
-             "Живёт на втором сервере и бота не трогает. Цены и ссылки подставляются "
-             "при каждом обновлении.</i>"]
-
-    kb = []
-    if configured():
-        # главное действие — первым и во всю ширину
-        kb.append([InlineKeyboardButton(
-            "🔄 Обновить сайт" if c["deployed_at"] else "🚀 Развернуть сайт",
-            callback_data="site_deploy")])
-    kb.append([InlineKeyboardButton("🖥 Сервер", callback_data="site_server"),
-               InlineKeyboardButton("🌍 Домен", callback_data="site_domain")])
-    kb.append([InlineKeyboardButton("✍️ Тексты сайта", callback_data="site_texts")])
-    if configured():
-        extra = []
-        if c["domain"] and c["deployed_at"] and not c["https"]:
-            extra.append(InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert"))
-        if c["deployed_at"]:
-            extra.append(InlineKeyboardButton("🩺 Проверить", callback_data="site_check"))
-            extra.append(InlineKeyboardButton(
-                "⚡ Авто: вкл" if load_config().get("site_auto", True) else "💤 Авто: выкл",
-                callback_data="site_auto"))
-        if extra:
-            kb.append(extra)
-        if c["deployed_at"] and url:
-            kb.append([InlineKeyboardButton("🔗 Открыть сайт", url=url),
-                       InlineKeyboardButton("🗑 Удалить", callback_data="site_delete")])
-    kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
-
-    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
-                                  reply_markup=InlineKeyboardMarkup(kb),
-                                  disable_web_page_preview=True)
+    """Старое имя экрана сайта: теперь это общий экран «Веб-доступ»."""
+    from web.webapi import handle_web_menu
+    await handle_web_menu(query)
 
 
 async def handle_site_server(query, context):

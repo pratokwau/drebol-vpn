@@ -572,8 +572,8 @@ async def sessions_tick(context):
 
 # ── Настройки кабинета (админка) ─────────────────────────────────────────────
 
-async def handle_cabinet_menu(query, context=None, note: str = ""):
-    """Что нужно кабинету, что уже готово и куда нажимать дальше."""
+async def handle_web_menu(query, context=None, note: str = ""):
+    """Веб-доступ: сайт и личный кабинет на одном экране."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from config import load_config
     from core.database import web_sessions_stats
@@ -584,7 +584,39 @@ async def handle_cabinet_menu(query, context=None, note: str = ""):
     s = settings()
     public = cfg.get("webapi_public") or ""
     stats = await web_sessions_stats()
+    c = site.creds()
+    url = site.site_url()
+    link = site.cabinet_link()
+    upstream = cfg.get("webapi_upstream") or ""
+    has_ssh = site.paramiko_ready()
 
+    lines = ["🌐 <b>Веб-доступ</b>", ""]
+    if note:
+        lines += [note, ""]
+
+    # — Сайт —
+    lines.append("<b>Сайт</b>")
+    if has_ssh:
+        state = (f"🟢 развёрнут {c['deployed_at']}" if c["deployed_at"]
+                 else "⚪️ ещё не разворачивали")
+        server = (f"<code>{html.escape(c['host'])}</code> · {html.escape(c['user'])}"
+                  if c["host"] else "не задан")
+        domain = (f"<code>{html.escape(c['domain'])}</code>"
+                  if c["domain"] else "не задан")
+        card = [f"🚀 Статус: <b>{state}</b>",
+                f"🖥 Сервер: {server}",
+                f"🌍 Домен: {domain}" + ("  ·  🔒 HTTPS" if c.get("https") else ""),
+                "⚡ Автообновление: "
+                + ("вкл" if cfg.get("site_auto", True) else "выкл")]
+        if url and c["deployed_at"]:
+            card.append(f"🔗 {html.escape(url)}")
+        lines.append("<blockquote>" + "\n".join(card) + "</blockquote>")
+    else:
+        lines.append("<blockquote>⚠️ Сайт: нужна библиотека для SSH — "
+                     f"<code>{html.escape(site.pip_path())} install paramiko</code>, "
+                     "потом <code>systemctl restart drebol-vpn</code></blockquote>")
+
+    # — Личный кабинет —
     ready = [
         ("🌐 Сайт развёрнут", bool(site.creds()["domain"] and cfg.get("site_deployed_at"))),
         ("🔌 API включён", s["enabled"]),
@@ -592,9 +624,7 @@ async def handle_cabinet_menu(query, context=None, note: str = ""):
         ("🔗 Адрес API задан", bool(public)),
         ("🪪 Кабинет опубликован", site.cabinet_ready()),
     ]
-    lines = ["🪪 <b>Личный кабинет</b>", ""]
-    if note:
-        lines += [note, ""]
+    lines.append("<b>Личный кабинет</b>")
     lines.append("<blockquote>" + "\n".join(
         ("✅ " if ok else "⬜️ ") + name for name, ok in ready) + "</blockquote>")
     lines.append(
@@ -604,34 +634,57 @@ async def handle_cabinet_menu(query, context=None, note: str = ""):
         f"👥 Живых сессий: <b>{stats['live']}</b>  ·  людей: <b>{stats['people']}</b>  ·  "
         f"входов сегодня: <b>{stats['today']}</b>"
         "</blockquote>")
-    link = site.cabinet_link()
     if link:
         lines.append(f"<blockquote>🪪 Кабинет: {html.escape(link)}</blockquote>")
-    upstream = cfg.get("webapi_upstream") or ""
     if upstream:
         lines.append(f"<blockquote>🔀 Сайт шлёт <code>/api/</code> на "
                      f"<b>{html.escape(upstream)}</b></blockquote>")
     lines.append(
         "\n<i>Кабинет только показывает: срок, ссылку подписки, устройства и платежи. "
-        "Менять что-либо можно только в боте.\n\n"
-        "Порядок такой: «🔍 Найти адрес бота» (бот подберёт его сам) → "
-        "«🟢 Включить API» → развернуть сайт заново. И скажи @BotFather команду "
-        "/setdomain с доменом сайта — без неё кнопка входа не появится.</i>")
+        "Менять что-либо можно только в боте.</i>")
 
-    kb = [[InlineKeyboardButton("🔴 Выключить API" if s["enabled"] else "🟢 Включить API",
+    kb = []
+    # сайт
+    if site.configured() and has_ssh:
+        kb.append([InlineKeyboardButton(
+            "🔄 Обновить сайт" if c["deployed_at"] else "🚀 Развернуть сайт",
+            callback_data="site_deploy")])
+    kb.append([InlineKeyboardButton("🖥 Сервер", callback_data="site_server"),
+               InlineKeyboardButton("🌍 Домен", callback_data="site_domain")])
+    kb.append([InlineKeyboardButton("✍️ Тексты сайта", callback_data="site_texts")])
+    if site.configured() and has_ssh:
+        extra = []
+        if c["domain"] and c["deployed_at"] and not c["https"]:
+            extra.append(InlineKeyboardButton("🔒 Включить HTTPS", callback_data="site_cert"))
+        if c["deployed_at"]:
+            extra.append(InlineKeyboardButton("🩺 Проверить", callback_data="site_check"))
+            extra.append(InlineKeyboardButton(
+                "⚡ Авто: вкл" if cfg.get("site_auto", True) else "💤 Авто: выкл",
+                callback_data="site_auto"))
+        if extra:
+            kb.append(extra)
+        if c["deployed_at"] and url:
+            kb.append([InlineKeyboardButton("🔗 Открыть сайт", url=url),
+                       InlineKeyboardButton("🗑 Удалить", callback_data="site_delete")])
+    # кабинет
+    kb.append([InlineKeyboardButton("🔴 Выключить API" if s["enabled"] else "🟢 Включить API",
                                 callback_data="cab_toggle"),
-           InlineKeyboardButton("🩺 Проверить", callback_data="cab_check")],
-          [InlineKeyboardButton("🔍 Найти адрес бота", callback_data="cab_find")],
-          [InlineKeyboardButton("🔀 Через сайт", callback_data="cab_upstream"),
+           InlineKeyboardButton("🩺 Проверить", callback_data="cab_check")])
+    kb.append([InlineKeyboardButton("🔍 Найти адрес бота", callback_data="cab_find")])
+    kb.append([InlineKeyboardButton("🔀 Через сайт", callback_data="cab_upstream"),
            InlineKeyboardButton("🔗 Адрес API", callback_data="cab_public"),
-           InlineKeyboardButton("🔌 Порт", callback_data="cab_port")]]
+           InlineKeyboardButton("🔌 Порт", callback_data="cab_port")])
     if link:
         kb.append([InlineKeyboardButton("🪪 Открыть кабинет", url=link)])
-    kb.append([InlineKeyboardButton("🌐 К сайту", callback_data="site_menu"),
-               InlineKeyboardButton("◀️ В админку", callback_data="admin_panel")])
+    kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
                                   disable_web_page_preview=True)
+
+
+async def handle_cabinet_menu(query, context=None, note: str = ""):
+    """Старое имя экрана кабинета: теперь это общий экран «Веб-доступ»."""
+    await handle_web_menu(query, context, note=note)
 
 
 async def handle_cabinet_toggle(query, context):
