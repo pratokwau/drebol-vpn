@@ -257,13 +257,17 @@
   </div>
 </div>
 
+<div id="sbpg" data-panel="<%- panelData %>" hidden></div>
+
 <script>
 /* Кастомная страница подписки Drebol VPN.
    Установка: подменить index.html в контейнере remnawave/subscription-page:
      ./subpage.html:/opt/app/frontend/index.html
      ./app-config.json:/opt/app/frontend/assets/app-config.json   (drebol-subpage.json)
-   и перезапустить контейнер. Данные подписки сервер подставляет сам в
-   плейсхолдер {{.PanelData}} (base64 JSON) — его нельзя убирать или менять.
+   и перезапустить контейнер (важно: шаблон компилируется при старте,
+   поэтому без рестарта новый файл не подхватится). Данные подписки
+   сервер подставляет сам в div#sbpg (атрибут data-panel, base64 JSON).
+   Убирать div#sbpg или менять имя атрибута нельзя.
    Конфиг (логотип, тексты, приложения, шаги установки) берётся из
    /assets/.app-config-v2.json, при его отсутствии — из ./assets/app-config.json,
    при отсутствии обоих — из встроенного FALLBACK_CONFIG ниже. */
@@ -388,14 +392,25 @@
   /* ---------- данные подписки (подставляет сервер Remnawave) ---------- */
   var panelData = null;
   function loadPanelData() {
-    var raw = "{{.PanelData}}";
-    if (!raw || raw.indexOf("{{") !== -1) { panelData = { response: { isFound: false } }; return; }
+    /* Данные подписки сервер подставляет сам при старте контейнера:
+       он компилирует этот файл как EJS-шаблон и кладёт base64 JSON
+       в атрибут data-panel у div#sbpg (см. разметку перед скриптом).
+       Старый плейсхолдер {{.PanelData}} (Orion) в этой версии сервера
+       не подставляется — оставлен как запасной вариант. Внедрённый
+       объект — голый SubscriptionInfo без обёртки response, поэтому
+       нормализуем его здесь в привычный вид { response: ... }. */
+    var raw = "";
+    var div = document.getElementById("sbpg");
+    if (div) raw = div.getAttribute("data-panel") || "";
+    if (!raw || raw.indexOf("<" + "%") !== -1) raw = "{{.PanelData}}";
+    if (!raw || raw.indexOf("{{") !== -1 || raw.indexOf("<" + "%") !== -1) { panelData = { response: { isFound: false } }; return; }
     try {
       var bin = atob(raw);
       var bytes = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       var text = (window.TextDecoder ? new TextDecoder("utf-8").decode(bytes) : decodeURIComponent(escape(bin)));
-      panelData = JSON.parse(text);
+      var parsed = JSON.parse(text);
+      panelData = parsed && parsed.response ? parsed : { response: parsed };
     } catch (e) {
       console.error("PanelData decode failed", e);
       panelData = { response: { isFound: false } };
@@ -519,7 +534,7 @@
       (bigSub ? '<div class="big-sub">' + esc(bigSub) + "</div>" : "") +
       '<div class="stats">' +
         '<div class="stat"><b>' + esc(indefinite ? "∞" : fmtDate(u.expiresAt)) + "</b><span>" + esc(t(tr.expires, "Истекает")) + "</span></div>" +
-        '<div class="stat"><b>' + esc(limit === "0" ? "∞" : limit) + "</b><span>" + esc(t(tr.bandwidth, "Трафик")) + "</span></div>" +
+        '<div class="stat"><b>' + esc(limit === "0" ? used : limit) + "</b><span>" + esc(limit === "0" ? (lang === "ru" ? "Использовано · безлимит" : "Used · unlimited") : t(tr.bandwidth, "Трафик")) + "</span></div>" +
         '<div class="stat"><b>' + esc(userName || "—") + "</b><span>" + esc(t(tr.name, "Имя пользователя")) + "</span></div>" +
       "</div>" + bar + "</div>";
   }
