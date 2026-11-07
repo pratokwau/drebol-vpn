@@ -526,56 +526,104 @@ h1 {
 
 .route-flow {
   display: grid; grid-template-columns: 1fr auto 1.3fr auto 1fr;
-  align-items: center; gap: 16px; position: relative; z-index: 2;
+  align-items: stretch; gap: 16px; position: relative; z-index: 2;
 }
 .flow-node {
-  padding: 20px; border-radius: 20px;
-  background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line);
-  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 12px;
-  transition: all 0.3s ease;
+  padding: 28px 24px 26px; border-radius: 24px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+  border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px;
+  position: relative; overflow: hidden;
+  transition: transform 0.3s var(--ease), border-color 0.3s ease, background 0.3s ease, box-shadow 0.3s ease;
 }
-.flow-node:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(79, 140, 255, 0.5);
-  transform: translateY(-2px);
+.flow-node::before {
+  content: ""; position: absolute; top: 0; left: 24px; right: 24px; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(79, 140, 255, 0.7), transparent);
+  opacity: 0; transition: opacity 0.3s ease;
 }
+.flow-node:hover::before { opacity: 1; }
 .flow-node.core {
-  background: linear-gradient(180deg, rgba(79, 140, 255, 0.15), rgba(79, 140, 255, 0.04));
-  border-color: rgba(79, 140, 255, 0.45);
-  box-shadow: 0 0 40px rgba(79, 140, 255, 0.2);
+  background: linear-gradient(180deg, rgba(79, 140, 255, 0.18), rgba(79, 140, 255, 0.05));
+  border-color: rgba(79, 140, 255, 0.55);
+  box-shadow: 0 0 50px rgba(79, 140, 255, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
+.flow-node.core::before { opacity: 1; }
+.flow-node:hover {
+  background: linear-gradient(180deg, rgba(79, 140, 255, 0.08), rgba(255, 255, 255, 0.02));
+  border-color: rgba(79, 140, 255, 0.5);
+  transform: translateY(-4px);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45), 0 0 30px rgba(79, 140, 255, 0.12);
+}
+.flow-step {
+  font-family: "Unbounded", "Inter", sans-serif;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.18em;
+  color: var(--soft);
+}
+.flow-node.core .flow-step { color: var(--accent); }
+.flow-node.free .flow-step { color: var(--accent-cyan); }
 .flow-icon {
-  width: 48px; height: 48px; border-radius: 14px;
+  width: 64px; height: 64px; border-radius: 18px;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(79, 140, 255, 0.12); color: var(--accent);
+  background: linear-gradient(135deg, rgba(79, 140, 255, 0.2), rgba(121, 82, 255, 0.14));
+  color: var(--accent);
+  border: 1px solid rgba(79, 140, 255, 0.35);
+  box-shadow: 0 0 28px rgba(79, 140, 255, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
+.flow-icon svg { width: 28px; height: 28px; }
 .flow-node.core .flow-icon {
-  background: var(--accent); color: #fff;
-  box-shadow: 0 0 20px var(--accent-glow);
+  width: 72px; height: 72px; border-radius: 20px;
+  background: linear-gradient(135deg, #4f8cff, #7952ff); color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 36px rgba(79, 140, 255, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
-.flow-title { font-size: 15px; font-weight: 700; color: #fff; }
+.flow-node.core .flow-icon svg { width: 32px; height: 32px; }
+.flow-node.free .flow-icon {
+  background: linear-gradient(135deg, rgba(56, 239, 125, 0.18), rgba(56, 239, 125, 0.06));
+  color: var(--accent-cyan);
+  border: 1px solid rgba(56, 239, 125, 0.35);
+  box-shadow: 0 0 28px rgba(56, 239, 125, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.flow-title { font-size: 16px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
 .flow-badge {
-  font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06); color: var(--muted);
+  font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); color: var(--muted);
 }
 .flow-node.core .flow-badge {
-  background: rgba(56, 239, 125, 0.18); color: var(--accent-cyan);
+  background: rgba(79, 140, 255, 0.16); color: #b6d0ff; border-color: rgba(79, 140, 255, 0.35);
+}
+.flow-node.free .flow-badge {
+  background: rgba(56, 239, 125, 0.12); color: var(--accent-cyan); border-color: rgba(56, 239, 125, 0.3);
 }
 
 .flow-beam {
-  position: relative; width: 60px; height: 2px;
-  background: rgba(255, 255, 255, 0.15);
+  display: flex; align-items: center; gap: 8px;
+  width: 76px; flex: none; align-self: center;
+}
+.beam-track {
+  position: relative; flex: 1; height: 4px; border-radius: 999px;
+  background: linear-gradient(90deg, rgba(79, 140, 255, 0.12), rgba(79, 140, 255, 0.4), rgba(79, 140, 255, 0.12));
   overflow: hidden;
 }
 .beam-pulse {
-  position: absolute; top: 0; left: 0; width: 30px; height: 100%;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  position: absolute; top: 0; left: 0; width: 36px; height: 100%;
+  background: linear-gradient(90deg, transparent, #4f8cff, transparent);
+  border-radius: 999px;
+  box-shadow: 0 0 12px rgba(79, 140, 255, 0.9);
   animation: beamFlow 1.8s linear infinite;
 }
 .beam-pulse.delayed { animation-delay: 0.9s; }
+.beam-arrow {
+  color: var(--accent); font-size: 22px; font-weight: 800; line-height: 1; flex: none;
+  text-shadow: 0 0 12px rgba(79, 140, 255, 0.7);
+}
 @keyframes beamFlow {
-  0%   { transform: translateX(-30px); }
-  100% { transform: translateX(60px); }
+  0%   { transform: translateX(-36px); }
+  100% { transform: translateX(68px); }
+}
+@keyframes beamFlowY {
+  0%   { transform: translateY(-28px); }
+  100% { transform: translateY(48px); }
 }
 
 /* ── Разделы (Общее) ── */
@@ -857,13 +905,13 @@ h2 {
   box-shadow: 0 0 32px rgba(79, 140, 255, 0.3);
 }
 
-/* Курсорный спотлайт: тарифы, метрики и шаги — как у bento-карточек */
-.plan::after, .metric-card::after, .step-card::after {
+/* Курсорный спотлайт: тарифы, метрики, шаги и маршрут — как у bento-карточек */
+.plan::after, .metric-card::after, .step-card::after, .flow-node::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgba(79, 140, 255, 0.10), transparent 45%);
   opacity: 0; transition: opacity 0.3s ease;
 }
-.plan:hover::after, .metric-card:hover::after, .step-card:hover::after { opacity: 1; }
+.plan:hover::after, .metric-card:hover::after, .step-card:hover::after, .flow-node:hover::after { opacity: 1; }
 
 /* Тарифы: пульс лучшего тарифа + свечение цены */
 .best-tag { animation: tagPulse 2.4s ease-in-out infinite; }
@@ -944,8 +992,11 @@ h2 {
   .visual { justify-content: center; }
   .visual-card { width: min(100%, 420px); }
   .metrics-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
-  .route-flow { grid-template-columns: 1fr; gap: 14px; }
-  .flow-beam { display: none; }
+  .route-flow { grid-template-columns: 1fr; gap: 0; }
+  .flow-beam { flex-direction: column; width: 4px; height: 64px; margin: 0 auto; gap: 4px; }
+  .beam-track { flex: 1; width: 4px; height: auto; background: linear-gradient(180deg, rgba(79, 140, 255, 0.12), rgba(79, 140, 255, 0.4), rgba(79, 140, 255, 0.12)); }
+  .beam-pulse { width: 100%; height: 28px; background: linear-gradient(180deg, transparent, #4f8cff, transparent); animation: beamFlowY 1.8s linear infinite; }
+  .beam-arrow { transform: rotate(90deg); font-size: 18px; }
   .bento-grid { grid-template-columns: 1fr; }
   .bento-card.wide { grid-column: auto; }
   .steps-grid { grid-template-columns: 1fr; gap: 14px; }
@@ -1022,7 +1073,7 @@ JS = """
     items.forEach(function (el) { el.classList.add('in'); });
   }
 
-  var spotCards = document.querySelectorAll('.bento-card, .plan, .metric-card, .step-card');
+  var spotCards = document.querySelectorAll('.bento-card, .plan, .metric-card, .step-card, .flow-node');
   spotCards.forEach(function (card) {
     card.addEventListener('mousemove', function (e) {
       var rect = card.getBoundingClientRect();
@@ -1357,18 +1408,21 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
       </div>
       <div class="route-flow">
         <div class="flow-node">
+          <span class="flow-step">01</span>
           <div class="flow-icon">{_ICONS["devices"]}</div>
           <div class="flow-title">{escape(txt['route_node1'])}</div>
           <span class="flow-badge">{escape(txt['route_badge1'])}</span>
         </div>
-        <div class="flow-beam"><div class="beam-pulse"></div></div>
+        <div class="flow-beam"><div class="beam-track"><div class="beam-pulse"></div></div><span class="beam-arrow">›</span></div>
         <div class="flow-node core">
+          <span class="flow-step">02</span>
           <div class="flow-icon">{_ICONS["shield"]}</div>
           <div class="flow-title">{escape(txt['route_node2'])}</div>
           <span class="flow-badge">{escape(txt['route_badge2'])}</span>
         </div>
-        <div class="flow-beam"><div class="beam-pulse delayed"></div></div>
-        <div class="flow-node">
+        <div class="flow-beam"><div class="beam-track"><div class="beam-pulse delayed"></div></div><span class="beam-arrow">›</span></div>
+        <div class="flow-node free">
+          <span class="flow-step">03</span>
           <div class="flow-icon">{_ICONS["globe"]}</div>
           <div class="flow-title">{escape(txt['route_node3'])}</div>
           <span class="flow-badge">{escape(txt['route_badge3'])}</span>
