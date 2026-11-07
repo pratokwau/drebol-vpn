@@ -97,7 +97,7 @@ CABINET_PAGE = r"""<!doctype html>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%234f8cff' stroke-width='7'%3E%3Ccircle cx='50' cy='50' r='40'/%3E%3Cellipse cx='50' cy='50' rx='40' ry='13'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
  :root {
@@ -111,7 +111,7 @@ CABINET_PAGE = r"""<!doctype html>
  }
  * { box-sizing: border-box; }
  body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); overflow-x:hidden;
-        font:15px/1.55 "Plus Jakarta Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+        font:15px/1.55 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
         -webkit-font-smoothing:antialiased; }
  body { min-height:var(--tg-viewport-height, 100vh); }
  a { color:inherit; text-decoration:none; }
@@ -160,7 +160,7 @@ CABINET_PAGE = r"""<!doctype html>
  .logo { display:flex; align-items:center; gap:10px; }
  .logo .mark { width:28px; height:28px; }
  .logo .mark circle, .logo .mark ellipse { fill:none; stroke:#4f8cff; stroke-width:7; }
- .logo .word { font-size:22px; font-weight:800; letter-spacing:-.02em; font-family:"Space Grotesk",sans-serif; color:#fff; }
+ .logo .word { font-size:22px; font-weight:800; letter-spacing:-.02em; font-family:"Unbounded",sans-serif; color:#fff; }
 
  .btn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%;
         min-height:52px; padding:0 22px; border-radius:999px; border:1px solid transparent;
@@ -189,16 +189,16 @@ CABINET_PAGE = r"""<!doctype html>
  .card-sub { color:var(--muted); font-size:13px; margin-bottom:10px; }
 
  .eyebrow { font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); }
- .hello { font-size:clamp(26px, 7vw, 34px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:6px 0 4px; }
+ .hello { font-size:clamp(26px, 7vw, 34px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:6px 0 4px; font-family:"Unbounded","Inter",sans-serif; }
  .muted { color:var(--muted); font-size:14px; }
 
  .hero-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
  .plan { font-weight:700; color:rgba(255,255,255,.9); }
- .big { font-size:clamp(28px, 8vw, 38px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:14px 0 2px; font-family:"Space Grotesk",sans-serif; }
+ .big { font-size:clamp(28px, 8vw, 38px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:14px 0 2px; font-family:"Unbounded",sans-serif; }
  .big-sub { color:var(--muted); font-size:14px; }
  .stats { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin-top:18px; }
  .stat { background:rgba(5,7,12,.45); border:1px solid var(--line); border-radius:16px; padding:12px; min-width:0; }
- .stat b { display:block; font-size:15px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:"Space Grotesk",sans-serif; }
+ .stat b { display:block; font-size:15px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:"Unbounded",sans-serif; }
  .stat span { display:block; font-size:12px; color:var(--soft); margin-top:2px; }
 
  .pill { display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border-radius:999px;
@@ -258,7 +258,7 @@ CABINET_PAGE = r"""<!doctype html>
  .pay { padding:14px 0; border-top:1px solid var(--line); }
  .pay:first-of-type { border-top:0; }
  .pay-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
- .pay-amount { font-size:18px; font-weight:800; letter-spacing:-.01em; font-family:"Space Grotesk",sans-serif; }
+ .pay-amount { font-size:18px; font-weight:800; letter-spacing:-.01em; font-family:"Unbounded",sans-serif; }
  .pay-date { font-size:13px; color:var(--soft); margin-top:2px; }
  .pay-meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
  .chip { padding:4px 10px; border-radius:999px; border:1px solid var(--line);

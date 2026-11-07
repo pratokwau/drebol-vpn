@@ -202,13 +202,14 @@ CSS = """
 html { scroll-behavior: smooth; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
-  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased; overflow-x: hidden;
   line-height: 1.5;
 }
 a { color: inherit; text-decoration: none; }
 img { max-width: 100%; }
 h1, h2, h3, h4, p { margin: 0; }
+h1, h2 { font-family: "Unbounded", "Inter", sans-serif; }
 .wrap { width: 100%; max-width: 1360px; margin: 0 auto; padding-inline: var(--pad); }
 
 /* ── Задний фон: Кибер-аура ── */
@@ -386,6 +387,7 @@ h1 {
   max-width: 540px; font-size: clamp(16px, 1.4vw, 19px); line-height: 1.6;
   color: var(--muted); text-wrap: pretty;
 }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 4px; }
 .hint { font-size: 13px; color: var(--soft); }
 .handle { color: #fff; font-weight: 700; user-select: all; -webkit-user-select: all; }
@@ -519,7 +521,7 @@ h1 {
   pointer-events: none;
 }
 .route-head { text-align: center; max-width: 680px; margin: 0 auto 36px; }
-.route-head h3 { font-size: clamp(22px, 2.5vw, 32px); font-weight: 800; letter-spacing: -0.02em; }
+.route-head h3 { font-size: clamp(22px, 2.5vw, 32px); font-weight: 800; letter-spacing: -0.02em; font-family: "Unbounded", "Inter", sans-serif; }
 .route-head p { font-size: 15px; color: var(--muted); margin-top: 8px; }
 
 .route-flow {
@@ -682,7 +684,7 @@ h2 {
 .step-num {
   font-size: 56px; line-height: 1; font-weight: 800; letter-spacing: -0.04em;
   color: transparent; -webkit-text-stroke: 1.5px rgba(255, 255, 255, 0.35);
-  font-family: "Space Grotesk", sans-serif;
+  font-family: "Unbounded", sans-serif;
 }
 .step-card:last-child .step-num { -webkit-text-stroke-color: var(--accent); }
 .step-card h3 { font-size: 22px; font-weight: 700; color: #fff; margin-bottom: 6px; }
@@ -734,7 +736,7 @@ h2 {
 .price-box { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
 .price-box b {
   font-size: clamp(44px, 4.5vw, 56px); font-weight: 800; letter-spacing: -0.04em;
-  color: #fff; line-height: 1; font-family: "Space Grotesk", sans-serif;
+  color: #fff; line-height: 1; font-family: "Unbounded", sans-serif;
 }
 .price-box span { font-size: 20px; font-weight: 700; color: var(--muted); }
 
@@ -1259,7 +1261,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%234f8cff' stroke-width='7'%3E%3Ccircle cx='50' cy='50' r='40'/%3E%3Cellipse cx='50' cy='50' rx='40' ry='13'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>{CSS}</style>
 <script>{JS_HEAD}</script>
 </head>
