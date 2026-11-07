@@ -57,7 +57,6 @@ CB_LABELS = {
     "rw_test": "🔌 Проверка Remnawave",
     "backup_export": "📤 Выгрузка базы",
     "backup_apply": "♻️ Восстановление из бэкапа",
-    "site_logo": "🖼 Логотип сайта",
     "site_deploy": "🚀 Разворачивает сайт",
     "site_check": "🩺 Проверка сайта",
     "site_auto": "⚡ Автообновление сайта",

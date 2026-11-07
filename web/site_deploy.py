@@ -942,65 +942,6 @@ def _asset(name: str) -> bytes:
         return b""
 
 
-def save_logo(data: bytes):
-    os.makedirs(os.path.join(PROJECT_DIR, "assets"), exist_ok=True)
-    with open(os.path.join(PROJECT_DIR, "assets", LOGO_NAME), "wb") as f:
-        f.write(data)
-
-
-def has_logo() -> bool:
-    return bool(_asset(LOGO_NAME))
-
-
-def process_logo(data: bytes) -> bytes:
-    """Готовит присланную картинку к вставке на тёмную страницу.
-
-    Обрезает пустые поля и, если логотип белый на тёмном фоне, делает фон
-    прозрачным — иначе на сайте вокруг знака висел бы тёмный прямоугольник.
-    Картинку с настоящей прозрачностью не трогаем, только подрезаем.
-    """
-    try:
-        import io
-        from PIL import Image
-    except ImportError:
-        return data
-    try:
-        im = Image.open(io.BytesIO(data))
-        im.load()
-    except Exception:
-        return data
-
-    has_alpha = im.mode in ("RGBA", "LA") and im.getchannel("A").getextrema()[0] < 255
-    if not has_alpha:
-        grey = im.convert("L")
-        # тёмный фон — берём прозрачность из яркости, знак остаётся белым
-        if sum(grey.getdata()) / max(1, grey.width * grey.height) < 110:
-            # фон почти никогда не бывает чисто чёрным, поэтому тёмное уводим
-            # в полную прозрачность, светлое — в полную непрозрачность,
-            # а между ними оставляем мягкий край, чтобы буквы не рвало
-            ramp = grey.point(lambda v: 0 if v < 95 else
-                              (255 if v > 190 else int((v - 95) * 255 / 95)))
-            im = Image.merge("RGBA", (
-                Image.new("L", grey.size, 255), Image.new("L", grey.size, 255),
-                Image.new("L", grey.size, 255), ramp))
-        else:
-            im = im.convert("RGBA")
-    else:
-        im = im.convert("RGBA")
-
-    alpha = im.getchannel("A")
-    # обрезаем по заметной части, а не по первому ненулевому пикселю
-    box = alpha.point(lambda v: 255 if v > 60 else 0).getbbox()
-    if box:
-        im = im.crop(box)
-    if im.width > 900:
-        im = im.resize((900, max(1, round(im.height * 900 / im.width))), Image.LANCZOS)
-
-    buf = io.BytesIO()
-    im.save(buf, format="PNG")
-    return buf.getvalue()
-
-
 def creds() -> dict:
     cfg = load_config()
     return {
@@ -1532,7 +1473,6 @@ async def handle_site_menu(query):
     card = [f"🚀 Статус: <b>{state}</b>",
             f"🖥 Сервер: {server}",
             f"🌍 Домен: {domain}" + ("  ·  🔒 HTTPS" if c.get("https") else ""),
-            f"🖼 Логотип: {'свой' if has_logo() else 'нарисованный'}",
             "⚡ Автообновление: "
             + ("вкл" if load_config().get("site_auto", True) else "выкл")]
     if url and c["deployed_at"]:
@@ -1549,8 +1489,7 @@ async def handle_site_menu(query):
             "🔄 Обновить сайт" if c["deployed_at"] else "🚀 Развернуть сайт",
             callback_data="site_deploy")])
     kb.append([InlineKeyboardButton("🖥 Сервер", callback_data="site_server"),
-               InlineKeyboardButton("🌍 Домен", callback_data="site_domain"),
-               InlineKeyboardButton("🖼 Логотип", callback_data="site_logo")])
+               InlineKeyboardButton("🌍 Домен", callback_data="site_domain")])
     kb.append([InlineKeyboardButton("✍️ Тексты сайта", callback_data="site_texts")])
     if configured():
         extra = []
@@ -1602,24 +1541,6 @@ async def handle_site_domain(query, context):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
-        ]),
-    )
-
-
-async def handle_site_logo(query, context):
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from core.states import AWAITING_SITE_LOGO
-    context.user_data["state"] = AWAITING_SITE_LOGO
-    cur = "стоит твой файл" if has_logo() else "нарисованный знак"
-    await query.edit_message_text(
-        "🖼 <b>Логотип сайта</b>\n\n"
-        f"<blockquote>Сейчас: <b>{cur}</b></blockquote>\n\n"
-        "Пришли картинку — лучше PNG с прозрачным фоном. "
-        "Тёмную подложку уберу сам, если её видно.\n\n"
-        "<i>После замены нажми «Обновить сайт».</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
         ]),
     )
 

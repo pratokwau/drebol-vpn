@@ -45,7 +45,7 @@ from features.backup import (
 )
 from web.site_deploy import (
     handle_site_menu, handle_site_server, handle_site_domain,
-    handle_site_deploy, handle_site_cert, handle_site_delete, handle_site_logo,
+    handle_site_deploy, handle_site_cert, handle_site_delete,
     handle_site_check, handle_site_auto,
 )
 from handlers.support import (
@@ -553,8 +553,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_site_server(query, context)
     elif data == "site_domain":
         await handle_site_domain(query, context)
-    elif data == "site_logo":
-        await handle_site_logo(query, context)
     elif data == "site_deploy":
         await handle_site_deploy(query, context)
     elif data == "site_cert":

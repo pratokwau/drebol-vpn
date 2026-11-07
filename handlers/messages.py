@@ -39,7 +39,7 @@ from core.states import (
     AWAITING_REMIND_FIRST, AWAITING_REMIND_SECOND, AWAITING_REMIND_THIRD,
     AWAITING_REMIND_QUIET, AWAITING_QUICK_REPLY,
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
-    AWAITING_SITE_DOMAIN, AWAITING_SITE_LOGO, AWAITING_SITE_TEXT, AWAITING_BACKUP_FILE,
+    AWAITING_SITE_DOMAIN, AWAITING_SITE_TEXT, AWAITING_BACKUP_FILE,
     AWAITING_RW_URL, AWAITING_RW_TOKEN, AWAITING_RW_USAGE_PERIOD,
     AWAITING_PANEL_SYNC_DAILY, AWAITING_PANEL_SYNC_INTERVAL,
     AWAITING_DIGEST_HOUR,
@@ -756,10 +756,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + (f"за {fmt_duration(seconds)}" if seconds else "выключено") + "</b>",
             parse_mode="HTML", reply_markup=back_admin(),
         )
-        return
-
-    if state == AWAITING_SITE_LOGO:
-        await update.message.reply_text("🖼 Пришли картинку файлом или фото.")
         return
 
     if state == AWAITING_BACKUP_FILE:
@@ -1542,26 +1538,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         await offer_restore(msg, context, blob)
-        return
-
-    # ── Логотип для сайта ───────────────────────────────────────────────────
-    if is_admin and state == AWAITING_SITE_LOGO:
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from web.site_deploy import process_logo, save_logo
-        context.user_data.pop("state", None)
-        tg_file = await context.bot.get_file(file_id)
-        raw = bytes(await tg_file.download_as_bytearray())
-        ready = process_logo(raw)
-        save_logo(ready)
-        await msg.reply_text(
-            "🖼 <b>Логотип сохранён</b>\n\n"
-            "Нажми «Обновить сайт» — он поедет на страницу.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Обновить сайт", callback_data="site_deploy")],
-                [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
-            ]),
-        )
         return
 
     # ── Картинка для рассылки ───────────────────────────────────────────────
