@@ -332,7 +332,7 @@ CABINET_PAGE = r"""<!doctype html>
    <div id="body"></div>
  </div>
 
- <p class="foot">© Drebol VPN</p>
+ <p class="foot">Drebol VPN</p>
 </div>
 
 <script>

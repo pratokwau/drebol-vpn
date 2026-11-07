@@ -818,6 +818,112 @@ h2 {
 .foot nav a:hover { color: #fff; }
 .copy { font-size: 13px; color: var(--soft); }
 
+/* ── Живые микро-анимации: сайт «дышит» ──
+   Тот же язык, что у кнопки «Открыть в Telegram»: бегущий блик,
+   свечение, подъём и спотлайт за курсором — на всех кнопках,
+   карточках, шагах, тарифах и ссылках. */
+
+/* Кнопки: бегущий блик + сдвиг иконки */
+.btn::after {
+  content: ""; position: absolute; top: 0; left: -80%;
+  width: 50%; height: 100%; pointer-events: none;
+  background: linear-gradient(105deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  transform: skewX(-20deg);
+  transition: left 0.6s var(--ease);
+}
+.btn:hover::after { left: 130%; }
+.btn-main::after {
+  background: linear-gradient(105deg, transparent, rgba(79, 140, 255, 0.28), transparent);
+}
+.btn svg { transition: transform 0.25s var(--ease); }
+.btn:hover svg { transform: translateX(3px); }
+
+/* Шапка: логотип оживает при наведении */
+.brand img { transition: transform 0.3s var(--ease), filter 0.3s ease; }
+.brand:hover img {
+  transform: scale(1.05);
+  filter: drop-shadow(0 2px 14px rgba(79, 140, 255, 0.6));
+}
+
+/* Бейдж hero: свечение при наведении */
+.cyber-pill { transition: border-color 0.3s ease, box-shadow 0.3s ease; }
+.cyber-pill:hover {
+  border-color: rgba(79, 140, 255, 0.55);
+  box-shadow: 0 0 32px rgba(79, 140, 255, 0.3);
+}
+
+/* Курсорный спотлайт: тарифы, метрики и шаги — как у bento-карточек */
+.plan::after, .metric-card::after, .step-card::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgba(79, 140, 255, 0.10), transparent 45%);
+  opacity: 0; transition: opacity 0.3s ease;
+}
+.plan:hover::after, .metric-card:hover::after, .step-card:hover::after { opacity: 1; }
+
+/* Тарифы: пульс лучшего тарифа + свечение цены */
+.best-tag { animation: tagPulse 2.4s ease-in-out infinite; }
+@keyframes tagPulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(79, 140, 255, 0.5); }
+  50%      { box-shadow: 0 0 34px rgba(79, 140, 255, 0.8); }
+}
+.price-box b { transition: text-shadow 0.3s ease; }
+.plan:hover .price-box b { text-shadow: 0 0 26px rgba(79, 140, 255, 0.4); }
+
+/* Шаги: цифра загорается при наведении */
+.step-num { transition: -webkit-text-stroke-color 0.3s ease, text-shadow 0.3s ease; }
+.step-card:hover .step-num {
+  -webkit-text-stroke-color: var(--accent);
+  text-shadow: 0 0 28px rgba(79, 140, 255, 0.4);
+}
+
+/* Маршрут: иконка узла подпрыгивает */
+.flow-icon { transition: transform 0.3s var(--ease), box-shadow 0.3s ease; }
+.flow-node:hover .flow-icon {
+  transform: scale(1.12);
+  box-shadow: 0 0 24px rgba(79, 140, 255, 0.35);
+}
+
+/* Hero-визуал: дышащее свечение рамки */
+.visual-card { animation: cardGlow 6s ease-in-out infinite alternate; }
+@keyframes cardGlow {
+  from { box-shadow: 0 40px 100px rgba(0, 0, 0, 0.8), 0 0 60px rgba(79, 140, 255, 0.2); }
+  to   { box-shadow: 0 40px 100px rgba(0, 0, 0, 0.8), 0 0 96px rgba(79, 140, 255, 0.38); }
+}
+
+/* CTA: логотип парит */
+.cta-box .mark-img { animation: logoFloat 5s ease-in-out infinite alternate; }
+@keyframes logoFloat {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-8px); }
+}
+
+/* FAQ: карточка приподнимается, плюс растёт */
+.qa details:hover {
+  border-color: rgba(79, 140, 255, 0.35);
+  transform: translateY(-2px);
+}
+.qa details:not([open]) summary:hover .qa-toggle {
+  border-color: var(--accent);
+  transform: scale(1.1);
+}
+
+/* Чипы платформ: свечение при наведении */
+.chips li:hover { box-shadow: 0 6px 18px rgba(79, 140, 255, 0.18); }
+
+/* Подвал: подчёркивание ссылок и свечение логотипа */
+.foot nav a { position: relative; }
+.foot nav a::after {
+  content: ""; position: absolute; left: 0; bottom: -4px;
+  width: 0; height: 1.5px; background: var(--accent);
+  transition: width 0.25s var(--ease);
+}
+.foot nav a:hover::after { width: 100%; }
+.foot img { transition: opacity 0.3s ease, filter 0.3s ease; }
+.foot img:hover {
+  opacity: 1;
+  filter: drop-shadow(0 0 14px rgba(79, 140, 255, 0.45));
+}
+
 
 /* ── Скролл-появление (Reveal) ── */
 .js .reveal {
@@ -911,8 +1017,8 @@ JS = """
     items.forEach(function (el) { el.classList.add('in'); });
   }
 
-  var bentoCards = document.querySelectorAll('.bento-card');
-  bentoCards.forEach(function (card) {
+  var spotCards = document.querySelectorAll('.bento-card, .plan, .metric-card, .step-card');
+  spotCards.forEach(function (card) {
     card.addEventListener('mousemove', function (e) {
       var rect = card.getBoundingClientRect();
       var x = e.clientX - rect.left;
@@ -1333,7 +1439,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
   <div class="wrap">
     {foot_logo}
     {docs_html}
-    <span class="copy">© {year} {name}</span>
+    <span class="copy">{year} {name}</span>
   </div>
 </footer>
 
