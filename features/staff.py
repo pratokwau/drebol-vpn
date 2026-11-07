@@ -113,7 +113,7 @@ PERMS = {
     "stats": {
         "label": "📊 Статистика",
         "hint": "сводка по деньгам и людям, кто онлайн, трафик",
-        "exact": {"dashboard", "ctl_menu", "ctl_online", "ctl_traffic", "ctl_feed"},
+        "exact": {"dashboard", "ctl_menu", "ctl_online", "ctl_feed"},
         "prefix": ("act_feed:", "user_feed:", "ctl_hist:", "payment_stats:"),
         "states": set(),
         "button": ("📊 Статистика", "dashboard"),

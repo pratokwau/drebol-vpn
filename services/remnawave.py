@@ -23,8 +23,6 @@ from config import load_config, save_config
 API_ROOT = "/api"
 USERS = f"{API_ROOT}/users"
 SQUADS = f"{API_ROOT}/internal-squads"
-# панель просит паузу между запросами при пачке — переносим неспешно
-STEP_PAUSE = 0.08
 
 
 def settings() -> dict:
@@ -371,7 +369,6 @@ async def nodes_users_usage(node_uuids: list, start: str, end: str) -> dict:
 # Лимит можно переопределить: пресетом для новых подписок или
 # отдельно для каждой подписки (колонка lte_gb, NULL = пресет).
 LTE_MONTHLY_GB = 30
-CDN_MONTHLY_GB = LTE_MONTHLY_GB  # старое имя, на всякий случай
 
 
 def lte_limit_gb(sub_lte=None, preset=None) -> int:
@@ -987,7 +984,6 @@ async def run_panel_sync() -> dict:
         checked += 1
         if (pu.get("status") or "") != "ACTIVE":
             disabled += 1
-        traffic = pu.get("userTraffic") or {}
         want = {}
         if pu.get("vlessUuid") and pu["vlessUuid"] != row[3]:
             want["uuid"] = pu["vlessUuid"]

@@ -39,7 +39,6 @@ STATUS_CHARGEBACKED = "CHARGEBACKED"
 # PARTIALLY_REFUNDED (в схеме GET /transaction/{id} его пока нет,
 # но страница колбэков его уже использует)
 STATUS_PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
-FINAL_STATUSES = {STATUS_CONFIRMED, STATUS_CANCELED, STATUS_CHARGEBACKED}
 
 
 def is_configured() -> bool:

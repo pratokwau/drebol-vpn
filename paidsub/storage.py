@@ -215,19 +215,6 @@ async def delete_paid_sub(sub_id: int):
         await db.commit()
 
 
-async def live_paid_subs() -> list:
-    """Живые подписки со всем, что нужно, чтобы написать человеку про его ключ."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT id, tg_id, email, expire_date, limit_ip, limit_hwid, total_gb,
-                   status, times_renewed, extra_devices, sub_url
-            FROM paid_subs
-            WHERE tg_id IS NOT NULL AND status IN ('active', 'renewal')
-            ORDER BY id
-        """) as cur:
-            return await cur.fetchall()
-
-
 async def lte_watch_subs() -> list:
     """Платные подписки для проверки LTE: живые, со своим лимитом
     и отметкой о переводе на fallback-сквад.
@@ -488,23 +475,6 @@ async def get_promo_by_id(promo_id: int) -> tuple | None:
             f"SELECT {_PROMO_COLS} FROM promo_codes WHERE id = ?", (promo_id,)
         ) as cur:
             return await cur.fetchone()
-
-
-async def list_promos(owner_tg_id: int | None = None, limit: int = 60) -> list:
-    """Промокоды: id, код, %, до, активен, кому выдан, лимит, тип, дни, сколько раз применён."""
-    q = ("SELECT p.id, p.code, p.percent, p.expires_at, p.active, p.owner_tg_id, "
-         "p.max_uses, p.kind, p.days, "
-         "(SELECT COUNT(*) FROM promo_uses u WHERE u.code = p.code) "
-         "FROM promo_codes p")
-    params: list = []
-    if owner_tg_id is not None:
-        q += " WHERE p.owner_tg_id = ?"
-        params.append(owner_tg_id)
-    q += " ORDER BY p.created_at DESC LIMIT ?"
-    params.append(limit)
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(q, params) as cur:
-            return await cur.fetchall()
 
 
 # Вкладки списка: что считаем «мёртвым» — выключенные и просроченные коды

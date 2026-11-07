@@ -59,7 +59,7 @@ from core.maintenance import (
 )
 from handlers.control import (
     handle_control_menu, handle_activity_feed, handle_user_activity,
-    handle_online, handle_traffic, handle_digest_toggle,
+    handle_online, handle_digest_toggle,
     handle_digest_hour_menu, handle_digest_set_hour, handle_digest_now,
     handle_digest_custom,
     handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
@@ -362,8 +362,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_user_activity(query, int(uid), int(pg))
     elif data == "ctl_online":
         await handle_online(query)
-    elif data == "ctl_traffic":
-        await handle_traffic(query)
     elif data == "ctl_digest_toggle":
         await handle_digest_toggle(query, context)
     elif data == "ctl_digest_hour":
@@ -760,9 +758,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_preset_traffic(query, context)
     elif data == "paid_preset_lte":
         await handle_paid_preset_lte(query, context)
-    elif data == "paid_squads_menu" or data == "paid_lte_settings":
-        # paid_lte_settings — старый колбэк, на случай открытых сообщений
-        # со старыми кнопками: ведёт на тот же объединённый экран
+    elif data == "paid_squads_menu":
         await handle_paid_squads_menu(query, context)
     elif data == "paid_issued_squads":
         await handle_paid_issued_squads(query, context)

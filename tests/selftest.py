@@ -170,15 +170,8 @@ class FakeQuery:
         self.out.append((text or "", kw.get("reply_markup")))
         return True
 
-    async def edit_message_caption(self, caption=None, **kw):
-        self.out.append((caption or "", kw.get("reply_markup")))
-        return True
-
     async def answer(self, text=None, **kw):
         self.toasts.append(text or "")
-        return True
-
-    async def delete_message(self, *a, **kw):
         return True
 
     @property
@@ -634,7 +627,6 @@ async def admin_flow(bot, sub_id):
         ("карточка пользователя", lambda: ha.handle_user_profile(FakeQuery(ADMIN_ID), TEST_TG_ID)),
         ("контроль", lambda: hc.handle_control_menu(FakeQuery(ADMIN_ID), ctx(bot))),
         ("кто онлайн", lambda: hc.handle_online(FakeQuery(ADMIN_ID))),
-        ("трафик", lambda: hc.handle_traffic(FakeQuery(ADMIN_ID))),
         ("запросы", lambda: ph.handle_paid_requests(FakeQuery(ADMIN_ID))),
         ("история действий", lambda: ph.handle_paid_history(FakeQuery(ADMIN_ID), 1)),
         ("меню панели", lambda: rw.handle_rw_menu(FakeQuery(ADMIN_ID), ctx(bot))),
@@ -648,7 +640,7 @@ async def admin_flow(bot, sub_id):
 
     # ── бэкап: только собираем архив, восстановление не трогаем
     try:
-        import features.backup
+        from features import backup
         data, name, inside = backup.make_archive()
         log.check("архив базы собирается",
                   bool(data) and len(data) > 1000 and str(name).endswith(".zip"),

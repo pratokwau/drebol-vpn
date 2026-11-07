@@ -125,7 +125,6 @@ CB_LABELS = {
     "ctl_menu": "🛰 Открыл контроль",
     "act_feed": "📜 Смотрел ленту",
     "ctl_online": "🔌 Смотрел, кто онлайн",
-    "ctl_traffic": "📊 Смотрел трафик",
     "ctl_digest_now": "📤 Сводка вручную + бэкап",
     "ctl_digest_toggle": "📨 Сводка вкл/выкл",
     "ctl_digest_hour": "🕘 Время сводки",
@@ -687,14 +686,6 @@ async def handle_online(query):
     # имена людей длинные: держим сообщение в рамках телеграма
     await query.edit_message_text("\n".join(_fit(lines, TEXT_BUDGET)), parse_mode="HTML",
                                   reply_markup=kb)
-
-
-async def handle_traffic(query, context=None):
-    """Старое имя экрана «Трафик»: теперь это тот же единый экран, что и
-    «Потребление ГБ» — сводка за всё время плюс потребление по узлам
-    и периодам. Алиас оставлен для старых клавиатур и selftest."""
-    from services.remnawave import handle_rw_usage
-    await handle_rw_usage(query, context)
 
 
 # ── Ежедневная сводка ────────────────────────────────────────────────────────
