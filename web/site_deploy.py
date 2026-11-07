@@ -1073,6 +1073,12 @@ def seo_files() -> tuple[str, str]:
     return robots, sitemap
 
 
+# Файл подтверждения Google Search Console. Google проверяет его при
+# каждом подтверждении прав на сайт — не удалять и не переименовывать.
+GOOGLE_VERIFICATION_FILE = "google7280fa10130c903e.html"
+GOOGLE_VERIFICATION_CONTENT = "google-site-verification: google7280fa10130c903e.html"
+
+
 def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"",
                  cabinet: str = "") -> dict:
     c = creds()
@@ -1111,6 +1117,8 @@ chmod 755 {WEB_ROOT}
                 f.write(robots_txt)
             with sftp.open("/tmp/drebol_sitemap.xml", "w") as f:
                 f.write(sitemap_xml)
+            with sftp.open("/tmp/drebol_google_verification.html", "w") as f:
+                f.write(GOOGLE_VERIFICATION_CONTENT)
             if logo_bytes:
                 with sftp.open("/tmp/drebol_logo", "wb") as f:
                     f.write(logo_bytes)
@@ -1136,6 +1144,7 @@ mv /tmp/drebol_og.webp {WEB_ROOT}/og.webp
 mv /tmp/drebol_add.html {WEB_ROOT}/add.html
 mv /tmp/drebol_robots.txt {WEB_ROOT}/robots.txt
 mv /tmp/drebol_sitemap.xml {WEB_ROOT}/sitemap.xml
+mv /tmp/drebol_google_verification.html {WEB_ROOT}/{GOOGLE_VERIFICATION_FILE}
 # Кабинет — по чистому адресу /cabinet: nginx отдаёт index.html из папки
 # сам (try_files $uri $uri/). Старый cabinet.html оставляем — закладки
 # и старые кнопки из бота не сломаются. Разделы — отдельными адресами
@@ -1151,7 +1160,7 @@ mv /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet.html
 chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html {WEB_ROOT}/cabinet/index.html
 chmod 644 {WEB_ROOT}/cabinet/*/index.html || true
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
-chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp {WEB_ROOT}/robots.txt {WEB_ROOT}/sitemap.xml
+chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp {WEB_ROOT}/robots.txt {WEB_ROOT}/sitemap.xml {WEB_ROOT}/{GOOGLE_VERIFICATION_FILE}
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
 cat > {NGINX_CONF} <<'NGINXCONF'
 server {{
