@@ -451,6 +451,16 @@ async def init_db():
             new_url = strip_default_port(old_url)
             if new_url != old_url:
                 await db.execute("UPDATE admin_subs SET sub_url = ? WHERE id = ?", (new_url, row_id))
+        # Картинки к экранам меню: ключ экрана → file_id картинки в Telegram.
+        # Сам файл хранится у Telegram, в базе только ссылка на него.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS screen_images (
+                key TEXT PRIMARY KEY,
+                file_id TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'photo',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await db.commit()
 
 
@@ -2023,3 +2033,39 @@ async def fraud_stats() -> dict:
                 "SELECT COUNT(*) FROM (SELECT value FROM device_seen WHERE kind = 'hwid' "
                 "AND tg_id IS NOT NULL GROUP BY value HAVING COUNT(DISTINCT tg_id) > 2)"),
         }
+
+
+# ── Картинки к экранам меню ──────────────────────────────────────────────────
+async def get_screen_image(key: str) -> str | None:
+    """file_id картинки экрана или None, если картинка не задана."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT file_id FROM screen_images WHERE key = ?", (key,),
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+
+async def set_screen_image(key: str, file_id: str, kind: str = "photo") -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO screen_images (key, file_id, kind, updated_at) "
+            "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET file_id = excluded.file_id, "
+            "kind = excluded.kind, updated_at = CURRENT_TIMESTAMP",
+            (key, file_id, kind),
+        )
+        await db.commit()
+
+
+async def delete_screen_image(key: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM screen_images WHERE key = ?", (key,))
+        await db.commit()
+
+
+async def list_screen_images() -> dict:
+    """Все заданные картинки: {ключ экрана: file_id}."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT key, file_id FROM screen_images") as cur:
+            return {k: f for k, f in await cur.fetchall()}

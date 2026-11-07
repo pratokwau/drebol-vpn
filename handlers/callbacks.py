@@ -3,6 +3,7 @@ from telegram.ext import ContextTypes
 from config import ADMIN_ID, load_config, save_config
 from core.states import AWAITING_SUPPORT_MSG
 from core.subscription import is_subscribed, subscribe_keyboard, subscribe_text
+from core.screen_images import show_screen
 from handlers.user import (
     handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_my_lte,
     handle_app_add,
@@ -222,8 +223,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user, context,
             on_start=lambda: query.edit_message_text("⏳ Готовлю ваш доступ…"))
         text, markup = await start_screen(user, fresh=fresh)
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
-                                      disable_web_page_preview=True)
+        await show_screen(query, "main", text, markup,
+                          disable_web_page_preview=True)
         return
 
     # ── Юзер ─────────────────────────────────────────────────────────────────
@@ -536,6 +537,18 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "web_menu":
         from web.webapi import handle_web_menu
         await handle_web_menu(query, context)
+    elif data == "screen_images_menu":
+        from handlers.screen_images import handle_screen_images_menu
+        await handle_screen_images_menu(query, context)
+    elif data.startswith("screen_img_set:"):
+        from handlers.screen_images import handle_screen_image_ask
+        await handle_screen_image_ask(query, context, data.split(":", 1)[1])
+    elif data.startswith("screen_img_del:"):
+        from handlers.screen_images import handle_screen_image_delete
+        await handle_screen_image_delete(query, data.split(":", 1)[1])
+    elif data.startswith("screen_img:"):
+        from handlers.screen_images import handle_screen_image_detail
+        await handle_screen_image_detail(query, data.split(":", 1)[1])
     elif data == "site_menu":
         context.user_data.pop("state", None)
         await handle_site_menu(query)

@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from html import escape
 
+from core.screen_images import show_screen
 from core.database import (
     get_support_messages, count_support_files, get_support_files,
     get_ticket, ticket_closed,
@@ -174,8 +175,8 @@ async def open_support(query, user_id: int, page: int | None = None):
     """Главный экран поддержки: ссылка на аккаунт, выбор темы или переписка."""
     if contact_mode():
         text, kb = contact_screen()
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb,
-                                      disable_web_page_preview=True)
+        await show_screen(query, "support", text, kb,
+                          disable_web_page_preview=True)
         return
     _, total_pages = await get_support_messages(user_id, 1)
     msgs_exist = (await get_support_messages(user_id, 1))[0]
@@ -194,9 +195,9 @@ async def open_support(query, user_id: int, page: int | None = None):
     body = "\n\n".join(_bubble(r) for r in msgs)
     text = f"{head}\n\n{body}\n\n<i>✍️ Напишите сообщение — оно придёт в этот чат.</i>"
 
-    await query.edit_message_text(
+    await show_screen(
+        query, "support",
         text,
-        parse_mode="HTML",
         reply_markup=support_keyboard(page, total_pages, has_files,
                                       can_close=ticket["status"] != "closed"),
     )
@@ -206,13 +207,13 @@ async def show_topics(query):
     """Первый экран: с чем помочь."""
     if contact_mode():
         text, kb = contact_screen()
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb,
-                                      disable_web_page_preview=True)
+        await show_screen(query, "support", text, kb,
+                          disable_web_page_preview=True)
         return
-    await query.edit_message_text(
+    await show_screen(
+        query, "support",
         "💬 <b>Поддержка</b>\n\n"
         "С чем помочь? Выберите тему — по частым вопросам подскажем сразу.",
-        parse_mode="HTML",
         reply_markup=support_topics_keyboard(TOPICS),
     )
 
@@ -222,8 +223,8 @@ async def show_topic_hint(query, context, topic: str):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if contact_mode():
         text, kb = contact_screen()
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb,
-                                      disable_web_page_preview=True)
+        await show_screen(query, "support", text, kb,
+                          disable_web_page_preview=True)
         return
     t = TOPICS.get(topic) or TOPICS["other"]
     rows = [[InlineKeyboardButton(label, callback_data=data)]
@@ -231,11 +232,11 @@ async def show_topic_hint(query, context, topic: str):
     rows.append([InlineKeyboardButton("🛟 Написать нам",
                                       callback_data=f"support_write:{topic}")])
     rows.append([InlineKeyboardButton("◀️ К темам", callback_data="support_open")])
-    await query.edit_message_text(
+    await show_screen(
+        query, "support",
         f"{t['emoji']} <b>{t['name']}</b>\n\n"
         f"<blockquote>💡 {t['hint']}</blockquote>\n\n"
         "<i>Не помогло? Напишите нам — ответим здесь же, в боте.</i>",
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(rows),
     )
 
@@ -246,16 +247,16 @@ async def start_writing(query, context, topic: str):
     from core.states import AWAITING_SUPPORT_MSG
     if contact_mode():
         text, kb = contact_screen()
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=kb,
-                                      disable_web_page_preview=True)
+        await show_screen(query, "support", text, kb,
+                          disable_web_page_preview=True)
         return
     context.user_data["state"] = AWAITING_SUPPORT_MSG
     context.user_data["support_topic"] = topic
-    await query.edit_message_text(
+    await show_screen(
+        query, "support",
         "✍️ <b>Опишите вопрос</b>\n\n"
         f"<blockquote>Тема: {topic_label(topic)}</blockquote>\n\n"
         "<i>Одним сообщением. Можно приложить скриншот — так разберёмся быстрее.</i>",
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data=f"support_topic:{topic}")],
         ]),

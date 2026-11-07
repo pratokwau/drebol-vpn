@@ -81,6 +81,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         # инфраструктура
         [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Веб-доступ", "web_menu")],
         [b("💾 Бэкап и перенос", "backup_menu"), b("📄 Документы", "documents_menu")],
+        [b("🖼 Картинки меню", "screen_images_menu")],
         [b("🛟 Поддержка", "support_settings"), b("🧾 Лог-канал", "log_channel_settings")],
         [b(mnt_label, "mnt_menu")],
         [b("🔄 Обновиться с GitHub", "git_update")],

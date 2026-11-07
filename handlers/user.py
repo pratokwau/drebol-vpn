@@ -2,6 +2,7 @@ from html import escape
 
 from config import ADMIN_ID, load_config
 from core.keyboards import main_keyboard, back_main, back_info
+from core.screen_images import show_screen
 
 
 def _support_row() -> list:
@@ -21,9 +22,9 @@ async def handle_my_sub(query):
     from adminsub.storage import get_sub_by_tg_id
     row = await get_sub_by_tg_id(user_id)
     if not row:
-        await query.edit_message_text(
+        await show_screen(
+            query, "my_sub",
             "📋 <b>Админская подписка</b>\n\nУ вас пока нет активной подписки.",
-            parse_mode="HTML",
             reply_markup=back_main(),
         )
         return
@@ -39,14 +40,14 @@ async def handle_my_sub(query):
         status_line = "⚪ Статус: <b>неизвестен</b>"
 
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text(
+    await show_screen(
+        query, "my_sub",
         "📋 <b>Админская подписка</b>\n\n"
         f"📅 Действует до: <b>{expire}</b>\n"
         f"📶 Трафик: <b>{traffic}</b>\n"
         f"{status_line}\n\n"
         f"🔗 <b>Ссылка подписки:</b>\n<code>{sub_url}</code>\n\n"
         "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)",
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📡 LTE-интернет", callback_data="my_lte_admin")],
             [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
@@ -116,9 +117,9 @@ async def handle_my_lte(query, kind: str = "paid"):
         from services.remnawave import lte_limit_gb as _lim
         row = await get_sub_by_tg_id(user_id)
         if not row:
-            await query.edit_message_text(
+            await show_screen(
+                query, "my_lte",
                 "📡 <b>LTE-интернет</b>\n\n<blockquote>Админской подписки пока нет.</blockquote>",
-                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("◀️ Назад", callback_data="back_start")]]),
             )
@@ -132,9 +133,9 @@ async def handle_my_lte(query, kind: str = "paid"):
         from services.remnawave import lte_limit_gb as _lim
         row = await get_paid_sub_by_tg_id(user_id)
         if not row:
-            await query.edit_message_text(
+            await show_screen(
+                query, "my_lte",
                 "📡 <b>LTE-интернет</b>\n\n<blockquote>Подписки пока нет.</blockquote>",
-                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("◀️ Назад", callback_data="back_start")]]),
             )
@@ -161,12 +162,12 @@ async def handle_my_lte(query, kind: str = "paid"):
     except Exception:
         body = "⚠️ <i>Не удалось получить статистику LTE. Попробуй обновить через минуту.</i>"
 
-    await query.edit_message_text(
+    await show_screen(
+        query, "my_lte",
         "📡 <b>LTE-интернет</b>\n\n"
         + body + "\n\n"
         "<i>LTE-серверы — используйте только тогда, когда в вашем городе "
         "включают ограничения интернета.</i>",
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Обновить", callback_data=refresh_cb)],
             [InlineKeyboardButton("◀️ Назад", callback_data=back_cb)],
@@ -182,10 +183,10 @@ async def handle_my_paid_sub(query):
     from paidsub.storage import get_paid_sub_by_tg_id
     row = await get_paid_sub_by_tg_id(user_id)
     if not row:
-        await query.edit_message_text(
+        await show_screen(
+            query, "my_paid_sub",
             "⚙️ <b>Моя подписка</b>\n\n"
             "<blockquote>Подписки пока нет.</blockquote>",
-            parse_mode="HTML",
             reply_markup=back_main(),
         )
         return
@@ -244,11 +245,11 @@ async def handle_my_paid_sub(query):
     kb_rows.append([InlineKeyboardButton("📡 LTE-интернет", callback_data="my_lte")])
     kb_rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")])
 
-    await query.edit_message_text(
+    await show_screen(
+        query, "my_paid_sub",
         "⚙️ <b>Моя подписка</b>\n\n"
         f"<blockquote>{plan}  ·  {mark}</blockquote>\n\n"
         "<i>Скопируйте ссылку, продлите подписку или управляйте устройствами.</i>",
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb_rows),
         disable_web_page_preview=True,
     )
@@ -479,10 +480,10 @@ async def handle_renew_sub(query):
                 body.append("<blockquote>" + "\n".join(hints) + "</blockquote>")
             body.append(f"<i>{tail} Оплата проходит здесь, в боте.</i>")
 
-            await query.edit_message_text(
+            await show_screen(
+                query, "renew_sub",
                 "💳 <b>Продление подписки</b>\n\n"
                 + "\n\n".join(x for x in body if x),
-                parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup(kb),
             )
             return
@@ -493,12 +494,12 @@ async def handle_renew_sub(query):
         return
 
     # Ключи платёжки не заданы — честно говорим, что оплатить сейчас нельзя
-    await query.edit_message_text(
+    await show_screen(
+        query, "renew_sub",
         "💳 <b>Продление подписки</b>\n\n"
         "<blockquote>Оплата сейчас недоступна — мы её настраиваем.</blockquote>\n\n"
         "<i>Напишите в поддержку: подскажем, когда всё заработает, "
         "и не дадим подписке закончиться.</i>",
-        parse_mode="HTML",
         reply_markup=_kb(_support_row(),
                          [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")]),
     )
@@ -541,12 +542,12 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
         # тарифов нет — срок и цену брать неоткуда, продлевать нечем
         pay_seconds = int(settings["pay_period"] or 0)
         if not pay_seconds or not int(settings["price"] or 0):
-            await query.edit_message_text(
+            await show_screen(
+                query, "renew_sub",
                 "💳 <b>Продление подписки</b>\n\n"
                 "<blockquote>Сейчас нет доступных тарифов.</blockquote>\n\n"
                 "<i>Напишите в поддержку — подскажем, когда появятся, "
                 "и не дадим подписке закончиться.</i>",
-                parse_mode="HTML",
                 reply_markup=_kb(_support_row(),
                                  [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")]),
             )
@@ -627,9 +628,9 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
                                     callback_data=f"pay_invoice:{tariff_id}:{devices}")])
     kb.append([InlineKeyboardButton("◀️ К тарифам", callback_data="renew_sub")])
 
-    await query.edit_message_text(
+    await show_screen(
+        query, "tariff_pick",
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
     )
 
@@ -643,10 +644,10 @@ async def handle_gift_pick(query):
     from paidsub.time_parser import fmt_duration
     tariffs = await list_tariffs(only_active=True)
     if not tariffs:
-        await query.edit_message_text(
+        await show_screen(
+            query, "gift_pick",
             "🎁 <b>Подарок подписки</b>\n\n"
             "<blockquote>Сейчас нет доступных тарифов.</blockquote>",
-            parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")],
             ]),
@@ -665,12 +666,12 @@ async def handle_gift_pick(query):
             label += " 🔥"
         kb.append([InlineKeyboardButton(label[:64], callback_data=f"gift_tariff:{t_id}")])
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")])
-    await query.edit_message_text(
+    await show_screen(
+        query, "gift_pick",
         "🎁 <b>Подарок подписки</b>\n\n"
         "Выберите срок — оплатите вы, а подписка откроется у друга "
         "сразу после оплаты.\n\n"
         "<i>🔥 — выгоднее всего по цене за месяц.</i>",
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb),
     )
 
@@ -961,10 +962,10 @@ async def handle_enter_promo(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from core.states import AWAITING_PROMO_CODE
     context.user_data["state"] = AWAITING_PROMO_CODE
-    await query.edit_message_text(
+    await show_screen(
+        query, "enter_promo",
         "🎟 <b>Промокод</b>\n\n"
         "Отправьте код одним сообщением — скидка сразу применится к оплате.",
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К оплате", callback_data="renew_sub")]
         ]),
@@ -983,7 +984,8 @@ async def handle_remove_promo(query, context):
 
 
 async def handle_how_to(query):
-    await query.edit_message_text(
+    await show_screen(
+        query, "how_to",
         "❓ <b>Как подключиться</b>\n"
         "Четыре шага, пара минут.\n\n"
         "<b>1️⃣ Установите INCY</b>  <i>— рекомендуем</i>\n"
@@ -1006,7 +1008,6 @@ async def handle_how_to(query):
         "<a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">macOS</a>"
         "</blockquote>\n"
         "<i>Дальше всё так же: скопируйте ссылку и вставьте её в Happ.</i>",
-        parse_mode="HTML",
         reply_markup=back_info(),
         disable_web_page_preview=True,
     )
@@ -1035,9 +1036,9 @@ async def handle_about(query):
     if docs:
         lines += ["", "📄 " + "  ·  ".join(docs)]
 
-    await query.edit_message_text(
+    await show_screen(
+        query, "about",
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=back_info(),
         disable_web_page_preview=True,
     )
@@ -1094,9 +1095,9 @@ async def handle_prices(query):
     lines += ["", "✨ <b>В каждом тарифе</b>",
               "<blockquote>" + "\n".join(perks) + "</blockquote>"]
 
-    await query.edit_message_text(
+    await show_screen(
+        query, "prices",
         "\n".join(lines),
-        parse_mode="HTML",
         reply_markup=back_info(),
     )
 
@@ -1290,9 +1291,9 @@ async def handle_referral(query, context):
         [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")],
     ])
 
-    await query.edit_message_text(
+    await show_screen(
+        query, "referral",
         "\n\n".join(blocks),
-        parse_mode="HTML",
         reply_markup=kb,
         disable_web_page_preview=True,
     )
@@ -1311,10 +1312,10 @@ def _ref_date(raw) -> str:
 async def handle_info(query):
     """Раздел «Инфо»: как подключиться, цены, документы."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text(
+    await show_screen(
+        query, "info",
         "ℹ️ <b>Информация</b>\n\n"
         "<i>Как подключиться, сколько стоит и кто мы.</i>",
-        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("❓ Как подключиться", callback_data="how_to")],
             [InlineKeyboardButton("💰 Цены", callback_data="prices"),
@@ -1445,8 +1446,8 @@ async def handle_my_devices(query, context=None):
         kb.append([InlineKeyboardButton(f"➕ Добавить место · {price} ₽",
                                         callback_data="dev_buy_menu")])
     kb.append([InlineKeyboardButton("◀️ К подписке", callback_data="my_paid_sub")])
-    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
-                                  reply_markup=InlineKeyboardMarkup(kb))
+    await show_screen(query, "my_devices", "\n".join(lines),
+                      reply_markup=InlineKeyboardMarkup(kb))
 
 
 def _when_ms(value) -> str:
@@ -1801,7 +1802,7 @@ async def start_screen(user, fresh: bool = False):
 
 async def handle_back_start(query, user):
     text, markup = await start_screen(user)
-    await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
-                                  disable_web_page_preview=True)
+    await show_screen(query, "main", text, reply_markup=markup,
+                      disable_web_page_preview=True)
 
 
