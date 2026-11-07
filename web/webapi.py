@@ -38,6 +38,13 @@ RATE_LIMIT = 60
 
 _rate: dict = {}
 _runner = None
+_bot = None  # Telegram-бот: отправляет коды сброса пароля в чат
+
+# Вход по почте: столько неверных попыток с одной почты за 15 минут
+PW_MAX_FAILS = 5
+PW_FAIL_WINDOW = 15 * 60
+RESET_CODE_MINUTES = 15
+_pw_fail: dict = {}
 
 
 # ── Настройки ────────────────────────────────────────────────────────────────
@@ -104,6 +111,81 @@ def check_webapp(init_data: str) -> dict | None:
             "username": user.get("username") or ""}
 
 
+# ── Вход по почте и паролю ───────────────────────────────────────────────────
+
+def _valid_email(email: str) -> str:
+    """Почта как логин: строчные, без пробелов, с @ и доменом. Иначе ""."""
+    import re
+    email = (email or "").strip().lower()
+    if len(email) > 254 or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        return ""
+    return email
+
+
+def hash_secret(secret: str) -> str:
+    """Хеш пароля или кода сброса: scrypt из стандартной библиотеки."""
+    import secrets
+    salt = secrets.token_bytes(16)
+    dk = hashlib.scrypt(secret.encode(), salt=salt, n=16384, r=8, p=1, dklen=32)
+    return f"scrypt$n=16384$r=8$p=1${salt.hex()}${dk.hex()}"
+
+
+def check_secret(secret: str, stored: str) -> bool:
+    try:
+        parts = (stored or "").split("$")
+        params = dict(kv.split("=") for kv in parts[1:4])
+        salt = bytes.fromhex(parts[4])
+        want = bytes.fromhex(parts[5])
+        dk = hashlib.scrypt(secret.encode(), salt=salt,
+                            n=int(params["n"]), r=int(params["r"]),
+                            p=int(params["p"]), dklen=len(want))
+        return hmac.compare_digest(dk, want)
+    except Exception:
+        return False
+
+
+def _pw_locked(key: str) -> bool:
+    """Ключ (почта или forgot:почта) временно закрыт после неверных попыток."""
+    now = time.time()
+    fails, first = _pw_fail.get(key, (0, now))
+    if now - first > PW_FAIL_WINDOW:
+        _pw_fail.pop(key, None)
+        return False
+    return fails >= PW_MAX_FAILS
+
+
+def _pw_fail_hit(key: str):
+    now = time.time()
+    fails, first = _pw_fail.get(key, (0, now))
+    if now - first > PW_FAIL_WINDOW:
+        fails, first = 0, now
+    _pw_fail[key] = (fails + 1, first)
+
+
+def _pw_fail_clear(key: str):
+    _pw_fail.pop(key, None)
+
+
+async def _turnstile_ok(token: str, ip: str) -> bool:
+    """Проверяет капчу у Cloudflare. Нет ключа — вход по паролю выключен."""
+    from config import TURNSTILE_SECRET_KEY
+    secret = TURNSTILE_SECRET_KEY or ""
+    if not secret or not token:
+        return False
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as s:
+            async with s.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                data={"secret": secret, "response": token, "remoteip": ip},
+            ) as r:
+                data = await r.json()
+        return bool(data.get("success"))
+    except Exception as ex:
+        logging.error("кабинет: turnstile: %s: %s", type(ex).__name__, ex)
+        return False
+
+
 # ── Данные кабинета ──────────────────────────────────────────────────────────
 
 def _fmt_bytes(value) -> str:
@@ -128,6 +210,11 @@ async def profile(tg_id: int) -> dict:
         "blocked": None, "subscription": None, "devices": [], "payments": [],
         "referral": None, "lte": None,
     }
+    # Вход по почте и паролю: кабинет по этому флагу показывает раздел
+    # «Профиль» и красную точку, пока почта или пароль не заданы.
+    from core.database import get_login_info
+    login_email, has_password = await get_login_info(tg_id)
+    out["login"] = {"email": login_email or "", "has_password": bool(has_password)}
     # Рефералка не зависит от подписки: её видно и без неё
     try:
         from paidsub.storage import get_referral_stats
@@ -347,6 +434,144 @@ def build_app():
         await web_session_drop(token)
         return web.json_response({"ok": True})
 
+    async def auth_password(request):
+        """Вход по почте и паролю + капча. Выдаёт ту же сессию, что и Telegram."""
+        from config import TURNSTILE_SECRET_KEY
+        from core.database import get_user_by_login_email, web_session_new
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        email = _valid_email(body.get("email"))
+        password = str(body.get("password") or "")
+        if not email or not password:
+            return web.json_response({"error": "bad_request"}, status=400)
+        if not TURNSTILE_SECRET_KEY:
+            return web.json_response({"error": "captcha_not_configured"}, status=503)
+        if _pw_locked(email):
+            return web.json_response({"error": "too_many"}, status=429)
+        ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() \
+            or (request.remote or "?")
+        if not await _turnstile_ok(str(body.get("captcha") or ""), ip):
+            return web.json_response({"error": "captcha"}, status=403)
+        row = await get_user_by_login_email(email)
+        if not row or not row[1] or not check_secret(password, row[1]):
+            _pw_fail_hit(email)
+            return web.json_response({"error": "bad_login"}, status=401)
+        _pw_fail_clear(email)
+        token = await web_session_new(row[0], "password", SESSION_DAYS)
+        return web.json_response({"token": token, "days": SESSION_DAYS})
+
+    async def auth_forgot(request):
+        """Код сброса пароля: приходит человеку в Telegram. Почту не выдаём:
+        ответ одинаковый, есть такая почта или нет."""
+        from config import TURNSTILE_SECRET_KEY
+        from core.database import get_user_by_login_email, password_reset_new
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        email = _valid_email(body.get("email"))
+        if not email:
+            return web.json_response({"error": "bad_request"}, status=400)
+        if not TURNSTILE_SECRET_KEY:
+            return web.json_response({"error": "captcha_not_configured"}, status=503)
+        key = "forgot:" + email
+        if _pw_locked(key):
+            return web.json_response({"error": "too_many"}, status=429)
+        _pw_fail_hit(key)
+        ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() \
+            or (request.remote or "?")
+        if not await _turnstile_ok(str(body.get("captcha") or ""), ip):
+            return web.json_response({"error": "captcha"}, status=403)
+        row = await get_user_by_login_email(email)
+        if row and _bot is not None:
+            import secrets
+            code = f"{secrets.randbelow(900000) + 100000}"
+            await password_reset_new(row[0], hash_secret(code), RESET_CODE_MINUTES)
+            try:
+                await _bot.send_message(
+                    chat_id=row[0],
+                    text=f"🔑 <b>Код для сброса пароля в кабинете Drebol VPN: {code}</b>\n\n"
+                         f"Действует {RESET_CODE_MINUTES} минут. "
+                         "Если это были не вы — просто не вводите его.",
+                    parse_mode="HTML")
+            except Exception as ex:
+                logging.error("кабинет: не удалось отправить код сброса: %s", ex)
+        return web.json_response({"ok": True})
+
+    async def auth_reset(request):
+        """Новый пароль по коду из Telegram. Старые сессии закрываются."""
+        from core.database import (get_user_by_login_email, password_reset_get,
+                                   password_reset_use, set_password_hash,
+                                   web_sessions_drop_user)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        email = _valid_email(body.get("email"))
+        code = str(body.get("code") or "").strip()
+        password = str(body.get("password") or "")
+        if not email or not code or len(password) < 8 or len(password) > 128:
+            return web.json_response({"error": "bad_request"}, status=400)
+        row = await get_user_by_login_email(email)
+        if not row:
+            return web.json_response({"error": "bad_code"}, status=401)
+        reset = await password_reset_get(row[0])
+        if not reset or not check_secret(code, reset[1]):
+            return web.json_response({"error": "bad_code"}, status=401)
+        await password_reset_use(reset[0])
+        await set_password_hash(row[0], hash_secret(password))
+        await web_sessions_drop_user(row[0])
+        return web.json_response({"ok": True})
+
+    async def profile_email(request):
+        """Сменить почту для входа. Сессия уже доказывает, кто ты:
+        через Telegram или по паролю."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        email = _valid_email(body.get("email"))
+        if not email:
+            return web.json_response({"error": "bad_email"}, status=400)
+        from core.database import get_user_by_login_email, set_login_email
+        other = await get_user_by_login_email(email)
+        if other and other[0] != tg_id:
+            return web.json_response({"error": "email_taken"}, status=409)
+        if not await set_login_email(tg_id, email):
+            return web.json_response({"error": "email_taken"}, status=409)
+        return web.json_response({"ok": True, "email": email})
+
+    async def profile_password(request):
+        """Задать или сменить пароль. Если пароль уже есть — нужен текущий.
+        Чужие сессии после смены закрываются, своя остаётся."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        current = str(body.get("current") or "")
+        password = str(body.get("password") or "")
+        if len(password) < 8 or len(password) > 128:
+            return web.json_response({"error": "bad_password"}, status=400)
+        from core.database import (get_login_info, get_password_hash,
+                                   set_password_hash, web_sessions_drop_user)
+        _, has_password = await get_login_info(tg_id)
+        if has_password:
+            stored = await get_password_hash(tg_id)
+            if not stored or not check_secret(current, stored):
+                return web.json_response({"error": "bad_current"}, status=401)
+        await set_password_hash(tg_id, hash_secret(password))
+        token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        await web_sessions_drop_user(tg_id, keep_token=token)
+        return web.json_response({"ok": True})
+
     async def device_delete(request):
         """Человек отключает своё устройство — то же, что кнопка в боте."""
         tg_id = await session_user(request)
@@ -522,6 +747,11 @@ def build_app():
     app = web.Application(middlewares=[web.middleware(guard)])
     app.router.add_get("/api/health", health)
     app.router.add_post("/api/auth", auth)
+    app.router.add_post("/api/auth/password", auth_password)
+    app.router.add_post("/api/auth/forgot", auth_forgot)
+    app.router.add_post("/api/auth/reset", auth_reset)
+    app.router.add_post("/api/profile/email", profile_email)
+    app.router.add_post("/api/profile/password", profile_password)
     app.router.add_get("/api/me", me)
     app.router.add_post("/api/logout", logout)
     app.router.add_post("/api/device/delete", device_delete)
@@ -532,9 +762,10 @@ def build_app():
     return app
 
 
-async def start_server() -> dict:
+async def start_server(bot=None) -> dict:
     """Поднимает API, если он включён в настройках."""
-    global _runner
+    global _runner, _bot
+    _bot = bot
     s = settings()
     if not s["enabled"]:
         return {"ok": False, "error": "выключен"}
@@ -566,9 +797,10 @@ def is_running() -> bool:
 
 
 async def sessions_tick(context):
-    """Раз в сутки убирает просроченные сессии."""
-    from core.database import web_sessions_purge
+    """Раз в сутки убирает просроченные сессии и коды сброса."""
+    from core.database import password_resets_purge, web_sessions_purge
     await web_sessions_purge()
+    await password_resets_purge()
 
 
 # ── Настройки кабинета (админка) ─────────────────────────────────────────────

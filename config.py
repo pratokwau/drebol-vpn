@@ -6,6 +6,10 @@ load_dotenv()
 
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
 ADMIN_ID: int = int(os.getenv("ADMIN_ID", "0"))
+# Капча Cloudflare Turnstile для входа в кабинет по почте и паролю.
+# Нет ключей — вход по паролю выключен, вход через Telegram работает.
+TURNSTILE_SITE_KEY: str = os.getenv("TURNSTILE_SITE_KEY", "")
+TURNSTILE_SECRET_KEY: str = os.getenv("TURNSTILE_SECRET_KEY", "")
 INSTALL_DIR: str = "/root/drebol-vpn"
 CONFIG_FILE: str = os.path.join(INSTALL_DIR, "config.json")
 

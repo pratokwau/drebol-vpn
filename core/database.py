@@ -17,6 +17,16 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Вход в кабинет по почте и паролю: почта — логин, пароль хранится
+        # только хешем (scrypt). Пустые значения — вход только через Telegram.
+        for col in ("login_email TEXT", "password_hash TEXT"):
+            try:
+                await db.execute(f"ALTER TABLE users ADD COLUMN {col}")
+            except Exception:
+                pass  # на свежих базах колонки уже есть в CREATE TABLE
+        await db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_email "
+            "ON users(login_email) WHERE login_email IS NOT NULL")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS support_messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -246,6 +256,20 @@ async def init_db():
         """)
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(tg_id)")
+        # Сброс пароля от кабинета: код приходит человеку в Telegram,
+        # хранится только хеш, живёт 15 минут, одноразовый.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER NOT NULL,
+                code_hash TEXT NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(tg_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(tg_id, created_at)")
         # Помощь с подключением: кому уже написали и кто подключался хоть раз.
@@ -574,6 +598,113 @@ async def web_session_user(token: str) -> int:
 async def web_session_drop(token: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM web_sessions WHERE token = ?", (token,))
+        await db.commit()
+
+
+async def web_sessions_drop_user(tg_id: int, keep_token: str = ""):
+    """Закрывает все сессии человека, кроме указанной (смена пароля)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        if keep_token:
+            await db.execute(
+                "DELETE FROM web_sessions WHERE tg_id = ? AND token != ?",
+                (tg_id, keep_token))
+        else:
+            await db.execute("DELETE FROM web_sessions WHERE tg_id = ?", (tg_id,))
+        await db.commit()
+
+
+# ── Вход в кабинет по почте и паролю ─────────────────────────────────────────
+
+async def get_user_by_login_email(email: str):
+    """Строка users по почте-логину: (tg_id, password_hash) или None."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, password_hash FROM users WHERE login_email = ?",
+            (email,)) as cur:
+            return await cur.fetchone()
+
+
+async def get_login_info(tg_id: int):
+    """Почта и есть ли пароль: (login_email | None, has_password)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT login_email, password_hash FROM users WHERE id = ?",
+            (tg_id,)) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return None, False
+    return row[0], bool(row[1])
+
+
+async def get_password_hash(tg_id: int):
+    """Хеш пароля человека или None."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT password_hash FROM users WHERE id = ?", (tg_id,)) as cur:
+            row = await cur.fetchone()
+    return row[0] if row else None
+
+
+async def set_login_email(tg_id: int, email: str | None) -> bool:
+    """Ставит почту-логин (None — убирает). False — почта занята другим."""
+    email = (email or "").strip().lower() or None
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute(
+                "UPDATE users SET login_email = ? WHERE id = ?", (email, tg_id))
+            await db.commit()
+        except Exception:
+            return False
+    return True
+
+
+async def set_password_hash(tg_id: int, password_hash: str | None):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (password_hash, tg_id))
+        await db.commit()
+
+
+async def password_reset_new(tg_id: int, code_hash: str, minutes: int = 15):
+    """Заводит код сброса; старые коды человека гасятся."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE password_resets SET used = 1 WHERE tg_id = ? AND used = 0",
+            (tg_id,))
+        await db.execute(
+            "INSERT INTO password_resets (tg_id, code_hash, expires_at) "
+            "VALUES (?, ?, datetime('now', ?))",
+            (tg_id, code_hash, f"+{int(minutes)} minutes"))
+        await db.commit()
+
+
+async def password_reset_get(tg_id: int):
+    """Живой неиспользованный код: (id, code_hash) или None."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, code_hash FROM password_resets WHERE tg_id = ? "
+            "AND used = 0 AND expires_at > CURRENT_TIMESTAMP "
+            "ORDER BY id DESC LIMIT 1", (tg_id,)) as cur:
+            return await cur.fetchone()
+
+
+async def password_reset_use(reset_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE password_resets SET used = 1 WHERE id = ?", (reset_id,))
+        await db.commit()
+
+
+async def password_resets_purge():
+    """Убирает просроченные и использованные коды сброса."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM password_resets "
+            "WHERE used = 1 OR expires_at <= CURRENT_TIMESTAMP")
         await db.commit()
 
 

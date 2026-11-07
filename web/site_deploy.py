@@ -245,12 +245,17 @@ CABINET_PAGE = r"""<!doctype html>
          background:rgba(5,7,12,.92); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
          scrollbar-width:none; }
  .tabs::-webkit-scrollbar { display:none; }
- .tab { flex:none; min-height:32px; padding:0 13px; border-radius:999px;
+ .tab { flex:none; min-height:32px; padding:0 13px; border-radius:999px; position:relative;
         border:1px solid var(--line-strong); background:transparent; color:rgba(255,255,255,.75);
         font:inherit; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap;
         transition:all .22s ease; }
  .tab:active { transform:scale(.96); }
  .tab.active { background:#fff; color:#05070c; border-color:#fff; box-shadow:0 3px 12px rgba(255,255,255,.2); }
+ .tab .dot { position:absolute; top:5px; right:5px; width:8px; height:8px; border-radius:50%;
+             background:#ff4d4d; box-shadow:0 0 0 0 rgba(255,77,77,.55);
+             animation:dotPulse 1.6s ease-out infinite; pointer-events:none; }
+ @keyframes dotPulse { 0% { box-shadow:0 0 0 0 rgba(255,77,77,.55); }
+   70% { box-shadow:0 0 0 7px rgba(255,77,77,0); } 100% { box-shadow:0 0 0 0 rgba(255,77,77,0); } }
  .breadcrumb { font-size:11px; color:var(--soft); margin:4px 0 6px; display:flex; align-items:center; gap:4px; letter-spacing:.01em; }
  .breadcrumb span { color:var(--muted); font-weight:600; }
  .breadcrumb span:last-child { color:#fff; }
@@ -296,7 +301,20 @@ CABINET_PAGE = r"""<!doctype html>
    [data-sec="sub"] > .card { margin:14px 0; }
    [data-sec="sub"] > .card.hero { grid-column:1 / -1; }
  }
- @media (prefers-reduced-motion: reduce) { .aurora span { animation:none; } .btn { transition:none; } }
+ @media (prefers-reduced-motion: reduce) { .aurora span { animation:none; } .btn { transition:none; } .tab .dot { animation:none; } }
+
+ .field { display:block; text-align:left; margin:12px 0 0; font-size:13px; font-weight:700; color:var(--muted); }
+ .field input { display:block; width:100%; margin-top:6px; padding:12px 14px; border-radius:14px;
+   border:1px solid var(--line-strong); background:rgba(255,255,255,.05); color:#fff;
+   font:inherit; font-size:15px; outline:none; }
+ .field input:focus { border-color:#4f8cff; box-shadow:0 0 0 3px rgba(79,140,255,.25); }
+ .or { display:flex; align-items:center; gap:12px; margin:22px 0 4px; color:var(--soft); font-size:13px; }
+ .or::before, .or::after { content:""; flex:1; height:1px; background:var(--line); }
+ #pwform .btn, #forgotform .btn { width:100%; margin-top:14px; }
+ #turnstile-box, #turnstile-box2 { display:flex; justify-content:center; margin-top:14px; }
+ #turnstile-box:empty, #turnstile-box2:empty { display:none; }
+ .form-note { font-size:13px; color:var(--soft); margin-top:10px; }
+ .linklike { background:none; border:0; color:#8db4ff; font:inherit; font-size:14px; cursor:pointer; padding:0; margin-top:12px; }
 </style></head>
 <body>
 <div class="bg" aria-hidden="true">
@@ -316,11 +334,33 @@ CABINET_PAGE = r"""<!doctype html>
  <div id="login">
    <div class="card">
      <span class="eyebrow">Личный кабинет</span>
-     <h1>Войдите через Telegram</h1>
+     <h1>Вход в кабинет</h1>
      <p class="muted">Увидите срок и трафик подписки, остаток LTE,<br>свои устройства, платежи и рефералку.</p>
      <div id="widget"></div>
+     <div id="pwblock" class="hide">
+       <div class="or"><span>или по почте</span></div>
+       <form id="pwform" autocomplete="on">
+         <label class="field">Почта<input type="email" id="pw-email" autocomplete="email" required></label>
+         <label class="field">Пароль<input type="password" id="pw-pass" autocomplete="current-password" required></label>
+         <div id="turnstile-box"></div>
+         <button class="btn btn-main" type="submit">Войти</button>
+       </form>
+       <button class="linklike" type="button" id="forgot-open">Забыли пароль?</button>
+       <form id="forgotform" class="hide" autocomplete="on">
+         <label class="field">Почта<input type="email" id="fg-email" autocomplete="email" required></label>
+         <div id="turnstile-box2"></div>
+         <button class="btn btn-main" type="submit">Получить код в Telegram</button>
+         <div id="fg-code-wrap" class="hide">
+           <label class="field">Код из Telegram<input type="text" id="fg-code" inputmode="numeric" autocomplete="one-time-code"></label>
+           <label class="field">Новый пароль<input type="password" id="fg-pass" autocomplete="new-password"></label>
+           <button class="btn btn-main" type="button" id="fg-reset">Сменить пароль</button>
+         </div>
+         <button class="linklike" type="button" id="forgot-back">← Назад ко входу</button>
+       </form>
+       <p class="form-note" id="pw-note"></p>
+     </div>
      <p class="muted" id="loginerr"></p>
-     <div class="perks"><span>Без паролей</span><span>Данные только ваши</span><span>Вход за секунду</span></div>
+     <div class="perks"><span>Два способа входа</span><span>Данные только ваши</span><span>Вход за секунду</span></div>
    </div>
    <p class="foot">Нет подписки? <a id="botlink" href="#" style="color:#fff;font-weight:700">Откройте бота</a></p>
  </div>
@@ -338,6 +378,7 @@ CABINET_PAGE = r"""<!doctype html>
 <script>
  var API = "__API__";
  var BOT = "__BOT__";
+ var TS_KEY = "__TURNSTILE__";
  var KEY = "drebol_token";
  var tg = window.Telegram && window.Telegram.WebApp;
  function esc(s) { return String(s == null ? "" : s).replace(/[<>&"]/g, function (c) {
@@ -361,7 +402,8 @@ CABINET_PAGE = r"""<!doctype html>
    key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.7-8.7M16 7l3 3M14 9l2 2"/></svg>',
    dev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/></svg>',
    card: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6.5 15h4"/></svg>',
-   lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>'
+   lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+   user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>'
  };
  function title(icon, text) {
    return '<div class="card-title"><span class="ico">' + ICON[icon] + "</span>" + esc(text) + "</div>";
@@ -401,6 +443,35 @@ CABINET_PAGE = r"""<!doctype html>
 
  window.onTelegramAuth = function (user) { login({user: user}); };
 
+ // Капча Cloudflare Turnstile: грузится только если задан ключ сайта.
+ // Без ключа блок входа по почте скрыт, вход через Telegram работает.
+ var tsLoaded = false, tsWidgets = {};
+ function tsLoad() {
+   if (!TS_KEY || tsLoaded) { return; }
+   tsLoaded = true;
+   var s = document.createElement("script");
+   s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+   s.async = true; s.defer = true;
+   s.onload = function () {
+     try {
+       tsWidgets.pw = turnstile.render("#turnstile-box", {sitekey: TS_KEY});
+       tsWidgets.fg = turnstile.render("#turnstile-box2", {sitekey: TS_KEY});
+     } catch (e) {}
+   };
+   document.head.appendChild(s);
+ }
+ function tsToken(which) {
+   try {
+     return (window.turnstile && tsWidgets[which] !== undefined)
+       ? turnstile.getResponse(tsWidgets[which]) : "";
+   } catch (e) { return ""; }
+ }
+ function tsReset(which) {
+   try {
+     if (window.turnstile && tsWidgets[which] !== undefined) { turnstile.reset(tsWidgets[which]); }
+   } catch (e) {}
+ }
+
  function pill(text, kind) { return '<span class="pill ' + kind + '">' + esc(text) + "</span>"; }
  function row(a, b) { return '<div class="row"><span>' + a + "</span><span>" + b + "</span></div>"; }
  function stat(value, label) { return '<div class="stat"><b>' + value + "</b><span>" + esc(label) + "</span></div>"; }
@@ -424,12 +495,39 @@ CABINET_PAGE = r"""<!doctype html>
    return m ? m[3] + "." + m[2] + "." + m[1] + " · " + m[4] : String(raw || "");
  }
 
+ // Профиль: почта и пароль для входа из браузера. Пока что-то не задано,
+ // вкладка светится красной точкой (см. buildTabs).
+ function profileCard(p) {
+   var lg = p.login || {};
+   var rows = [
+     row("Почта", lg.email ? esc(lg.email) : pill("не задана", "warn")),
+     row("Пароль", lg.has_password ? pill("задан", "ok") : pill("не задан", "warn"))
+   ];
+   return '<div data-sec="profile"><div class="card">' + title("user", "Профиль") +
+     '<p class="card-sub">Почта и пароль — для входа в кабинет из браузера, без Telegram.</p>' +
+     rows.join("") +
+     '<form id="prof-email-form" style="margin-top:14px">' +
+       '<label class="field">Почта<input type="email" id="prof-email" value="' + esc(lg.email || "") +
+       '" placeholder="you@example.com" autocomplete="email"></label>' +
+       '<button class="btn btn-ghost" type="submit">Сохранить почту</button></form>' +
+     '<form id="prof-pass-form" style="margin-top:14px">' +
+       (lg.has_password
+         ? '<label class="field">Текущий пароль<input type="password" id="prof-cur" autocomplete="current-password"></label>'
+         : "") +
+       '<label class="field">Новый пароль (от 8 символов)<input type="password" id="prof-new" autocomplete="new-password" minlength="8"></label>' +
+       '<button class="btn btn-ghost" type="submit">' +
+       (lg.has_password ? "Сменить пароль" : "Задать пароль") + "</button></form>" +
+     '<p class="form-note" id="prof-note"></p>' +
+     "</div></div>";
+ }
+
  function render(p) {
    document.getElementById("login").className = "hide";
    document.getElementById("app").className = "";
    document.getElementById("out").classList.remove("hide");
    document.getElementById("hello").textContent = "Привет, " + (p.user.name || "друг") + "!";
    document.getElementById("whoami").textContent = p.user.username ? "@" + p.user.username : "";
+   window.LOGIN = p.login || {};
    var out = [];
 
    if (p.blocked) {
@@ -448,6 +546,7 @@ CABINET_PAGE = r"""<!doctype html>
               '<a class="btn btn-main" href="' + botUrl() + '">' + ICON.tg + "Оформить в боте</a></div>");
      var ref0 = referralCard(p);
      if (ref0) { out.push('<div data-sec="friends">' + ref0 + "</div>"); }
+     out.push(profileCard(p));
      document.getElementById("body").innerHTML = out.join("");
      buildTabs();
      bindActions();
@@ -554,6 +653,7 @@ CABINET_PAGE = r"""<!doctype html>
 
    var ref = referralCard(p);
    if (ref) { out.push('<div data-sec="friends">' + ref + "</div>"); }
+   out.push(profileCard(p));
 
    out.push('<div class="stack" style="margin-top:6px">' +
             '<button class="btn btn-ghost" type="button" onclick="load()">🔄 Обновить данные</button>' +
@@ -571,7 +671,7 @@ CABINET_PAGE = r"""<!doctype html>
  // тихое: раздел меняется на месте, без перезагрузки, а адрес просто
  // подстраивается под текущий раздел, чтобы ссылку можно было взять.
  var SEC_LABELS = {sub: "Подписка", lte: "LTE", devices: "Устройства",
-                   payments: "Платежи", friends: "Друзья"};
+                   payments: "Платежи", friends: "Друзья", profile: "Профиль"};
  function cabinetBase() {
    var p = location.pathname.replace(/\/+$/, "");
    if (p.slice(-13) === "/cabinet.html") { return p.slice(0, -13) + "/cabinet"; }
@@ -604,6 +704,12 @@ CABINET_PAGE = r"""<!doctype html>
      b.className = "tab" + (name === active ? " active" : "");
      b.type = "button";
      b.textContent = SEC_LABELS[name] || name;
+     if (name === "profile" && window.LOGIN && (!window.LOGIN.email || !window.LOGIN.has_password)) {
+       var d = document.createElement("span");
+       d.className = "dot";
+       d.title = "Задайте почту и пароль";
+       b.appendChild(d);
+     }
      b.onclick = function () { showTab(name); };
      tabs.appendChild(b);
    });
@@ -693,6 +799,54 @@ CABINET_PAGE = r"""<!doctype html>
      };
    }
    if (document.getElementById("renew-card")) { loadRenew(); }
+
+   // Профиль: смена почты и пароля — формы перерисовываются при каждой
+   // загрузке, поэтому привязка здесь же, после каждой отрисовки.
+   var pef = document.getElementById("prof-email-form");
+   if (pef) {
+     pef.addEventListener("submit", function (e) {
+       e.preventDefault();
+       var v = document.getElementById("prof-email").value.trim();
+       var note = document.getElementById("prof-note");
+       note.textContent = "Сохраняем…";
+       api("/api/profile/email", {method: "POST", body: JSON.stringify({email: v})})
+         .then(function (r) {
+           if (r.status === 200) { note.textContent = "Почта сохранена."; load(); return; }
+           if (r.data && r.data.error === "email_taken") {
+             note.textContent = "Эта почта уже привязана к другому человеку."; return;
+           }
+           if (r.data && r.data.error === "bad_email") {
+             note.textContent = "Проверьте почту — похоже, опечатка."; return;
+           }
+           note.textContent = "Не получилось — попробуйте позже.";
+         })
+         .catch(function () { note.textContent = "Не получилось — попробуйте позже."; });
+     });
+   }
+   var ppf = document.getElementById("prof-pass-form");
+   if (ppf) {
+     ppf.addEventListener("submit", function (e) {
+       e.preventDefault();
+       var cur = document.getElementById("prof-cur");
+       var nw = document.getElementById("prof-new").value;
+       var note = document.getElementById("prof-note");
+       if (nw.length < 8) { note.textContent = "Пароль — от 8 символов."; return; }
+       note.textContent = "Сохраняем…";
+       api("/api/profile/password", {method: "POST",
+           body: JSON.stringify({current: cur ? cur.value : "", password: nw})})
+         .then(function (r) {
+           if (r.status === 200) { note.textContent = "Пароль сохранён."; load(); return; }
+           if (r.data && r.data.error === "bad_current") {
+             note.textContent = "Неверный текущий пароль."; return;
+           }
+           if (r.data && r.data.error === "bad_password") {
+             note.textContent = "Пароль — от 8 символов."; return;
+           }
+           note.textContent = "Не получилось — попробуйте позже.";
+         })
+         .catch(function () { note.textContent = "Не получилось — попробуйте позже."; });
+     });
+   }
  }
 
  // Продление: тарифы, счёт, ожидание подтверждения. Подтверждение
@@ -854,6 +1008,10 @@ CABINET_PAGE = r"""<!doctype html>
    w.setAttribute("data-onauth", "onTelegramAuth(user)");
    w.setAttribute("data-request-access", "write");
    document.getElementById("widget").appendChild(w);
+   if (TS_KEY) {
+     document.getElementById("pwblock").classList.remove("hide");
+     tsLoad();
+   }
  }
 
  document.getElementById("out").onclick = function () {
@@ -861,6 +1019,108 @@ CABINET_PAGE = r"""<!doctype html>
    setToken("");
    location.reload();
  };
+
+ // Вход по почте и паролю и сброс пароля — формы на экране входа,
+ // привязка один раз при загрузке страницы.
+ (function bindLoginForms() {
+   var pwf = document.getElementById("pwform");
+   if (pwf) {
+     pwf.addEventListener("submit", function (e) {
+       e.preventDefault();
+       var email = document.getElementById("pw-email").value.trim();
+       var pass = document.getElementById("pw-pass").value;
+       var cap = tsToken("pw");
+       if (!cap) { say("Подтвердите, что вы не робот — нажмите на капчу."); return; }
+       say("Входим…");
+       api("/api/auth/password", {method: "POST",
+           body: JSON.stringify({email: email, password: pass, captcha: cap})})
+         .then(function (r) {
+           tsReset("pw");
+           if (r.status === 200 && r.data.token) { setToken(r.data.token); return load(); }
+           if (r.status === 401) { say("Неверная почта или пароль."); return; }
+           if (r.status === 429) { say("Слишком много попыток. Подождите 15 минут."); return; }
+           if (r.status === 403) { say("Капча не пройдена. Попробуйте ещё раз."); return; }
+           if (r.status === 503) { say("Вход по почте пока не настроен."); return; }
+           fail("войти", "ответ " + r.status);
+         })
+         .catch(function (e) { tsReset("pw"); fail("связаться с кабинетом", e); });
+     });
+   }
+   var fo = document.getElementById("forgot-open");
+   if (fo) {
+     fo.onclick = function () {
+       document.getElementById("pwform").classList.add("hide");
+       fo.classList.add("hide");
+       document.getElementById("forgotform").classList.remove("hide");
+       say("");
+     };
+   }
+   var fb = document.getElementById("forgot-back");
+   if (fb) {
+     fb.onclick = function () {
+       document.getElementById("forgotform").classList.add("hide");
+       document.getElementById("fg-code-wrap").classList.add("hide");
+       document.getElementById("pwform").classList.remove("hide");
+       document.getElementById("forgot-open").classList.remove("hide");
+       document.getElementById("pw-note").textContent = "";
+       say("");
+     };
+   }
+   var fgf = document.getElementById("forgotform");
+   if (fgf) {
+     fgf.addEventListener("submit", function (e) {
+       e.preventDefault();
+       var email = document.getElementById("fg-email").value.trim();
+       var cap = tsToken("fg");
+       if (!cap) { say("Подтвердите, что вы не робот — нажмите на капчу."); return; }
+       say("Отправляем код в Telegram…");
+       api("/api/auth/forgot", {method: "POST",
+           body: JSON.stringify({email: email, captcha: cap})})
+         .then(function (r) {
+           tsReset("fg");
+           if (r.status === 200) {
+             say("");
+             document.getElementById("fg-code-wrap").classList.remove("hide");
+             document.getElementById("pw-note").textContent =
+               "Код отправлен в Telegram. Если его нет — проверьте, что почта та же, что в профиле.";
+             return;
+           }
+           if (r.status === 429) { say("Слишком много запросов. Подождите 15 минут."); return; }
+           if (r.status === 403) { say("Капча не пройдена. Попробуйте ещё раз."); return; }
+           if (r.status === 503) { say("Сброс пароля пока не настроен."); return; }
+           fail("отправить код", "ответ " + r.status);
+         })
+         .catch(function (e) { tsReset("fg"); fail("связаться с кабинетом", e); });
+     });
+   }
+   var fr = document.getElementById("fg-reset");
+   if (fr) {
+     fr.onclick = function () {
+       var email = document.getElementById("fg-email").value.trim();
+       var code = document.getElementById("fg-code").value.trim();
+       var pass = document.getElementById("fg-pass").value;
+       if (!code) { say("Введите код из Telegram."); return; }
+       if (pass.length < 8) { say("Новый пароль — от 8 символов."); return; }
+       say("Меняем пароль…");
+       api("/api/auth/reset", {method: "POST",
+           body: JSON.stringify({email: email, code: code, password: pass})})
+         .then(function (r) {
+           if (r.status === 200) {
+             say("");
+             document.getElementById("forgotform").classList.add("hide");
+             document.getElementById("fg-code-wrap").classList.add("hide");
+             document.getElementById("pwform").classList.remove("hide");
+             document.getElementById("forgot-open").classList.remove("hide");
+             document.getElementById("pw-note").textContent = "Пароль сменён — войдите с новым паролем.";
+             return;
+           }
+           if (r.status === 401) { say("Неверный код. Проверьте и попробуйте ещё раз."); return; }
+           fail("сменить пароль", "ответ " + r.status);
+         })
+         .catch(function (e) { fail("связаться с кабинетом", e); });
+     };
+   }
+ })();
 
  if (tg && tg.initData) {
    tg.ready(); tg.expand();
@@ -905,13 +1165,14 @@ CABINET_PAGE = r"""<!doctype html>
 
 def cabinet_page(bot_username: str) -> str:
     """Готовая страница кабинета: подставлены адрес API, имя бота и точный логотип с основного сайта."""
-    from config import load_config
+    from config import TURNSTILE_SITE_KEY, load_config
     from web.site_page import LOGO_URL
     api = (load_config().get("webapi_public") or "").rstrip("/")
     logo_html = f'<img src="{LOGO_URL}" alt="Drebol VPN" width="492" height="132">'
     return (CABINET_PAGE.replace("__API__", api or "")
             .replace("__BOT__", bot_username or "")
-            .replace("__LOGO__", logo_html))
+            .replace("__LOGO__", logo_html)
+            .replace("__TURNSTILE__", TURNSTILE_SITE_KEY or ""))
 
 
 def add_ready() -> bool:
@@ -1152,7 +1413,7 @@ mv /tmp/drebol_google_verification.html {WEB_ROOT}/{GOOGLE_VERIFICATION_FILE}
 # она выбирает сама по адресу (см. sectionFromPath в её JS).
 mkdir -p {WEB_ROOT}/cabinet
 cp /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet/index.html
-for sec in sub lte devices payments friends; do
+for sec in sub lte devices payments friends profile; do
   mkdir -p {WEB_ROOT}/cabinet/$sec
   cp /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet/$sec/index.html
 done

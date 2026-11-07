@@ -321,9 +321,10 @@ async def post_init(app: Application):
         from services.remnawave import panel_sync_tick
         app.job_queue.run_repeating(panel_sync_tick, interval=900, first=900)
 
-    # Личный кабинет: http-api для сайта и мини-приложения
+    # Личный кабинет: http-api для сайта и мини-приложения.
+    # Бота отдаём в API, чтобы оно само слало коды сброса пароля в чат.
     from web.webapi import start_server
-    started = await start_server()
+    started = await start_server(app.bot)
     if started.get("ok"):
         print(f"Кабинет слушает порт {started.get('port')}")
 
