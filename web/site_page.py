@@ -692,7 +692,7 @@ h2 {
 
 /* ── Тарифы ── */
 .plans {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 24px; align-items: stretch;
 }
 .plan {
@@ -728,6 +728,9 @@ h2 {
   color: #fff; font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
   box-shadow: 0 0 20px rgba(79, 140, 255, 0.5);
 }
+/* Невидимый двойник плашки в обычных тарифах: занимает ровно столько же
+   места, поэтому содержимое всех карточек начинается на одной высоте. */
+.best-tag--ghost { visibility: hidden; animation: none; }
 
 .plan-top { display: flex; flex-direction: column; gap: 6px; }
 .plan-name { font-size: 20px; font-weight: 700; color: #fff; }
@@ -1180,7 +1183,8 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
                            if period and period.lower() != t_name.lower() else "")
             is_best = (i == best)
             btn_cls = "btn btn-main" if is_best else "btn btn-ghost"
-            best_badge = '<span class="best-tag">🔥 Самый популярный</span>' if is_best else ""
+            best_badge = ('<span class="best-tag">🔥 Самый популярный</span>' if is_best else
+                          '<span class="best-tag best-tag--ghost" aria-hidden="true"></span>')
             cards.append(f"""
       <article class="plan{' best' if is_best else ''} reveal">
         {best_badge}
