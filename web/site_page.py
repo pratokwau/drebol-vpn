@@ -9,6 +9,13 @@ bento grid с курсорным spotlight, интерактивный визу�
 from __future__ import annotations
 from html import escape
 
+# Логотип — тот же файл, что и на странице подписки (web/subpage.html):
+# прозрачный вордмарк из assets репозитория. Прямая ссылка на raw GitHub,
+# а не /logo.png: на сервере в assets/logo.png лежит залитый когда-то через
+# бота кадр шёлковой картинки (817×774, логотип мелко в середине) — из-за
+# него логотип на сайте был крошечным и с «белыми полосами» (складки шёлка).
+LOGO_URL = "https://raw.githubusercontent.com/pratokwau/drebol-vpn/main/assets/logo.png"
+
 # ── Иконки (обводка, currentColor) ──────────────────────────────────────────
 
 _TG = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
@@ -264,8 +271,8 @@ header, main, footer { position: relative; z-index: 1; }
   transition: border-color 0.3s;
 }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 76px; }
-.brand { display: flex; align-items: center; text-decoration: none; }
-.brand img { height: 46px; width: auto; display: block; filter: drop-shadow(0 2px 8px rgba(79, 140, 255, 0.3)); }
+.brand { display: flex; align-items: center; min-height: 36px; }
+.brand img { height: 28px; max-height: 28px; width: auto; max-width: 180px; object-fit: contain; display: block; filter: drop-shadow(0 2px 8px rgba(79,140,255,.3)); }
 .nav { display: flex; gap: 32px; font-size: 14px; font-weight: 600; }
 .nav a {
   color: var(--muted); position: relative; padding: 6px 0;
@@ -811,13 +818,6 @@ h2 {
 .foot nav a:hover { color: #fff; }
 .copy { font-size: 13px; color: var(--soft); }
 
-/* Логотип по умолчанию (линии) */
-.logo { display: flex; align-items: center; gap: 12px; }
-.logo .mark { width: 46px; height: 46px; }
-.logo .mark circle, .logo .mark ellipse { fill: none; stroke: #fff; stroke-width: 7; }
-.logo .word { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; font-family: "Space Grotesk", sans-serif; }
-.cta-box .logo .mark { width: 56px; height: 56px; }
-.cta-box .logo .word { font-size: 40px; }
 
 /* ── Скролл-появление (Reveal) ── */
 .js .reveal {
@@ -845,7 +845,6 @@ h2 {
 /* ── Адаптивность (Телефон) ── */
 @media (max-width: 640px) {
   .top .wrap { height: 64px; }
-  .brand img { height: 34px; }
   .top .btn-sm { height: 40px; padding: 0 16px; font-size: 13px; }
   .top .btn-sm .long { display: none; }
   .head-actions { gap: 8px; }
@@ -959,7 +958,7 @@ def _fmt_price(value) -> str:
 def build_page(bot_username: str, title: str = "Drebol VPN",
                tagline: str = "Быстрый VPN без логов",
                privacy_url: str = "", terms_url: str = "",
-               channel_url: str = "", logo_file: str = "",
+               channel_url: str = "", logo_file: str = LOGO_URL,
                tariffs: list | None = None,
                poster_file: str = "og.webp",
                cabinet_url: str = "",
@@ -973,19 +972,12 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
     # Получаем актуальные тексты (с учётом правок из админки)
     txt = get_site_texts(site_texts)
 
-    # Логотип
-    if logo_file:
-        logo_src = escape(logo_file)
-        brand_html = f'<img src="{logo_src}" alt="{name}" width="492" height="132">'
-        cta_logo = f'<img class="mark-img" src="{logo_src}" alt="" width="492" height="132">'
-        foot_logo = f'<img src="{logo_src}" alt="{name}" width="492" height="132">'
-    else:
-        word = escape(title.split()[0].lower())
-        drawn = ('<span class="logo"><svg class="mark" viewBox="0 0 100 100" aria-hidden="true">'
-                 '<circle cx="50" cy="50" r="40"/>'
-                 '<ellipse cx="50" cy="50" rx="40" ry="13"/></svg>'
-                 f'<span class="word">{word}</span></span>')
-        brand_html = cta_logo = foot_logo = drawn
+    # Логотип — блок 1:1 со страницы подписки (web/subpage.html): всегда
+    # картинка PNG из assets репозитория, без рисованного SVG-запасника.
+    logo_src = escape(logo_file or LOGO_URL)
+    brand_html = f'<img id="brandLogo" src="{logo_src}" alt="{name}" width="492" height="132">'
+    cta_logo = f'<img class="mark-img" src="{logo_src}" alt="" width="492" height="132">'
+    foot_logo = f'<img src="{logo_src}" alt="{name}" width="492" height="132">'
 
     hint_html = (f'<p class="hint">Не открылось? Найдите в Telegram: '
                  f'<span class="handle">@{escape(handle)}</span></p>' if handle else "")

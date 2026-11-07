@@ -906,8 +906,9 @@ CABINET_PAGE = r"""<!doctype html>
 def cabinet_page(bot_username: str) -> str:
     """Готовая страница кабинета: подставлены адрес API, имя бота и точный логотип с основного сайта."""
     from config import load_config
+    from web.site_page import LOGO_URL
     api = (load_config().get("webapi_public") or "").rstrip("/")
-    logo_html = f'<img src="/{LOGO_NAME}" alt="Drebol VPN" width="492" height="132">'
+    logo_html = f'<img src="{LOGO_URL}" alt="Drebol VPN" width="492" height="132">'
     return (CABINET_PAGE.replace("__API__", api or "")
             .replace("__BOT__", bot_username or "")
             .replace("__LOGO__", logo_html))
@@ -1303,7 +1304,7 @@ async def build_current(bot_username: str) -> tuple:
     Одна сборка на всех: и кнопка «Обновить», и автообновление смотрят
     ровно на то, что окажется на сервере.
     """
-    from web.site_page import build_page
+    from web.site_page import LOGO_URL, build_page
     cfg = load_config()
     og_bytes = _asset("og.webp")
     logo_bytes = _asset(LOGO_NAME)
@@ -1315,11 +1316,10 @@ async def build_current(bot_username: str) -> tuple:
         privacy_url=cfg.get("privacy_url", "") or "",
         terms_url=cfg.get("terms_url", "") or "",
         channel_url=cfg.get("channel_url", "") or "",
-        # Логотип всегда берём из папки assets (он уже лежит там как
-        # logo.png и заодно уезжает на сервер в корень сайта): страница
-        # показывает настоящий логотип, как кабинет и страница подписки.
-        # Нет файла — остаётся рисованный SVG-логотип.
-        logo_file="/logo.png" if logo_bytes else "",
+        # Логотип — тот же файл, что и на странице подписки: прямая ссылка
+        # на assets/logo.png в репозитории. /logo.png на сервере не берём:
+        # там лежит залитый когда-то через бота кадр шёлковой картинки.
+        logo_file=LOGO_URL,
         tariffs=await site_tariffs(cfg),
         poster_file="og.webp" if og_bytes else "",
         site_texts=cfg.get("site_texts") or {},
