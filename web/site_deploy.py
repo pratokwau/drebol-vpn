@@ -1374,7 +1374,11 @@ async def build_current(bot_username: str) -> tuple:
         privacy_url=cfg.get("privacy_url", "") or "",
         terms_url=cfg.get("terms_url", "") or "",
         channel_url=cfg.get("channel_url", "") or "",
-        logo_file="",
+        # Логотип всегда берём из папки assets (он уже лежит там как
+        # logo.png и заодно уезжает на сервер в корень сайта): страница
+        # показывает настоящий логотип, как кабинет и страница подписки.
+        # Нет файла — остаётся рисованный SVG-логотип.
+        logo_file="/logo.png" if logo_bytes else "",
         tariffs=await site_tariffs(cfg),
         poster_file="og.webp" if og_bytes else "",
         site_texts=cfg.get("site_texts") or {},
