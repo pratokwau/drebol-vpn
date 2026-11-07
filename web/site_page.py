@@ -204,7 +204,7 @@ img { max-width: 100%; }
 h1, h2, h3, h4, p { margin: 0; }
 .wrap { width: 100%; max-width: 1360px; margin: 0 auto; padding-inline: var(--pad); }
 
-/* ── Задний фон: Кибер-аура и сетка ── */
+/* ── Задний фон: Кибер-аура ── */
 .bg { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .aurora {
   position: absolute; inset: -30%;
@@ -241,16 +241,6 @@ h1, h2, h3, h4, p { margin: 0; }
   66%      { transform: translate3d(-6vw, 4vh, 0) scale(0.92) rotate(120deg); }
 }
 
-.cyber-grid {
-  position: absolute; inset: 0;
-  background-image: 
-    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(ellipse at 50% 20%, black 20%, transparent 75%);
-  -webkit-mask-image: radial-gradient(ellipse at 50% 20%, black 20%, transparent 75%);
-}
-
 .light-beam {
   position: absolute; top: -180px; left: 50%; transform: translateX(-50%);
   width: 800px; height: 500px;
@@ -275,7 +265,7 @@ header, main, footer { position: relative; z-index: 1; }
 }
 .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 76px; }
 .brand { display: flex; align-items: center; text-decoration: none; }
-.brand img { height: 32px; width: auto; display: block; filter: drop-shadow(0 2px 8px rgba(79, 140, 255, 0.3)); }
+.brand img { height: 46px; width: auto; display: block; filter: drop-shadow(0 2px 8px rgba(79, 140, 255, 0.3)); }
 .nav { display: flex; gap: 32px; font-size: 14px; font-weight: 600; }
 .nav a {
   color: var(--muted); position: relative; padding: 6px 0;
@@ -370,8 +360,9 @@ header, main, footer { position: relative; z-index: 1; }
 }
 
 h1 {
-  font-size: clamp(42px, 5.6vw, 78px); line-height: 1.04;
+  font-size: clamp(36px, 5.6vw, 78px); line-height: 1.04;
   font-weight: 800; letter-spacing: -0.035em; text-wrap: balance;
+  overflow-wrap: break-word;
 }
 .shimmer-text {
   background: linear-gradient(135deg, #ffffff 15%, #9bc2ff 55%, #ffffff 90%);
@@ -803,17 +794,7 @@ h2 {
   background: radial-gradient(ellipse at 50% -20%, rgba(79, 140, 255, 0.4), rgba(5, 7, 12, 0.95) 75%);
   box-shadow: 0 40px 120px rgba(0, 0, 0, 0.8), 0 0 80px rgba(79, 140, 255, 0.2);
 }
-.cta-box::before {
-  content: ""; position: absolute; inset: 0;
-  background-image: 
-    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 40px 40px;
-  mask-image: radial-gradient(ellipse at center, black 10%, transparent 70%);
-  -webkit-mask-image: radial-gradient(ellipse at center, black 10%, transparent 70%);
-  pointer-events: none;
-}
-.cta-box .mark-img { height: 48px; width: auto; filter: drop-shadow(0 0 20px rgba(79, 140, 255, 0.5)); }
+.cta-box .mark-img { height: 64px; width: auto; filter: drop-shadow(0 0 20px rgba(79, 140, 255, 0.5)); }
 .cta-box h2 { font-size: clamp(36px, 5.2vw, 64px); position: relative; z-index: 1; }
 .cta-box p { position: relative; z-index: 1; }
 .cta-box .actions { justify-content: center; position: relative; z-index: 1; }
@@ -824,7 +805,7 @@ h2 {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
   padding-block: 36px 44px;
 }
-.foot img { height: 26px; width: auto; opacity: 0.85; }
+.foot img { height: 32px; width: auto; opacity: 0.85; }
 .foot nav { display: flex; flex-wrap: wrap; gap: 12px 28px; font-size: 14px; font-weight: 600; }
 .foot nav a { color: var(--muted); transition: color 0.2s; }
 .foot nav a:hover { color: #fff; }
@@ -832,11 +813,11 @@ h2 {
 
 /* Логотип по умолчанию (линии) */
 .logo { display: flex; align-items: center; gap: 12px; }
-.logo .mark { width: 34px; height: 34px; }
+.logo .mark { width: 46px; height: 46px; }
 .logo .mark circle, .logo .mark ellipse { fill: none; stroke: #fff; stroke-width: 7; }
-.logo .word { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; font-family: "Space Grotesk", sans-serif; }
-.cta-box .logo .mark { width: 44px; height: 44px; }
-.cta-box .logo .word { font-size: 34px; }
+.logo .word { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; font-family: "Space Grotesk", sans-serif; }
+.cta-box .logo .mark { width: 56px; height: 56px; }
+.cta-box .logo .word { font-size: 40px; }
 
 /* ── Скролл-появление (Reveal) ── */
 .js .reveal {
@@ -864,7 +845,7 @@ h2 {
 /* ── Адаптивность (Телефон) ── */
 @media (max-width: 640px) {
   .top .wrap { height: 64px; }
-  .brand img { height: 26px; }
+  .brand img { height: 34px; }
   .top .btn-sm { height: 40px; padding: 0 16px; font-size: 13px; }
   .top .btn-sm .long { display: none; }
   .head-actions { gap: 8px; }
@@ -1189,7 +1170,6 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
   <div class="aurora">
     <span></span><span></span><span></span><span></span>
   </div>
-  <div class="cyber-grid"></div>
   <div class="light-beam"></div>
   <div class="vignette"></div>
 </div>
