@@ -8,7 +8,6 @@ from core.database import add_support_message, get_support_messages
 from core.keyboards import back_admin, support_keyboard
 from core.states import (
     AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
-    AWAITING_SCREEN_IMAGE,
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_PRESET_EXPIRE,
@@ -1546,12 +1545,6 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         await offer_restore(msg, context, blob)
-        return
-
-    # ── Картинка для меню ───────────────────────────────────────────────────
-    if is_admin and state == AWAITING_SCREEN_IMAGE:
-        from handlers.screen_images import accept_screen_image
-        await accept_screen_image(msg, context)
         return
 
     # ── Картинка для рассылки ───────────────────────────────────────────────

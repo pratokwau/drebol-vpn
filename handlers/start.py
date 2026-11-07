@@ -4,7 +4,6 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID
 from core.database import upsert_user
-from core.screen_images import show_screen
 from core.subscription import is_subscribed, subscribe_keyboard, subscribe_text
 
 
@@ -75,8 +74,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fresh = await ensure_trial(user, context, on_start=_show_progress)
     text, markup = await start_screen(user, fresh=fresh)
     if waiting:
-        await show_screen(waiting[0], "main", text, markup,
-                          disable_web_page_preview=True)
+        await waiting[0].edit_text(text, parse_mode="HTML", reply_markup=markup,
+                                   disable_web_page_preview=True)
     else:
-        await show_screen(update.message, "main", text, markup,
-                          disable_web_page_preview=True)
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=markup,
+                                        disable_web_page_preview=True)
