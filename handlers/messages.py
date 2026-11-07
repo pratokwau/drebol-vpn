@@ -33,6 +33,7 @@ from core.states import (
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
     AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_CONTACT,
+    AWAITING_GIFT_USER,
     AWAITING_CABINET_PORT, AWAITING_CABINET_PUBLIC, AWAITING_CABINET_UPSTREAM,
     AWAITING_WINBACK_DAYS, AWAITING_WINBACK_PERCENT,
     AWAITING_WINBACK_DAYS2, AWAITING_WINBACK_PERCENT2, AWAITING_WINBACK_LIFE,
@@ -45,8 +46,8 @@ from core.states import (
     AWAITING_DIGEST_HOUR,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET, AWAITING_REFUND_PARTIAL,
-    AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
-    AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
+    AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
+    AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
     AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
     AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK, AWAITING_BL_UNTIL,
     AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
@@ -1388,16 +1389,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Тарифы ───────────────────────────────────────────────────────────────
-    if state in (AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE):
+    if state in (AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE):
         from handlers.tariffs import apply_new_step
         context.user_data.pop("state", None)
         await apply_new_step(update.message, context, state, text)
         return
 
-    if state in (AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD,
+    if state in (AWAITING_TARIFF_EDIT_PERIOD,
                  AWAITING_TARIFF_EDIT_PRICE):
         from handlers.tariffs import apply_edit
         await apply_edit(update.message, context, state, text)
+        return
+
+    # ── Подарок подписки ─────────────────────────────────────────────────────
+    if state == AWAITING_GIFT_USER:
+        from handlers.user import apply_gift_user
+        await apply_gift_user(update.message, context, text)
         return
 
     # ── Ключи платёжной системы ──────────────────────────────────────────────

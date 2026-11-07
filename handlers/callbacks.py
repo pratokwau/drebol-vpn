@@ -11,6 +11,7 @@ from handlers.user import (
     handle_qr_code, handle_reissue_key, handle_reissue_do, handle_prices, handle_info,
     handle_pay_invoice, handle_tariff_pick, handle_my_devices, handle_dev_del,
     handle_dev_buy_menu, handle_dev_buy,
+    handle_gift_pick, handle_gift_tariff, handle_gift_pay,
 )
 from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
@@ -251,6 +252,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _p = data.split(":")
         await handle_tariff_pick(query, context, int(_p[1]),
                                  int(_p[2]) if len(_p) > 2 else None)
+    elif data == "gift_pick":
+        await handle_gift_pick(query)
+    elif data.startswith("gift_tariff:"):
+        await handle_gift_tariff(query, context, int(data.split(":")[1]))
+    elif data == "gift_pay":
+        await handle_gift_pay(query, context)
     elif data == "my_sub":
         await handle_my_sub(query)
     elif data == "my_lte":
@@ -737,8 +744,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_tariff_edit(query, context, int(data.split(":")[1]), "price")
     elif data.startswith("tariff_period:"):
         await handle_tariff_edit(query, context, int(data.split(":")[1]), "period")
-    elif data.startswith("tariff_name:"):
-        await handle_tariff_edit(query, context, int(data.split(":")[1]), "name")
     elif data == "pay_provider_menu":
         await handle_pay_provider_menu(query, context)
     elif data == "platega_set_merchant":

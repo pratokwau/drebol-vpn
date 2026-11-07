@@ -137,12 +137,17 @@ async def post_init(app: Application):
                 return_exceptions=True,
             )
 
-            from paidsub.handlers import apply_paid_payment, apply_devices_payment
+            from paidsub.handlers import (
+                apply_paid_payment, apply_devices_payment, apply_gift_payment,
+            )
             for p, r in zip([p for p in pending if p[3]], statuses):
                 pay_id, tg_id, amount, period, promo = p[0], p[1], p[4], p[5], p[6]
                 # счёт бывает за срок и за докуп устройств
                 kind = p[8] if len(p) > 8 else "period"
                 extra = p[9] if len(p) > 9 else 0
+                # получатель подарка: счёт оплатил один человек, а подписка
+                # открывается у другого
+                gift_tg = p[10] if len(p) > 10 else None
                 if isinstance(r, Exception):
                     continue
                 if not r.get("ok"):
@@ -158,6 +163,11 @@ async def post_init(app: Application):
                     try:
                         if kind == "devices":
                             res = await apply_devices_payment(tg_id, extra, ctx, amount)
+                        elif gift_tg:
+                            res = await apply_gift_payment(
+                                gift_tg, tg_id, amount, ctx, promo_code=promo,
+                                source="Platega", period_seconds=period,
+                            )
                         else:
                             res = await apply_paid_payment(
                                 tg_id, amount, ctx, promo_code=promo,
@@ -189,13 +199,18 @@ async def post_init(app: Application):
                         if not res.get("ok"):
                             await set_payment_status(pay_id, "paid", res.get("error"))
                             from config import ADMIN_ID
+                            gift_line = (f"🎁 Подарок для <code>{gift_tg}</code>\n"
+                                         if gift_tg else "")
+                            tail = ("Выдай подписку получателю вручную."
+                                    if gift_tg else "Продли подписку вручную.")
                             await ctx.bot.send_message(
                                 chat_id=ADMIN_ID,
                                 text=(
                                     "⚠️ <b>Оплата получена, но не засчитана</b>\n\n"
                                     f"👤 <code>{tg_id}</code> · {amount} ₽\n"
+                                    f"{gift_line}"
                                     f"<code>{res.get('error')}</code>\n\n"
-                                    "Продли подписку вручную."
+                                    f"{tail}"
                                 ),
                                 parse_mode="HTML",
                             )

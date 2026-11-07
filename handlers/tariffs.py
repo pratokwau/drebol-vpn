@@ -4,8 +4,6 @@
 одна цена и один период из общих настроек.
 """
 
-from html import escape
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
@@ -15,8 +13,8 @@ from core.database import (
 )
 from paidsub.time_parser import parse_duration, fmt_duration
 from core.states import (
-    AWAITING_TARIFF_NAME, AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
-    AWAITING_TARIFF_EDIT_NAME, AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
+    AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
+    AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
 )
 
 _PERIOD_HINT = (
@@ -51,10 +49,10 @@ async def handle_tariffs_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
         lines.append("\n<i>Нажми на тариф, чтобы изменить.</i>")
 
     kb = []
-    for t_id, name, period, price, is_active, _ in rows:
+    for t_id, _name, period, price, is_active, _ in rows:
         mark = "✅" if is_active else "🙈"
         kb.append([InlineKeyboardButton(
-            f"{mark} {name} · {price} ₽ · {fmt_duration(period)}",
+            f"{mark} {fmt_duration(period)} · {price} ₽",
             callback_data=f"tariff_view:{t_id}",
         )])
     kb.append([InlineKeyboardButton("➕ Добавить тариф", callback_data="tariff_add"),
@@ -70,11 +68,11 @@ async def handle_tariff_view(query, tariff_id: int):
     if not t:
         await query.answer("Тариф не найден", show_alert=True)
         return
-    _, name, period, price, is_active, _ = t
+    _, _name, period, price, is_active, _ = t
     state = "✅ показывается клиенту" if is_active else "🙈 скрыт от клиента"
 
     await query.edit_message_text(
-        f"🏷 <b>{escape(str(name))}</b>\n\n"
+        f"🏷 <b>{fmt_duration(period)} · {price} ₽</b>\n\n"
         f"<blockquote>💵 Цена: <b>{price} ₽</b>\n"
         f"⏱ Срок: <b>{fmt_duration(period)}</b>\n"
         f"📌 {state}</blockquote>",
@@ -88,8 +86,7 @@ async def handle_tariff_view(query, tariff_id: int):
                 InlineKeyboardButton("💵 Цена", callback_data=f"tariff_price:{tariff_id}"),
                 InlineKeyboardButton("⏱ Срок", callback_data=f"tariff_period:{tariff_id}"),
             ],
-            [InlineKeyboardButton("✏️ Название", callback_data=f"tariff_name:{tariff_id}"),
-             InlineKeyboardButton("🗑 Удалить", callback_data=f"tariff_del:{tariff_id}")],
+            [InlineKeyboardButton("🗑 Удалить", callback_data=f"tariff_del:{tariff_id}")],
             [InlineKeyboardButton("◀️ К тарифам", callback_data="tariffs_menu")],
         ]),
     )
@@ -112,7 +109,7 @@ async def handle_tariff_delete(query, tariff_id: int):
         return
     await query.edit_message_text(
         f"🗑 <b>Удалить тариф?</b>\n\n"
-        f"<blockquote>{escape(str(t[1]))} · {t[3]} ₽ · {fmt_duration(t[2])}</blockquote>\n\n"
+        f"<blockquote>{fmt_duration(t[2])} · {t[3]} ₽</blockquote>\n\n"
         "<i>На уже оплаченные подписки это не влияет.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
@@ -132,12 +129,11 @@ async def handle_tariff_delete_confirm(query, context, tariff_id: int):
 # ── Добавление ───────────────────────────────────────────────────────────────
 
 async def handle_tariff_add(query, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["state"] = AWAITING_TARIFF_NAME
+    context.user_data["state"] = AWAITING_TARIFF_PERIOD
     context.user_data["new_tariff"] = {}
     await query.edit_message_text(
-        "➕ <b>Новый тариф</b>  ·  <i>шаг 1 из 3</i>\n\n"
-        "<b>Название</b> — его увидит клиент.\n\n"
-        "<i>Например: <code>1 месяц</code>, <code>Полгода</code>, <code>Год</code></i>",
+        "➕ <b>Новый тариф</b>  ·  <i>шаг 1 из 2</i>\n\n"
+        "<b>Срок</b>\n" + _PERIOD_HINT,
         parse_mode="HTML", reply_markup=_back_kb(),
     )
 
@@ -145,24 +141,6 @@ async def handle_tariff_add(query, context: ContextTypes.DEFAULT_TYPE):
 async def apply_new_step(message, context: ContextTypes.DEFAULT_TYPE, state: str, text: str):
     """Шаги мастера создания тарифа."""
     data = context.user_data.setdefault("new_tariff", {})
-
-    if state == AWAITING_TARIFF_NAME:
-        name = text.strip()
-        if not name or len(name) > 40:
-            await message.reply_text(
-                "❌ <b>Название — до 40 символов</b>\n\n<i>Пришли ещё раз.</i>",
-                parse_mode="HTML", reply_markup=_back_kb()
-            )
-            context.user_data["state"] = AWAITING_TARIFF_NAME
-            return
-        data["name"] = name
-        context.user_data["state"] = AWAITING_TARIFF_PERIOD
-        await message.reply_text(
-            f"➕ <b>Новый тариф</b>  ·  <i>шаг 2 из 3</i>\n\n"
-            f"✅ Название: <b>{escape(name)}</b>\n\n<b>Срок</b>\n{_PERIOD_HINT}",
-            parse_mode="HTML", reply_markup=_back_kb(),
-        )
-        return
 
     if state == AWAITING_TARIFF_PERIOD:
         seconds = parse_duration(text)
@@ -176,7 +154,7 @@ async def apply_new_step(message, context: ContextTypes.DEFAULT_TYPE, state: str
         data["period"] = seconds
         context.user_data["state"] = AWAITING_TARIFF_PRICE
         await message.reply_text(
-            f"➕ <b>Новый тариф</b>  ·  <i>шаг 3 из 3</i>\n\n"
+            f"➕ <b>Новый тариф</b>  ·  <i>шаг 2 из 2</i>\n\n"
             f"✅ Срок: <b>{fmt_duration(seconds)}</b>\n\n"
             "<b>Цена</b> в рублях — просто число.",
             parse_mode="HTML", reply_markup=_back_kb(),
@@ -192,18 +170,20 @@ async def apply_new_step(message, context: ContextTypes.DEFAULT_TYPE, state: str
             context.user_data["state"] = AWAITING_TARIFF_PRICE
             return
         price = int(text)
-        name, period = data.get("name"), data.get("period")
+        period = data.get("period")
         context.user_data.pop("state", None)
         context.user_data.pop("new_tariff", None)
-        if not name or not period:
+        if not period:
             await message.reply_text("😕 <b>Данные потерялись</b>\n\n<i>Начни заново.</i>",
                                      parse_mode="HTML", reply_markup=back_admin())
             return
 
-        await add_tariff(name, period, price)
+        # имя в базе больше нигде не показывается — кладём туда же срок,
+        # чтобы колонка не пустовала
+        await add_tariff(fmt_duration(period), period, price)
         await message.reply_text(
             "✅ <b>Тариф создан</b>\n\n"
-            f"<blockquote>🏷 {escape(name)}\n💵 {price} ₽\n⏱ {fmt_duration(period)}</blockquote>\n\n"
+            f"<blockquote>⏱ {fmt_duration(period)}\n💵 {price} ₽</blockquote>\n\n"
             "<i>Он уже активен и виден клиентам.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
@@ -225,16 +205,15 @@ async def handle_tariff_edit(query, context: ContextTypes.DEFAULT_TYPE,
 
     if field == "price":
         context.user_data["state"] = AWAITING_TARIFF_EDIT_PRICE
-        body = (f"💵 <b>Цена тарифа «{escape(str(t[1]))}»</b>\n\n"
+        body = (f"💵 <b>Цена — {fmt_duration(t[2])}</b>\n\n"
                 f"<blockquote>Сейчас: <b>{t[3]} ₽</b></blockquote>\n\n<i>Пришли новую цену.</i>")
     elif field == "period":
         context.user_data["state"] = AWAITING_TARIFF_EDIT_PERIOD
-        body = (f"⏱ <b>Срок тарифа «{escape(str(t[1]))}»</b>\n\n"
+        body = (f"⏱ <b>Срок — {fmt_duration(t[2])}</b>\n\n"
                 f"Сейчас: <b>{fmt_duration(t[2])}</b>\n\n{_PERIOD_HINT}")
     else:
-        context.user_data["state"] = AWAITING_TARIFF_EDIT_NAME
-        body = (f"✏️ <b>Название тарифа</b>\n\n"
-                f"<blockquote>Сейчас: <b>{escape(str(t[1]))}</b></blockquote>\n\n<i>Пришли новое.</i>")
+        await query.answer("Неизвестное поле", show_alert=True)
+        return
 
     await query.edit_message_text(
         body, parse_mode="HTML",
@@ -271,15 +250,11 @@ async def apply_edit(message, context: ContextTypes.DEFAULT_TYPE, state: str, te
                                      parse_mode="HTML", reply_markup=kb)
             return
         await update_tariff_field(tariff_id, "period_seconds", seconds)
+        # имя в базе — тот же срок, держим их вровень
+        await update_tariff_field(tariff_id, "name", fmt_duration(seconds))
         await message.reply_text(f"✅ <b>Срок обновлён</b>: {fmt_duration(seconds)}",
                                  parse_mode="HTML", reply_markup=kb)
 
     else:
-        name = text.strip()
-        if not name or len(name) > 40:
-            await message.reply_text("❌ <b>Название — до 40 символов</b>",
-                                     parse_mode="HTML", reply_markup=kb)
-            return
-        await update_tariff_field(tariff_id, "name", name)
-        await message.reply_text(f"✅ <b>Название обновлено</b>: {escape(name)}",
-                                 parse_mode="HTML", reply_markup=kb)
+        await message.reply_text("😕 <b>Неизвестный шаг</b>\n\n<i>Начни заново.</i>",
+                                 parse_mode="HTML", reply_markup=back_admin())

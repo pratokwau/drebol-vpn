@@ -432,6 +432,7 @@ async def handle_renew_sub(query):
     import services.platega_api as pg
     if pg.is_configured():
         from core.database import last_paid_period, list_tariffs
+        from paidsub.time_parser import fmt_duration
         tariffs = await list_tariffs(only_active=True)
 
         # Есть тарифы — клиент выбирает срок сам
@@ -445,9 +446,9 @@ async def handle_renew_sub(query):
                 key=lambda t: (0 if usual and t[2] == usual else 1, t[2]))
 
             kb = []
-            for t_id, name, t_period, t_price, _a, _s in ordered:
+            for t_id, _name, t_period, t_price, _a, _s in ordered:
                 data = extras[t_id]
-                label = f"{name} · {data['final']} ₽"
+                label = f"{fmt_duration(t_period)} · {data['final']} ₽"
                 if data["seconds"] >= 2 * MONTH:
                     label += f" · {data['per_month']}/мес"
                 marks = ""
@@ -458,6 +459,7 @@ async def handle_renew_sub(query):
                 kb.append([InlineKeyboardButton((label + marks)[:64],
                                                 callback_data=f"tariff_pick:{t_id}")])
             kb.append(promo_btn_row)
+            kb.append([InlineKeyboardButton("🎁 Подарить подписку", callback_data="gift_pick")])
             kb.append([InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")])
 
             hints = []
@@ -534,7 +536,7 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
             await query.answer("Тариф больше недоступен", show_alert=True)
             await handle_renew_sub(query)
             return
-        name, pay_seconds, price = t[1], t[2], int(t[3])
+        pay_seconds, price = t[2], int(t[3])
     else:
         # тарифов нет — срок и цену брать неоткуда, продлевать нечем
         pay_seconds = int(settings["pay_period"] or 0)
@@ -549,7 +551,7 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
                                  [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")]),
             )
             return
-        name, price = "Подписка", int(settings["price"])
+        price = int(settings["price"])
 
     # Промокод действует на срок, устройства считаются отдельно —
     # иначе скидка растекается на разовую покупку слотов
@@ -615,7 +617,7 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
     total_line = f"💰 К оплате: <b>{total} ₽</b>"
     if dev_sum:
         total_line += f"  <i>({period_price} ₽ подписка + {dev_sum} ₽ устройства)</i>"
-    lines = ([f"💳 <b>Тариф «{escape(str(name))}»</b>", "",
+    lines = ([f"💳 <b>{fmt_duration(pay_seconds)}</b>", "",
               "<blockquote>" + "\n".join(card) + "</blockquote>", ""]
              + lines + ([""] if lines else [])
              + [total_line])
@@ -632,9 +634,176 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
     )
 
 
+# ── Подарок подписки ─────────────────────────────────────────────────────────
+
+async def handle_gift_pick(query):
+    """Подарок: выбор срока — оплачивает даритель, подписка достаётся другу."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from core.database import list_tariffs
+    from paidsub.time_parser import fmt_duration
+    tariffs = await list_tariffs(only_active=True)
+    if not tariffs:
+        await query.edit_message_text(
+            "🎁 <b>Подарок подписки</b>\n\n"
+            "<blockquote>Сейчас нет доступных тарифов.</blockquote>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")],
+            ]),
+        )
+        return
+    extras = _tariff_extras(tariffs)
+    best = min(extras, key=lambda tid: extras[tid]["per_month"]) if extras else None
+    ordered = sorted(tariffs, key=lambda t: t[2])
+    kb = []
+    for t_id, _name, t_period, t_price, _a, _s in ordered:
+        data = extras[t_id]
+        label = f"{fmt_duration(t_period)} · {data['final']} ₽"
+        if data["seconds"] >= 2 * MONTH:
+            label += f" · {data['per_month']}/мес"
+        if t_id == best and len(tariffs) > 1 and data["save"]:
+            label += " 🔥"
+        kb.append([InlineKeyboardButton(label[:64], callback_data=f"gift_tariff:{t_id}")])
+    kb.append([InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")])
+    await query.edit_message_text(
+        "🎁 <b>Подарок подписки</b>\n\n"
+        "Выберите срок — оплатите вы, а подписка откроется у друга "
+        "сразу после оплаты.\n\n"
+        "<i>🔥 — выгоднее всего по цене за месяц.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb),
+    )
+
+
+async def handle_gift_tariff(query, context, tariff_id: int):
+    """Подарок: срок выбран — спрашиваем, кому дарим."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from core.database import get_tariff
+    from paidsub.time_parser import fmt_duration
+    from core.states import AWAITING_GIFT_USER
+    t = await get_tariff(tariff_id)
+    if not t or not t[4]:
+        await query.answer("Тариф больше недоступен", show_alert=True)
+        await handle_gift_pick(query)
+        return
+    context.user_data["gift_tariff"] = tariff_id
+    context.user_data.pop("gift_tg_id", None)
+    context.user_data.pop("gift_name", None)
+    context.user_data["state"] = AWAITING_GIFT_USER
+    await query.edit_message_text(
+        f"🎁 <b>Подарок: {fmt_duration(t[2])} — {int(t[3])} ₽</b>\n\n"
+        "Пришли <b>@ник друга</b> или его <b>TG ID</b> одним сообщением.\n\n"
+        "<i>Если друг ещё не запускал бота, после оплаты пришлите ему "
+        "ссылку сами — она будет у вас на экране.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ Назад", callback_data="gift_pick")],
+        ]),
+    )
+
+
+async def apply_gift_user(message, context, text: str):
+    """Даритель прислал ник или TG ID — проверяем и показываем подтверждение."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from core.database import get_tariff
+    from paidsub.storage import get_paid_sub_by_tg_id
+    from paidsub.time_parser import fmt_duration
+    raw = (text or "").strip().lstrip("@")
+    tg_id = None
+    display = None
+    if raw.isdigit():
+        tg_id = int(raw)
+        display = f"id{tg_id}"
+    elif raw:
+        try:
+            chat = await context.bot.get_chat("@" + raw)
+        except Exception:
+            chat = None
+        if chat is None:
+            await message.reply_text(
+                "❌ <b>Не нашли такого пользователя</b>\n\n"
+                "<i>Проверьте ник и пришлите ещё раз.</i>",
+                parse_mode="HTML",
+            )
+            return
+        tg_id = chat.id
+        display = (f"@{chat.username}" if getattr(chat, "username", None)
+                   else (chat.first_name or f"id{tg_id}"))
+    if not tg_id:
+        await message.reply_text(
+            "❌ <b>Пришлите @ник или TG ID</b>",
+            parse_mode="HTML",
+        )
+        return
+    if tg_id == message.from_user.id:
+        await message.reply_text(
+            "🎁 <b>Себе дарить не нужно</b> — это обычное продление.\n\n"
+            "<i>Пришлите ник друга или вернитесь к тарифам.</i>",
+            parse_mode="HTML",
+        )
+        return
+    from features.blacklist import is_blacklisted
+    if await is_blacklisted(tg_id):
+        await message.reply_text(
+            "⛔ <b>Этому человеку подарить нельзя</b>\n\n"
+            "<i>Он в чёрном списке сервиса.</i>",
+            parse_mode="HTML",
+        )
+        return
+    tariff_id = context.user_data.get("gift_tariff")
+    t = await get_tariff(tariff_id) if tariff_id else None
+    if not t or not t[4]:
+        context.user_data.pop("state", None)
+        await message.reply_text(
+            "😕 <b>Тариф больше недоступен</b>\n\n<i>Выберите другой.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎁 К подаркам", callback_data="gift_pick")],
+            ]),
+        )
+        return
+    context.user_data["gift_tg_id"] = tg_id
+    context.user_data["gift_name"] = display
+    context.user_data.pop("state", None)
+    already = await get_paid_sub_by_tg_id(tg_id)
+    extra = ""
+    if already and already[3]:
+        extra = (f"\n<i>У друга уже есть подписка до <b>{str(already[3])[:16]}</b> — "
+                 "срок прибавится к ней.</i>")
+    await message.reply_text(
+        f"🎁 <b>Подарок для {escape(display)}</b>\n\n"
+        f"<blockquote>⏱ Срок: <b>{fmt_duration(t[2])}</b>\n"
+        f"💵 Цена: <b>{int(t[3])} ₽</b></blockquote>{extra}\n\n"
+        "<i>Оплатите счёт — подписка откроется у друга сразу после оплаты.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"💳 Оплатить {int(t[3])} ₽", callback_data="gift_pay")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="gift_pick")],
+        ]),
+    )
+
+
+async def handle_gift_pay(query, context):
+    """Подарок: подтверждение — создаём счёт с получателем."""
+    tariff_id = context.user_data.get("gift_tariff")
+    gift_tg_id = context.user_data.get("gift_tg_id")
+    gift_name = context.user_data.get("gift_name")
+    if not tariff_id or not gift_tg_id:
+        await query.answer("Сначала выберите срок и получателя", show_alert=True)
+        await handle_gift_pick(query)
+        return
+    await handle_pay_invoice(query, context, tariff_id, devices=0,
+                             gift_tg_id=int(gift_tg_id), gift_name=gift_name)
+
+
 async def handle_pay_invoice(query, context, tariff_id: int | None = None,
-                             devices=None):
-    """Создаёт счёт в Platega и отдаёт ссылку на оплату."""
+                             devices=None, gift_tg_id: int | None = None,
+                             gift_name: str | None = None):
+    """Создаёт счёт в Platega и отдаёт ссылку на оплату.
+
+    gift_tg_id — счёт оплачивает один человек, а подписка откроется
+    у другого: тогда без устройств и с пометкой о подарке в счёте.
+    """
     from telegram import InlineKeyboardButton
     import services.platega_api as pg
     from core.database import add_payment, get_active_payment, get_tariff
@@ -650,14 +819,13 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
     settings = sub_settings(row)
 
     # Тариф задаёт и цену, и срок; иначе берём условия самой подписки
-    tariff_name = None
     if tariff_id:
         t = await get_tariff(tariff_id)
         if not t or not t[4]:
             await query.answer("Тариф больше недоступен", show_alert=True)
             await handle_renew_sub(query)
             return
-        tariff_name, pay_seconds, price = t[1], t[2], int(t[3])
+        pay_seconds, price = t[2], int(t[3])
     else:
         price = int(settings["price"] or 0)
         pay_seconds = int(settings["pay_period"] or 0)
@@ -682,23 +850,28 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
         dev_price = 0
     devices = bought if devices is None else int(devices)
     devices = max(0, min(devices, dev_max if dev_price else 0))
+    if gift_tg_id:
+        # подарок — только срок: устройства друг докупит себе сам
+        devices = 0
     dev_sum = devices * dev_price
     price += dev_sum
     # по этой пометке фоновая задача поймёт, что в счёте был выбор устройств
-    pay_kind = "period_dev" if dev_price else "period"
+    pay_kind = "period" if gift_tg_id else ("period_dev" if dev_price else "period")
 
-    # уже есть неоплаченный счёт на ту же сумму, срок и набор устройств —
-    # переиспользуем ссылку, чтобы не плодить счета при повторных нажатиях
+    # уже есть неоплаченный счёт на ту же сумму, срок, набор устройств
+    # и того же получателя — переиспользуем ссылку, чтобы не плодить счета
     existing = await get_active_payment(user.id, "platega")
     same_extra = (len(existing) < 12 or existing[11] == devices) if existing else False
-    if existing and existing[4] == price and existing[5] == pay_seconds and existing[8] and same_extra:
-        await _send_invoice(query, existing[8], price, tariff_name, pay_seconds, devices)
+    same_gift = (len(existing) < 13 or (existing[12] or 0) == (gift_tg_id or 0)) if existing else False
+    if existing and existing[4] == price and existing[5] == pay_seconds and existing[8] and same_extra and same_gift:
+        await _send_invoice(query, existing[8], price, pay_seconds, devices,
+                            gift_name=gift_name)
         return
 
     await query.edit_message_text("⏳ Готовлю счёт…")
     desc = "Подписка Drebol VPN"
-    if tariff_name:
-        desc += f" · {tariff_name}"
+    if gift_tg_id:
+        desc += f" · 🎁 Подарок для {gift_name or gift_tg_id}"
     if devices:
         desc += f" · +{devices} устр."
     result = await pg.create_payment(
@@ -708,6 +881,10 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
         username=user.username,
     )
     if not result["ok"]:
+        # подарок при повторе идёт тем же путём — через gift_pay,
+        # иначе счёт создался бы уже за себя
+        retry_cb = "gift_pay" if gift_tg_id else f"pay_invoice:{tariff_id or 0}:{devices}"
+        back_cb = "gift_pick" if gift_tg_id else "renew_sub"
         await query.edit_message_text(
             "😕 <b>Не получилось создать счёт</b>\n\n"
             "<blockquote>Платёжная система не ответила. Деньги не списаны.</blockquote>\n\n"
@@ -715,9 +892,9 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
             parse_mode="HTML",
             reply_markup=_kb([InlineKeyboardButton(
                                  "🔁 Попробовать ещё раз",
-                                 callback_data=f"pay_invoice:{tariff_id or 0}:{devices}")],
+                                 callback_data=retry_cb)],
                              _support_row()
-                             + [InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")]),
+                             + [InlineKeyboardButton("◀️ Назад", callback_data=back_cb)]),
         )
         from config import ADMIN_ID
         try:
@@ -739,38 +916,42 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
         external_id=result["transaction_id"], amount=price,
         period_seconds=pay_seconds, pay_url=result["url"],
         promo_code=promo_code, kind=pay_kind, extra=devices,
+        gift_tg_id=gift_tg_id,
     )
-    await _send_invoice(query, result["url"], price, tariff_name, pay_seconds, devices)
+    await _send_invoice(query, result["url"], price, pay_seconds, devices,
+                        gift_name=gift_name)
 
 
 async def _send_invoice(query, url: str, price: int,
-                        tariff_name: str | None = None,
                         period_seconds: int | None = None,
-                        devices: int = 0):
+                        devices: int = 0, gift_name: str | None = None):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.time_parser import fmt_duration
     from html import escape as _esc
 
     parts = []
-    if tariff_name:
-        parts.append(_esc(str(tariff_name)))
-    # срок дописываем, только если название тарифа его не называет («3 месяца»)
-    if period_seconds and not any(ch.isdigit() for ch in str(tariff_name or "")):
+    if period_seconds:
         parts.append(fmt_duration(period_seconds))
     if devices:
         parts.append(f"+{devices} устр.")
+    if gift_name:
+        parts.append(f"🎁 Подарок для {_esc(str(gift_name))}")
     what = "  ·  ".join(parts)
+    tail = ("Оплатите по кнопке ниже — подписка откроется у друга, "
+            "как только платёж пройдёт." if gift_name else
+            "Оплатите по кнопке ниже — подписка продлится сама, "
+            "как только платёж пройдёт.")
+    back_cb = "gift_pick" if gift_name else "renew_sub"
 
     await query.edit_message_text(
         "🧾 <b>Счёт готов</b>\n\n"
         f"<blockquote>💰 Сумма: <b>{price} ₽</b>"
         + (f"\n📦 {what}" if what else "") + "</blockquote>\n\n"
-        "<i>Оплатите по кнопке ниже — подписка продлится сама, "
-        "как только платёж пройдёт.</i>",
+        f"<i>{tail}</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(f"💳 Оплатить {price} ₽", url=url)],
-            [InlineKeyboardButton("◀️ Назад", callback_data="renew_sub")],
+            [InlineKeyboardButton("◀️ Назад", callback_data=back_cb)],
         ]),
         disable_web_page_preview=True,
     )
@@ -886,7 +1067,7 @@ async def handle_prices(query):
         lines.append("💳 <b>Тарифы</b>")
         rows = []
         base = None
-        for _id, name, t_period, t_price, _a, _s in tariffs:
+        for _id, _name, t_period, t_price, _a, _s in tariffs:
             per_month = t_price / (t_period / 2592000) if t_period else None
             note = ""
             # выгода длинных тарифов относительно самого короткого
@@ -894,7 +1075,7 @@ async def handle_prices(query):
                 note = f"  <i>выгода {round((1 - per_month / base) * 100)}%</i>"
             if base is None and per_month:
                 base = per_month
-            rows.append(f"{escape(str(name))} — <b>{t_price} ₽</b>{note}")
+            rows.append(f"{fmt_duration(t_period)} — <b>{t_price} ₽</b>{note}")
         lines.append("<blockquote>" + "\n".join(rows) + "</blockquote>")
     elif price:
         lines.append("💳 <b>Подписка</b>")

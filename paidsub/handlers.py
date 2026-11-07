@@ -624,9 +624,9 @@ async def handle_paid_create_sub(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     kb = [[InlineKeyboardButton(f"🆓 Пробный · {fmt_duration(trial_period)}",
                                 callback_data="paid_create_type:trial")]]
-    for t_id, name, period, price, _a, _s in tariffs:
+    for t_id, _name, period, price, _a, _s in tariffs:
         kb.append([InlineKeyboardButton(
-            f"💳 {name} · {fmt_duration(period)}",
+            f"💳 {fmt_duration(period)} · {price} ₽",
             callback_data=f"paid_create_type:{t_id}")])
     kb.append([InlineKeyboardButton("◀️ Назад", callback_data="paid_subs")])
 
@@ -664,7 +664,7 @@ async def handle_paid_create_type(query, context, kind: str):
             return
         context.user_data["create_trial"] = False
         context.user_data["create_period"] = int(tariff[2])
-        label = f"💳 <b>{_esc_name(tariff[1])}</b>"
+        label = "💳 <b>Платная подписка</b>"
         period = fmt_duration(int(tariff[2]))
 
     await query.edit_message_text(
@@ -679,8 +679,13 @@ async def handle_paid_create_type(query, context, kind: str):
 
 async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
                              trial: bool = False, for_user: bool = False,
-                             period_override: int | None = None):
-    """Создаёт платную подписку. trial=True — пробный период."""
+                             period_override: int | None = None,
+                             notify: bool = True):
+    """Создаёт платную подписку. trial=True — пробный период.
+
+    notify=False — не шлёт клиенту «Подписка готова!»: текст уведомления
+    формирует вызывающий (например, подарок со своим текстом).
+    """
     cfg = load_config()
     await reply_func("⏳ Создаю подписку…")
 
@@ -771,7 +776,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
     )
 
     bot = context.bot if hasattr(context, 'bot') else None
-    if bot:
+    if bot and notify:
         await _notify_user(bot, tg_id, user_text)
 
 
@@ -2240,7 +2245,8 @@ def _renew_base(full_row) -> tuple:
 async def apply_paid_payment(tg_id: int, amount: int, context,
                              promo_code: str | None = None,
                              source: str = "Platega",
-                             period_seconds: int | None = None) -> dict:
+                             period_seconds: int | None = None,
+                             gift_from: int | None = None) -> dict:
     """Засчитывает оплату, пришедшую из платёжной системы.
 
     Делает то же, что ручное подтверждение админом, но без его участия:
@@ -2248,6 +2254,8 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
 
     period_seconds — срок из оплаченного тарифа. Он зафиксирован в счёте,
     поэтому правка тарифа после оплаты не меняет уже купленный срок.
+    gift_from — счёт оплатил другой человек: подписка открывается у tg_id,
+    а тексты, история и промокод идут как у подарка.
     """
     # Человек из ЧС: деньги пришли, но срок не начисляем — иначе оплата по
     # счёту, выставленному до внесения в ЧС, включила бы подписку обратно
@@ -2309,51 +2317,195 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
     pending_promo = promo_code or await get_pending_promo(tg_id)
     if pending_promo:
         promo = await get_promo(pending_promo)
-        if promo and not await promo_used_by(pending_promo, tg_id):
-            await record_promo_use(pending_promo, tg_id)
-            await add_history(tg_id, "promo_used", f"Промокод {pending_promo} (−{promo[2]}%)")
+        # промокод ввёл даритель — использование пишем на него
+        promo_who = gift_from or tg_id
+        if promo and not await promo_used_by(pending_promo, promo_who):
+            await record_promo_use(pending_promo, promo_who)
+            await add_history(promo_who, "promo_used", f"Промокод {pending_promo} (−{promo[2]}%)")
             promo_line = f"🎟 Промокод: <b>{pending_promo}</b> (−{promo[2]}%)\n"
         await update_paid_sub_field(sub_id, "pending_promo", None)
 
+    giver_name = None
+    if gift_from:
+        from core.database import get_user_info as _gui
+        _gr = await _gui(gift_from)
+        giver_name = _esc_name(_gr[1] if _gr else None, gift_from)
+
     promo_note = f" (промокод {pending_promo})" if promo_line else ""
-    await add_history(
-        tg_id, "payment_confirmed",
-        f"Сумма: {amount} ₽{promo_note}\nЧерез: {source}\nДо: {new_expire_str}",
-    )
+    if gift_from:
+        await add_history(
+            tg_id, "gift_received",
+            f"Подарок от {giver_name}: {amount} ₽{promo_note}\nЧерез: {source}\nДо: {new_expire_str}",
+        )
+    else:
+        await add_history(
+            tg_id, "payment_confirmed",
+            f"Сумма: {amount} ₽{promo_note}\nЧерез: {source}\nДо: {new_expire_str}",
+        )
 
     from core.log_channel import send_log
     from core.database import get_user_info
     u = await get_user_info(tg_id)
     u_name = _esc_name(u[1] if u else None, tg_id)
-    await send_log(context.bot,
-        f"💰 Оплата через {source}: {u_name} (<code>{tg_id}</code>) — {amount} ₽\n"
-        f"{promo_line}📅 До: {new_expire_str}"
-        + (f"\n{guessed}" if guessed else "")
-    )
+    if gift_from:
+        await send_log(context.bot,
+            f"🎁 Подарок через {source}: {giver_name} (<code>{gift_from}</code>) → "
+            f"{u_name} (<code>{tg_id}</code>) — {amount} ₽\n"
+            f"{promo_line}📅 До: {new_expire_str}"
+            + (f"\n{guessed}" if guessed else "")
+        )
+    else:
+        await send_log(context.bot,
+            f"💰 Оплата через {source}: {u_name} (<code>{tg_id}</code>) — {amount} ₽\n"
+            f"{promo_line}📅 До: {new_expire_str}"
+            + (f"\n{guessed}" if guessed else "")
+        )
 
-    await _notify_user(context.bot, tg_id,
-        "✅ <b>Оплата прошла — спасибо!</b>\n\n"
-        f"<blockquote>➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
-        f"📅 Подписка до: <b>{new_expire_str[:16]}</b></blockquote>"
-    )
+    if gift_from:
+        await _notify_user(context.bot, tg_id,
+            "🎁 <b>Вам подарили подписку Drebol VPN!</b>\n\n"
+            f"<blockquote>➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
+            f"📅 Подписка до: <b>{new_expire_str[:16]}</b></blockquote>\n\n"
+            f"<i>Подарил: {giver_name}</i>"
+        )
+    else:
+        await _notify_user(context.bot, tg_id,
+            "✅ <b>Оплата прошла — спасибо!</b>\n\n"
+            f"<blockquote>➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
+            f"📅 Подписка до: <b>{new_expire_str[:16]}</b></blockquote>"
+        )
 
     from config import ADMIN_ID
     try:
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
+        if gift_from:
+            admin_text = (
+                f"🎁 <b>Подарок через {source}</b>\n\n"
+                f"🎁 От: {giver_name} (<code>{gift_from}</code>)\n"
+                f"👤 Кому: {u_name} (<code>{tg_id}</code>)\n"
+                f"💵 {amount} ₽\n"
+                f"{promo_line}"
+                f"📅 До: <b>{new_expire_str}</b>"
+            )
+        else:
+            admin_text = (
                 f"💰 <b>Оплата через {source}</b>\n\n"
                 f"👤 {u_name} (<code>{tg_id}</code>)\n"
                 f"💵 {amount} ₽\n"
                 f"{promo_line}"
                 f"📅 До: <b>{new_expire_str}</b>"
-            ),
-            parse_mode="HTML",
+            )
+        await context.bot.send_message(
+            chat_id=ADMIN_ID, text=admin_text, parse_mode="HTML",
         )
     except Exception:
         pass
 
     return {"ok": True, "expire": new_expire_str}
+
+
+async def apply_gift_payment(gift_tg: int, giver_tg: int, amount: int, context,
+                             promo_code: str | None = None,
+                             source: str = "Platega",
+                             period_seconds: int | None = None) -> dict:
+    """Засчитывает оплаченный подарок: подписка открывается у получателя.
+
+    У получателя уже есть подписка — продлеваем её, как обычную оплату.
+    Подписки нет — создаём с оплаченным сроком (без триала: у подарка
+    свой срок из счёта). Дарителя уведомляем, что подарок дошёл.
+    """
+    from features.blacklist import is_blacklisted
+    if await is_blacklisted(gift_tg):
+        return {"ok": False, "error": "получатель в чёрном списке — срок не начислен: "
+                                      "верни деньги или убери из ЧС"}
+
+    row = await get_paid_sub_by_tg_id(gift_tg)
+    if row:
+        res = await apply_paid_payment(
+            gift_tg, amount, context, promo_code=promo_code,
+            source=source, period_seconds=period_seconds, gift_from=giver_tg)
+        if not res.get("ok"):
+            return res
+    else:
+        # свежему получателю создаём подписку сразу с оплаченным сроком;
+        # дарителю уходит текст с деталями и ссылкой — он перешлёт её другу,
+        # если тот ещё не запускал бота
+        async def _to_giver(text, parse_mode=None):
+            try:
+                await context.bot.send_message(chat_id=giver_tg, text=text,
+                                               parse_mode=parse_mode or "HTML")
+            except Exception:
+                pass
+
+        await do_create_paid_sub(None, gift_tg, context, _to_giver,
+                                 trial=False, for_user=False,
+                                 period_override=period_seconds, notify=False)
+        row2 = await get_paid_sub_by_tg_id(gift_tg)
+        if not row2:
+            return {"ok": False, "error": "не удалось создать подписку получателя"}
+        # промокод ввёл даритель — использование пишем на него
+        if promo_code:
+            promo = await get_promo(promo_code)
+            if promo and not await promo_used_by(promo_code, giver_tg):
+                await record_promo_use(promo_code, giver_tg)
+                await add_history(giver_tg, "promo_used",
+                                  f"Промокод {promo_code} (−{promo[2]}%)")
+        from core.database import get_user_info
+        giver_row = await get_user_info(giver_tg)
+        giver_name = _esc_name(giver_row[1] if giver_row else None, giver_tg)
+        new_expire = str(row2[6])[:16]
+        sub_url = row2[5]
+        await _notify_user(context.bot, gift_tg,
+            "🎁 <b>Вам подарили подписку Drebol VPN!</b>\n\n"
+            f"<blockquote>📅 Подписка до: <b>{new_expire}</b></blockquote>\n\n"
+            "🔑 <b>Ссылка для подключения</b>\n"
+            f"<code>{sub_url}</code>\n\n"
+            f"<i>Подарил: {giver_name}</i>"
+        )
+        await add_history(gift_tg, "gift_received",
+                          f"Подарок от {giver_name}: {amount} ₽\nДо: {new_expire}")
+        from core.log_channel import send_log
+        u = await get_user_info(gift_tg)
+        u_name = _esc_name(u[1] if u else None, gift_tg)
+        await send_log(context.bot,
+            f"🎁 Подарок через {source}: {giver_name} (<code>{giver_tg}</code>) → "
+            f"{u_name} (<code>{gift_tg}</code>) — {amount} ₽\n"
+            f"📅 До: {new_expire}")
+        res = {"ok": True, "expire": str(row2[6])}
+
+    # висящий промокод дарителя потрачен на подарок — снимаем, чтобы он
+    # не применился ещё и к его собственному продлению
+    giver_row = await get_paid_sub_by_tg_id(giver_tg)
+    if giver_row:
+        await update_paid_sub_field(giver_row[0], "pending_promo", None)
+
+    # даритель: подтверждение, что подарок дошёл
+    from core.database import get_user_info
+    u = await get_user_info(gift_tg)
+    if u and u[1]:
+        recipient_name = _esc_name(u[1], gift_tg)
+    else:
+        try:
+            chat = await context.bot.get_chat(gift_tg)
+            recipient_name = _esc_name(
+                f"@{chat.username}" if getattr(chat, "username", None)
+                else (chat.first_name or f"id{gift_tg}"), gift_tg)
+        except Exception:
+            recipient_name = f"id{gift_tg}"
+    pay_seconds = int(period_seconds or 0)
+    expire = str(res.get("expire", ""))[:16]
+    lines = ["🎁 <b>Подарок оплачен и выдан!</b>", "",
+             "<blockquote>"
+             f"👤 {recipient_name}"]
+    if pay_seconds:
+        lines.append(f"➕ Срок: <b>{fmt_duration(pay_seconds)}</b>")
+    if expire:
+        lines.append(f"📅 Подписка до: <b>{expire}</b>")
+    lines.append("</blockquote>")
+    await _notify_user(context.bot, giver_tg, "\n".join(lines))
+    await add_history(giver_tg, "gift_sent",
+                      f"Подарок {recipient_name}: {amount} ₽\nДо: {expire}")
+    return res
+
 
 
 

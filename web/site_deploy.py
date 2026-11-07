@@ -738,7 +738,7 @@ CABINET_PAGE = r"""<!doctype html>
      html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через Platega.</p>';
      d.tariffs.forEach(function (t) {
        html += '<button class="btn btn-ghost" type="button" style="margin-top:8px" onclick="renewPay(' +
-               t.id + ')">' + esc(t.name) + " — " + esc(t.period) + " — " +
+               t.id + ')">' + esc(t.period) + " — " +
                esc(t.price) + " ₽</button>";
      });
      body.innerHTML = html;
@@ -1291,8 +1291,11 @@ async def site_tariffs(cfg: dict) -> list:
         from core.database import list_tariffs
         from paidsub.time_parser import fmt_duration
         rows = await list_tariffs()
-        tariffs = [{"name": name, "price": price, "period": fmt_duration(period)}
-                   for _, name, period, price, is_active, _ in rows if is_active]
+        # имя тарифа больше нигде не показывается — в карточке срок,
+        # а цена рядом; кладём срок и в поле name, чтобы старые снапшоты
+        # страницы, ждущие name, тоже показывали срок, а не пустоту
+        tariffs = [{"name": fmt_duration(period), "price": price, "period": fmt_duration(period)}
+                   for _, _name, period, price, is_active, _ in rows if is_active]
         return tariffs
     except Exception:
         return []

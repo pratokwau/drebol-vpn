@@ -55,6 +55,9 @@ AWAITING_PROMO_NEW_LIMIT = "awaiting_promo_new_limit"
 AWAITING_PROMO_FIND = "awaiting_promo_find"
 AWAITING_PROMO_NEW_EXPIRE = "awaiting_promo_new_expire"
 
+# Подарок подписки
+AWAITING_GIFT_USER = "awaiting_gift_user"
+
 # Управление юзером
 AWAITING_FIND_USER = "awaiting_find_user"
 
@@ -93,10 +96,8 @@ AWAITING_WINBACK_LIFE = "awaiting_winback_life"
 AWAITING_MAINTENANCE_TEXT = "awaiting_maintenance_text"
 
 # Тарифы
-AWAITING_TARIFF_NAME = "awaiting_tariff_name"
 AWAITING_TARIFF_PERIOD = "awaiting_tariff_period"
 AWAITING_TARIFF_PRICE = "awaiting_tariff_price"
-AWAITING_TARIFF_EDIT_NAME = "awaiting_tariff_edit_name"
 AWAITING_TARIFF_EDIT_PERIOD = "awaiting_tariff_edit_period"
 AWAITING_TARIFF_EDIT_PRICE = "awaiting_tariff_edit_price"
 

@@ -234,6 +234,7 @@ async def _renew_quote(tg_id: int, tariff: tuple) -> dict:
     и в боте, считается только от тарифа, а не от мест."""
     from config import load_config
     from paidsub.handlers import apply_discount, validate_promo
+    from paidsub.time_parser import fmt_duration
     from paidsub.storage import base_hwid, get_paid_sub_by_tg_id, get_pending_promo
     row = await get_paid_sub_by_tg_id(tg_id)
     cfg = load_config()
@@ -255,7 +256,7 @@ async def _renew_quote(tg_id: int, tariff: tuple) -> dict:
             promo_percent = int(promo[2])
             base_price = apply_discount(base_price, promo[2])
     return {"price": base_price + devices * dev_price,
-            "seconds": int(tariff[2]), "name": tariff[1],
+            "seconds": int(tariff[2]), "name": fmt_duration(int(tariff[2])),
             "kind": "period_dev" if dev_price else "period", "extra": devices,
             "dev_price": dev_price, "promo_code": promo_code,
             "promo_percent": promo_percent}
@@ -431,7 +432,7 @@ def build_app():
             q = await _renew_quote(tg_id, t)
             if quote0 is None:
                 quote0 = q
-            out.append({"id": t[0], "name": t[1],
+            out.append({"id": t[0], "name": fmt_duration(q["seconds"]),
                         "period": fmt_duration(q["seconds"]),
                         "price": q["price"]})
         pending = await get_active_payment(tg_id, "platega")

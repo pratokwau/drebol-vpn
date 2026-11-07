@@ -337,6 +337,9 @@ async def init_db():
         for table, col, decl in (
             ("payments", "kind", "TEXT NOT NULL DEFAULT 'period'"),
             ("payments", "extra", "INTEGER NOT NULL DEFAULT 0"),
+            # получатель подарка: счёт оплатил один человек, а подписка
+            # открывается у другого. Пусто — обычная оплата за себя.
+            ("payments", "gift_tg_id", "INTEGER"),
             ("paid_subs", "extra_devices", "INTEGER NOT NULL DEFAULT 0"),
             # какое напоминание о скором конце уже отправлено: 0 — ни одного
             ("paid_subs", "remind_stage", "INTEGER NOT NULL DEFAULT 0"),
@@ -797,23 +800,25 @@ async def delete_tariff(tariff_id: int):
 async def add_payment(tg_id: int, provider: str, external_id: str, amount: int,
                       period_seconds: int | None, pay_url: str,
                       promo_code: str | None = None,
-                      kind: str = "period", extra: int = 0) -> int:
+                      kind: str = "period", extra: int = 0,
+                      gift_tg_id: int | None = None) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
             INSERT INTO payments (tg_id, provider, external_id, amount,
-                                  period_seconds, promo_code, status, pay_url, kind, extra)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                                  period_seconds, promo_code, status, pay_url, kind, extra,
+                                  gift_tg_id)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
         """, (tg_id, provider, external_id, amount, period_seconds, promo_code,
-              pay_url, kind, int(extra)))
+              pay_url, kind, int(extra), gift_tg_id))
         await db.commit()
         return cur.lastrowid
 
 
 async def get_pending_payments(provider: str | None = None, limit: int = 50) -> list[tuple]:
     """Счета, ожидающие оплаты — их опрашивает фоновая задача."""
-    # kind и extra в конце: старые распаковки по индексам продолжают работать
+    # kind, extra и gift_tg_id в конце: старые распаковки по индексам продолжают работать
     q = """SELECT id, tg_id, provider, external_id, amount, period_seconds,
-                  promo_code, created_at, kind, extra
+                  promo_code, created_at, kind, extra, gift_tg_id
            FROM payments WHERE status = 'pending'"""
     params: list = []
     if provider:
@@ -841,7 +846,7 @@ async def get_active_payment(tg_id: int, provider: str) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
             SELECT id, tg_id, provider, external_id, amount, period_seconds,
-                   promo_code, status, pay_url, created_at, kind, extra
+                   promo_code, status, pay_url, created_at, kind, extra, gift_tg_id
             FROM payments
             WHERE tg_id = ? AND provider = ? AND status = 'pending'
             ORDER BY id DESC LIMIT 1
