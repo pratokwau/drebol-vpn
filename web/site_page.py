@@ -314,6 +314,7 @@ body, main, header, footer { position: relative; z-index: 1; }
 
 /* ── Шапка ──────────────────────────────────────────────────────────── */
 .top {
+  position: sticky; top: 0; z-index: 60;
   border-bottom: 1px solid var(--line);
   background: rgba(2,2,2,.72);
   backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
@@ -812,9 +813,19 @@ JS = """
 // едут плавно. На тачскринах — нативный скролл, при prefers-reduced-motion
 // Lenis не включается вовсе.
 if (window.Lenis && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  var lenis = new Lenis({ duration: 1.2, anchors: true });
+  var lenis = new Lenis({ duration: 1.2 });
   var __lenisRaf = function (time) { lenis.raf(time); requestAnimationFrame(__lenisRaf); };
   requestAnimationFrame(__lenisRaf);
+  // Якоря в шапке: плавно к секции, с отступом под липкую шапку (72px + запас).
+  document.querySelectorAll('a[href^="#"]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      var id = a.getAttribute('href');
+      if (id.length > 1 && document.querySelector(id)) {
+        e.preventDefault();
+        lenis.scrollTo(id, { offset: -84 });
+      }
+    });
+  });
 }
 """
 
