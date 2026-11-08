@@ -41,6 +41,15 @@ def is_configured() -> bool:
     return bool(key and shop)
 
 
+def _shop_id() -> int | None:
+    """ID магазина как int — для shopId в запросах к API."""
+    _key, shop = _creds()
+    try:
+        return int(shop)
+    except (TypeError, ValueError):
+        return None
+
+
 def _headers() -> dict:
     key, _shop = _creds()
     return {
@@ -51,14 +60,15 @@ def _headers() -> dict:
 
 
 async def _request(method: str, path: str, payload: dict | None = None,
-                   timeout: int = 30) -> tuple[int | None, dict | str | None, str]:
+                   timeout: int = 30, params: dict | None = None
+                   ) -> tuple[int | None, dict | str | None, str]:
     """Возвращает (http_код, разобранное_тело, текст_ошибки)."""
     url = f"{BASE_URL}{path}"
     try:
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=timeout)
         ) as s:
-            async with s.request(method, url, json=payload,
+            async with s.request(method, url, json=payload, params=params,
                                  headers=_headers()) as r:
                 text = await r.text()
                 try:
@@ -86,12 +96,17 @@ def _err_text(status: int, body) -> str:
 
 async def create_payment(amount: int, description: str, tg_id: int,
                          username: str | None = None,
-                         order_id: str | None = None) -> dict:
+                         order_id: str | None = None,
+                         success_url: str | None = None,
+                         fail_url: str | None = None,
+                         back_url: str | None = None) -> dict:
     """Создаёт платёж и возвращает ссылку на оплату.
 
     Способ оплаты (СБП или крипта) человек выбирает сам на форме anore —
-    в настройках магазина включены оба. Редиректы после оплаты тоже
-    задаются в настройках магазина, а не в каждом счёте.
+    в настройках магазина включены оба. Редиректы после оплаты по
+    умолчанию берутся из настроек магазина, но их можно переопределить
+    для одного счёта: success_url — после успешной оплаты, fail_url —
+    при неуспехе или истечении, back_url — кнопка «вернуться» на форме.
     """
     if not is_configured():
         return {"ok": False, "error": "anore не настроена (нет ключа или id магазина)"}
@@ -110,6 +125,12 @@ async def create_payment(amount: int, description: str, tg_id: int,
         # по нему видно, чей счёт, даже без сверки с базой бота
         "orderId": order_id or f"tg{tg_id}-{uuid.uuid4().hex[:12]}",
     }
+    if success_url:
+        payload["successurl"] = success_url
+    if fail_url:
+        payload["failurl"] = fail_url
+    if back_url:
+        payload["getbackurl"] = back_url
     status, body, err = await _request("POST", "/payments", payload)
     if err:
         return {"ok": False, "error": err}
@@ -150,6 +171,163 @@ async def get_status(payment_id: str) -> dict:
         "amount": body.get("amount"),
         "raw": body,
     }
+
+
+async def list_payments(status_filter: str | None = None, limit: int = 50,
+                        offset: int = 0) -> dict:
+    """Список платежей кассы в anore, свежие сверху.
+
+    Удобен для сверки: видно способ оплаты (sbp/crypto) и платежи,
+    которых нет в базе бота. Фильтр status — paid/pending/failed/
+    written_off (шкала списка отличается от статуса одного платежа).
+    """
+    params: dict[str, str | int] = {"limit": max(1, min(limit, 200)),
+                                    "offset": max(0, offset)}
+    shop_id = _shop_id()
+    if shop_id is not None:
+        params["shopId"] = shop_id
+    if status_filter:
+        params["status"] = status_filter
+    status, body, err = await _request("GET", "/payments", params=params)
+    if status not in (200, 201) or not isinstance(body, dict):
+        return {"ok": False, "error": err or f"HTTP {status}"}
+    return {"ok": True, "total": body.get("total"),
+            "payments": body.get("payments", []), "raw": body}
+
+
+# ---------------------------------------------------------------------------
+# Баланс и выплаты (Payout API). Для кассы он должен быть включён в
+# кабинете anore, иначе API отвечает 403 — см. _payout_api_error.
+# ---------------------------------------------------------------------------
+
+def _payout_api_error(status: int | None, err: str) -> dict:
+    if status == 403:
+        return {"ok": False, "payout_api_disabled": True,
+                "error": "Payout API не включён для этой кассы — "
+                         "включи его в кабинете anore"}
+    return {"ok": False, "error": err or f"HTTP {status}"}
+
+
+async def get_balance() -> dict:
+    """Баланс кассы: доступно, в холде, созрело, выведено, комиссии."""
+    params = {}
+    shop_id = _shop_id()
+    if shop_id is not None:
+        params["shopId"] = shop_id
+    status, body, err = await _request("GET", "/balance", params=params)
+    if status not in (200, 201) or not isinstance(body, dict):
+        return _payout_api_error(status, err)
+    return {"ok": True, "available": body.get("available"),
+            "hold": body.get("hold"), "matured": body.get("matured"),
+            "withdrawn": body.get("withdrawn"),
+            "paid_amount": body.get("paidAmount"),
+            "fee": body.get("fee"), "min_amount": body.get("minAmount"),
+            "max_amount": body.get("maxAmount"), "raw": body}
+
+
+async def get_payout_fees() -> dict:
+    """Актуальные комиссии на вывод для мерчанта."""
+    params = {}
+    shop_id = _shop_id()
+    if shop_id is not None:
+        params["shopId"] = shop_id
+    status, body, err = await _request("GET", "/payouts/fees", params=params)
+    if status not in (200, 201) or not isinstance(body, dict):
+        return _payout_api_error(status, err)
+    return {"ok": True, "raw": body}
+
+
+async def get_payout_rates() -> dict:
+    """Предварительные курсы выплат (итоговый — в ответе создания)."""
+    params = {}
+    shop_id = _shop_id()
+    if shop_id is not None:
+        params["shopId"] = shop_id
+    status, body, err = await _request("GET", "/payouts/rates", params=params)
+    if status not in (200, 201) or not isinstance(body, dict):
+        return _payout_api_error(status, err)
+    return {"ok": True, "raw": body}
+
+
+# Способы вывода: карта РФ и USDT в четырёх сетях. Выплаты по телефону
+# и СБП у anore временно приостановлены — их здесь нет.
+PAYOUT_METHODS = {
+    "card": "💳 Карта РФ",
+    "usdt_ton": "💎 USDT · TON",
+    "usdt_bep20": "💎 USDT · BNB Chain",
+    "usdt_erc20": "💎 USDT · Ethereum",
+    "usdt_trc20": "💎 USDT · TRON",
+}
+
+
+def payout_limits(method: str) -> tuple[int, int]:
+    """(минимум, максимум) суммы вывода в рублях для способа."""
+    if method == "card":
+        return 3000, 500000
+    return 500, 1500000
+
+
+async def create_payout(amount: int, method: str, address: str,
+                        external_id: str | None = None) -> dict:
+    """Создаёт заявку на вывод. Сумма — целые рубли.
+
+    address — полный номер карты (для card) или адрес кошелька в сети
+    метода (для usdt_*). Никакие CVV/PIN/секреты сюда не передаются.
+    В ответе — комиссия и сумма к получению, реквизиты — только в маске.
+    """
+    if method not in PAYOUT_METHODS:
+        return {"ok": False, "error": f"Неизвестный способ вывода: {method}"}
+    low, high = payout_limits(method)
+    if not low <= int(amount) <= high:
+        return {"ok": False,
+                "error": f"Сумма для {PAYOUT_METHODS[method]} — "
+                         f"от {low} до {high} ₽"}
+    payload = {"amount": int(amount), "method": method, "address": address}
+    shop_id = _shop_id()
+    if shop_id is not None:
+        payload["shopId"] = shop_id
+    if external_id:
+        payload["externalId"] = external_id
+    status, body, err = await _request("POST", "/payouts", payload)
+    if status not in (200, 201) or not isinstance(body, dict):
+        return _payout_api_error(status, err)
+    return {"ok": True, "id": body.get("id"), "status": body.get("status"),
+            "amount": body.get("amount"), "fee": body.get("fee"),
+            "net": body.get("netRub"),
+            "settlement": body.get("settlementRub"),
+            "address_masked": body.get("address"),
+            "tx_hash": body.get("txHash"), "raw": body}
+
+
+async def list_payouts(limit: int = 50, cursor: str | None = None) -> dict:
+    """Список выплат кассы, от новых к старым (курсорная пагинация)."""
+    params: dict[str, str | int] = {"limit": max(1, min(limit, 100))}
+    shop_id = _shop_id()
+    if shop_id is not None:
+        params["shopId"] = shop_id
+    if cursor:
+        params["cursor"] = cursor
+    status, body, err = await _request("GET", "/payouts", params=params)
+    if status not in (200, 201) or not isinstance(body, dict):
+        return _payout_api_error(status, err)
+    return {"ok": True, "items": body.get("items", []),
+            "has_more": body.get("hasMore"),
+            "next_cursor": body.get("nextCursor"), "raw": body}
+
+
+async def get_payout(payout_id: str) -> dict:
+    """Статус одной выплаты: pending/approved/paid/rejected."""
+    status, body, err = await _request("GET", f"/payouts/{payout_id}")
+    if status == 404:
+        return {"ok": False, "not_found": True,
+                "error": "Выплата не найдена в anore"}
+    if status not in (200, 201) or not isinstance(body, dict):
+        return _payout_api_error(status, err)
+    return {"ok": True, "id": body.get("id"), "status": body.get("status"),
+            "amount": body.get("amount"), "fee": body.get("fee"),
+            "net": body.get("netRub"), "method": body.get("methodCode"),
+            "address_masked": body.get("address"),
+            "tx_hash": body.get("txHash"), "raw": body}
 
 
 def verify_webhook(raw_body: bytes, signature: str | None) -> bool:

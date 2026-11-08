@@ -97,6 +97,9 @@ from handlers.payprovider import (
     handle_pay_provider_menu,
     handle_anore_set_key, handle_anore_set_shop,
     handle_anore_set_webhook_secret, handle_anore_test,
+    handle_anore_balance, handle_anore_payments, handle_anore_payouts,
+    handle_anore_payout_new, handle_anore_payout_method,
+    handle_anore_payout_do, handle_anore_shop,
 )
 from handlers.broadcast import (
     handle_broadcast_start, handle_broadcast_segment,
@@ -747,6 +750,20 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_anore_set_webhook_secret(query, context)
     elif data == "anore_test":
         await handle_anore_test(query, context)
+    elif data == "anore_balance":
+        await handle_anore_balance(query, context)
+    elif data == "anore_payments":
+        await handle_anore_payments(query, context)
+    elif data == "anore_payouts":
+        await handle_anore_payouts(query, context)
+    elif data == "anore_payout_new":
+        await handle_anore_payout_new(query, context)
+    elif data.startswith("anore_payout_method:"):
+        await handle_anore_payout_method(query, context, data.split(":", 1)[1])
+    elif data == "anore_payout_do":
+        await handle_anore_payout_do(query, context)
+    elif data == "anore_shop":
+        await handle_anore_shop(query, context)
     elif data == "paid_sub_presets":
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":

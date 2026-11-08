@@ -701,10 +701,22 @@ def build_app():
                                       "url": existing[8],
                                       "amount": existing[4], "reused": True})
         user = await get_user_info(tg_id)
+        # После оплаты клиент возвращается в кабинет, а не в бота:
+        # редиректы магазина (t.me/drebolvpn_bot) переопределяются для
+        # этого счёта. Если кабинет не опубликован — остаются редиректы
+        # магазина.
+        cabinet_url = ""
+        try:
+            from web import site_deploy as site
+            cabinet_url = (site.cabinet_link() or "") + "/payments"
+        except Exception:
+            cabinet_url = ""
         res = await an.create_payment(
             amount=q["price"],
             description=f"Подписка Drebol VPN · {q['name']} · {tg_id}",
-            tg_id=tg_id, username=user[2] if user else None)
+            tg_id=tg_id, username=user[2] if user else None,
+            success_url=cabinet_url or None, fail_url=cabinet_url or None,
+            back_url=cabinet_url or None)
         if not res.get("ok"):
             logging.error("кабинет: счёт anore не создан для %s: %s",
                           tg_id, res.get("error"))
@@ -739,7 +751,8 @@ def build_app():
         anore шлёт POST с заголовком Anore-Signature (HMAC-SHA256 по
         сырому телу, секрет — из настроек магазина). События:
         payment.succeeded — засчитать счёт, payment.canceled — пометить
-        отменённым. Счёт ищем по id платежа anore (external_id в базе).
+        отменённым, payment.expired — пометить истёкшим (счёт anore
+        живёт 4 часа). Счёт ищем по id платежа anore (external_id в базе).
         Если вебхук придёт раньше опроса или дважды — подтверждение
         идемпотентно: засчитываются только счета в статусе pending.
         """
@@ -754,7 +767,8 @@ def build_app():
             return web.json_response({"error": "bad_json"}, status=400)
         event = body.get("event")
         pay_id = body.get("id")
-        if event not in ("payment.succeeded", "payment.canceled") or not pay_id:
+        if event not in ("payment.succeeded", "payment.canceled",
+                         "payment.expired") or not pay_id:
             return web.json_response({"ok": True, "ignored": True})
         from core.database import (
             get_payment_by_external, get_payment, set_payment_status,
@@ -768,6 +782,9 @@ def build_app():
             return web.json_response({"ok": True, "already": True})
         if event == "payment.canceled":
             await set_payment_status(p[0], "canceled")
+            return web.json_response({"ok": True})
+        if event == "payment.expired":
+            await set_payment_status(p[0], "expired")
             return web.json_response({"ok": True})
         if _bot is None:
             logging.error("кабинет: вебхук anore, а бот не подключён к API")

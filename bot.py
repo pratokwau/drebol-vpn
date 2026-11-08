@@ -123,8 +123,10 @@ async def post_init(app: Application):
             if not an.is_configured():
                 return
 
-            # счёт anore живёт ограниченное время — дальше опрашивать нечего
-            ttl = int(load_config().get("invoice_ttl_minutes", 60) or 60)
+            # счёт anore живёт 4 часа (expiresIn 14400 в документации) —
+            # раньше этого срока оплату ещё можно дождаться, дальше
+            # опрашивать нечего
+            ttl = int(load_config().get("invoice_ttl_minutes", 240) or 240)
             await expire_stale_payments(ttl)
             pending = await get_pending_payments("anore", limit=40)
             if not pending:
