@@ -94,7 +94,7 @@ CABINET_PAGE = r"""<!doctype html>
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#020202">
 <title>Личный кабинет · Drebol VPN</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%232ea8ff' stroke-width='7'%3E%3Ccircle cx='50' cy='50' r='40'/%3E%3Cellipse cx='50' cy='50' rx='40' ry='13'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="__FAVICON__">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -1204,12 +1204,13 @@ CABINET_PAGE = r"""<!doctype html>
 def cabinet_page(bot_username: str) -> str:
     """Готовая страница кабинета: подставлены адрес API, имя бота и точный логотип с основного сайта."""
     from config import load_config, turnstile_keys
-    from web.site_page import LOGO_URL
+    from web.site_page import FAVICON_URL, LOGO_URL
     api = (load_config().get("webapi_public") or "").rstrip("/")
     logo_html = f'<img src="{LOGO_URL}" alt="Drebol VPN" width="760" height="346">'
     return (CABINET_PAGE.replace("__API__", api or "")
             .replace("__BOT__", bot_username or "")
             .replace("__LOGO__", logo_html)
+            .replace("__FAVICON__", FAVICON_URL)
             .replace("__TURNSTILE__", turnstile_keys()[0]))
 
 
