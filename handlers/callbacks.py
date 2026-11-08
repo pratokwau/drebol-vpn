@@ -101,6 +101,7 @@ from handlers.payprovider import (
     handle_anore_payout_new, handle_anore_payout_method,
     handle_anore_payout_do, handle_anore_shop,
     handle_anore_reconcile, handle_anore_reconcile_fix,
+    handle_anore_rates, handle_anore_payment, handle_anore_payout,
 )
 from handlers.broadcast import (
     handle_broadcast_start, handle_broadcast_segment,
@@ -755,8 +756,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_anore_balance(query, context)
     elif data == "anore_payments":
         await handle_anore_payments(query, context)
+    elif data.startswith("anore_payments:"):
+        await handle_anore_payments(query, context, data.split(":", 1)[1])
+    elif data.startswith("anore_payment:"):
+        await handle_anore_payment(query, context, data.split(":", 1)[1])
     elif data == "anore_payouts":
         await handle_anore_payouts(query, context)
+    elif data.startswith("anore_payout:"):
+        await handle_anore_payout(query, context, data.split(":", 1)[1])
+    elif data == "anore_rates":
+        await handle_anore_rates(query, context)
     elif data == "anore_payout_new":
         await handle_anore_payout_new(query, context)
     elif data.startswith("anore_payout_method:"):

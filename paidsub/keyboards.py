@@ -70,7 +70,7 @@ def paid_subs_list_keyboard(rows, page: int, total_pages: int, presets_ready: bo
 
 
 def _money_rows(b) -> list:
-    return [[b("🏷 Тарифы", "tariffs_menu"), b("💳 Платёжка", "pay_provider_menu")]]
+    return [[b("🏷 Тарифы", "tariffs_menu")]]
 
 
 def _devices_rows(b) -> list:

@@ -154,7 +154,7 @@ CB_LABELS = {
     "gift_pick": "🎁 Подарок подписки",
     "gift_tariff": "🎁 Выбрал срок подарка",
     "gift_pay": "🎁 Оплатил подарок",
-    "pay_provider_menu": "💳 Платёжка",
+    "pay_provider_menu": "💳 Anore",
     "payments": "💰 Оплаты",
     "payment_view": "💰 Открыл платёж",
     "promo_menu": "🎟 Промокоды",

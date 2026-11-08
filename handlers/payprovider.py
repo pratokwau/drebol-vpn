@@ -1,4 +1,4 @@
-"""Раздел «Платёжная система»: настройки приёма платежей через anore.
+"""Раздел Anore: настройки приёма платежей через anore.
 
 Бот сам выставляет счёт и сам засчитывает оплату — подтверждать вручную
 не нужно. Другого способа приёма платежей в боте нет.
@@ -50,7 +50,7 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
 
     import services.anore_api as an
     ready = an.is_configured()
-    lines = ["💳 <b>Платёжная система</b>", "",
+    lines = ["💳 <b>Anore</b>", "",
              f"<blockquote>Приём платежей: <b>Anore</b>\n"
              f"🔑 Ключ: <code>{_mask(cfg.get('anore_api_key'))}</code>\n"
              f"🏬 ID магазина: <code>{cfg.get('anore_shop_id') or 'не задан'}</code>\n"
@@ -79,8 +79,9 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
          InlineKeyboardButton("💸 Выплаты", callback_data="anore_payouts")],
         [InlineKeyboardButton("🧾 Счета anore", callback_data="anore_payments"),
          InlineKeyboardButton("🏬 Настройки кассы", callback_data="anore_shop")],
-        [InlineKeyboardButton("🔍 Сверка Anore", callback_data="anore_reconcile")],
-        [InlineKeyboardButton("◀️ К настройкам", callback_data="paid_sub_presets")],
+        [InlineKeyboardButton("💱 Курсы выплат", callback_data="anore_rates"),
+         InlineKeyboardButton("🔍 Сверка Anore", callback_data="anore_reconcile")],
+        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
@@ -275,30 +276,52 @@ async def handle_anore_balance(query, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def handle_anore_payments(query, context: ContextTypes.DEFAULT_TYPE):
-    """Последние счета в anore — со способом оплаты, которого нет в базе бота."""
+# Фильтр списка счетов — значения фильтра status из доков anore
+# (paid/pending/failed/written_off). У одного счёта статусы другие:
+# new/paid/expired — см. handle_anore_payment.
+_ANORE_PAYMENT_FILTERS = [
+    (None, "Все"),
+    ("paid", "✅ Оплаченные"),
+    ("pending", "⏳ В обработке"),
+    ("failed", "❌ Неудачные"),
+    ("written_off", "🗑 Списанные"),
+]
+
+
+async def handle_anore_payments(query, context: ContextTypes.DEFAULT_TYPE = None,
+                                status_filter: str | None = None):
+    """Счета в anore: фильтр по статусу + детали одного счёта кнопкой."""
     import services.anore_api as an
     await query.edit_message_text("🧾 Запрашиваю счета anore…")
-    r = await an.list_payments(limit=10)
+    r = await an.list_payments(status_filter=status_filter, limit=10)
+    refresh_cb = ("anore_payments" if not status_filter
+                  else f"anore_payments:{status_filter}")
     if not r["ok"]:
         await query.edit_message_text(
             _anore_error_text(r["error"]), parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Ещё раз", callback_data="anore_payments"),
+                [InlineKeyboardButton("🔁 Ещё раз", callback_data=refresh_cb),
                  InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
             ]),
         )
         return
     items = r.get("payments", [])
-    lines = ["🧾 <b>Счета anore</b> — последние 10", ""]
+    flabel = dict(_ANORE_PAYMENT_FILTERS).get(status_filter, "Все")
+    lines = [f"🧾 <b>Счета anore</b> — {flabel.lower()}, последние 10", ""]
     if not items:
-        lines.append("<i>Счетов пока нет.</i>")
+        lines.append("<i>Счетов нет.</i>")
     method_label = {"sbp": "СБП", "card": "карта", "yoomoney": "ЮMoney",
                     "crypto": "крипта"}
     status_label = {"paid": "✅ оплачен", "new": "⏳ новый",
                     "expired": "⌛ истёк", "pending": "⏳ в обработке",
                     "failed": "❌ неудачный", "written_off": "🗑 списан"}
+    status_emoji = {"paid": "✅", "new": "⏳", "expired": "⌛",
+                    "pending": "⏳", "failed": "❌", "written_off": "🗑"}
+    rows: list = []
     for p in items:
+        pid = str(p.get("id") or "")
+        order = str(p.get("orderId") or "")
+        who = order.split("-", 1)[0] if order.startswith("tg") else ""
         lines.append(
             f"• {_fmt_money(p.get('rubAmount') or p.get('amount'))} — "
             f"{status_label.get((p.get('status') or '').lower(), p.get('status'))}"
@@ -306,12 +329,134 @@ async def handle_anore_payments(query, context: ContextTypes.DEFAULT_TYPE):
                if p.get("method") else "")
             + (f" · <code>{p.get('orderId')}</code>" if p.get("orderId") else "")
         )
+        label = (f"{status_emoji.get((p.get('status') or '').lower(), '•')} "
+                 f"{_fmt_money(p.get('rubAmount') or p.get('amount'))}"
+                 + (f" · {method_label.get(p.get('method'), p.get('method'))}"
+                    if p.get("method") else "")
+                 + (f" · {who}" if who else ""))
+        if pid:
+            rows.append([InlineKeyboardButton(
+                f"🔍 {label}", callback_data=f"anore_payment:{pid}")])
     if r.get("total"):
-        lines.append(f"\n<i>Всего счетов: {r['total']}.</i>")
+        lines.append(f"<i>Всего счетов: {r['total']}.</i>")
+    # фильтр — двумя рядами, текущий помечен точкой
+    frows = [[
+        InlineKeyboardButton(
+            ("• " if f == status_filter else "") + label,
+            callback_data="anore_payments" if f is None else f"anore_payments:{f}")
+        for f, label in _ANORE_PAYMENT_FILTERS[:2]
+    ], [
+        InlineKeyboardButton(
+            ("• " if f == status_filter else "") + label,
+            callback_data=f"anore_payments:{f}")
+        for f, label in _ANORE_PAYMENT_FILTERS[2:]
+    ]]
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            frows + rows + [
+                [InlineKeyboardButton("🔁 Обновить", callback_data=refresh_cb),
+                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            ]),
+    )
+
+
+async def handle_anore_payment(query, context: ContextTypes.DEFAULT_TYPE,
+                               payment_id: str):
+    """Один счёт: статус в anore + запись в базе бота и журнале начислений."""
+    import services.anore_api as an
+    from core.database import get_payment_by_external, get_payment_credit
+    await query.edit_message_text("🔍 Запрашиваю счёт…")
+    r = await an.get_status(payment_id)
+    if not r.get("ok"):
+        await query.edit_message_text(
+            _anore_error_text(r["error"]), parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔁 Ещё раз",
+                                      callback_data=f"anore_payment:{payment_id}"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_payments")],
+            ]),
+        )
+        return
+    raw = r.get("raw") or {}
+    status_label = {"paid": "✅ оплачен", "new": "⏳ новый",
+                    "expired": "⌛ истёк"}.get(
+                        (r.get("status") or "").lower(), r.get("status"))
+    lines = ["🧾 <b>Счёт anore</b>", "",
+             f"<blockquote>Статус: <b>{status_label}</b>\n"
+             f"Сумма: <b>{_fmt_money(raw.get('rubAmount') or r.get('amount'))}</b>\n"
+             f"Оплачен: <b>{'да' if r.get('paid') else 'нет'}</b>"
+             + (f"\nСпособ: {raw.get('method')}" if raw.get("method") else "")
+             + (f"\nЗаказ: <code>{raw.get('orderId')}</code>"
+                if raw.get("orderId") else "")
+             + (f"\nСоздан: {str(raw.get('createdAt'))[:19].replace('T', ' ')}"
+                if raw.get("createdAt") else "")
+             + (f"\nОплачен: {str(raw.get('paidAt'))[:19].replace('T', ' ')}"
+                if raw.get("paidAt") else "")
+             + f"\nID: <code>{payment_id}</code></blockquote>", ""]
+    row = await get_payment_by_external(payment_id)
+    kb_rows = []
+    if row:
+        # строка get_payment_by_external: статус в конце, индекс 11
+        bot_status = (row[11] or "") if len(row) > 11 else ""
+        credit = await get_payment_credit(row[0])
+        lines.append(
+            "🤖 <b>В базе бота:</b>\n"
+            f"👤 <code>{row[1]}</code> · статус <b>{bot_status}</b> · "
+            f"{_fmt_money(row[4])}\n"
+            f"Начисление: {'✅ записано в журнале' if credit else '— нет записи'}")
+        kb_rows.append([InlineKeyboardButton(
+            "👤 Профиль плательщика", callback_data=f"user_profile:{row[1]}")])
+    else:
+        lines.append("<i>В базе бота такого счёта нет — создан не ботом.</i>")
+    kb_rows.append([InlineKeyboardButton("◀️ Назад", callback_data="anore_payments")])
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(kb_rows),
+    )
+
+
+def _fmt_rate(value) -> str:
+    """Число курса без лишних нулей: 83.39 → 83.39, 0.01199185 → как есть.
+
+    %g здесь не подходит: он режет до 6 значащих цифр и 0.01199185
+    превращает в 0.0119919. repr даёт ровно то число, что прислал anore.
+    """
+    if value is None:
+        return "—"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    return str(value)
+
+
+async def handle_anore_rates(query, context: ContextTypes.DEFAULT_TYPE = None):
+    """Курсы выплат anore: фиксинг USDT/RUB, рынок, наценка, курс ЦБ."""
+    import services.anore_api as an
+    await query.edit_message_text("💱 Запрашиваю курсы anore…")
+    r = await an.get_payout_rates()
+    if not r.get("ok"):
+        await query.edit_message_text(
+            _anore_error_text(r["error"]), parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔁 Ещё раз", callback_data="anore_rates"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            ]),
+        )
+        return
+    b = r.get("raw") or {}
+    lines = ["💱 <b>Курсы выплат anore</b>", "",
+             f"<blockquote>💎 USDT/RUB, фиксинг с наценкой: "
+             f"<b>{_fmt_rate(b.get('rapiraUsdtRub'))} ₽</b>\n"
+             f"📉 Рынок без наценки: {_fmt_rate(b.get('rapiraMarketUsdtRub'))} ₽ "
+             f"(наценка {_fmt_rate(b.get('rapiraMarketPercent'))}%)\n"
+             f"🏦 ЦБ USD/RUB: {_fmt_rate(b.get('cbrUsdRub'))} ₽\n"
+             f"🔄 За 1 ₽ — {_fmt_rate(b.get('rubToUsdt'))} USDT</blockquote>", "",
+             f"<i>Фиксинг: {b.get('rapiraFixing') or '—'}. Курсы предварительные — "
+             "итоговая сумма фиксируется при принятии заявки в работу.</i>"]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔁 Обновить", callback_data="anore_payments"),
+            [InlineKeyboardButton("🔁 Обновить", callback_data="anore_rates"),
              InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
         ]),
     )
@@ -520,20 +665,79 @@ async def handle_anore_payouts(query, context: ContextTypes.DEFAULT_TYPE):
     lines = ["💸 <b>Выплаты anore</b> — последние 10", ""]
     if not items:
         lines.append("<i>Выплат пока не было.</i>")
+    rows: list = []
     for p in items:
+        pid = str(p.get("id") or "")
         lines.append(
             f"• <code>{p.get('id')}</code> — {_fmt_money(p.get('amount'))} · "
             f"{_PAYOUT_STATUS.get((p.get('status') or '').lower(), p.get('status'))}"
             + (f" · комиссия {_fmt_money(p.get('fee'))}" if p.get("fee") is not None else "")
             + (f" · {p.get('address')}" if p.get("address") else "")
         )
+        label = (
+            f"{_fmt_money(p.get('amount'))} · "
+            f"{_PAYOUT_STATUS.get((p.get('status') or '').lower(), p.get('status'))}"
+            + (f" · комиссия {_fmt_money(p.get('fee'))}"
+               if p.get("fee") is not None else "")
+            + (f" · {p.get('address')}" if p.get("address") else "")
+        )
+        if pid:
+            rows.append([InlineKeyboardButton(
+                f"🔍 {label}", callback_data=f"anore_payout:{pid}")])
+        else:
+            lines.append(f"• {label}")
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            rows + [
+                [InlineKeyboardButton("➕ Новая выплата", callback_data="anore_payout_new"),
+                 InlineKeyboardButton("💰 Баланс", callback_data="anore_balance")],
+                [InlineKeyboardButton("🔁 Обновить", callback_data="anore_payouts"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            ]),
+    )
+
+
+async def handle_anore_payout(query, context: ContextTypes.DEFAULT_TYPE,
+                              payout_id: str):
+    """Одна выплата: статус, сумма, комиссия, реквизиты, хеш транзакции."""
+    import services.anore_api as an
+    await query.edit_message_text("🔍 Запрашиваю выплату…")
+    r = await an.get_payout(payout_id)
+    if not r.get("ok"):
+        await query.edit_message_text(
+            _anore_error_text(r["error"]), parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔁 Ещё раз",
+                                      callback_data=f"anore_payout:{payout_id}"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_payouts")],
+            ]),
+        )
+        return
+    raw = r.get("raw") or {}
+    method = an.PAYOUT_METHODS.get(r.get("method"), r.get("method") or "—")
+    lines = ["💸 <b>Выплата</b>", "",
+             f"<blockquote>Статус: <b>"
+             f"{_PAYOUT_STATUS.get((r.get('status') or '').lower(), r.get('status'))}</b>\n"
+             f"Сумма: <b>{_fmt_money(r.get('amount'))}</b>\n"
+             f"Способ: {method}\n"
+             f"Реквизиты: <code>{r.get('address_masked') or '—'}</code>\n"
+             f"Комиссия: {_fmt_money(r.get('fee'))}\n"
+             f"К получению: <b>{_fmt_money(r.get('net'))}</b>"
+             + (f"\nК зачислению: {_fmt_money(raw.get('settlementRub'))}"
+                if raw.get("settlementRub") is not None else "")
+             + (f"\nВнешний ID: <code>{raw.get('externalId')}</code>"
+                if raw.get("externalId") else "")
+             + (f"\nСоздана: {str(raw.get('createdAt'))[:19].replace('T', ' ')}"
+                if raw.get("createdAt") else "")
+             + (f"\nОбработана: {str(raw.get('processedAt'))[:19].replace('T', ' ')}"
+                if raw.get("processedAt") else "")
+             + (f"\nTX: <code>{r.get('tx_hash')}</code>" if r.get("tx_hash") else "")
+             + f"\nID: <code>{payout_id}</code></blockquote>"]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Новая выплата", callback_data="anore_payout_new"),
-             InlineKeyboardButton("💰 Баланс", callback_data="anore_balance")],
-            [InlineKeyboardButton("🔁 Обновить", callback_data="anore_payouts"),
-             InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="anore_payouts")],
         ]),
     )
 

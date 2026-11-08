@@ -69,6 +69,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         # сводка и деньги
         [b("📊 Статистика", "dashboard"), b("💰 Оплаты", "payments:paid:1")],
+        [b("💳 Anore", "pay_provider_menu")],
         # люди и подписки
         [b("🔍 Найти юзера", "find_user"), b("🛰 Контроль", "ctl_menu")],
         [b("💳 Платные подписки", "paid_subs"), b("📋 Админские", "admin_subs")],
