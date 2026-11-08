@@ -1,7 +1,11 @@
-"""Раздел «Платёжная система»: настройки приёма платежей через Platega.
+"""Раздел «Платёжная система»: настройки приёма платежей через anore.
 
 Бот сам выставляет счёт и сам засчитывает оплату — подтверждать вручную
 не нужно. Другого способа приёма платежей в боте нет.
+
+Способ оплаты (СБП или крипта) человек выбирает сам на форме anore,
+комиссия и редиректы задаются в настройках магазина на anore.cc —
+в боте их нет.
 """
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -9,21 +13,23 @@ from telegram.ext import ContextTypes
 
 from config import load_config, save_config
 from core.keyboards import back_admin
-from core.states import AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET
+from core.states import (
+    AWAITING_ANORE_KEY, AWAITING_ANORE_SHOP, AWAITING_ANORE_WEBHOOK_SECRET,
+)
 
 
 def provider_label() -> str:
-    return "Platega"
+    return "Anore"
 
 
 def provider_line() -> str:
     """Строка о платёжке для админских экранов."""
-    import services.platega_api as pg
+    import services.anore_api as an
     cfg = load_config()
-    if not pg.is_configured():
-        return "💳 Platega  ·  ⚠️ <b>ключи не заданы</b>"
-    method = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
-    return f"💳 Platega  ·  <b>{pg.PAYMENT_METHODS.get(method, method)}</b>"
+    if not an.is_configured():
+        return "💳 Anore  ·  ⚠️ <b>ключи не заданы</b>"
+    return (f"💳 Anore  ·  магазин <b>{cfg.get('anore_shop_id')}</b>"
+            f"{' · 🔔 вебхук' if cfg.get('anore_webhook_secret') else ''}")
 
 
 def _mask(value: str) -> str:
@@ -39,25 +45,30 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
         context.user_data.pop("state", None)
     cfg = load_config()
 
-    import services.platega_api as pg
-    ready = pg.is_configured()
-    method_id = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
+    import services.anore_api as an
+    ready = an.is_configured()
     lines = ["💳 <b>Платёжная система</b>", "",
-             f"<blockquote>Приём платежей: <b>Platega</b>\n"
-             f"🆔 MerchantId: <code>{_mask(cfg.get('platega_merchant_id'))}</code>\n"
-             f"🔑 Ключ: <code>{_mask(cfg.get('platega_secret'))}</code>\n"
-             f"💠 Способ: <b>{pg.PAYMENT_METHODS.get(method_id, method_id)}</b></blockquote>", "",
+             f"<blockquote>Приём платежей: <b>Anore</b>\n"
+             f"🔑 Ключ: <code>{_mask(cfg.get('anore_api_key'))}</code>\n"
+             f"🏬 ID магазина: <code>{cfg.get('anore_shop_id') or 'не задан'}</code>\n"
+             f"🔔 Секрет вебхука: <code>{_mask(cfg.get('anore_webhook_secret'))}</code></blockquote>", "",
              "<i>Бот сам выставляет счёт и сам засчитывает оплату — "
-             "подтверждать вручную не нужно.</i>"]
+             "подтверждать вручную не нужно.</i>",
+             "<i>Оплата подтверждается вебхуком мгновенно, опрос — "
+             "страховка, если вебхук не дойдёт.</i>"]
     if not ready:
-        lines.append("\n⚠️ <b>Не хватает данных</b> — заполни MerchantId и ключ. "
+        lines.append("\n⚠️ <b>Не хватает данных</b> — заполни ключ и id магазина. "
                      "Пока их нет, клиенты не смогут оплатить подписку.")
+    if ready and not cfg.get("anore_webhook_secret"):
+        lines.append("\n⚠️ <b>Без секрета вебхука</b> подтверждения будут "
+                     "только опросом раз в минуту. Секрет появляется в "
+                     "настройках anore после сохранения url вебхука.")
 
     rows = [
-        [InlineKeyboardButton("🆔 MerchantId", callback_data="platega_set_merchant"),
-         InlineKeyboardButton("🔑 Ключ", callback_data="platega_set_secret")],
-        [InlineKeyboardButton("💠 Способ оплаты", callback_data="platega_methods"),
-         InlineKeyboardButton("🔌 Проверить", callback_data="platega_test")],
+        [InlineKeyboardButton("🔑 API-ключ", callback_data="anore_set_key"),
+         InlineKeyboardButton("🏬 ID магазина", callback_data="anore_set_shop")],
+        [InlineKeyboardButton("🔔 Секрет вебхука", callback_data="anore_set_webhook_secret"),
+         InlineKeyboardButton("🔌 Проверить", callback_data="anore_test")],
         [InlineKeyboardButton("◀️ К настройкам", callback_data="paid_sub_presets")],
     ]
     await query.edit_message_text(
@@ -66,23 +77,13 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
     )
 
 
-async def handle_platega_set_merchant(query, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["state"] = AWAITING_PLATEGA_MERCHANT
+async def handle_anore_set_key(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_ANORE_KEY
     await query.edit_message_text(
-        "🆔 <b>MerchantId Platega</b>\n\n"
-        "<i>Пришли MerchantId из личного кабинета Platega (Настройки) одним сообщением.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
-        ]),
-    )
-
-
-async def handle_platega_set_secret(query, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["state"] = AWAITING_PLATEGA_SECRET
-    await query.edit_message_text(
-        "🔑 <b>API-ключ Platega</b>\n\n"
-        "<i>Пришли ключ (X-Secret) одним сообщением.</i>\n\n"
+        "🔑 <b>API-ключ anore</b>\n\n"
+        "<i>Пришли ключ из личного кабинета anore (Настройки → Ключи API) "
+        "одним сообщением. Для проверки сначала можно вставить тестовый "
+        "ключ (an_test_…), потом заменить его на боевой (an_live_…).</i>\n\n"
         "⚠️ Сообщение с ключом лучше потом удалить из чата.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
@@ -91,51 +92,50 @@ async def handle_platega_set_secret(query, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def handle_platega_methods(query, context: ContextTypes.DEFAULT_TYPE):
-    import services.platega_api as pg
-    cfg = load_config()
-    cur = int(cfg.get("platega_method", pg.DEFAULT_METHOD) or pg.DEFAULT_METHOD)
-    rows = [
-        [InlineKeyboardButton(
-            f"{'✅ ' if code == cur else ''}{name}",
-            callback_data=f"platega_method:{code}",
-        )]
-        for code, name in pg.PAYMENT_METHODS.items()
-    ]
-    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")])
+async def handle_anore_set_shop(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_ANORE_SHOP
     await query.edit_message_text(
-        "💠 <b>Способ оплаты Platega</b>\n\n"
-        "Какой способ предлагать клиентам?\n\n"
-        "<i>Доступность зависит от того, что подключено у тебя в Platega.</i>",
-        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
+        "🏬 <b>ID магазина anore</b>\n\n"
+        "<i>Пришли id магазина из настроек anore (там же, рядом с ключами) "
+        "одним сообщением — просто число.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+        ]),
     )
 
 
-async def handle_platega_method_set(query, context: ContextTypes.DEFAULT_TYPE, code: int):
-    cfg = load_config()
-    cfg["platega_method"] = int(code)
-    save_config(cfg)
-    await query.answer("Способ сохранён")
-    await handle_pay_provider_menu(query, context)
+async def handle_anore_set_webhook_secret(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_ANORE_WEBHOOK_SECRET
+    await query.edit_message_text(
+        "🔔 <b>Секрет подписи вебхука anore</b>\n\n"
+        "<i>Секрет появляется в настройках anore, когда сохранишь там url "
+        "вебхука. Пришли его одним сообщением.</i>\n\n"
+        "⚠️ Сообщение с секретом лучше потом удалить из чата.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+        ]),
+    )
 
 
-async def handle_platega_test(query, context: ContextTypes.DEFAULT_TYPE):
-    import services.platega_api as pg
-    await query.edit_message_text("🔌 Проверяю подключение к Platega…")
-    r = await pg.test_connection()
+async def handle_anore_test(query, context: ContextTypes.DEFAULT_TYPE):
+    import services.anore_api as an
+    await query.edit_message_text("🔌 Проверяю подключение к anore…")
+    r = await an.test_connection()
     if r["ok"]:
-        text = "✅ <b>Подключение работает</b>\n\n<blockquote>Ключи приняты Platega.</blockquote>"
+        text = "✅ <b>Подключение работает</b>\n\n<blockquote>Ключи приняты anore.</blockquote>"
     else:
         from html import escape
         text = (
             "❌ <b>Не удалось подключиться</b>\n\n"
             f"<blockquote><code>{escape(str(r['error']))}</code></blockquote>\n\n"
-            "<i>Проверь MerchantId и ключ в личном кабинете Platega.</i>"
+            "<i>Проверь ключ и id магазина в личном кабинете anore.</i>"
         )
     await query.edit_message_text(
         text, parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔁 Ещё раз", callback_data="platega_test"),
+            [InlineKeyboardButton("🔁 Ещё раз", callback_data="anore_test"),
              InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
         ]),
     )
@@ -143,11 +143,23 @@ async def handle_platega_test(query, context: ContextTypes.DEFAULT_TYPE):
 
 async def apply_credential(message, context: ContextTypes.DEFAULT_TYPE,
                            field: str, raw: str):
-    """Сохраняет MerchantId или ключ, введённый в чате."""
+    """Сохраняет ключ, id магазина или секрет вебхука, введённый в чате."""
     value = (raw or "").strip()
+    labels = {
+        "anore_api_key": "API-ключ",
+        "anore_shop_id": "ID магазина",
+        "anore_webhook_secret": "Секрет вебхука",
+    }
     if not value or len(value) > 200:
         await message.reply_text(
             "❌ <b>Пустое или слишком длинное значение</b>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
+        return
+    if field == "anore_shop_id" and not value.isdigit():
+        await message.reply_text(
+            "❌ <b>ID магазина — просто число</b>\n\n"
+            "<i>Пришли id из настроек anore ещё раз.</i>",
             parse_mode="HTML", reply_markup=back_admin(),
         )
         return
@@ -155,13 +167,13 @@ async def apply_credential(message, context: ContextTypes.DEFAULT_TYPE,
     cfg[field] = value
     save_config(cfg)
 
-    label = "MerchantId" if field == "platega_merchant_id" else "API-ключ"
+    label = labels.get(field, field)
     await message.reply_text(
         f"✅ <b>{label} сохранён</b>\n\n"
         "<i>Рекомендую удалить сообщение с ним из чата.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔌 Проверить", callback_data="platega_test"),
+            [InlineKeyboardButton("🔌 Проверить", callback_data="anore_test"),
              InlineKeyboardButton("◀️ К платёжке", callback_data="pay_provider_menu")],
         ]),
     )

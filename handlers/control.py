@@ -89,9 +89,6 @@ CB_LABELS = {
     # админ — действия, которые что-то меняют
     "paid_approve": "✅ Одобрил триал",
     "paid_reject": "❌ Отклонил триал",
-    "refund_do": "💸 Возврат",
-    "refund_partial_start": "💸 Частичный возврат (начало)",
-    "refund_partial_do": "💸 Частичный возврат",
     # удаления, вкл/выкл подписок и техработ идут через «Точно?» —
     # их подписи в handlers/confirm.py (CONFIRM_TITLES)
     "bcast_send": "📣 Отправил рассылку",
@@ -112,7 +109,6 @@ CB_LABELS = {
     "subs_names_sync": "🔄 Сверил ники с панелью",
     "panel_names_sync": "👤 Актуализировал юзернеймы и ники в панели",
     "panel_sync": "🔄 Точечная синхронизация с панелью",
-    "payment_sync": "💳 Синхронизация платежей с Platega",
     "panel_sync_menu": "🔄 Открыл синхронизацию",
     "sub_hwid_del": "📱 Отключил устройство (админская)",
     "bl_add_apply": "⛔ Внёс в ЧС",
@@ -161,7 +157,6 @@ CB_LABELS = {
     "pay_provider_menu": "💳 Платёжка",
     "payments": "💰 Оплаты",
     "payment_view": "💰 Открыл платёж",
-    "refund_menu": "💸 Возвраты",
     "promo_menu": "🎟 Промокоды",
     "promo_view": "🎟 Открыл промокод",
     "promo_create": "➕ Создание промокода",

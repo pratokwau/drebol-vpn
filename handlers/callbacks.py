@@ -86,8 +86,7 @@ from features.promos import (
     handle_promo_batch, handle_promo_batch_n, handle_promo_batch_go, handle_promo_find,
 )
 from handlers.payments import (
-    handle_payments_menu, handle_payment_view, handle_refund_start, handle_refund_do,
-    handle_refund_partial_start, handle_refund_partial_do, handle_payment_sync_run,
+    handle_payments_menu, handle_payment_view,
 )
 from handlers.tariffs import (
     handle_tariffs_menu, handle_tariff_view, handle_tariff_toggle,
@@ -96,8 +95,8 @@ from handlers.tariffs import (
 )
 from handlers.payprovider import (
     handle_pay_provider_menu,
-    handle_platega_set_merchant, handle_platega_set_secret,
-    handle_platega_methods, handle_platega_method_set, handle_platega_test,
+    handle_anore_set_key, handle_anore_set_shop,
+    handle_anore_set_webhook_secret, handle_anore_test,
 )
 from handlers.broadcast import (
     handle_broadcast_start, handle_broadcast_segment,
@@ -432,18 +431,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_payments_menu(query, context, st, int(pg))
     elif data.startswith("payment_view:"):
         await handle_payment_view(query, int(data.split(":")[1]))
-    elif data.startswith("refund_start:"):
-        await handle_refund_start(query, int(data.split(":")[1]))
-    elif data.startswith("refund_do:"):
-        _, pid, rv = data.split(":")
-        await handle_refund_do(query, context, int(pid), rv == "1")
-    elif data.startswith("refund_partial_start:"):
-        await handle_refund_partial_start(query, context, int(data.split(":")[1]))
-    elif data.startswith("refund_partial_do:"):
-        _, pid, amt = data.split(":")
-        await handle_refund_partial_do(query, context, int(pid), int(amt))
-    elif data == "payment_sync":
-        await handle_payment_sync_run(query, context)
     elif data == "healthcheck":
         await handle_healthcheck(query)
     elif data == "find_user":
@@ -752,16 +739,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_tariff_edit(query, context, int(data.split(":")[1]), "period")
     elif data == "pay_provider_menu":
         await handle_pay_provider_menu(query, context)
-    elif data == "platega_set_merchant":
-        await handle_platega_set_merchant(query, context)
-    elif data == "platega_set_secret":
-        await handle_platega_set_secret(query, context)
-    elif data == "platega_methods":
-        await handle_platega_methods(query, context)
-    elif data.startswith("platega_method:"):
-        await handle_platega_method_set(query, context, int(data.split(":")[1]))
-    elif data == "platega_test":
-        await handle_platega_test(query, context)
+    elif data == "anore_set_key":
+        await handle_anore_set_key(query, context)
+    elif data == "anore_set_shop":
+        await handle_anore_set_shop(query, context)
+    elif data == "anore_set_webhook_secret":
+        await handle_anore_set_webhook_secret(query, context)
+    elif data == "anore_test":
+        await handle_anore_test(query, context)
     elif data == "paid_sub_presets":
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":

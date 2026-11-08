@@ -972,6 +972,21 @@ async def get_payment(payment_id: int) -> tuple | None:
             return await cur.fetchone()
 
 
+async def get_payment_by_external(external_id: str) -> tuple | None:
+    """Счёт по id из платёжной системы — по нему ищет вебхук.
+
+    Колонки — как у get_pending_payments, чтобы найденную строку можно
+    было сразу отдать в подтверждение оплаты.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, provider, external_id, amount, period_seconds,
+                   promo_code, created_at, kind, extra, gift_tg_id
+            FROM payments WHERE external_id = ?
+        """, (external_id,)) as cur:
+            return await cur.fetchone()
+
+
 async def get_active_payment(tg_id: int, provider: str) -> tuple | None:
     """Последний неоплаченный счёт юзера — чтобы не плодить дубли."""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -1003,7 +1018,7 @@ async def set_payment_status(payment_id: int, status: str, error: str | None = N
 async def expire_stale_payments(minutes: int = 60) -> int:
     """Гасит счета, по которым так и не заплатили.
 
-    Счёт в платёжной системе живёт ограниченное время (у Platega — 30 минут),
+    Счёт в платёжной системе живёт ограниченное время (у anore — expiresIn),
     после чего опрашивать его бессмысленно. Берём запас вдвое, чтобы не
     потерять оплату, подтверждённую у самого края срока.
     """
@@ -1126,20 +1141,10 @@ async def user_payments(tg_id: int, limit: int = 10) -> tuple[list, int, int]:
     return rows, cnt, total
 
 
-async def mark_refund_pending(payment_id: int, revoke: bool):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE payments SET status = 'refund_pending', refund_revoke = ? WHERE id = ?",
-            (1 if revoke else 0, payment_id),
-        )
-        await db.commit()
-
-
 async def claim_refund(payment_id: int) -> bool:
     """Переводит платёж в «возвращён». True — если перевёл именно этот вызов.
 
-    Довести возврат могут одновременно и кнопка, и фоновая сверка: атомарный
-    переход не даёт отозвать срок дважды за один возврат.
+    Атомарный переход не даёт отозвать срок дважды за один возврат.
     """
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
@@ -1150,38 +1155,6 @@ async def claim_refund(payment_id: int) -> bool:
         return (cur.rowcount or 0) > 0
 
 
-async def get_partial_refunded(payment_id: int) -> int:
-    """Сколько по платежу уже вернули частями (подтверждённых ботом)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT COALESCE(partial_refunded, 0) FROM payments WHERE id = ?",
-            (payment_id,)) as cur:
-            r = await cur.fetchone()
-    return int(r[0]) if r else 0
-
-
-async def add_partial_refunded(payment_id: int, amount: int) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE payments SET partial_refunded = COALESCE(partial_refunded, 0) + ? "
-            "WHERE id = ?",
-            (int(amount), payment_id),
-        )
-        await db.commit()
-
-
-async def set_partial_refunded(payment_id: int, amount: int) -> None:
-    """Ставит суммарно возвращённую частями сумму (абсолютное значение,
-    а не прибавку: Platega отдаёт именно накопленный итог)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE payments SET partial_refunded = MAX(COALESCE(partial_refunded, 0), ?) "
-            "WHERE id = ?",
-            (int(amount), payment_id),
-        )
-        await db.commit()
-
-
 async def get_refund_revoke(payment_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -1189,27 +1162,6 @@ async def get_refund_revoke(payment_id: int):
         ) as cur:
             r = await cur.fetchone()
     return r[0] if r else None
-
-
-async def get_refund_watchlist(days: int = 30, limit: int = 100) -> list[tuple]:
-    """Платежи, у которых может появиться возврат.
-
-    О возврате из личного кабинета Platega бот узнаёт, только перечитав статус
-    оплаченной транзакции. Сначала — возвраты в обработке, затем свежие оплаты.
-    """
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT id, tg_id, external_id, amount, period_seconds, status
-            FROM payments
-            WHERE provider = 'platega'
-              AND external_id IS NOT NULL
-              AND (status = 'refund_pending'
-                   OR (status = 'paid'
-                       AND COALESCE(paid_at, created_at) >= datetime('now', ?)))
-            ORDER BY CASE status WHEN 'refund_pending' THEN 0 ELSE 1 END, id DESC
-            LIMIT ?
-        """, (f"-{days} days", limit)) as cur:
-            return await cur.fetchall()
 
 
 # ── Журнал действий ──────────────────────────────────────────────────────────

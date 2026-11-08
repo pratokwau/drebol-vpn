@@ -429,8 +429,8 @@ async def handle_renew_sub(query):
             await update_paid_sub_field(row[0], "pending_promo", None)
 
     # Счёт выставляет бот, оплата засчитывается автоматически
-    import services.platega_api as pg
-    if pg.is_configured():
+    import services.anore_api as an
+    if an.is_configured():
         from core.database import last_paid_period, list_tariffs
         from paidsub.time_parser import fmt_duration
         tariffs = await list_tariffs(only_active=True)
@@ -799,19 +799,19 @@ async def handle_gift_pay(query, context):
 async def handle_pay_invoice(query, context, tariff_id: int | None = None,
                              devices=None, gift_tg_id: int | None = None,
                              gift_name: str | None = None):
-    """Создаёт счёт в Platega и отдаёт ссылку на оплату.
+    """Создаёт счёт в anore и отдаёт ссылку на оплату.
 
     gift_tg_id — счёт оплачивает один человек, а подписка откроется
     у другого: тогда без устройств и с пометкой о подарке в счёте.
     """
     from telegram import InlineKeyboardButton
-    import services.platega_api as pg
+    import services.anore_api as an
     from core.database import add_payment, get_active_payment, get_tariff
     from paidsub.storage import get_paid_sub_by_tg_id, sub_settings, get_pending_promo
     from paidsub.handlers import validate_promo, apply_discount
 
     user = query.from_user
-    if not pg.is_configured():
+    if not an.is_configured():
         await query.answer("Оплата временно недоступна", show_alert=True)
         return
 
@@ -860,7 +860,7 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
 
     # уже есть неоплаченный счёт на ту же сумму, срок, набор устройств
     # и того же получателя — переиспользуем ссылку, чтобы не плодить счета
-    existing = await get_active_payment(user.id, "platega")
+    existing = await get_active_payment(user.id, "anore")
     same_extra = (len(existing) < 12 or existing[11] == devices) if existing else False
     same_gift = (len(existing) < 13 or (existing[12] or 0) == (gift_tg_id or 0)) if existing else False
     if existing and existing[4] == price and existing[5] == pay_seconds and existing[8] and same_extra and same_gift:
@@ -874,7 +874,7 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
         desc += f" · 🎁 Подарок для {gift_name or gift_tg_id}"
     if devices:
         desc += f" · +{devices} устр."
-    result = await pg.create_payment(
+    result = await an.create_payment(
         amount=price,
         description=f"{desc} · {user.id}",
         tg_id=user.id,
@@ -901,7 +901,7 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
-                    "⚠️ <b>Ошибка создания счёта Platega</b>\n\n"
+                    "⚠️ <b>Ошибка создания счёта Anore</b>\n\n"
                     f"👤 <code>{user.id}</code>\n"
                     f"<code>{result['error']}</code>"
                 ),
@@ -912,8 +912,8 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
         return
 
     await add_payment(
-        tg_id=user.id, provider="platega",
-        external_id=result["transaction_id"], amount=price,
+        tg_id=user.id, provider="anore",
+        external_id=result["payment_id"], amount=price,
         period_seconds=pay_seconds, pay_url=result["url"],
         promo_code=promo_code, kind=pay_kind, extra=devices,
         gift_tg_id=gift_tg_id,
@@ -1532,7 +1532,7 @@ async def handle_dev_buy_menu(query, context):
 async def handle_dev_buy(query, context, count: int):
     """Счёт на докуп устройств — теми же платежами, что и продление."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    import services.platega_api as pg
+    import services.anore_api as an
     from core.database import add_payment
     from paidsub.storage import get_paid_sub_by_tg_id
     user = query.from_user
@@ -1548,7 +1548,7 @@ async def handle_dev_buy(query, context, count: int):
     if not count:
         await query.answer("Больше устройств добавить нельзя", show_alert=True)
         return
-    if not pg.is_configured():
+    if not an.is_configured():
         await query.edit_message_text(
             "➕ <b>Оплата сейчас недоступна</b>\n\n"
             "<blockquote>Напишите в поддержку — добавим устройства вручную.</blockquote>",
@@ -1560,7 +1560,7 @@ async def handle_dev_buy(query, context, count: int):
 
     amount = count * price
     await query.edit_message_text("⏳ Готовлю счёт…")
-    result = await pg.create_payment(
+    result = await an.create_payment(
         amount=amount, description=f"Устройства Drebol VPN · +{count} · {user.id}",
         tg_id=user.id, username=user.username,
     )
@@ -1575,7 +1575,7 @@ async def handle_dev_buy(query, context, count: int):
         )
         return
     await add_payment(
-        tg_id=user.id, provider="platega", external_id=result["transaction_id"],
+        tg_id=user.id, provider="anore", external_id=result["payment_id"],
         amount=amount, period_seconds=None, pay_url=result["url"],
         kind="devices", extra=count,
     )

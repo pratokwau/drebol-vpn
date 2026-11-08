@@ -11,6 +11,7 @@ from core.database import (
 from paidsub.time_parser import fmt_duration
 
 PROVIDER_LABELS = {
+    "anore": "Anore",
     "platega": "Platega",
     "manual": "вручную",
 }
@@ -155,21 +156,99 @@ async def handle_payment_view(query, payment_id: int):
     kb = [[InlineKeyboardButton("🔍 Профиль юзера", callback_data=f"user_profile:{tg_id}")]]
     if status == "pending" and pay_url:
         kb.append([InlineKeyboardButton("🔗 Ссылка на оплату", url=pay_url)])
-    if provider == "platega" and status == "paid" and ext_id:
-        from core.database import get_partial_refunded
-        partial = await get_partial_refunded(p_id)
-        if partial:
-            lines.append(f"↩️ Частично возвращено: <b>{partial} ₽</b> "
-                         f"(ещё можно вернуть <b>{amount - partial} ₽</b>)")
-        kb.append([InlineKeyboardButton("💸 Вернуть деньги", callback_data=f"refund_start:{p_id}")])
-        kb.append([InlineKeyboardButton("💸 Вернуть часть",
-                                        callback_data=f"refund_partial_start:{p_id}")])
     kb.append([InlineKeyboardButton("◀️ К оплатам", callback_data="payments:paid:1")])
 
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(kb), disable_web_page_preview=True,
     )
+
+
+# ── Подтверждение оплаты ───────────────────────────────────────────────────
+
+async def confirm_provider_payment(bot, p) -> dict:
+    """Засчитывает оплаченный счёт.
+
+    p — строка get_pending_payments / get_payment_by_external:
+    (id, tg_id, provider, external_id, amount, period, promo,
+    created_at, kind, extra, gift_tg_id). Общая для опроса и вебхука:
+    кто первым увидел оплату, тот и начисляет; повторный вызов ничего
+    не начислит дважды, потому что статус ставится до начисления.
+    """
+    from types import SimpleNamespace
+
+    from config import ADMIN_ID
+    from core.database import set_payment_status
+    from paidsub.handlers import (
+        apply_paid_payment, apply_devices_payment, apply_gift_payment,
+    )
+
+    pay_id, tg_id, amount, period, promo = p[0], p[1], p[4], p[5], p[6]
+    kind = p[8] if len(p) > 8 else "period"
+    extra = p[9] if len(p) > 9 else 0
+    gift_tg = p[10] if len(p) > 10 else None
+
+    # статус ставим до начисления: если начисление упадёт, повторный
+    # проход не выдаст второй период за один платёж
+    await set_payment_status(pay_id, "paid")
+    # apply_* ждут context с .bot — бот напрямую им не подходит
+    ctx = SimpleNamespace(bot=bot)
+    try:
+        if kind == "devices":
+            res = await apply_devices_payment(tg_id, extra, ctx, amount)
+        elif gift_tg:
+            res = await apply_gift_payment(
+                gift_tg, tg_id, amount, ctx, promo_code=promo,
+                source="Anore", period_seconds=period,
+            )
+        else:
+            res = await apply_paid_payment(
+                tg_id, amount, ctx, promo_code=promo,
+                source="Anore", period_seconds=period,
+            )
+            # в счёте за срок ехал выбор устройств на новый период:
+            # ставим ровно столько, сколько взяли. Ноль — человек от
+            # них отказался, и это не ошибка
+            if res.get("ok") and kind == "period_dev":
+                dev = await apply_devices_payment(tg_id, extra, ctx, 0, mode="set")
+                if not dev.get("ok"):
+                    # срок начислен, слоты нет — молчать нельзя,
+                    # человек за них заплатил
+                    await set_payment_status(
+                        pay_id, "paid",
+                        f"устройства не начислены: {dev.get('error')}")
+                    await bot.send_message(
+                        chat_id=ADMIN_ID,
+                        text=(
+                            "⚠️ <b>Срок продлён, устройства не применены</b>\n\n"
+                            f"👤 <code>{tg_id}</code> · выбрано {extra} устр.\n"
+                            f"<code>{dev.get('error')}</code>\n\n"
+                            "Добавь слоты вручную."
+                        ),
+                        parse_mode="HTML",
+                    )
+        if not res.get("ok"):
+            await set_payment_status(pay_id, "paid", res.get("error"))
+            gift_line = (f"🎁 Подарок для <code>{gift_tg}</code>\n"
+                         if gift_tg else "")
+            tail = ("Выдай подписку получателю вручную."
+                    if gift_tg else "Продли подписку вручную.")
+            await bot.send_message(
+                chat_id=ADMIN_ID,
+                text=(
+                    "⚠️ <b>Оплата получена, но не засчитана</b>\n\n"
+                    f"👤 <code>{tg_id}</code> · {amount} ₽\n"
+                    f"{gift_line}"
+                    f"<code>{res.get('error')}</code>\n\n"
+                    f"{tail}"
+                ),
+                parse_mode="HTML",
+            )
+            return {"ok": False, "error": res.get("error")}
+    except Exception as e:
+        await set_payment_status(pay_id, "paid", str(e)[:120])
+        return {"ok": False, "error": str(e)[:120]}
+    return {"ok": True}
 
 
 async def user_payments_block(tg_id: int) -> str:
@@ -188,374 +267,6 @@ async def user_payments_block(tg_id: int) -> str:
         )
     return "\n".join(lines)
 
-
-# ── Сверка платежей с Platega ────────────────────────────────────────────────
-
-def _scan_refunded_amount(raw):
-    """Ищет в сыром ответе Platega накопленную сумму частичных возвратов.
-
-    Поле в схеме статуса не зафиксировано, поэтому ищем по смыслу ключа:
-    refundedAmount, totalRefunded и подобные. Если ничего не нашлось —
-    возвращаем None, а не ноль: ноль означал бы «возвратов нет», а мы
-    этого как раз не знаем.
-    """
-    import re
-    wanted = {"refundedamount", "totalrefundedamount", "refunded",
-              "refundamount", "totalrefunded"}
-    if not isinstance(raw, dict):
-        return None
-
-    def walk(node):
-        if isinstance(node, dict):
-            for key, value in node.items():
-                norm = re.sub(r"[^a-z0-9]", "", str(key).lower())
-                if norm in wanted and isinstance(value, (int, float)) and value > 0:
-                    return int(value)
-                found = walk(value)
-                if found is not None:
-                    return found
-        elif isinstance(node, list):
-            for value in node:
-                found = walk(value)
-                if found is not None:
-                    return found
-        return None
-
-    return walk(raw)
-
-
-async def run_payment_sync(context) -> dict:
-    """Сверка оплат с Platega: платёжная система — источник правды.
-
-    Проходит по оплатам за 30 дней и возвратам в обработке:
-    - CHARGEBACKED → доводит полный возврат тем же finalize_refund,
-      что и кнопка (атомарно, дважды не доведёт);
-    - PARTIALLY_REFUNDED → записывает накопленную сумму частичных
-      возвратов, если Platega отдала её в ответе; если суммы в ответе
-      нет, платёж попадает в partial_unknown — админу стоит проверить
-      сумму в кабинете Platega руками.
-    Срок подписок не трогается: частичный возврат его не меняет.
-    """
-    import services.platega_api as pg
-    from core.database import (get_refund_watchlist, get_partial_refunded,
-                          set_partial_refunded, get_payment_full)
-    if not pg.is_configured():
-        return {"ok": False, "error": "Platega не настроена"}
-    watch = await get_refund_watchlist(days=30, limit=100)
-    checked = chargebacked = partial_synced = 0
-    partial_unknown, errors = [], []
-    for pay_id, _tg_id, ext_id, _amount, _period, _status in watch:
-        if not ext_id:
-            continue
-        checked += 1
-        r = await pg.get_status(ext_id)
-        if not r.get("ok"):
-            errors.append(f"#{pay_id}: {r.get('error')}")
-            continue
-        st = r.get("status")
-        if st == pg.STATUS_CHARGEBACKED:
-            before = await get_payment_full(pay_id)
-            await finalize_refund(context, pay_id)
-            after = await get_payment_full(pay_id)
-            if before and before[7] != "refunded" and after and after[7] == "refunded":
-                chargebacked += 1
-        elif st == pg.STATUS_PARTIALLY_REFUNDED:
-            known = await get_partial_refunded(pay_id)
-            found = _scan_refunded_amount(r.get("raw"))
-            if found is not None and found > known:
-                await set_partial_refunded(pay_id, found)
-                partial_synced += 1
-            elif found is None and known == 0:
-                partial_unknown.append(pay_id)
-    return {"ok": True, "checked": checked, "chargebacked": chargebacked,
-            "partial_synced": partial_synced,
-            "partial_unknown": partial_unknown, "errors": errors}
-
-
-def payment_sync_report_text(res: dict) -> str:
-    """Текст отчёта run_payment_sync() — для ручного запуска и для
-    общей плановой синхронизации."""
-    if not res.get("ok"):
-        return (f"❌ <b>Сверка платежей</b>\n\n"
-                f"<blockquote>{res.get('error')}</blockquote>")
-    lines = ["💳 <b>Сверка платежей с Platega</b>", "",
-             "<blockquote>"
-             f"Проверено оплат: <b>{res['checked']}</b>\n"
-             f"Доведено полных возвратов: <b>{res['chargebacked']}</b>\n"
-             f"Обновлено частичных возвратов: <b>{res['partial_synced']}</b>"
-             "</blockquote>"]
-    if res["partial_unknown"]:
-        shown = ", ".join(f"#{i}" for i in res["partial_unknown"][:10])
-        lines += ["", "⚠️ <b>Частичный возврат есть, а сумма из опроса не видна</b>",
-                  f"<blockquote>{shown}</blockquote>",
-                  "<i>Проверь суммы в кабинете Platega — бот их сам не угадывает.</i>"]
-    if res["errors"]:
-        shown = "\n".join(str(e)[:120] for e in res["errors"][:5])
-        lines += ["", "⚠️ <b>Не сверены</b>", f"<blockquote>{shown}</blockquote>"]
-    return "\n".join(lines)
-
-
-async def handle_payment_sync_run(query, context):
-    """Ручной запуск сверки платежей: та же, что идёт по расписанию."""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text("💳 Сверяю оплаты с Platega…")
-    res = await run_payment_sync(context)
-    await query.edit_message_text(
-        payment_sync_report_text(res), parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 Ещё раз", callback_data="payment_sync"),
-             InlineKeyboardButton("🔄 К синхронизации",
-                                  callback_data="panel_sync_menu")],
-            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
-
-
-# ── Возвраты ─────────────────────────────────────────────────────────────────
-
-async def handle_refund_start(query, payment_id: int):
-    """Проверяет, можно ли вернуть платёж, и спрашивает, что делать со сроком."""
-    import services.platega_api as pg
-    p = await get_payment_full(payment_id)
-    if not p:
-        await query.answer("Платёж не найден", show_alert=True)
-        return
-    (p_id, tg_id, provider, ext_id, amount, period, promo,
-     status, _url, _err, _created, _paid, first_name, username) = p
-    if provider != "platega" or status != "paid" or not ext_id:
-        await query.answer("Возврат доступен только для оплаченных через Platega",
-                           show_alert=True)
-        return
-
-    back = InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️ К платежу", callback_data=f"payment_view:{p_id}")],
-    ])
-    await query.edit_message_text("🔎 Проверяю возможность возврата...")
-    chk = await pg.refund_supported(ext_id)
-    if not chk["ok"]:
-        await query.edit_message_text(
-            f"❌ Не удалось проверить возврат:\n<code>{chk['error']}</code>",
-            parse_mode="HTML", reply_markup=back)
-        return
-    if not chk["supported"]:
-        reason = chk.get("block_reason") or "Platega не сообщила причину"
-        await query.edit_message_text(
-            f"⛔ <b>Возврат недоступен</b>\n\nПричина: <code>{reason}</code>\n\n"
-            "Частая причина — на балансе мерчанта не хватает средств: "
-            "возврат оплачивается с баланса Platega.",
-            parse_mode="HTML", reply_markup=back)
-        return
-
-    lines = [
-        f"💸 <b>Возврат платежа #{p_id}</b>\n",
-        f"👤 {_who(first_name, username, tg_id)}",
-        f"💵 Вернётся клиенту: <b>{amount} ₽</b>",
-    ]
-    if chk.get("deduct_usdt") is not None:
-        lines.append(f"🏦 Спишется с баланса: <b>{chk['deduct_usdt']} USDT</b>")
-    if chk.get("penalty_usdt"):
-        lines.append(f"⚠️ Штраф: <b>{chk['penalty_usdt']} USDT</b>")
-    if period:
-        lines.append(f"\nОплаченный период: <b>{fmt_duration(period)}</b>")
-    lines.append("\nЧто сделать с подпиской?")
-
-    await query.edit_message_text(
-        "\n".join(lines), parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💸 Вернуть и отозвать срок",
-                                  callback_data=f"refund_do:{p_id}:1")],
-            [InlineKeyboardButton("💸 Вернуть, срок оставить",
-                                  callback_data=f"refund_do:{p_id}:0")],
-            [InlineKeyboardButton("❌ Нет", callback_data=f"payment_view:{p_id}"),
-             InlineKeyboardButton("◀️ Назад", callback_data="payments:paid:1")],
-        ]),
-    )
-
-
-async def handle_refund_do(query, context: ContextTypes.DEFAULT_TYPE,
-                           payment_id: int, revoke: bool):
-    import services.platega_api as pg
-    from core.database import mark_refund_pending
-
-    p = await get_payment_full(payment_id)
-    if not p or p[7] != "paid":
-        await query.answer("Платёж уже не в статусе «оплачен»", show_alert=True)
-        return
-
-    back = InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️ К платежу", callback_data=f"payment_view:{payment_id}")],
-    ])
-    await query.edit_message_text("⏳ Отправляю возврат в Platega...")
-    res = await pg.refund(p[3])
-    if not res["ok"]:
-        await query.edit_message_text(
-            f"❌ Возврат не прошёл:\n<code>{res['error']}</code>",
-            parse_mode="HTML", reply_markup=back)
-        return
-
-    # выбор фиксируем сразу: итог может прийти позже статусом CHARGEBACKED,
-    # и довести возврат должна фоновая сверка — даже после перезапуска бота
-    await mark_refund_pending(payment_id, revoke)
-
-    if res["accepted"]:
-        await finalize_refund(context, payment_id, revoke)
-        await query.edit_message_text(
-            "✅ <b>Возврат выполнен</b>\n" +
-            ("Оплаченный срок отозван." if revoke else "Срок подписки оставлен."),
-            parse_mode="HTML", reply_markup=back)
-        return
-
-    msg = res.get("message") or "Возврат в обработке"
-    await query.edit_message_text(
-        f"⏳ <b>Возврат принят в обработку</b>\n\n{msg}\n\n"
-        "Как только Platega его проведёт, бот сам обновит платёж"
-        + (" и отзовёт срок." if revoke else "."),
-        parse_mode="HTML", reply_markup=back)
-
-
-# ── Частичный возврат ─────────────────────────────────────────────────────
-
-async def handle_refund_partial_start(query, context, payment_id: int):
-    """Частичный возврат: проверяет поддержку в Platega и просит сумму.
-
-    В отличие от полного возврата, срок подписки не трогается, а платёж
-    остаётся «оплачен» — возвращается только часть денег. Подтверждённые
-    части суммируются в payments.partial_refunded, чтобы было видно,
-    сколько ещё можно вернуть (Platega и сама не даст превысить остаток:
-    AMOUNT_EXCEEDS_REFUNDABLE).
-    """
-    import services.platega_api as pg
-    from core.database import get_partial_refunded
-    p = await get_payment_full(payment_id)
-    if not p:
-        await query.answer("Платёж не найден", show_alert=True)
-        return
-    (p_id, tg_id, provider, ext_id, amount, period, promo,
-     status, _url, _err, _created, _paid, first_name, username) = p
-    if provider != "platega" or status != "paid" or not ext_id:
-        await query.answer("Частичный возврат доступен только для оплаченных через Platega",
-                           show_alert=True)
-        return
-
-    back = InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️ К платежу", callback_data=f"payment_view:{p_id}")],
-    ])
-    await query.edit_message_text("🔎 Проверяю возможность частичного возврата...")
-    chk = await pg.refund_supported(ext_id)
-    if not chk["ok"]:
-        await query.edit_message_text(
-            f"❌ Не удалось проверить возврат:\n<code>{chk['error']}</code>",
-            parse_mode="HTML", reply_markup=back)
-        return
-    if not chk["supported"]:
-        reason = chk.get("block_reason") or "Platega не сообщила причину"
-        await query.edit_message_text(
-            f"⛔ <b>Возврат недоступен</b>\n\nПричина: <code>{reason}</code>",
-            parse_mode="HTML", reply_markup=back)
-        return
-    if chk.get("partial_supported") is False:
-        await query.edit_message_text(
-            "⛔ <b>Частичный возврат не поддерживается</b>\n\n"
-            "Для этой транзакции Platega разрешает только полный возврат.",
-            parse_mode="HTML", reply_markup=back)
-        return
-
-    partial = await get_partial_refunded(p_id)
-    remaining = amount - partial
-    if remaining <= 0:
-        await query.edit_message_text(
-            "⛔ <b>Возвращать больше нечего</b>\n\n"
-            f"По платежу уже возвращено частями <b>{partial} ₽</b> из <b>{amount} ₽</b>.",
-            parse_mode="HTML", reply_markup=back)
-        return
-
-    from core.states import AWAITING_REFUND_PARTIAL
-    if context is not None:
-        context.user_data["state"] = AWAITING_REFUND_PARTIAL
-        context.user_data["refund_partial_payment"] = p_id
-    lines = [
-        f"💸 <b>Частичный возврат платежа #{p_id}</b>\n",
-        f"👤 {_who(first_name, username, tg_id)}",
-        f"💵 Сумма платежа: <b>{amount} ₽</b>",
-    ]
-    if partial:
-        lines.append(f"↩️ Уже возвращено частями: <b>{partial} ₽</b>")
-    lines += [
-        f"✅ Можно вернуть ещё: <b>{remaining} ₽</b>\n",
-        "Пришли сумму возврата в рублях — целым числом, например <code>500</code>.\n",
-        "<i>Срок подписки при частичном возврате не меняется, платёж "
-        "остаётся «оплачен».</i>",
-    ]
-    await query.edit_message_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=back)
-
-
-async def handle_refund_partial_do(query, context, payment_id: int, amount: int):
-    import services.platega_api as pg
-    from core.database import add_partial_refunded, get_partial_refunded
-    from core.log_channel import send_log
-    from config import ADMIN_ID
-
-    p = await get_payment_full(payment_id)
-    if not p or p[7] != "paid":
-        await query.answer("Платёж уже не в статусе «оплачен»", show_alert=True)
-        return
-    remaining = p[4] - await get_partial_refunded(payment_id)
-    if amount < 1 or amount > remaining:
-        await query.answer(f"Сумма должна быть от 1 до {remaining} ₽",
-                           show_alert=True)
-        return
-
-    back = InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️ К платежу", callback_data=f"payment_view:{payment_id}")],
-    ])
-    await query.edit_message_text("⏳ Отправляю частичный возврат в Platega...")
-    res = await pg.refund_partial(p[3], amount)
-    if not res["ok"]:
-        await query.edit_message_text(
-            f"❌ Частичный возврат не прошёл:\n<code>{res['error']}</code>",
-            parse_mode="HTML", reply_markup=back)
-        return
-
-    if not res["accepted"]:
-        # Platega приняла в ручную обработку: сумма ещё не возвращена,
-        # поэтому в базу её не пишем — засчитается только подтверждённый возврат
-        msg = res.get("message") or "Возврат в обработке"
-        await query.edit_message_text(
-            f"⏳ <b>Частичный возврат принят в обработку</b>\n\n{msg}\n\n"
-            "Platega проведёт его вручную. Пока он не подтверждён, бот "
-            "сумму не засчитывает: проверь итог в кабинете Platega.",
-            parse_mode="HTML", reply_markup=back)
-        return
-
-    await add_partial_refunded(payment_id, amount)
-    total_partial = await get_partial_refunded(payment_id)
-    (p_id, tg_id, _prov, _ext, full, _period, _promo,
-     _status, _url, _err, _created, _paid, first_name, username) = p
-    admin_text = (
-        f"↩️ <b>Частичный возврат по платежу #{p_id}</b>\n\n"
-        f"👤 {_who(first_name, username, tg_id)} (<code>{tg_id}</code>)\n"
-        f"💵 Возвращено: <b>{amount} ₽</b> из <b>{full} ₽</b> "
-        f"(всего частями: <b>{total_partial} ₽</b>)\n"
-        "📅 Срок подписки не менялся"
-    )
-    try:
-        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, parse_mode="HTML")
-    except Exception:
-        pass
-    await send_log(context.bot, admin_text)
-    user_text = (
-        f"↩️ <b>Частичный возврат {amount} ₽ оформлен.</b>\n\n"
-        "Деньги вернутся плательщику — срок зачисления зависит от банка.\n"
-        "Подписка продолжает действовать как раньше."
-    )
-    try:
-        await context.bot.send_message(chat_id=tg_id, text=user_text, parse_mode="HTML")
-    except Exception:
-        pass
-    await query.edit_message_text(
-        f"✅ <b>Частично возвращено {amount} ₽</b>\n\n"
-        f"Всего возвращено частями: <b>{total_partial} ₽</b> из <b>{full} ₽</b>\n"
-        "Срок подписки не менялся.",
-        parse_mode="HTML", reply_markup=back)
 
 
 async def finalize_refund(context, payment_id: int, revoke: bool | None = None) -> None:

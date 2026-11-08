@@ -109,23 +109,24 @@ async def post_init(app: Application):
 
         app.job_queue.run_repeating(_healthcheck_job, interval=300, first=60)
 
-        async def _platega_poll_job(ctx):
+        async def _anore_poll_job(ctx):
             """Опрашивает выставленные счета и засчитывает оплату.
 
-            Колбэки Platega требуют публичный HTTPS с валидным сертификатом,
-            поэтому статус выясняем опросом — не зависит от занятости 443.
+            Вебхук anore обычно подтверждает оплату мгновенно, а опрос —
+            страховка, если вебхук не дойдёт: тот же счёт не засчитается
+            дважды, потому что подтверждение ставит статус до начисления.
             """
-            import services.platega_api as pg
+            import services.anore_api as an
             from core.database import (
                 get_pending_payments, set_payment_status, expire_stale_payments,
             )
-            if not pg.is_configured():
+            if not an.is_configured():
                 return
 
-            # счёт Platega живёт 30 минут — дальше опрашивать нечего
+            # счёт anore живёт ограниченное время — дальше опрашивать нечего
             ttl = int(load_config().get("invoice_ttl_minutes", 60) or 60)
             await expire_stale_payments(ttl)
-            pending = await get_pending_payments("platega", limit=40)
+            pending = await get_pending_payments("anore", limit=40)
             if not pending:
                 return
 
@@ -133,135 +134,27 @@ async def post_init(app: Application):
             # растянуться дольше, чем интервал самой задачи
             import asyncio
             statuses = await asyncio.gather(
-                *[pg.get_status(p[3]) for p in pending if p[3]],
+                *[an.get_status(p[3]) for p in pending if p[3]],
                 return_exceptions=True,
             )
 
-            from paidsub.handlers import (
-                apply_paid_payment, apply_devices_payment, apply_gift_payment,
-            )
+            from handlers.payments import confirm_provider_payment
             for p, r in zip([p for p in pending if p[3]], statuses):
-                pay_id, tg_id, amount, period, promo = p[0], p[1], p[4], p[5], p[6]
-                # счёт бывает за срок и за докуп устройств
-                kind = p[8] if len(p) > 8 else "period"
-                extra = p[9] if len(p) > 9 else 0
-                # получатель подарка: счёт оплатил один человек, а подписка
-                # открывается у другого
-                gift_tg = p[10] if len(p) > 10 else None
                 if isinstance(r, Exception):
                     continue
                 if not r.get("ok"):
                     if r.get("not_found"):
-                        await set_payment_status(pay_id, "error", "транзакция не найдена")
+                        await set_payment_status(p[0], "error", "платёж не найден")
                     continue
-
                 status = r.get("status")
-                if status == pg.STATUS_CONFIRMED:
-                    # статус ставим до начисления: если начисление упадёт,
-                    # повторный проход не выдаст второй период за один платёж
-                    await set_payment_status(pay_id, "paid")
-                    try:
-                        if kind == "devices":
-                            res = await apply_devices_payment(tg_id, extra, ctx, amount)
-                        elif gift_tg:
-                            res = await apply_gift_payment(
-                                gift_tg, tg_id, amount, ctx, promo_code=promo,
-                                source="Platega", period_seconds=period,
-                            )
-                        else:
-                            res = await apply_paid_payment(
-                                tg_id, amount, ctx, promo_code=promo,
-                                source="Platega", period_seconds=period,
-                            )
-                            # в счёте за срок ехал выбор устройств на новый
-                            # период: ставим ровно столько, сколько взяли.
-                            # Ноль — человек от них отказался, и это не ошибка
-                            if res.get("ok") and kind == "period_dev":
-                                dev = await apply_devices_payment(
-                                    tg_id, extra, ctx, 0, mode="set")
-                                if not dev.get("ok"):
-                                    # срок начислен, слоты нет — молчать нельзя,
-                                    # человек за них заплатил
-                                    await set_payment_status(
-                                        pay_id, "paid",
-                                        f"устройства не начислены: {dev.get('error')}")
-                                    from config import ADMIN_ID
-                                    await ctx.bot.send_message(
-                                        chat_id=ADMIN_ID,
-                                        text=(
-                                            "⚠️ <b>Срок продлён, устройства не применены</b>\n\n"
-                                            f"👤 <code>{tg_id}</code> · выбрано {extra} устр.\n"
-                                            f"<code>{dev.get('error')}</code>\n\n"
-                                            "Добавь слоты вручную."
-                                        ),
-                                        parse_mode="HTML",
-                                    )
-                        if not res.get("ok"):
-                            await set_payment_status(pay_id, "paid", res.get("error"))
-                            from config import ADMIN_ID
-                            gift_line = (f"🎁 Подарок для <code>{gift_tg}</code>\n"
-                                         if gift_tg else "")
-                            tail = ("Выдай подписку получателю вручную."
-                                    if gift_tg else "Продли подписку вручную.")
-                            await ctx.bot.send_message(
-                                chat_id=ADMIN_ID,
-                                text=(
-                                    "⚠️ <b>Оплата получена, но не засчитана</b>\n\n"
-                                    f"👤 <code>{tg_id}</code> · {amount} ₽\n"
-                                    f"{gift_line}"
-                                    f"<code>{res.get('error')}</code>\n\n"
-                                    f"{tail}"
-                                ),
-                                parse_mode="HTML",
-                            )
-                    except Exception as e:
-                        await set_payment_status(pay_id, "paid", str(e)[:120])
-                elif status == pg.STATUS_CANCELED:
-                    await set_payment_status(pay_id, "canceled")
-                elif status == pg.STATUS_CHARGEBACKED:
-                    # вернули раньше, чем бот увидел оплату — срок не начислялся
-                    await set_payment_status(pay_id, "refunded")
+                if status == an.STATUS_PAID:
+                    await confirm_provider_payment(ctx.bot, p)
+                elif status == an.STATUS_EXPIRED:
+                    await set_payment_status(p[0], "expired")
 
         poll_every = int(load_config().get("invoice_poll_seconds", 60) or 60)
-        app.job_queue.run_repeating(_platega_poll_job, interval=poll_every, first=30)
+        app.job_queue.run_repeating(_anore_poll_job, interval=poll_every, first=30)
 
-        async def _refund_sync_job(ctx):
-            """Замечает возвраты, сделанные в личном кабинете Platega.
-
-            Сам бот о них не узнаёт — только перечитав статус оплаченной
-            транзакции: при возврате Platega переводит её в CHARGEBACKED.
-            Здесь же доводятся возвраты из бота, которые Platega проводила вручную.
-            """
-            import asyncio
-            import services.platega_api as pg
-            from core.database import get_refund_watchlist
-            if not pg.is_configured():
-                return
-            days = int(load_config().get("refund_watch_days", 30) or 30)
-            watch = await get_refund_watchlist(days=days, limit=100)
-            if not watch:
-                return
-
-            # пачками по 10, чтобы не бить в API сотней запросов разом
-            results = []
-            for i in range(0, len(watch), 10):
-                chunk = watch[i:i + 10]
-                results += await asyncio.gather(
-                    *[pg.get_status(w[2]) for w in chunk], return_exceptions=True
-                )
-
-            from handlers.payments import finalize_refund
-            for w, r in zip(watch, results):
-                if isinstance(r, Exception) or not r.get("ok"):
-                    continue
-                if r.get("status") == pg.STATUS_CHARGEBACKED:
-                    try:
-                        await finalize_refund(ctx, w[0])
-                    except Exception:
-                        pass
-
-        refund_every = int(load_config().get("refund_sync_minutes", 30) or 30) * 60
-        app.job_queue.run_repeating(_refund_sync_job, interval=refund_every, first=120)
 
         async def _recovered_job(ctx):
             """После сбоя сообщает, что бот снова в строю.

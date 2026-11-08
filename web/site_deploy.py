@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import base64
 import os
 from datetime import datetime
 from html import escape
@@ -522,7 +523,7 @@ CABINET_PAGE = r"""<!doctype html>
    refund_pending: {text: "Возврат в обработке", kind: "warn"}
  };
  function payProvider(raw) {
-   var map = {platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
+   var map = {anore: "Anore", platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
    return map[String(raw).toLowerCase()] || String(raw);
  }
  // "2026-10-20 10:00" -> "20.10.2026 · 10:00"
@@ -888,8 +889,8 @@ CABINET_PAGE = r"""<!doctype html>
  }
 
  // Продление: тарифы, счёт, ожидание подтверждения. Подтверждение
- // приходит опросом: бот сам спрашивает Platega раз в минуту, вебхуков нет,
- // поэтому страница опрашивает статус счёта каждые 10 секунд, пока ждёт.
+ // приходит вебхуком anore, а опрос — страховка: страница опрашивает
+ // статус счёта каждые 10 секунд, пока ждёт.
  var renewTimer = null;
  var renewPayUrl = "";
  var pendingPayUrl = "";
@@ -936,7 +937,7 @@ CABINET_PAGE = r"""<!doctype html>
                '<button class="btn btn-ghost" type="button" onclick="pollPayment(' +
                d.pending.id + ', 90)">Проверить оплату</button></div>';
      }
-     html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через Platega.</p>';
+     html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через Anore.</p>';
      d.tariffs.forEach(function (t) {
        html += '<button class="btn btn-ghost renew-tariff" type="button" style="margin-top:8px" onclick="renewPay(' +
                t.id + ')">' + esc(t.period) + ' — <b class="rt-price">' +
@@ -1664,7 +1665,13 @@ async def build_current(bot_username: str) -> tuple:
     from web.site_page import LOGO_URL, build_page
     cfg = load_config()
     og_bytes = _asset("og.webp")
-    logo_bytes = _asset(LOGO_NAME)
+    # /logo.png на сервере — новый логотип (тот же base64, что в шапке
+    # сайта): его же можно вставить в настройки платёжной формы anore.
+    # assets/logo.png — старый логотип, его сюда больше не кладём.
+    try:
+        logo_bytes = base64.b64decode(LOGO_URL.split(",", 1)[1])
+    except Exception:
+        logo_bytes = _asset(LOGO_NAME)
     # кабинет лежит рядом со страницей — ссылка относительная, без .html
     cabinet = "cabinet" if cfg.get("webapi_public") else ""
     page = build_page(
