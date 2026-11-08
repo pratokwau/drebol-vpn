@@ -657,8 +657,8 @@ CABINET_PAGE = r"""<!doctype html>
    out.push('<div data-sec="sub"><div class="card">' + title("key", "Подключение") +
             '<p class="card-sub">Добавьте подписку в приложение одним нажатием.</p>' +
             '<div class="pair">' +
-              '<a class="btn btn-main" href="happ://add/' + encodeURI(s.url) + '">Добавить в Happ</a>' +
-              '<a class="btn btn-ghost" href="incy://add/' + encodeURI(s.url) + '">Добавить в INCY</a>' +
+              '<a class="btn btn-main" target="_blank" rel="noopener" href="' + esc(location.origin + "/add.html?app=happ&u=" + encodeURIComponent(s.url)) + '" onclick="return openAppLink(this)">Добавить в Happ</a>' +
+              '<a class="btn btn-ghost" target="_blank" rel="noopener" href="' + esc(location.origin + "/add.html?app=incy&u=" + encodeURIComponent(s.url)) + '" onclick="return openAppLink(this)">Добавить в INCY</a>' +
             "</div>" +
             '<div class="link"><code id="suburl">' + esc(s.url) + "</code>" +
             '<button class="copy" type="button" data-copy="' + esc(s.url) + '">Скопировать</button></div>' +
@@ -897,6 +897,15 @@ CABINET_PAGE = r"""<!doctype html>
  function openPay(url) {
    if (tg && tg.openLink) { tg.openLink(url); }
    else { window.open(url, "_blank"); }
+ }
+ // Кнопки «Добавить в Happ/INCY» в мини-приложении не работали: WebView
+ // Telegram проглатывает ссылки happ:// и incy:// — тап никуда не вёл.
+ // Поэтому ведём через страницу-переходник /add.html — ту же, что в кнопках
+ // бота: она откроется в браузере и сама уведёт в приложение, а если его
+ // нет — покажет кнопку App Store.
+ function openAppLink(el) {
+   if (tg && tg.openLink) { tg.openLink(el.href); return false; }
+   return true;
  }
  function loadRenew() {
    stopRenewPoll();
