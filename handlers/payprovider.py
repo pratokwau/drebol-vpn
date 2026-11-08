@@ -58,7 +58,10 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
              "<i>Бот сам выставляет счёт и сам засчитывает оплату — "
              "подтверждать вручную не нужно.</i>",
              "<i>Оплата подтверждается вебхуком мгновенно, опрос — "
-             "страховка, если вебхук не дойдёт.</i>"]
+             "страховка, если вебхук не дойдёт.</i>",
+             "<i>Сверка раз в сутки сравнивает счета anore с базой бота "
+             "и сообщает о расхождениях — пропущенные начисления и "
+             "подозрительные засчитывания.</i>"]
     if not ready:
         lines.append("\n⚠️ <b>Не хватает данных</b> — заполни ключ и id магазина. "
                      "Пока их нет, клиенты не смогут оплатить подписку.")
@@ -76,6 +79,7 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
          InlineKeyboardButton("💸 Выплаты", callback_data="anore_payouts")],
         [InlineKeyboardButton("🧾 Счета anore", callback_data="anore_payments"),
          InlineKeyboardButton("🏬 Настройки кассы", callback_data="anore_shop")],
+        [InlineKeyboardButton("🔍 Сверка Anore", callback_data="anore_reconcile")],
         [InlineKeyboardButton("◀️ К настройкам", callback_data="paid_sub_presets")],
     ]
     await query.edit_message_text(
@@ -308,6 +312,192 @@ async def handle_anore_payments(query, context: ContextTypes.DEFAULT_TYPE):
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔁 Обновить", callback_data="anore_payments"),
+             InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+        ]),
+    )
+
+
+async def reconcile_anore(limit: int = 50) -> dict:
+    """Сверяет последние счета anore с базой бота.
+
+    Проверяет каждый счёт из anore по базе:
+    • anore «paid», бот «pending» — пропущенное начисление (missed): деньги
+      пришли, а подписка не продлена. Засчитывается кнопкой на экране сверки;
+      подтверждение атомарно, дважды не начислится.
+    • anore «paid», бот «paid» — в норме; по журналу начислений проверяем,
+      что срок записан ровно тот, что в счёте (ledger_bad). Отсутствие
+      записи в журнале — не ошибка: журнал ведётся с этого обновления,
+      старые начисления в него не попали.
+    • бот «paid», а anore оплату не подтверждает — фантом (phantom):
+      подписка засчитана без оплаты.
+    • счёт есть в anore, а в базе бота его нет — чужой (unknown): создан
+      не ботом, например, вручную в кабинете anore.
+
+    Возвращает отчёт: {"ok", "checked", "ok_count", "missed", "unknown",
+    "phantom", "ledger_bad"}. Списки — короткие словари для экрана.
+    """
+    import services.anore_api as an
+    from core.database import (
+        count_payment_credits, get_payment_by_external, get_payment_credit,
+    )
+    r = await an.list_payments(limit=limit)
+    if not r.get("ok"):
+        return {"ok": False, "error": r.get("error")}
+    report: dict = {"ok": True, "checked": 0, "ok_count": 0,
+                    "missed": [], "unknown": [], "phantom": [], "ledger_bad": []}
+    for pay in r.get("payments", []):
+        ext = str(pay.get("id") or "")
+        an_status = (pay.get("status") or "").lower()
+        amount = pay.get("rubAmount") or pay.get("amount")
+        report["checked"] += 1
+        row = await get_payment_by_external(ext) if ext else None
+        if not row:
+            report["unknown"].append(
+                {"external_id": ext, "amount": amount, "anore_status": an_status})
+            continue
+        # строка get_payment_by_external: статус в конце, индекс 11
+        bot_status = (row[11] or "").lower() if len(row) > 11 else ""
+        tg_id = row[1]
+        if an_status == "paid" and bot_status == "pending":
+            report["missed"].append(
+                {"external_id": ext, "amount": amount, "tg_id": tg_id})
+        elif an_status == "paid" and bot_status == "paid":
+            bad = None
+            if await count_payment_credits(row[0]) > 1:
+                bad = "два начисления за один счёт"
+            else:
+                credit = await get_payment_credit(row[0])
+                period = row[5]
+                if credit and period is not None and credit[3] != int(period):
+                    bad = (f"в журнале {credit[3]} с, а в счёте {int(period)} с")
+            if bad:
+                report["ledger_bad"].append(
+                    {"external_id": ext, "amount": amount, "tg_id": tg_id,
+                     "reason": bad})
+            else:
+                report["ok_count"] += 1
+        elif bot_status == "paid" and an_status not in ("paid",):
+            report["phantom"].append(
+                {"external_id": ext, "amount": amount, "tg_id": tg_id,
+                 "anore_status": an_status})
+        else:
+            report["ok_count"] += 1
+    return report
+
+
+def _reconcile_lines(rep: dict) -> list[str]:
+    """Текст отчёта сверки для экрана и для фонового алерта."""
+    lines = ["🔍 <b>Сверка Anore</b>",
+             f"Проверено счетов: <b>{rep['checked']}</b> · "
+             f"в порядке: <b>{rep['ok_count']}</b>", ""]
+    if not rep["checked"]:
+        lines.append("<i>Счетов в anore пока нет.</i>")
+        return lines
+    bad = (len(rep["missed"]) + len(rep["unknown"]) + len(rep["phantom"])
+           + len(rep["ledger_bad"]))
+    if not bad:
+        lines.append("✅ <b>Расхождений нет</b> — все оплаченные счета "
+                     "засчитаны по одному разу.")
+        return lines
+    if rep["missed"]:
+        lines.append(f"⚠️ <b>Пропущено начислений: {len(rep['missed'])}</b> — "
+                     "оплачено в anore, а бот не засчитал:")
+        for m in rep["missed"][:10]:
+            lines.append(f"• {m['amount']} ₽ · <code>{m['tg_id']}</code> · "
+                         f"<code>{m['external_id'][:8]}…</code>")
+        lines.append("")
+    if rep["phantom"]:
+        lines.append(f"🚨 <b>Подозрительные засчитывания: {len(rep['phantom'])}</b> — "
+                     "бот засчитал, а anore оплату не подтверждает:")
+        for m in rep["phantom"][:10]:
+            lines.append(f"• {m['amount']} ₽ · <code>{m['tg_id']}</code> · "
+                         f"anore: {m['anore_status']}")
+        lines.append("")
+    if rep["ledger_bad"]:
+        lines.append(f"🚨 <b>Несоответствия в журнале: {len(rep['ledger_bad'])}</b>:")
+        for m in rep["ledger_bad"][:10]:
+            lines.append(f"• {m['amount']} ₽ · <code>{m['tg_id']}</code> · {m['reason']}")
+        lines.append("")
+    if rep["unknown"]:
+        lines.append(f"ℹ️ <b>Чужие счета anore: {len(rep['unknown'])}</b> — "
+                     "в базе бота их нет (созданы не ботом):")
+        for m in rep["unknown"][:10]:
+            lines.append(f"• {m['amount']} ₽ · anore: {m['anore_status']} · "
+                         f"<code>{m['external_id'][:8]}…</code>")
+    return lines
+
+
+async def handle_anore_reconcile(query, context: ContextTypes.DEFAULT_TYPE):
+    """Экран сверки: отчёт + кнопка засчитать пропущенные начисления."""
+    await query.edit_message_text("🔍 Сверяю счета anore с базой…")
+    rep = await reconcile_anore(limit=50)
+    if not rep.get("ok"):
+        await query.edit_message_text(
+            _anore_error_text(rep.get("error") or "не удалось получить счета"),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔁 Ещё раз", callback_data="anore_reconcile"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            ]),
+        )
+        return
+    context.user_data["reconcile_missed"] = [
+        m["external_id"] for m in rep["missed"]]
+    rows = []
+    if rep["missed"]:
+        rows.append([InlineKeyboardButton(
+            f"✅ Засчитать пропущенные ({len(rep['missed'])})",
+            callback_data="anore_reconcile_fix")])
+    rows.append([InlineKeyboardButton("🔁 Обновить", callback_data="anore_reconcile"),
+                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")])
+    await query.edit_message_text(
+        "\n".join(_reconcile_lines(rep)), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+
+
+async def handle_anore_reconcile_fix(query, context: ContextTypes.DEFAULT_TYPE):
+    """Засчитывает пропущенные начисления из сверки — по одному за раз.
+
+    Каждое подтверждение проходит атомарный claim: если опрос или вебхук
+    уже засчитали счёт, повторного начисления не будет.
+    """
+    from core.database import get_payment_by_external
+    from handlers.payments import confirm_provider_payment
+    exts = list(context.user_data.get("reconcile_missed") or [])
+    if not exts:
+        await query.edit_message_text(
+            "Пропущенных начислений нет — засчитывать нечего.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ Назад", callback_data="anore_reconcile")],
+            ]),
+        )
+        return
+    await query.edit_message_text(
+        f"✅ Засчитываю пропущенные ({len(exts)})…")
+    done, already, failed = 0, 0, 0
+    for ext in exts:
+        row = await get_payment_by_external(ext)
+        if not row:
+            failed += 1
+            continue
+        res = await confirm_provider_payment(query.bot, row)
+        if res.get("ok"):
+            done += 1
+        elif res.get("already"):
+            already += 1
+        else:
+            failed += 1
+    context.user_data.pop("reconcile_missed", None)
+    lines = [f"✅ Засчитано: <b>{done}</b>"]
+    if already:
+        lines.append(f"Уже были засчитаны: <b>{already}</b>")
+    if failed:
+        lines.append(f"⚠️ Не засчитались: <b>{failed}</b> — проверь вручную.")
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔍 К сверке", callback_data="anore_reconcile"),
              InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
         ]),
     )

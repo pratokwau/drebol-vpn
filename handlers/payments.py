@@ -171,14 +171,18 @@ async def confirm_provider_payment(bot, p) -> dict:
 
     p — строка get_pending_payments / get_payment_by_external:
     (id, tg_id, provider, external_id, amount, period, promo,
-    created_at, kind, extra, gift_tg_id). Общая для опроса и вебхука:
-    кто первым увидел оплату, тот и начисляет; повторный вызов ничего
-    не начислит дважды, потому что статус ставится до начисления.
+    created_at, kind, extra, gift_tg_id). Общая для опроса и вебхука.
+
+    Двойное начисление исключено атомарным claim: кто первым перевёл
+    счёт из pending в paid, тот и начисляет; второй подтверждающий
+    (вебхук и опрос одновременно) получает {"already": True} и не трогает
+    ни подписку, ни журнал. Раньше статус ставился безусловным UPDATE —
+    опрос, уже взявший счёт в список pending, подтверждал его второй раз.
     """
     from types import SimpleNamespace
 
     from config import ADMIN_ID
-    from core.database import set_payment_status
+    from core.database import claim_payment_paid, record_payment_credit, set_payment_status
     from paidsub.handlers import (
         apply_paid_payment, apply_devices_payment, apply_gift_payment,
     )
@@ -188,9 +192,9 @@ async def confirm_provider_payment(bot, p) -> dict:
     extra = p[9] if len(p) > 9 else 0
     gift_tg = p[10] if len(p) > 10 else None
 
-    # статус ставим до начисления: если начисление упадёт, повторный
-    # проход не выдаст второй период за один платёж
-    await set_payment_status(pay_id, "paid")
+    # атомарный захват счёта: второй подтверждающий сюда не пройдёт
+    if not await claim_payment_paid(pay_id):
+        return {"ok": False, "already": True}
     # apply_* ждут context с .bot — бот напрямую им не подходит
     ctx = SimpleNamespace(bot=bot)
     try:
@@ -248,6 +252,9 @@ async def confirm_provider_payment(bot, p) -> dict:
     except Exception as e:
         await set_payment_status(pay_id, "paid", str(e)[:120])
         return {"ok": False, "error": str(e)[:120]}
+    # начисление прошло — пишем в журнал: один счёт, одна запись.
+    # Если запись уже есть (не должно случиться после claim) — молча пропускаем.
+    await record_payment_credit(pay_id, tg_id, amount, period or 0)
     return {"ok": True}
 
 

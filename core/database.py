@@ -356,6 +356,19 @@ async def init_db():
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external "
             "ON payments(provider, external_id)"
         )
+        # Журнал начислений по оплаченным счетам: один счёт — одна запись.
+        # Первичный ключ по payment_id не даёт записать второе начисление
+        # за тот же платёж, а сверка по нему проверяет, что каждый оплаченный
+        # счёт начислен ровно один раз и на тот срок, что в счёте.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS payment_credits (
+                payment_id INTEGER PRIMARY KEY,
+                tg_id INTEGER NOT NULL,
+                amount INTEGER NOT NULL,
+                seconds INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         # Докуп устройств: счёт бывает за срок ('period') и за слоты ('devices'),
         # extra — сколько устройств куплено. Слоты живут вместе с подпиской.
         for table, col, decl in (
@@ -976,12 +989,13 @@ async def get_payment_by_external(external_id: str) -> tuple | None:
     """Счёт по id из платёжной системы — по нему ищет вебхук.
 
     Колонки — как у get_pending_payments, чтобы найденную строку можно
-    было сразу отдать в подтверждение оплаты.
+    было сразу отдать в подтверждение оплаты; статус в конце (индекс 11) —
+    для сверки, подтверждение по индексам не трогает.
     """
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
             SELECT id, tg_id, provider, external_id, amount, period_seconds,
-                   promo_code, created_at, kind, extra, gift_tg_id
+                   promo_code, created_at, kind, extra, gift_tg_id, status
             FROM payments WHERE external_id = ?
         """, (external_id,)) as cur:
             return await cur.fetchone()
@@ -1013,6 +1027,61 @@ async def set_payment_status(payment_id: int, status: str, error: str | None = N
                 (status, error, payment_id)
             )
         await db.commit()
+
+
+async def claim_payment_paid(payment_id: int) -> bool:
+    """Атомарно переводит счёт в «оплачен». True — если перевёл именно этот вызов.
+
+    Один SQL-оператор: кто первым перевёл счёт из pending в paid, тот и
+    начисляет. Второй подтверждающий (вебхук + опрос одновременно) получает
+    False и ничего не начисляет — двойное продление за один платёж
+    невозможно. Зеркало claim_refund.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "UPDATE payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP "
+            "WHERE id = ? AND status = 'pending'", (payment_id,),
+        )
+        await db.commit()
+        return (cur.rowcount or 0) > 0
+
+
+async def record_payment_credit(payment_id: int, tg_id: int, amount: int,
+                               seconds: int) -> bool:
+    """Пишет начисление в журнал. True — если записал, False — уже есть.
+
+    INSERT OR IGNORE + первичный ключ по payment_id: второе начисление за
+    тот же счёт не запишется никогда.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO payment_credits "
+            "(payment_id, tg_id, amount, seconds) VALUES (?, ?, ?, ?)",
+            (payment_id, tg_id, amount, int(seconds or 0)),
+        )
+        await db.commit()
+        return (cur.rowcount or 0) > 0
+
+
+async def get_payment_credit(payment_id: int) -> tuple | None:
+    """Запись журнала начислений по счёту: (payment_id, tg_id, amount, seconds)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT payment_id, tg_id, amount, seconds FROM payment_credits "
+            "WHERE payment_id = ?", (payment_id,),
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def count_payment_credits(payment_id: int) -> int:
+    """Сколько начислений записано за счёт — в норме 0 или 1."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM payment_credits WHERE payment_id = ?",
+            (payment_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
 
 
 async def expire_stale_payments(minutes: int = 60) -> int:

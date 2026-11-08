@@ -100,6 +100,7 @@ from handlers.payprovider import (
     handle_anore_balance, handle_anore_payments, handle_anore_payouts,
     handle_anore_payout_new, handle_anore_payout_method,
     handle_anore_payout_do, handle_anore_shop,
+    handle_anore_reconcile, handle_anore_reconcile_fix,
 )
 from handlers.broadcast import (
     handle_broadcast_start, handle_broadcast_segment,
@@ -764,6 +765,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_anore_payout_do(query, context)
     elif data == "anore_shop":
         await handle_anore_shop(query, context)
+    elif data == "anore_reconcile":
+        await handle_anore_reconcile(query, context)
+    elif data == "anore_reconcile_fix":
+        await handle_anore_reconcile_fix(query, context)
     elif data == "paid_sub_presets":
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":

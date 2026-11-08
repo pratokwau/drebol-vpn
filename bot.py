@@ -113,8 +113,9 @@ async def post_init(app: Application):
             """Опрашивает выставленные счета и засчитывает оплату.
 
             Вебхук anore обычно подтверждает оплату мгновенно, а опрос —
-            страховка, если вебхук не дойдёт: тот же счёт не засчитается
-            дважды, потому что подтверждение ставит статус до начисления.
+            страховка, если вебхук не дойдёт. Двойное начисление исключено:
+            подтверждение проходит атомарный claim — кто первым перевёл
+            счёт из pending в paid, тот и начисляет.
             """
             import services.anore_api as an
             from core.database import (
@@ -156,6 +157,45 @@ async def post_init(app: Application):
 
         poll_every = int(load_config().get("invoice_poll_seconds", 60) or 60)
         app.job_queue.run_repeating(_anore_poll_job, interval=poll_every, first=30)
+
+        async def _anore_reconcile_job(ctx):
+            """Раз в сутки сверяет счета anore с базой бота.
+
+            Молчит, если всё в порядке. О расхождениях (пропущенные
+            начисления, подозрительные засчитывания, чужие счета) сообщает
+            админу — засчитать пропущенные можно кнопкой на экране сверки.
+            Ошибка API — не повод будить админа, просто пропускаем прогон.
+            """
+            import services.anore_api as an
+            if not an.is_configured():
+                return
+            try:
+                from handlers.payprovider import (
+                    _reconcile_lines, reconcile_anore,
+                )
+                rep = await reconcile_anore(limit=50)
+            except Exception:
+                return
+            if not rep.get("ok"):
+                return
+            bad = (len(rep["missed"]) + len(rep["unknown"])
+                   + len(rep["phantom"]) + len(rep["ledger_bad"]))
+            if not bad:
+                return
+            from config import ADMIN_ID
+            try:
+                await ctx.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text="\n".join(_reconcile_lines(rep)) + "\n\n"
+                         "Засчитать пропущенные: админка → Платёжная система "
+                         "→ 🔍 Сверка Anore.",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+        app.job_queue.run_repeating(_anore_reconcile_job,
+                                    interval=24 * 3600, first=3600)
 
 
         async def _recovered_job(ctx):
