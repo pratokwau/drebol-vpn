@@ -36,6 +36,18 @@ _TG = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
        'l.4-5 9.1-8.2c.4-.4-.1-.6-.6-.2L6.2 12.9l-4.8-1.5c-1-.3-1-1 .2-1.5l18.9-7.3'
        'c.9-.3 1.6.2 1.4 1.7z"/></svg>')
 
+_TT = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
+       '<path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 '
+       '1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93'
+       '-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21'
+       '-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49'
+       '.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44'
+       '-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61'
+       '.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06'
+       '.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>')
+
+TIKTOK_URL = "https://www.tiktok.com/@drebolvpn"
+
 
 def _icon(paths: str) -> str:
     return ('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -697,6 +709,15 @@ body, main, header, footer { position: relative; z-index: 1; }
 .foot nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
 .foot nav a { font-size: 14px; color: var(--muted); transition: color .2s ease; }
 .foot nav a:hover { color: #fff; }
+.socials { display: flex; gap: 10px; }
+.socials a {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 10px 18px; border: 1px solid var(--line-strong); border-radius: 999px;
+  font-size: 15px; font-weight: 600; color: var(--ink); text-decoration: none;
+  transition: border-color .2s ease, background .2s ease, transform .2s ease;
+}
+.socials a:hover { border-color: rgba(255,255,255,.35); background: rgba(255,255,255,.06); transform: translateY(-1px); }
+.socials svg { width: 18px; height: 18px; }
 .copy { font-size: 13px; color: var(--soft); }
 
 /* ── Появление при скролле ──────────────────────────────────────────── */
@@ -961,6 +982,13 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
         docs.append(f'<a href="{escape(channel_url)}">Наш канал</a>')
     docs_html = f'<nav aria-label="Документы">{"".join(docs)}</nav>' if docs else ""
 
+    socials = ['<div class="socials">']
+    if channel_url:
+        socials.append(f'<a href="{escape(channel_url)}" target="_blank" rel="noopener">{_TG}<span>Telegram</span></a>')
+    socials.append(f'<a href="{TIKTOK_URL}" target="_blank" rel="noopener">{_TT}<span>TikTok</span></a>')
+    socials.append('</div>')
+    socials_html = "".join(socials)
+
     year = "2026"
     og_meta = (f'<meta property="og:image" content="{escape(poster_file)}">'
                if poster_file else "")
@@ -1166,6 +1194,7 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
   <div class="wrap">
     {foot_logo}
     {docs_html}
+    {socials_html}
     <span class="copy">{year} {name}</span>
   </div>
 </footer>
