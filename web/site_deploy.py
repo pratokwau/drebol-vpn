@@ -92,9 +92,9 @@ CABINET_PAGE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#05070c">
+<meta name="theme-color" content="#020202">
 <title>Личный кабинет · Drebol VPN</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%234f8cff' stroke-width='7'%3E%3Ccircle cx='50' cy='50' r='40'/%3E%3Cellipse cx='50' cy='50' rx='40' ry='13'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%232ea8ff' stroke-width='7'%3E%3Ccircle cx='50' cy='50' r='40'/%3E%3Cellipse cx='50' cy='50' rx='40' ry='13'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -102,11 +102,11 @@ CABINET_PAGE = r"""<!doctype html>
 <style>
  :root {
    color-scheme: dark;
-   --bg: #05070c; --ink: #ffffff;
+   --bg: #020202; --ink: #f4f3ec;
    --muted: rgba(255,255,255,.72); --soft: rgba(255,255,255,.48);
    --line: rgba(255,255,255,.08); --line-strong: rgba(255,255,255,.16);
-   --card: rgba(13,18,30,.70); --card-hover: rgba(20,28,48,.85);
-   --accent: #4f8cff; --accent-soft: rgba(79,140,255,.14);
+   --card: rgba(11,11,13,.78); --card-hover: rgba(16,16,19,.9);
+   --accent: #2ea8ff; --accent-soft: rgba(46,168,255,.14);
    --ok: #38ef7d; --warn: #fbbf24; --bad: #f87171;
  }
  * { box-sizing: border-box; }
@@ -118,31 +118,32 @@ CABINET_PAGE = r"""<!doctype html>
  h1, h2, p { margin:0; }
 
  .bg { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
+ .orbit { position:absolute; left:50%; top:-38vmax; border-radius:50%;
+   border:1px solid rgba(46,168,255,.13); animation:spin 90s linear infinite; will-change:transform; }
+ .orbit i { position:absolute; left:50%; top:-5px; width:10px; height:10px; margin-left:-5px;
+   border-radius:50%; background:#2ea8ff;
+   box-shadow:0 0 18px 4px rgba(46,168,255,.45), 0 0 46px 12px rgba(46,168,255,.25); }
+ .orbit-a { width:110vmax; height:110vmax; margin-left:-55vmax; }
+ .orbit-b { width:78vmax; height:78vmax; margin-left:-39vmax; top:-26vmax;
+   border-color:rgba(46,168,255,.09); animation-duration:64s; animation-direction:reverse; }
+ .orbit-b i { width:7px; height:7px; margin-left:-3.5px; top:-3.5px; }
+ @keyframes spin { to { transform:rotate(360deg); } }
  .aurora { position:absolute; inset:-30%; filter:blur(80px); opacity:.85; }
  .aurora span { position:absolute; border-radius:50%; animation:floatOrb 24s ease-in-out infinite; mix-blend-mode:screen; }
  .aurora span:nth-child(1) { width:60vmax; height:60vmax; top:-15%; left:-10%;
-   background:radial-gradient(circle at center, rgba(79,140,255,.35), transparent 70%); }
+   background:radial-gradient(circle at center, rgba(30,111,255,.32), transparent 70%); }
  .aurora span:nth-child(2) { width:50vmax; height:50vmax; bottom:-20%; right:-15%;
-   background:radial-gradient(circle at center, rgba(121,82,255,.25), transparent 75%);
+   background:radial-gradient(circle at center, rgba(46,168,255,.16), transparent 75%);
    animation-duration:30s; animation-delay:-6s; }
  .aurora span:nth-child(3) { width:45vmax; height:45vmax; top:25%; left:30%;
-   background:radial-gradient(circle at center, rgba(56,239,125,.1), transparent 70%);
+   background:radial-gradient(circle at center, rgba(30,111,255,.1), transparent 70%);
    animation-duration:34s; animation-delay:-12s; }
  @keyframes floatOrb {
    0%,100% { transform:translate3d(0,0,0) scale(1); }
    33% { transform:translate3d(5vw,-4vh,0) scale(1.1); }
    66% { transform:translate3d(-4vw,5vh,0) scale(.95); } }
- .cyber-grid {
-   position:absolute; inset:0;
-   background-image:
-     linear-gradient(to right, rgba(255,255,255,0.035) 1px, transparent 1px),
-     linear-gradient(to bottom, rgba(255,255,255,0.035) 1px, transparent 1px);
-   background-size:48px 48px;
-   mask-image:radial-gradient(ellipse at center, black 30%, transparent 80%);
-   -webkit-mask-image:radial-gradient(ellipse at center, black 30%, transparent 80%);
- }
  .vignette { position:absolute; inset:0;
-   background:radial-gradient(ellipse at center, transparent 40%, rgba(5,7,12,.85) 100%); }
+   background:radial-gradient(ellipse at center, transparent 40%, rgba(2,2,2,.85) 100%); }
 
  .wrap { position:relative; z-index:1; max-width:520px; margin:0 auto;
          padding:12px 12px 36px;
@@ -150,16 +151,16 @@ CABINET_PAGE = r"""<!doctype html>
                           var(--tg-content-safe-area-inset-top, 0px)); }
 
  .top { display:flex; align-items:center; justify-content:space-between; gap:10px;
-        min-height:46px; margin-bottom:12px; background:rgba(10,14,24,.85);
+        min-height:46px; margin-bottom:12px; background:rgba(7,7,8,.85);
         border:1px solid var(--line); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
         padding:7px 12px; border-radius:14px; }
  body.tg-fullscreen .wrap { padding-top:116px; }
  body.tg-fullscreen .tabs { top:96px; }
  .brand { display:flex; align-items:center; min-height:36px; text-decoration:none; }
- .brand img { height:28px; max-height:28px; width:auto; max-width:160px; object-fit:contain; display:block; filter:drop-shadow(0 2px 8px rgba(79,140,255,.3)); }
+ .brand img { height:40px; max-height:40px; width:auto; max-width:200px; object-fit:contain; display:block; filter:drop-shadow(0 0 12px rgba(46,168,255,.3)); }
  .logo { display:flex; align-items:center; gap:10px; }
  .logo .mark { width:28px; height:28px; }
- .logo .mark circle, .logo .mark ellipse { fill:none; stroke:#4f8cff; stroke-width:7; }
+ .logo .mark circle, .logo .mark ellipse { fill:none; stroke:#2ea8ff; stroke-width:7; }
  .logo .word { font-size:22px; font-weight:800; letter-spacing:-.02em; font-family:"Unbounded",sans-serif; color:#fff; }
 
  .btn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%;
@@ -167,9 +168,9 @@ CABINET_PAGE = r"""<!doctype html>
         font:inherit; font-size:15px; font-weight:800; cursor:pointer; text-align:center;
         transition:transform .2s ease, box-shadow .2s ease, background .2s, border-color .2s; }
  .btn svg { width:19px; height:19px; flex:none; }
- .btn-main { background:linear-gradient(135deg, #ffffff 0%, #e2e8f5 100%); color:#05070c;
+ .btn-main { background:linear-gradient(135deg, #ffffff 0%, #e2e8f5 100%); color:#020202;
              box-shadow:0 0 0 1px rgba(255,255,255,.4), 0 8px 30px rgba(255,255,255,.16); }
- .btn-main:hover { transform:translateY(-2px); box-shadow:0 0 0 1px #fff, 0 12px 40px rgba(79,140,255,.4); }
+ .btn-main:hover { transform:translateY(-2px); box-shadow:0 0 0 1px #fff, 0 12px 40px rgba(46,168,255,.4); }
  .btn-ghost { background:rgba(255,255,255,.05); color:#fff; border-color:var(--line-strong); font-weight:700; }
  .btn-ghost:hover { background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.35); transform:translateY(-2px); }
  .btn-sm { width:auto; min-height:40px; padding:0 16px; font-size:13px; }
@@ -179,9 +180,9 @@ CABINET_PAGE = r"""<!doctype html>
  .card { background:var(--card); border:1px solid var(--line); border-radius:18px;
          padding:14px; margin:8px 0; backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
          box-shadow:0 6px 20px rgba(0,0,0,.35); }
- .card.hero { border-color:rgba(79,140,255,.45);
-              background:linear-gradient(180deg, rgba(79,140,255,.16), rgba(13,18,30,.92));
-              box-shadow:0 14px 36px rgba(0,0,0,.5), 0 0 24px rgba(79,140,255,.15); }
+ .card.hero { border-color:rgba(46,168,255,.45);
+              background:linear-gradient(180deg, rgba(46,168,255,.14), rgba(11,11,13,.92));
+              box-shadow:0 14px 36px rgba(0,0,0,.5), 0 0 24px rgba(46,168,255,.15); }
  .card-title { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:800; margin-bottom:2px; }
  .card-title .ico { width:30px; height:30px; border-radius:9px; display:flex; align-items:center;
                     justify-content:center; background:var(--accent-soft); color:var(--accent); }
@@ -197,7 +198,7 @@ CABINET_PAGE = r"""<!doctype html>
  .big { font-size:clamp(28px, 8vw, 38px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:14px 0 2px; font-family:"Unbounded",sans-serif; }
  .big-sub { color:var(--muted); font-size:14px; }
  .stats { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin-top:18px; }
- .stat { background:rgba(5,7,12,.45); border:1px solid var(--line); border-radius:16px; padding:12px; min-width:0; }
+ .stat { background:rgba(2,2,2,.45); border:1px solid var(--line); border-radius:16px; padding:12px; min-width:0; }
  .stat b { display:block; font-size:15px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:"Unbounded",sans-serif; }
  .stat span { display:block; font-size:12px; color:var(--soft); margin-top:2px; }
 
@@ -209,7 +210,7 @@ CABINET_PAGE = r"""<!doctype html>
  .bad { background:rgba(248,113,113,.14); color:var(--bad); }
 
  .link { display:flex; align-items:center; gap:10px; margin-top:12px; padding:10px 10px 10px 14px;
-         background:rgba(5,7,12,.65); border:1px solid var(--line); border-radius:16px; }
+         background:rgba(2,2,2,.65); border:1px solid var(--line); border-radius:16px; }
  .link code { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
               color:var(--muted); font-size:13px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
  .copy { flex:none; min-height:40px; padding:0 14px; border-radius:999px; border:1px solid var(--line-strong);
@@ -223,7 +224,7 @@ CABINET_PAGE = r"""<!doctype html>
  .row span:last-child { color:var(--soft); text-align:right; }
 
  .bar { height:10px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:14px; }
- .bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, var(--accent), #7fb0ff); }
+ .bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, var(--accent), #7cc4ff); }
  .bar-fill.full { background:linear-gradient(90deg, #fbbf24, #f87171); }
  .bar-note { display:flex; justify-content:space-between; gap:12px; margin-top:8px; font-size:13px; color:var(--soft); }
 
@@ -242,7 +243,7 @@ CABINET_PAGE = r"""<!doctype html>
 
  .tabs { position:sticky; top:var(--tg-content-safe-area-inset-top, 0px); z-index:5; display:flex; gap:6px; overflow-x:auto;
          margin:0 -12px; padding:7px 12px;
-         background:rgba(5,7,12,.92); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+         background:rgba(2,2,2,.92); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
          scrollbar-width:none; }
  .tabs::-webkit-scrollbar { display:none; }
  .tab { flex:none; min-height:32px; padding:0 13px; border-radius:999px; position:relative;
@@ -250,7 +251,7 @@ CABINET_PAGE = r"""<!doctype html>
         font:inherit; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap;
         transition:all .22s ease; }
  .tab:active { transform:scale(.96); }
- .tab.active { background:#fff; color:#05070c; border-color:#fff; box-shadow:0 3px 12px rgba(255,255,255,.2); }
+ .tab.active { background:#fff; color:#020202; border-color:#fff; box-shadow:0 3px 12px rgba(255,255,255,.2); }
  .tab .dot { position:absolute; top:5px; right:5px; width:8px; height:8px; border-radius:50%;
              background:#ff4d4d; box-shadow:0 0 0 0 rgba(255,77,77,.55);
              animation:dotPulse 1.6s ease-out infinite; pointer-events:none; }
@@ -301,25 +302,26 @@ CABINET_PAGE = r"""<!doctype html>
    [data-sec="sub"] > .card { margin:14px 0; }
    [data-sec="sub"] > .card.hero { grid-column:1 / -1; }
  }
- @media (prefers-reduced-motion: reduce) { .aurora span { animation:none; } .btn { transition:none; } .tab .dot { animation:none; } }
+ @media (prefers-reduced-motion: reduce) { .aurora span, .orbit { animation:none; } .btn { transition:none; } .tab .dot { animation:none; } }
 
  .field { display:block; text-align:left; margin:12px 0 0; font-size:13px; font-weight:700; color:var(--muted); }
  .field input { display:block; width:100%; margin-top:6px; padding:12px 14px; border-radius:14px;
    border:1px solid var(--line-strong); background:rgba(255,255,255,.05); color:#fff;
    font:inherit; font-size:15px; outline:none; }
- .field input:focus { border-color:#4f8cff; box-shadow:0 0 0 3px rgba(79,140,255,.25); }
+ .field input:focus { border-color:#2ea8ff; box-shadow:0 0 0 3px rgba(46,168,255,.25); }
  .or { display:flex; align-items:center; gap:12px; margin:22px 0 4px; color:var(--soft); font-size:13px; }
  .or::before, .or::after { content:""; flex:1; height:1px; background:var(--line); }
  #pwform .btn, #forgotform .btn { width:100%; margin-top:14px; }
  #turnstile-box, #turnstile-box2 { display:flex; justify-content:center; margin-top:14px; }
  #turnstile-box:empty, #turnstile-box2:empty { display:none; }
  .form-note { font-size:13px; color:var(--soft); margin-top:10px; }
- .linklike { background:none; border:0; color:#8db4ff; font:inherit; font-size:14px; cursor:pointer; padding:0; margin-top:12px; }
+ .linklike { background:none; border:0; color:#7cc4ff; font:inherit; font-size:14px; cursor:pointer; padding:0; margin-top:12px; }
 </style></head>
 <body>
 <div class="bg" aria-hidden="true">
+  <div class="orbit orbit-a"><i></i></div>
+  <div class="orbit orbit-b"><i></i></div>
   <div class="aurora"><span></span><span></span><span></span></div>
-  <div class="cyber-grid"></div>
   <div class="vignette"></div>
 </div>
 
@@ -1125,7 +1127,7 @@ CABINET_PAGE = r"""<!doctype html>
  if (tg && tg.initData) {
    tg.ready(); tg.expand();
    // внутри Telegram красим шапку в цвет страницы
-   try { tg.setHeaderColor("#05070c"); tg.setBackgroundColor("#05070c"); } catch (e) {}
+   try { tg.setHeaderColor("#020202"); tg.setBackgroundColor("#020202"); } catch (e) {}
    // Безопасная зона Telegram: в полном экране шапка клиента
    // (закрыть, меню) висит поверх страницы. Скрипт Telegram сам
    // выставляет --tg-content-safe-area-inset-top, но на старых
@@ -1168,7 +1170,7 @@ def cabinet_page(bot_username: str) -> str:
     from config import load_config, turnstile_keys
     from web.site_page import LOGO_URL
     api = (load_config().get("webapi_public") or "").rstrip("/")
-    logo_html = f'<img src="{LOGO_URL}" alt="Drebol VPN" width="492" height="132">'
+    logo_html = f'<img src="{LOGO_URL}" alt="Drebol VPN" width="760" height="346">'
     return (CABINET_PAGE.replace("__API__", api or "")
             .replace("__BOT__", bot_username or "")
             .replace("__LOGO__", logo_html)
