@@ -282,6 +282,10 @@ async def handle_git_update(query):
     from html import escape
     await query.edit_message_text("⏳ Обновляю бота с GitHub…")
     try:
+        old_head = subprocess.run(
+            ["git", "-C", INSTALL_DIR, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
         result = subprocess.run(
             ["git", "-C", INSTALL_DIR, "pull"],
             capture_output=True, text=True, timeout=30,
@@ -295,10 +299,34 @@ async def handle_git_update(query):
             )
             return
         output = result.stdout.strip()
+        # Сайт обновляем только если pull принёс его правки: смотрим, что
+        # изменилось между старым и новым коммитом. Сам деплой делает уже
+        # новый процесс после перезапуска — у старого в памяти старый код.
+        site_changed = False
+        new_head = subprocess.run(
+            ["git", "-C", INSTALL_DIR, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+        if old_head and new_head and old_head != new_head:
+            diff = subprocess.run(
+                ["git", "-C", INSTALL_DIR, "diff", "--name-only", old_head, new_head],
+                capture_output=True, text=True, timeout=10,
+            )
+            site_changed = any(
+                p.startswith(("web/", "assets/")) for p in diff.stdout.splitlines()
+            )
+        if site_changed:
+            cfg = load_config()
+            cfg["site_update_pending"] = True
+            save_config(cfg)
+        site_note = ("\n\n🌐 <i>В обновлении есть правки сайта — после перезапуска проверю его и обновлю.</i>"
+                     if site_changed else
+                     "\n\n🌐 <i>Сайт не менялся — его не трогаю.</i>")
         await query.edit_message_text(
             "✅ <b>Обновление загружено</b>\n\n"
             f"<blockquote expandable><code>{escape(output[-1500:])}</code></blockquote>\n\n"
-            "<i>Перезапускаю бота — через несколько секунд он снова ответит.</i>",
+            "<i>Перезапускаю бота — через несколько секунд он снова ответит.</i>"
+            + site_note,
             parse_mode="HTML",
         )
         subprocess.Popen(

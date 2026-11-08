@@ -315,7 +315,7 @@ CABINET_PAGE = r"""<!doctype html>
  @keyframes logoGlow {
    0%,100% { filter:drop-shadow(0 0 16px rgba(46,168,255,.35)); }
    50% { filter:drop-shadow(0 0 32px rgba(46,168,255,.55)); } }
- .renew-tariff { justify-content:space-between; }
+ .renew-tariff { justify-content:center; gap:8px; }
  .renew-tariff .rt-price { color:var(--accent); font-family:"Unbounded",sans-serif; font-size:16px; }
 
  @media (max-width: 480px) {
@@ -327,9 +327,13 @@ CABINET_PAGE = r"""<!doctype html>
 
  @media (min-width: 900px) {
    .wrap { max-width:960px; }
-   [data-sec="sub"] { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; align-items:start; }
+   /* сетка — на #body: каждая карточка лежит в своём [data-sec],
+      поэтому грид на самих карточках давал одну занятую колонку
+      и пустую правую половину. Класс tab-sub ставит showTab. */
+   #body.tab-sub { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; align-items:start; }
+   #body.tab-sub > #tabs, #body.tab-sub > .breadcrumb,
+   #body.tab-sub > .stack, #body.tab-sub > .sub-hero { grid-column:1 / -1; }
    [data-sec="sub"] > .card { margin:14px 0; }
-   [data-sec="sub"] > .card.hero { grid-column:1 / -1; }
  }
  @media (prefers-reduced-motion: reduce) { .aurora span, .orbit { animation:none; } .btn { transition:none; } .tab .dot { animation:none; } .card.hero, .login-logo img { animation:none; } }
 
@@ -603,7 +607,7 @@ CABINET_PAGE = r"""<!doctype html>
    }
 
    // Главная карточка: статус и сколько осталось
-   out.push('<div data-sec="sub"><div class="card hero">' +
+   out.push('<div data-sec="sub" class="sub-hero"><div class="card hero">' +
             '<div class="hero-head"><span class="plan">' + plan + "</span>" + mark + "</div>" +
             '<div class="big">' + big + "</div>" +
             '<div class="big-sub">' + bigSub + "</div>" +
@@ -751,6 +755,8 @@ CABINET_PAGE = r"""<!doctype html>
    }
  }
  function showTab(name, silent) {
+   var bodyEl = document.getElementById("body");
+   if (bodyEl) { bodyEl.classList.toggle("tab-sub", name === "sub"); }
    document.querySelectorAll("#body [data-sec]").forEach(function (el) {
      var show = el.getAttribute("data-sec") === name;
      el.style.display = show ? "" : "none";
@@ -1679,11 +1685,12 @@ def cabinet_link() -> str:
     return f"{site_url()}/cabinet" if cabinet_ready() else ""
 
 
-def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes) -> str:
+def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "") -> str:
     """Отпечаток того, что должно лежать на сервере.
 
     По нему автообновление понимает, поменялось ли хоть что-нибудь: цена
-    тарифа, ссылка на канал, документы, логотип. Не поменялось — не трогаем.
+    тарифа, ссылка на канал, документы, логотип, сам кабинет. Не поменялось —
+    не трогаем.
     """
     import hashlib
     h = hashlib.sha256()
@@ -1692,6 +1699,7 @@ def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes) -> str:
     h.update(logo_bytes)
     # адрес API кабинета тоже часть сайта: сменили — страницу надо перезалить
     h.update(str(load_config().get("webapi_public") or "").encode("utf-8"))
+    h.update(cabinet.encode("utf-8"))
     return h.hexdigest()
 
 
@@ -1703,9 +1711,30 @@ async def deploy(bot_username: str) -> dict:
     if res.get("ok"):
         # вместе со страницей уехал и переходник — можно показывать кнопки приложений
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
-                   site_page_hash=page_hash(page, og_bytes, logo_bytes),
+                   site_page_hash=page_hash(page, og_bytes, logo_bytes, cabinet),
                    site_add_page=True, site_cabinet=bool(load_config().get("webapi_public")))
     return res
+
+
+async def _build_and_maybe_deploy(bot_username: str) -> tuple:
+    """Собирает лендинг и кабинет, сравнивает отпечаток с сохранённым.
+
+    Возвращает (статус, результат): "unchanged" — ничего не поменялось,
+    сервер не трогаем; "deployed" — залили; "failed" — деплой не прошёл.
+    Кабинет едет вместе со страницей: раньше автообновление заливало его
+    пустым (аргумент не передавался), и кабинет бы стёрся.
+    """
+    page, og_bytes, logo_bytes = await build_current(bot_username)
+    cabinet = cabinet_page(bot_username)
+    fresh = page_hash(page, og_bytes, logo_bytes, cabinet)
+    if fresh == load_config().get("site_page_hash"):
+        return "unchanged", None
+    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes, cabinet)
+    if res.get("ok"):
+        save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
+                   site_page_hash=fresh)
+        return "deployed", res
+    return "failed", res
 
 
 async def site_sync_tick(context):
@@ -1722,24 +1751,53 @@ async def site_sync_tick(context):
         return
     try:
         me = await context.bot.get_me()
-        page, og_bytes, logo_bytes = await build_current(me.username)
+        status, res = await _build_and_maybe_deploy(me.username)
     except Exception:
         return
-    fresh = page_hash(page, og_bytes, logo_bytes)
-    if fresh == cfg.get("site_page_hash"):
+    if status == "unchanged":
         return
-
-    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes)
     from core.log_channel import send_log
-    if res.get("ok"):
-        save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
-                   site_page_hash=fresh)
+    if status == "deployed":
         await send_log(context.bot, "🌐 Сайт обновлён автоматически: данные изменились")
     else:
         # молчать нельзя: на сайте остались старые цены
         await send_log(context.bot,
             "⚠️ Сайт не обновился автоматически\n"
             f"<code>{escape(str(res.get('error'))[:300])}</code>")
+
+
+async def site_update_pending_job(context):
+    """После обновления бота с GitHub: проверить, поменялся ли сайт.
+
+    Флаг site_update_pending ставит handle_git_update, когда в pull были
+    правки сайта. Если собранная страница совпала с той, что на сервере, —
+    сайт не трогаем. Это явное действие админа, поэтому настройка
+    автообновления здесь не учитывается.
+    """
+    cfg = load_config()
+    if not cfg.get("site_update_pending"):
+        return
+    cfg["site_update_pending"] = False
+    save_config(cfg)
+    if not configured() or not cfg.get("site_deployed_at"):
+        return
+    from core.log_channel import send_log
+    try:
+        me = await context.bot.get_me()
+        status, res = await _build_and_maybe_deploy(me.username)
+    except Exception as e:
+        await send_log(context.bot,
+            "⚠️ Не получилось проверить сайт после обновления бота\n"
+            f"<code>{escape(str(e))[:300]}</code>")
+        return
+    if status == "deployed":
+        await send_log(context.bot, "🌐 Сайт обновлён после обновления бота: в нём были изменения")
+    elif status == "failed":
+        await send_log(context.bot,
+            "⚠️ Сайт не обновился после обновления бота\n"
+            f"<code>{escape(str(res.get('error'))[:300])}</code>")
+    else:
+        await send_log(context.bot, "🌐 Сайт не менялся — после обновления бота его не трогали")
 
 
 async def issue_cert() -> dict:

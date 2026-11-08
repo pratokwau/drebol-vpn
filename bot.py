@@ -300,6 +300,10 @@ async def post_init(app: Application):
         from web.site_deploy import site_sync_tick
         app.job_queue.run_repeating(site_sync_tick, interval=120, first=300)
 
+        # после обновления с GitHub — один раз проверить, поменялся ли сайт
+        from web.site_deploy import site_update_pending_job
+        app.job_queue.run_once(site_update_pending_job, when=15)
+
         from features.fraud import fraud_tick
         app.job_queue.run_repeating(fraud_tick, interval=1800, first=420)
 
