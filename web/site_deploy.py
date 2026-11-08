@@ -340,7 +340,7 @@ CABINET_PAGE = r"""<!doctype html>
  .field input:focus { border-color:#2ea8ff; box-shadow:0 0 0 3px rgba(46,168,255,.25); }
  .or { display:flex; align-items:center; gap:12px; margin:22px 0 4px; color:var(--soft); font-size:13px; }
  .or::before, .or::after { content:""; flex:1; height:1px; background:var(--line); }
- #pwform .btn, #forgotform .btn { width:100%; margin-top:14px; }
+ #pwform .btn, #forgotform .btn, #prof-email-form .btn, #prof-pass-form .btn { width:100%; margin-top:14px; }
  #turnstile-box, #turnstile-box2 { display:flex; justify-content:center; margin-top:14px; }
  #turnstile-box:empty, #turnstile-box2:empty { display:none; }
  .form-note { font-size:13px; color:var(--soft); margin-top:10px; }
