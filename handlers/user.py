@@ -4,6 +4,16 @@ from config import ADMIN_ID, load_config
 from core.keyboards import main_keyboard, back_main, back_info
 
 
+def _pay_urls() -> dict:
+    """Редиректы после оплаты — на страницы сайта (или пусто, если
+    домен не задан: тогда действуют редиректы магазина)."""
+    try:
+        from web.site_deploy import pay_redirect_urls
+        return pay_redirect_urls()
+    except Exception:
+        return {}
+
+
 def _support_row() -> list:
     """Ряд с кнопкой поддержки: ссылка на аккаунт или переписка в боте."""
     from handlers.support import support_row
@@ -874,11 +884,15 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
         desc += f" · 🎁 Подарок для {gift_name or gift_tg_id}"
     if devices:
         desc += f" · +{devices} устр."
+    urls = _pay_urls()
     result = await an.create_payment(
         amount=price,
         description=f"{desc} · {user.id}",
         tg_id=user.id,
         username=user.username,
+        success_url=urls.get("success"),
+        fail_url=urls.get("fail"),
+        back_url=urls.get("back"),
     )
     if not result["ok"]:
         # подарок при повторе идёт тем же путём — через gift_pay,
@@ -1560,9 +1574,13 @@ async def handle_dev_buy(query, context, count: int):
 
     amount = count * price
     await query.edit_message_text("⏳ Готовлю счёт…")
+    urls = _pay_urls()
     result = await an.create_payment(
         amount=amount, description=f"Устройства Drebol VPN · +{count} · {user.id}",
         tg_id=user.id, username=user.username,
+        success_url=urls.get("success"),
+        fail_url=urls.get("fail"),
+        back_url=urls.get("back"),
     )
     if not result["ok"]:
         await query.edit_message_text(

@@ -588,14 +588,16 @@ async def handle_anore_shop(query, context: ContextTypes.DEFAULT_TYPE):
         f"Магазин: <b>drebolvpn_bot</b> · ID <code>{cfg.get('anore_shop_id') or '—'}</code>\n"
         "Способы оплаты: СБП 6% — вкл, криптовалюта 1% — вкл\n"
         "Комиссия: платит магазин (клиент платит ровно цену тарифа)\n"
-        "После оплаты: https://t.me/drebolvpn_bot\n"
-        "При неуспехе: https://t.me/drebolvpn_bot\n"
-        "Кнопка «вернуться»: https://t.me/drebolvpn_bot\n"
+        "После оплаты: https://vpn.drbl.tech/pay/success/\n"
+        "При неуспехе: https://vpn.drbl.tech/pay/fail/\n"
+        "Кнопка «вернуться»: https://vpn.drbl.tech/pay/back/\n"
         "Дизайн формы: split\n"
         "Логотип формы: https://vpn.drbl.tech/logo.png\n"
         "Вебхук: https://vpn.drbl.tech/api/webhooks/anore\n"
         "События: payment.succeeded, payment.canceled"
-        "</blockquote>",
+        "</blockquote>", "",
+        "<i>Бот сам подставляет эти три адреса в каждый счёт, но впиши "
+        "их и в настройки кассы на anore.cc — чтобы везде было одинаково.</i>",
     ]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True,

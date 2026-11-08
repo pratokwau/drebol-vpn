@@ -1390,7 +1390,7 @@ GOOGLE_VERIFICATION_CONTENT = "google-site-verification: google7280fa10130c903e.
 
 
 def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"",
-                 cabinet: str = "") -> dict:
+                 cabinet: str = "", pay_pages: dict | None = None) -> dict:
     c = creds()
     try:
         cli = _client()
@@ -1422,6 +1422,10 @@ chmod 755 {WEB_ROOT}
                 f.write(ADD_PAGE)
             with sftp.open("/tmp/drebol_cabinet.html", "w") as f:
                 f.write(cabinet or "")
+            for kind in ("success", "fail", "back"):
+                if pay_pages and pay_pages.get(kind):
+                    with sftp.open(f"/tmp/drebol_pay_{kind}.html", "w") as f:
+                        f.write(pay_pages[kind])
             robots_txt, sitemap_xml = seo_files()
             with sftp.open("/tmp/drebol_robots.txt", "w") as f:
                 f.write(robots_txt)
@@ -1469,6 +1473,14 @@ done
 mv /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet.html
 chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html {WEB_ROOT}/cabinet/index.html
 chmod 644 {WEB_ROOT}/cabinet/*/index.html || true
+# Страницы редиректов после оплаты: /pay/success/, /pay/fail/, /pay/back/
+for kind in success fail back; do
+  if [ -f /tmp/drebol_pay_$kind.html ]; then
+    mkdir -p {WEB_ROOT}/pay/$kind
+    mv /tmp/drebol_pay_$kind.html {WEB_ROOT}/pay/$kind/index.html
+    chmod 644 {WEB_ROOT}/pay/$kind/index.html
+  fi
+done
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp {WEB_ROOT}/robots.txt {WEB_ROOT}/sitemap.xml {WEB_ROOT}/{GOOGLE_VERIFICATION_FILE}
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
@@ -1702,7 +1714,24 @@ def cabinet_link() -> str:
     return f"{site_url()}/cabinet" if cabinet_ready() else ""
 
 
-def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "") -> str:
+def pay_redirect_urls() -> dict:
+    """Адреса страниц редиректов после оплаты на сайте.
+
+    Пусто, если домен не задан, — тогда действуют редиректы магазина
+    (t.me/drebolvpn_bot) или возврат в кабинет.
+    """
+    base = site_url().rstrip("/")
+    if not base:
+        return {}
+    return {
+        "success": f"{base}/pay/success/",
+        "fail": f"{base}/pay/fail/",
+        "back": f"{base}/pay/back/",
+    }
+
+
+def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",
+              pay: str = "") -> str:
     """Отпечаток того, что должно лежать на сервере.
 
     По нему автообновление понимает, поменялось ли хоть что-нибудь: цена
@@ -1717,18 +1746,23 @@ def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "") 
     # адрес API кабинета тоже часть сайта: сменили — страницу надо перезалить
     h.update(str(load_config().get("webapi_public") or "").encode("utf-8"))
     h.update(cabinet.encode("utf-8"))
+    h.update(pay.encode("utf-8"))
     return h.hexdigest()
 
 
 async def deploy(bot_username: str) -> dict:
     """Собирает страницу и раскатывает её на сервер."""
+    from web.site_page import build_pay_pages
     page, og_bytes, logo_bytes = await build_current(bot_username)
     cabinet = cabinet_page(bot_username)
-    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes, cabinet)
+    pay_pages = build_pay_pages()
+    pay = "".join(pay_pages[k] for k in ("success", "fail", "back"))
+    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes,
+                                  cabinet, pay_pages)
     if res.get("ok"):
         # вместе со страницей уехал и переходник — можно показывать кнопки приложений
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
-                   site_page_hash=page_hash(page, og_bytes, logo_bytes, cabinet),
+                   site_page_hash=page_hash(page, og_bytes, logo_bytes, cabinet, pay),
                    site_add_page=True, site_cabinet=bool(load_config().get("webapi_public")))
     return res
 
@@ -1741,12 +1775,16 @@ async def _build_and_maybe_deploy(bot_username: str) -> tuple:
     Кабинет едет вместе со страницей: раньше автообновление заливало его
     пустым (аргумент не передавался), и кабинет бы стёрся.
     """
+    from web.site_page import build_pay_pages
     page, og_bytes, logo_bytes = await build_current(bot_username)
     cabinet = cabinet_page(bot_username)
-    fresh = page_hash(page, og_bytes, logo_bytes, cabinet)
+    pay_pages = build_pay_pages()
+    pay = "".join(pay_pages[k] for k in ("success", "fail", "back"))
+    fresh = page_hash(page, og_bytes, logo_bytes, cabinet, pay)
     if fresh == load_config().get("site_page_hash"):
         return "unchanged", None
-    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes, cabinet)
+    res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes,
+                                  cabinet, pay_pages)
     if res.get("ok"):
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
                    site_page_hash=fresh)

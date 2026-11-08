@@ -1234,3 +1234,158 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
 </body>
 </html>
 """
+
+
+# ── Страницы редиректов после оплаты ──────────────────────────────────────────
+# anore после оплаты (или по кнопке «Вернуться») ведёт покупателя не
+# напрямую в Telegram-бота, а на эти страницы: сначала «спасибо» на
+# нашем сайте, через 5 секунд — сам переброс в бота. Отдельные адреса:
+# /pay/success/, /pay/fail/, /pay/back/ — чистые папки с index.html,
+# как разделы кабинета. В поиск не попадают (noindex), в sitemap их нет.
+
+BOT_URL = "https://t.me/drebolvpn_bot"
+
+_PAY_PAGE_CSS = """
+:root {
+  color-scheme: dark;
+  --bg: #020202;
+  --ink: #f4f3ec;
+  --muted: rgba(244,243,236,.66);
+  --soft: rgba(244,243,236,.42);
+  --blue: #2ea8ff;
+  --blue-deep: #1e6fff;
+  --blue-glow: rgba(46,168,255,.45);
+  --bad: #f87171;
+  --font-display: "Unbounded","Inter",sans-serif;
+  --font-body: "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+.wrap { max-width: 560px; }
+.logo img { width: 190px; max-width: 60vw; }
+.icon {
+  width: 88px; height: 88px;
+  margin: 34px auto 26px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px; font-weight: 700;
+  border: 1.5px solid var(--blue);
+  color: var(--blue);
+  box-shadow: 0 0 44px var(--blue-glow), inset 0 0 22px rgba(46,168,255,.14);
+  animation: pulse 2.4s ease-in-out infinite;
+}
+.icon.bad {
+  border-color: var(--bad);
+  color: var(--bad);
+  box-shadow: 0 0 44px rgba(248,113,113,.35), inset 0 0 22px rgba(248,113,113,.12);
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 44px var(--blue-glow), inset 0 0 22px rgba(46,168,255,.14); }
+  50% { box-shadow: 0 0 64px rgba(46,168,255,.65), inset 0 0 26px rgba(46,168,255,.22); }
+}
+.icon.bad { animation-name: pulseBad; }
+@keyframes pulseBad {
+  0%, 100% { box-shadow: 0 0 44px rgba(248,113,113,.35), inset 0 0 22px rgba(248,113,113,.12); }
+  50% { box-shadow: 0 0 64px rgba(248,113,113,.5), inset 0 0 26px rgba(248,113,113,.18); }
+}
+h1 {
+  font-family: var(--font-display);
+  font-size: 30px; line-height: 1.25;
+  margin: 0 0 14px;
+}
+p { color: var(--muted); font-size: 17px; line-height: 1.6; margin: 0 0 30px; }
+.btn {
+  display: inline-block;
+  background: #fff; color: #020202;
+  font-family: var(--font-display);
+  font-size: 15px; font-weight: 600;
+  padding: 15px 30px; border-radius: 100px;
+  text-decoration: none;
+}
+.btn:hover { box-shadow: 0 0 32px rgba(255,255,255,.35); }
+.cd { margin-top: 22px; color: var(--soft); font-size: 14px; }
+.cd b { color: var(--blue); }
+.cab { display: block; margin-top: 14px; color: var(--soft); font-size: 14px; }
+"""
+
+_PAY_PAGES = {
+    "success": {
+        "title": "Спасибо за оплату — Drebol VPN",
+        "icon": "✓",
+        "icon_class": "",
+        "h1": "Спасибо за оплату!",
+        "text": "Подписка продлена — приятного использования Drebol VPN.",
+    },
+    "fail": {
+        "title": "Оплата не прошла — Drebol VPN",
+        "icon": "✕",
+        "icon_class": " bad",
+        "h1": "Оплата не прошла",
+        "text": "Деньги не списаны. Создайте счёт заново в боте — и попробуйте ещё раз.",
+    },
+    "back": {
+        "title": "Drebol VPN",
+        "icon": "←",
+        "icon_class": "",
+        "h1": "Возвращаем вас в Telegram",
+        "text": "Оплата не завершена — счёт остался неоплаченным.",
+    },
+}
+
+
+def _pay_page(kind: str) -> str:
+    """Одна страница редиректа: «спасибо» / «не оплачено» / «возврат»."""
+    p = _PAY_PAGES[kind]
+    return f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#020202">
+<title>{p["title"]}</title>
+<link rel="icon" href="{FAVICON_URL}">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>{_PAY_PAGE_CSS}</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo"><img src="{LOGO_URL}" alt="Drebol VPN"></div>
+  <div class="icon{p["icon_class"]}">{p["icon"]}</div>
+  <h1>{p["h1"]}</h1>
+  <p>{p["text"]}</p>
+  <a class="btn" href="{BOT_URL}">Открыть Telegram-бот</a>
+  <div class="cd">Переходим в Telegram через <b id="cd">5</b> сек.</div>
+  <a class="cab" href="/cabinet/">Вернуться в кабинет →</a>
+</div>
+<script>
+(function () {{
+  var n = 5, el = document.getElementById("cd");
+  var t = setInterval(function () {{
+    n--;
+    if (n <= 0) {{ clearInterval(t); location.href = "{BOT_URL}"; }}
+    else {{ el.textContent = n; }}
+  }}, 1000);
+}})();
+</script>
+</body>
+</html>
+"""
+
+
+def build_pay_pages() -> dict:
+    """Все три страницы редиректов: {"success": html, "fail": html, "back": html}."""
+    return {kind: _pay_page(kind) for kind in _PAY_PAGES}

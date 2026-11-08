@@ -701,10 +701,12 @@ def build_app():
                                       "url": existing[8],
                                       "amount": existing[4], "reused": True})
         user = await get_user_info(tg_id)
-        # После оплаты клиент возвращается в кабинет, а не в бота:
-        # редиректы магазина (t.me/drebolvpn_bot) переопределяются для
-        # этого счёта. Если кабинет не опубликован — остаются редиректы
-        # магазина.
+        # После оплаты клиент попадает на страницу «спасибо» на сайте,
+        # а через 5 секунд — в Telegram-бота. Редиректы магазина
+        # (t.me/drebolvpn_bot) переопределяются для этого счёта.
+        # Нет домена — возвращаемся в кабинет, как раньше.
+        from web.site_deploy import pay_redirect_urls
+        urls = pay_redirect_urls()
         cabinet_url = ""
         try:
             from web import site_deploy as site
@@ -715,8 +717,9 @@ def build_app():
             amount=q["price"],
             description=f"Подписка Drebol VPN · {q['name']} · {tg_id}",
             tg_id=tg_id, username=user[2] if user else None,
-            success_url=cabinet_url or None, fail_url=cabinet_url or None,
-            back_url=cabinet_url or None)
+            success_url=urls.get("success") or cabinet_url or None,
+            fail_url=urls.get("fail") or cabinet_url or None,
+            back_url=urls.get("back") or cabinet_url or None)
         if not res.get("ok"):
             logging.error("кабинет: счёт anore не создан для %s: %s",
                           tg_id, res.get("error"))
