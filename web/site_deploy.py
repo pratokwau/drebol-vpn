@@ -163,7 +163,7 @@ CABINET_PAGE = r"""<!doctype html>
  .logo .mark circle, .logo .mark ellipse { fill:none; stroke:#2ea8ff; stroke-width:7; }
  .logo .word { font-size:22px; font-weight:800; letter-spacing:-.02em; font-family:"Unbounded",sans-serif; color:#fff; }
 
- .btn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%;
+ .btn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; position:relative; overflow:hidden;
         min-height:52px; padding:0 22px; border-radius:999px; border:1px solid transparent;
         font:inherit; font-size:15px; font-weight:800; cursor:pointer; text-align:center;
         transition:transform .2s ease, box-shadow .2s ease, background .2s, border-color .2s; }
@@ -174,23 +174,37 @@ CABINET_PAGE = r"""<!doctype html>
  .btn-ghost { background:rgba(255,255,255,.05); color:#fff; border-color:var(--line-strong); font-weight:700; }
  .btn-ghost:hover { background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.35); transform:translateY(-2px); }
  .btn-sm { width:auto; min-height:40px; padding:0 16px; font-size:13px; }
+ .btn::after { content:""; position:absolute; top:0; left:-80%; width:50%; height:100%;
+   background:linear-gradient(100deg, transparent, rgba(255,255,255,.32), transparent);
+   transform:skewX(-20deg); transition:left .6s ease; pointer-events:none; }
+ .btn:hover::after { left:130%; }
+ .btn-main::after { background:linear-gradient(100deg, transparent, rgba(46,168,255,.28), transparent); }
  .stack { display:flex; flex-direction:column; gap:10px; }
  .pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 
  .card { background:var(--card); border:1px solid var(--line); border-radius:18px;
          padding:14px; margin:8px 0; backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
-         box-shadow:0 6px 20px rgba(0,0,0,.35); }
+         box-shadow:0 6px 20px rgba(0,0,0,.35); position:relative; }
+ .card::before { content:""; position:absolute; top:0; left:24px; right:24px; height:1px;
+   background:linear-gradient(90deg, transparent, rgba(46,168,255,.55), transparent); pointer-events:none; }
  .card.hero { border-color:rgba(46,168,255,.45);
               background:linear-gradient(180deg, rgba(46,168,255,.14), rgba(11,11,13,.92));
-              box-shadow:0 14px 36px rgba(0,0,0,.5), 0 0 24px rgba(46,168,255,.15); }
+              box-shadow:0 14px 36px rgba(0,0,0,.5), 0 0 24px rgba(46,168,255,.15);
+              animation:heroIn .5s ease both; }
+ .card.hero::after { content:""; position:absolute; inset:0; border-radius:inherit;
+   background:radial-gradient(ellipse 70% 55% at 50% 0%, rgba(46,168,255,.22), transparent 70%);
+   pointer-events:none; }
+ .card.hero > * { position:relative; z-index:1; }
+ @keyframes heroIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
  .card-title { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:800; margin-bottom:2px; }
  .card-title .ico { width:30px; height:30px; border-radius:9px; display:flex; align-items:center;
-                    justify-content:center; background:var(--accent-soft); color:var(--accent); }
+                    justify-content:center; background:var(--accent-soft); color:var(--accent);
+                    box-shadow:0 0 14px rgba(46,168,255,.3); }
  .card-title .ico svg { width:15px; height:15px; }
  .card-sub { color:var(--muted); font-size:13px; margin-bottom:10px; }
 
  .eyebrow { font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); }
- .hello { font-size:clamp(26px, 7vw, 34px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:6px 0 4px; font-family:"Unbounded","Inter",sans-serif; }
+ .hello { font-size:clamp(26px, 7vw, 34px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:6px 0 4px; font-family:"Unbounded","Inter",sans-serif; text-shadow:0 0 32px rgba(46,168,255,.28); }
  .muted { color:var(--muted); font-size:14px; }
 
  .hero-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -198,9 +212,11 @@ CABINET_PAGE = r"""<!doctype html>
  .big { font-size:clamp(28px, 8vw, 38px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:14px 0 2px; font-family:"Unbounded",sans-serif; }
  .big-sub { color:var(--muted); font-size:14px; }
  .stats { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin-top:18px; }
- .stat { background:rgba(2,2,2,.45); border:1px solid var(--line); border-radius:16px; padding:12px; min-width:0; }
+ .stat { background:linear-gradient(180deg, rgba(46,168,255,.08), rgba(2,2,2,.45)); border:1px solid var(--line); border-radius:16px; padding:12px; min-width:0; }
  .stat b { display:block; font-size:15px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:"Unbounded",sans-serif; }
  .stat span { display:block; font-size:12px; color:var(--soft); margin-top:2px; }
+ .stat span::before { content:""; display:inline-block; width:5px; height:5px; border-radius:50%;
+   background:var(--accent); margin-right:6px; vertical-align:1px; box-shadow:0 0 8px rgba(46,168,255,.8); }
 
  .pill { display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border-radius:999px;
          font-size:12px; font-weight:700; white-space:nowrap; }
@@ -223,13 +239,15 @@ CABINET_PAGE = r"""<!doctype html>
  .row span:first-child { color:rgba(255,255,255,.88); min-width:0; overflow-wrap:anywhere; }
  .row span:last-child { color:var(--soft); text-align:right; }
 
- .bar { height:10px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:14px; }
- .bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, var(--accent), #7cc4ff); }
+ .bar { height:12px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; margin-top:14px; }
+ .bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, var(--accent), #7cc4ff);
+   box-shadow:0 0 14px rgba(46,168,255,.55); }
  .bar-fill.full { background:linear-gradient(90deg, #fbbf24, #f87171); }
  .bar-note { display:flex; justify-content:space-between; gap:12px; margin-top:8px; font-size:13px; color:var(--soft); }
 
- .dev { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 0;
-        border-top:1px solid var(--line); }
+ .dev { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 8px;
+        border-top:1px solid var(--line); border-radius:12px; transition:background .2s ease; }
+ .dev:hover { background:rgba(255,255,255,.04); }
  .dev:first-of-type { border-top:0; }
  .dev b { display:block; font-size:15px; overflow-wrap:anywhere; }
  .dev small { color:var(--soft); font-size:13px; }
@@ -246,12 +264,13 @@ CABINET_PAGE = r"""<!doctype html>
          background:rgba(2,2,2,.92); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
          scrollbar-width:none; }
  .tabs::-webkit-scrollbar { display:none; }
- .tab { flex:none; min-height:32px; padding:0 13px; border-radius:999px; position:relative;
+ .tab { flex:none; min-height:36px; padding:0 15px; border-radius:999px; position:relative;
         border:1px solid var(--line-strong); background:transparent; color:rgba(255,255,255,.75);
         font:inherit; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap;
         transition:all .22s ease; }
  .tab:active { transform:scale(.96); }
- .tab.active { background:#fff; color:#020202; border-color:#fff; box-shadow:0 3px 12px rgba(255,255,255,.2); }
+ .tab.active { background:#fff; color:#020202; border-color:#fff;
+   box-shadow:0 3px 12px rgba(255,255,255,.2), 0 0 18px rgba(46,168,255,.3); }
  .tab .dot { position:absolute; top:5px; right:5px; width:8px; height:8px; border-radius:50%;
              background:#ff4d4d; box-shadow:0 0 0 0 rgba(255,77,77,.55);
              animation:dotPulse 1.6s ease-out infinite; pointer-events:none; }
@@ -278,7 +297,8 @@ CABINET_PAGE = r"""<!doctype html>
    #app:not(.hide), [data-sec].sec-show { animation:none; } }
 
  #login { text-align:center; padding:6vh 0 0; }
- #login .card { padding:30px 22px; }
+ #login .card { padding:30px 22px; border-color:rgba(46,168,255,.28);
+   box-shadow:0 20px 60px rgba(0,0,0,.5), 0 0 44px rgba(46,168,255,.1); }
  #login h1 { font-size:clamp(28px, 7vw, 36px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:10px 0 10px; }
  #widget { display:flex; justify-content:center; min-height:48px; margin:22px 0 6px; }
  #loginerr { margin-top:10px; }
@@ -288,6 +308,15 @@ CABINET_PAGE = r"""<!doctype html>
 
  .foot { text-align:center; margin-top:28px; font-size:13px; color:var(--soft); }
  .hide { display:none !important; }
+
+ .login-logo { display:flex; justify-content:center; margin:10px 0 22px; }
+ .login-logo img { width:240px; max-width:70vw; height:auto;
+   animation:logoGlow 6s ease-in-out infinite; }
+ @keyframes logoGlow {
+   0%,100% { filter:drop-shadow(0 0 16px rgba(46,168,255,.35)); }
+   50% { filter:drop-shadow(0 0 32px rgba(46,168,255,.55)); } }
+ .renew-tariff { justify-content:space-between; }
+ .renew-tariff .rt-price { color:var(--accent); font-family:"Unbounded",sans-serif; font-size:16px; }
 
  @media (max-width: 480px) {
    .stats { grid-template-columns:1fr 1fr; }
@@ -302,7 +331,7 @@ CABINET_PAGE = r"""<!doctype html>
    [data-sec="sub"] > .card { margin:14px 0; }
    [data-sec="sub"] > .card.hero { grid-column:1 / -1; }
  }
- @media (prefers-reduced-motion: reduce) { .aurora span, .orbit { animation:none; } .btn { transition:none; } .tab .dot { animation:none; } }
+ @media (prefers-reduced-motion: reduce) { .aurora span, .orbit { animation:none; } .btn { transition:none; } .tab .dot { animation:none; } .card.hero, .login-logo img { animation:none; } }
 
  .field { display:block; text-align:left; margin:12px 0 0; font-size:13px; font-weight:700; color:var(--muted); }
  .field input { display:block; width:100%; margin-top:6px; padding:12px 14px; border-radius:14px;
@@ -334,6 +363,7 @@ CABINET_PAGE = r"""<!doctype html>
  </header>
 
  <div id="login">
+   <div class="login-logo">__LOGO__</div>
    <div class="card">
      <span class="eyebrow">Личный кабинет</span>
      <h1>Вход в кабинет</h1>
@@ -893,9 +923,9 @@ CABINET_PAGE = r"""<!doctype html>
      }
      html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через Platega.</p>';
      d.tariffs.forEach(function (t) {
-       html += '<button class="btn btn-ghost" type="button" style="margin-top:8px" onclick="renewPay(' +
-               t.id + ')">' + esc(t.period) + " — " +
-               esc(t.price) + " ₽</button>";
+       html += '<button class="btn btn-ghost renew-tariff" type="button" style="margin-top:8px" onclick="renewPay(' +
+               t.id + ')">' + esc(t.period) + ' — <b class="rt-price">' +
+               esc(t.price) + " ₽</b></button>";
      });
      body.innerHTML = html;
    }).catch(function () {
