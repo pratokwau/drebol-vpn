@@ -1364,9 +1364,13 @@ def seo_files() -> tuple[str, str]:
     """
     from datetime import date
     base = site_url().rstrip("/")
+    # /api/ — не страницы, а ручки кабинета: без сессии отдают 401,
+    # а поисковику там делать нечего. Без запрета Googlebot лезет туда
+    # при рендере кабинета и жалуется на 401 в Search Console.
     robots = (
         "User-agent: *\n"
         "Allow: /\n"
+        "Disallow: /api/\n"
         + (f"Sitemap: {base}/sitemap.xml\n" if base else "")
     )
     sitemap = (
@@ -1387,6 +1391,57 @@ def seo_files() -> tuple[str, str]:
 # каждом подтверждении прав на сайт — не удалять и не переименовывать.
 GOOGLE_VERIFICATION_FILE = "google7280fa10130c903e.html"
 GOOGLE_VERIFICATION_CONTENT = "google-site-verification: google7280fa10130c903e.html"
+
+# /favicon.ico на сервере: тот же «e», что в шапке сайта, в формате ICO.
+# Сгенерирован из drebol-favicon-e.png (64x64). Браузеры и Googlebot
+# запрашивают /favicon.ico по умолчанию — без файла это 404.
+FAVICON_ICO_B64 = (
+    "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"
+    "iON+Ag6y3Ww1aVmhAAAAAElFTkSuQmCC"
+)
 
 
 def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"",
@@ -1436,6 +1491,11 @@ chmod 755 {WEB_ROOT}
             if logo_bytes:
                 with sftp.open("/tmp/drebol_logo", "wb") as f:
                     f.write(logo_bytes)
+            # /favicon.ico: браузеры и Googlebot запрашивают его по
+            # умолчанию — без файла на сервере это 404 и жалоба в
+            # Search Console. Тот же «e», что и в шапке, в формате ICO.
+            with sftp.open("/tmp/drebol_favicon.ico", "wb") as f:
+                f.write(base64.b64decode(FAVICON_ICO_B64))
         finally:
             sftp.close()
 
@@ -1482,7 +1542,8 @@ for kind in success fail back; do
   fi
 done
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
-chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp {WEB_ROOT}/robots.txt {WEB_ROOT}/sitemap.xml {WEB_ROOT}/{GOOGLE_VERIFICATION_FILE}
+mv /tmp/drebol_favicon.ico {WEB_ROOT}/favicon.ico
+chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp {WEB_ROOT}/robots.txt {WEB_ROOT}/sitemap.xml {WEB_ROOT}/{GOOGLE_VERIFICATION_FILE} {WEB_ROOT}/favicon.ico
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
 cat > {NGINX_CONF} <<'NGINXCONF'
 server {{
@@ -1747,6 +1808,10 @@ def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",
     h.update(str(load_config().get("webapi_public") or "").encode("utf-8"))
     h.update(cabinet.encode("utf-8"))
     h.update(pay.encode("utf-8"))
+    # фавикон и robots.txt тоже едут на сервер — их смена должна
+    # вызывать перезалив, а не молча пропускаться автообновлением
+    h.update(base64.b64decode(FAVICON_ICO_B64))
+    h.update(seo_files()[0].encode("utf-8"))
     return h.hexdigest()
 
 
