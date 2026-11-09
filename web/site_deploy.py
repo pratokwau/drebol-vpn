@@ -1444,6 +1444,23 @@ FAVICON_ICO_B64 = (
 )
 
 
+def app_version_json() -> str:
+    """Манифест версий приложения для автообновления в самом приложении.
+
+    Файл web/app-version.json лежит в репозитории; при каждом обновлении
+    сайта он уезжает на сервер как /app/version.json. Приложение сверяет
+    versionCode со своим и, если на сервере новее, качает APK по apkUrl.
+    Сам APK (drebolapp.apk) в репозитории НЕ лежит — он кладётся в
+    {WEB_ROOT} вручную, deploy его не трогает.
+    """
+    path = os.path.join(PROJECT_DIR, "web", "app-version.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return "{}"
+
+
 def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"",
                  cabinet: str = "", pay_pages: dict | None = None) -> dict:
     c = creds()
@@ -1496,6 +1513,10 @@ chmod 755 {WEB_ROOT}
             # Search Console. Тот же «e», что и в шапке, в формате ICO.
             with sftp.open("/tmp/drebol_favicon.ico", "wb") as f:
                 f.write(base64.b64decode(FAVICON_ICO_B64))
+            # Манифест версий приложения: /app/version.json для
+            # автообновления в самом приложении (см. app_version_json).
+            with sftp.open("/tmp/drebol_app_version.json", "w") as f:
+                f.write(app_version_json())
         finally:
             sftp.close()
 
@@ -1543,7 +1564,12 @@ for kind in success fail back; do
 done
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
 mv /tmp/drebol_favicon.ico {WEB_ROOT}/favicon.ico
-chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp {WEB_ROOT}/robots.txt {WEB_ROOT}/sitemap.xml {WEB_ROOT}/{GOOGLE_VERIFICATION_FILE} {WEB_ROOT}/favicon.ico
+# Манифест версий приложения: /app/version.json. Сам APK
+# (drebolapp.apk) сюда НЕ заливается — он лежит в {WEB_ROOT} отдельно,
+# deploy его не трогает.
+mkdir -p {WEB_ROOT}/app
+mv /tmp/drebol_app_version.json {WEB_ROOT}/app/version.json
+chmod 644 {WEB_ROOT}/index.html {WEB_ROOT}/og.webp {WEB_ROOT}/robots.txt {WEB_ROOT}/sitemap.xml {WEB_ROOT}/{GOOGLE_VERIFICATION_FILE} {WEB_ROOT}/favicon.ico {WEB_ROOT}/app/version.json
 [ -f {WEB_ROOT}/{LOGO_NAME} ] && chmod 644 {WEB_ROOT}/{LOGO_NAME} || true
 cat > {NGINX_CONF} <<'NGINXCONF'
 server {{
@@ -1812,6 +1838,8 @@ def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",
     # вызывать перезалив, а не молча пропускаться автообновлением
     h.update(base64.b64decode(FAVICON_ICO_B64))
     h.update(seo_files()[0].encode("utf-8"))
+    # манифест версий приложения тоже едет на сервер
+    h.update(app_version_json().encode("utf-8"))
     return h.hexdigest()
 
 
