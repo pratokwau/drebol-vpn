@@ -548,7 +548,8 @@
         ? "Добавьте подписку в приложение одним нажатием или отсканируйте QR-код."
         : "Add the subscription to the app in one tap or scan the QR code.") + "</p>" +
       '<div class="pair">' +
-        '<a class="btn btn-main" href="happ://add/' + encodeURIComponent(subUrl) + '">Добавить в Happ</a>' +
+        '<a class="btn btn-main" href="v2rayng://install-sub?url=' + encodeURIComponent(subUrl) + '">Добавить в Drebol VPN</a>' +
+        '<a class="btn btn-ghost" href="happ://add/' + encodeURIComponent(subUrl) + '">Добавить в Happ</a>' +
         '<a class="btn btn-ghost" href="incy://import/' + encodeURIComponent(subUrl) + '">Добавить в INCY</a>' +
       "</div>" +
       '<div class="link"><code>' + esc(subUrl) + "</code>" +
