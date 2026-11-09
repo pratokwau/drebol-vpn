@@ -187,8 +187,8 @@ async def post_init(app: Application):
                 await ctx.bot.send_message(
                     chat_id=ADMIN_ID,
                     text="\n".join(_reconcile_lines(rep)) + "\n\n"
-                         "Засчитать пропущенные: админка → Anore "
-                         "→ 🔍 Сверка Anore.",
+                         "Засчитать пропущенные: админка → Платёжка "
+                         "→ 🔍 Сверка Платёжки.",
                     parse_mode="HTML",
                 )
             except Exception:

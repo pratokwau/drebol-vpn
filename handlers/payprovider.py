@@ -1,4 +1,4 @@
-"""Раздел Anore: настройки приёма платежей через anore.
+"""Раздел «Платёжка»: настройки приёма платежей через anore.
 
 Бот сам выставляет счёт и сам засчитывает оплату — подтверждать вручную
 не нужно. Другого способа приёма платежей в боте нет.
@@ -22,7 +22,7 @@ from core.states import (
 
 
 def provider_label() -> str:
-    return "Anore"
+    return "Платёжка"
 
 
 def provider_line() -> str:
@@ -30,8 +30,8 @@ def provider_line() -> str:
     import services.anore_api as an
     cfg = load_config()
     if not an.is_configured():
-        return "💳 Anore  ·  ⚠️ <b>ключи не заданы</b>"
-    return (f"💳 Anore  ·  магазин <b>{cfg.get('anore_shop_id')}</b>"
+        return "💳 Платёжка  ·  ⚠️ <b>ключи не заданы</b>"
+    return (f"💳 Платёжка  ·  магазин <b>{cfg.get('anore_shop_id')}</b>"
             f"{' · 🔔 вебхук' if cfg.get('anore_webhook_secret') else ''}")
 
 
@@ -50,8 +50,8 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
 
     import services.anore_api as an
     ready = an.is_configured()
-    lines = ["💳 <b>Anore</b>", "",
-             f"<blockquote>Приём платежей: <b>Anore</b>\n"
+    lines = ["💳 <b>Платёжка</b>", "",
+             f"<blockquote>Приём платежей: <b>Платёжка</b>\n"
              f"🔑 Ключ: <code>{_mask(cfg.get('anore_api_key'))}</code>\n"
              f"🏬 ID магазина: <code>{cfg.get('anore_shop_id') or 'не задан'}</code>\n"
              f"🔔 Секрет вебхука: <code>{_mask(cfg.get('anore_webhook_secret'))}</code></blockquote>", "",
@@ -71,6 +71,7 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
                      "настройках anore после сохранения url вебхука.")
 
     rows = [
+        [InlineKeyboardButton("💰 Оплаты", callback_data="payments:paid:1")],
         [InlineKeyboardButton("🔑 API-ключ", callback_data="anore_set_key"),
          InlineKeyboardButton("🏬 ID магазина", callback_data="anore_set_shop")],
         [InlineKeyboardButton("🔔 Секрет вебхука", callback_data="anore_set_webhook_secret"),
@@ -80,7 +81,7 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
         [InlineKeyboardButton("🧾 Счета anore", callback_data="anore_payments"),
          InlineKeyboardButton("🏬 Настройки кассы", callback_data="anore_shop")],
         [InlineKeyboardButton("💱 Курсы выплат", callback_data="anore_rates"),
-         InlineKeyboardButton("🔍 Сверка Anore", callback_data="anore_reconcile")],
+         InlineKeyboardButton("🔍 Сверка Платёжки", callback_data="anore_reconcile")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ]
     await query.edit_message_text(
@@ -532,7 +533,7 @@ async def reconcile_anore(limit: int = 50) -> dict:
 
 def _reconcile_lines(rep: dict) -> list[str]:
     """Текст отчёта сверки для экрана и для фонового алерта."""
-    lines = ["🔍 <b>Сверка Anore</b>",
+    lines = ["🔍 <b>Сверка Платёжки</b>",
              f"Проверено счетов: <b>{rep['checked']}</b> · "
              f"в порядке: <b>{rep['ok_count']}</b>", ""]
     if not rep["checked"]:
