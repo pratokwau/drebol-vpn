@@ -997,21 +997,24 @@ async def handle_remove_promo(query, context):
 
 
 async def handle_how_to(query):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     await query.edit_message_text(
         "❓ <b>Как подключиться</b>\n"
-        "Четыре шага, пара минут.\n\n"
-        "<b>1️⃣ Установите INCY</b>  <i>— рекомендуем</i>\n"
+        "Три шага, пара минут.\n\n"
+        "<b>📱 Android — наше приложение Drebol VPN</b>  <i>— рекомендуем</i>\n"
+        "<blockquote>"
+        "1️⃣ Скачайте приложение — кнопка ниже\n"
+        "2️⃣ Скопируйте ссылку подписки на главном экране бота\n"
+        "3️⃣ Вставьте её в приложение — серверы подтянутся сами\n"
+        "4️⃣ Включите VPN — готово ✅"
+        "</blockquote>\n\n"
+        "<b>🍎 iOS, Windows, macOS — INCY</b>\n"
         "<blockquote>"
         "<a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">iOS</a>  ·  "
-        "<a href=\"https://play.google.com/store/apps/details?id=llc.itdev.incy\">Android</a>  ·  "
         "<a href=\"https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe\">Windows</a>  ·  "
         "<a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">macOS</a>"
-        "</blockquote>\n\n"
-        "<b>2️⃣ Скопируйте ссылку подписки</b>\n"
-        "На главном экране нажмите на ссылку — она скопируется.\n\n"
-        "<b>3️⃣ Вставьте её в приложение</b>\n"
-        "Серверы подтянутся сами.\n\n"
-        "<b>4️⃣ Выберите сервер и включите VPN</b> ✅\n\n"
+        "</blockquote>\n"
+        "<i>Дальше всё так же: скопируйте ссылку и вставьте её в INCY.</i>\n\n"
         "🔄 <b>Если INCY не подошёл — Happ</b>\n"
         "<blockquote>"
         "<a href=\"https://apps.apple.com/us/app/happ-proxy-utility/id6504287215\">iOS</a>  ·  "
@@ -1021,7 +1024,11 @@ async def handle_how_to(query):
         "</blockquote>\n"
         "<i>Дальше всё так же: скопируйте ссылку и вставьте её в Happ.</i>",
         parse_mode="HTML",
-        reply_markup=back_info(),
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📱 Скачать приложение",
+                                  url="https://vpn.drbl.tech/drebolapp.apk")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="info")],
+        ]),
         disable_web_page_preview=True,
     )
 
@@ -1034,7 +1041,9 @@ async def handle_about(query):
     lines = [
         "📕 <b>О сервисе</b>",
         "<b>Drebol VPN</b> — быстрый VPN без логов, который живёт в Telegram.", "",
-        "<blockquote>🖥 <b>Любая платформа</b>\n"
+        "<blockquote>📱 <b>Своё приложение</b>\n"
+        "Drebol VPN для Android — подключение в один тап, серверы с пингом, автообновление подписки\n\n"
+        "🖥 <b>Любая платформа</b>\n"
         "iOS, Android, Windows и macOS\n\n"
         "🛡 <b>Без логов</b>\n"
         "Не храним данные о вашей активности\n\n"
@@ -1800,7 +1809,7 @@ async def start_screen(user, fresh: bool = False):
                     f"{_link_block(row[5])}\n\n"
                     "<b>Как подключиться</b>\n"
                     "1️⃣ Скопируйте ссылку выше\n"
-                    "2️⃣ Откройте приложение INCY и вставьте её\n"
+                    "2️⃣ Откройте приложение Drebol VPN (Android) или INCY и вставьте её\n"
                     "3️⃣ Включите VPN — готово ✅")
         else:
             text = (f"👋 Привет, {name}!\n"
