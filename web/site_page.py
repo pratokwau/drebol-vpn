@@ -2961,6 +2961,8 @@ _TG = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
        'c.9-.3 1.6.2 1.4 1.7z"/></svg>')
 
 TIKTOK_URL = "https://www.tiktok.com/@drebolvpn"
+INSTAGRAM_URL = "https://www.instagram.com/drebolvpn"
+SUPPORT_URL = "https://t.me/drebolvpn_sup"
 
 
 def _icon(paths: str) -> str:
@@ -3922,7 +3924,11 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
         foot_links.append(f'<a href="{escape(terms_url)}">Соглашение</a>')
     if channel_url:
         foot_links.append(f'<a href="{escape(channel_url)}" target="_blank" rel="noopener">Наш TG канал</a>')
+    if handle:
+        foot_links.append(f'<a href="{bot_url}" target="_blank" rel="noopener">Telegram-бот</a>')
+    foot_links.append(f'<a href="{SUPPORT_URL}" target="_blank" rel="noopener">Поддержка</a>')
     foot_links.append(f'<a href="{TIKTOK_URL}" target="_blank" rel="noopener">Наш TikTok канал</a>')
+    foot_links.append(f'<a href="{INSTAGRAM_URL}" target="_blank" rel="noopener">Наш Instagram</a>')
     foot_links_html = f'<nav aria-label="Ссылки">{"".join(foot_links)}</nav>'
 
     year = "2026"
