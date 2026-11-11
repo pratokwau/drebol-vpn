@@ -15,7 +15,7 @@
   удаляет вместе со всеми следами (история, промокод, тикет, платежи).
 — Сообщения «клиенту» никуда не уходят: бот в прогоне поддельный, он их только
   записывает. Наружу уходит один настоящий отчёт — тебе в личку.
-— Счёт в anore не выставляется: создание платежа подменено заглушкой,
+— Счёт в Platega не выставляется: создание платежа подменено заглушкой,
   чтобы прогон не плодил счета в кабинете.
 — Опасное прогон не трогает: массовые действия над всеми подписками, рассылки,
   техработы, восстановление из бэкапа, удаление сайта, обновление с GitHub.
@@ -42,7 +42,7 @@ SKIPPED = [
     "техработы (включили бы их всем)",
     "восстановление базы из бэкапа",
     "удаление сайта и обновление с GitHub",
-    "реальное выставление счёта в anore (подменено заглушкой)",
+    "реальное выставление счёта в Platega (подменено заглушкой)",
 ]
 
 
@@ -684,7 +684,7 @@ async def money_and_expiry(bot, sub_id):
     # ── возврат платежа: срок обязан уехать назад и в базе, и в панели
     from core.database import record_paid_payment
     pay_id = await record_paid_payment(
-        tg_id=TEST_TG_ID, provider="anore", amount=100,
+        tg_id=TEST_TG_ID, provider="platega", amount=100,
         period_seconds=30 * 86400,
         external_id=f"selftest-refund-{TEST_TG_ID}")
     row = await get_paid_sub(sub_id)
@@ -856,18 +856,18 @@ async def send_report(report: str):
 async def main():
     bot = FakeBot()
 
-    # счёт в anore не создаём: иначе прогон плодил бы счета в кабинете
-    import services.anore_api as an
-    real_create = an.create_payment
+    # счёт в Platega не создаём: иначе прогон плодил бы счета в кабинете
+    import services.platega_api as pg
+    real_create = pg.create_payment
 
     async def fake_create(amount, description, tg_id, username=None,
-                          order_id=None):
-        # формат тот же, что у настоящей anore, только без запроса к ней
+                          order_id=None, **kwargs):
+        # формат тот же, что у настоящей Platega, только без запроса к ней
         return {"ok": True, "payment_id": f"selftest-{tg_id}-{amount}",
                 "url": "https://example.invalid/selftest-invoice",
                 "amount": amount}
 
-    an.create_payment = fake_create
+    pg.create_payment = fake_create
 
     sub_id = None
     try:
@@ -885,7 +885,7 @@ async def main():
         log.crash("прогон упал на полпути", e)
         log.note(traceback.format_exc()[-600:])
     finally:
-        an.create_payment = real_create
+        pg.create_payment = real_create
         try:
             await cleanup(bot, sub_id)
         except Exception as e:

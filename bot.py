@@ -117,27 +117,27 @@ async def post_init(app: Application):
 
         app.job_queue.run_repeating(_healthcheck_job, interval=300, first=60)
 
-        async def _anore_poll_job(ctx):
+        async def _platega_poll_job(ctx):
             """Опрашивает выставленные счета и засчитывает оплату.
 
-            Вебхук anore обычно подтверждает оплату мгновенно, а опрос —
-            страховка, если вебхук не дойдёт. Двойное начисление исключено:
+            Колбэк Platega обычно подтверждает оплату мгновенно, а опрос —
+            страховка, если колбэк не дойдёт. Двойное начисление исключено:
             подтверждение проходит атомарный claim — кто первым перевёл
             счёт из pending в paid, тот и начисляет.
             """
-            import services.anore_api as an
+            import services.platega_api as pg
             from core.database import (
                 get_pending_payments, set_payment_status, expire_stale_payments,
+                set_partial_refunded,
             )
-            if not an.is_configured():
+            if not pg.is_configured():
                 return
 
-            # счёт anore живёт 4 часа (expiresIn 14400 в документации) —
-            # раньше этого срока оплату ещё можно дождаться, дальше
-            # опрашивать нечего
-            ttl = int(load_config().get("invoice_ttl_minutes", 240) or 240)
-            await expire_stale_payments(ttl)
-            pending = await get_pending_payments("anore", limit=40)
+            # счёт Platega живёт 15 минут (expiresIn 00:15:00) — раньше
+            # этого срока оплату ещё можно дождаться, дальше опрашивать
+            # нечего; гасим с запасом вдвое
+            await expire_stale_payments(pg.INVOICE_TTL_MINUTES * 2)
+            pending = await get_pending_payments("platega", limit=40)
             if not pending:
                 return
 
@@ -145,11 +145,12 @@ async def post_init(app: Application):
             # растянуться дольше, чем интервал самой задачи
             import asyncio
             statuses = await asyncio.gather(
-                *[an.get_status(p[3]) for p in pending if p[3]],
+                *[pg.get_status(p[3]) for p in pending if p[3]],
                 return_exceptions=True,
             )
 
-            from handlers.payments import confirm_provider_payment
+            from types import SimpleNamespace
+            from handlers.payments import confirm_provider_payment, finalize_refund
             for p, r in zip([p for p in pending if p[3]], statuses):
                 if isinstance(r, Exception):
                     continue
@@ -158,52 +159,24 @@ async def post_init(app: Application):
                         await set_payment_status(p[0], "error", "платёж не найден")
                     continue
                 status = r.get("status")
-                if status == an.STATUS_PAID:
+                if status == pg.STATUS_PAID:
                     await confirm_provider_payment(ctx.bot, p)
-                elif status == an.STATUS_EXPIRED:
-                    await set_payment_status(p[0], "expired")
+                elif status == pg.STATUS_CANCELED:
+                    await set_payment_status(p[0], "canceled")
+                elif status == pg.STATUS_CHARGEBACKED:
+                    # возврат пришёл без колбэка — доводим до конца
+                    await finalize_refund(SimpleNamespace(bot=ctx.bot), p[0])
+                elif status == pg.STATUS_PARTIALLY_REFUNDED:
+                    raw = r.get("raw") or {}
+                    refunded = raw.get("refundedAmount")
+                    if refunded is not None:
+                        try:
+                            await set_partial_refunded(p[0], int(float(refunded)))
+                        except (TypeError, ValueError):
+                            pass
 
         poll_every = int(load_config().get("invoice_poll_seconds", 60) or 60)
-        app.job_queue.run_repeating(_anore_poll_job, interval=poll_every, first=30)
-
-        async def _anore_reconcile_job(ctx):
-            """Раз в сутки сверяет счета anore с базой бота.
-
-            Молчит, если всё в порядке. О расхождениях (пропущенные
-            начисления, подозрительные засчитывания, чужие счета) сообщает
-            админу — засчитать пропущенные можно кнопкой на экране сверки.
-            Ошибка API — не повод будить админа, просто пропускаем прогон.
-            """
-            import services.anore_api as an
-            if not an.is_configured():
-                return
-            try:
-                from handlers.payprovider import (
-                    _reconcile_lines, reconcile_anore,
-                )
-                rep = await reconcile_anore(limit=50)
-            except Exception:
-                return
-            if not rep.get("ok"):
-                return
-            bad = (len(rep["missed"]) + len(rep["unknown"])
-                   + len(rep["phantom"]) + len(rep["ledger_bad"]))
-            if not bad:
-                return
-            from config import ADMIN_ID
-            try:
-                await ctx.bot.send_message(
-                    chat_id=ADMIN_ID,
-                    text="\n".join(_reconcile_lines(rep)) + "\n\n"
-                         "Засчитать пропущенные: админка → Финансы "
-                         "→ Платёжная система → 🔍 Сверка.",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-
-        app.job_queue.run_repeating(_anore_reconcile_job,
-                                    interval=24 * 3600, first=3600)
+        app.job_queue.run_repeating(_platega_poll_job, interval=poll_every, first=30)
 
         # Серверы: в день оплаты в 23:00 мск спрашивает админа, оплачен ли сервер.
         from datetime import time as _time

@@ -11,7 +11,7 @@ from core.database import (
 from paidsub.time_parser import fmt_duration
 
 PROVIDER_LABELS = {
-    "anore": "Платёжная система",
+    "anore": "Anore",
     "platega": "Platega",
     "manual": "вручную",
 }
@@ -163,6 +163,9 @@ async def handle_payment_view(query, payment_id: int):
         lines.append(f"\n⚠️ <code>{error}</code>")
 
     kb = [[InlineKeyboardButton("🔍 Профиль юзера", callback_data=f"user_profile:{tg_id}")]]
+    if provider == "platega" and ext_id and not ext_id.startswith("manual-"):
+        kb.append([InlineKeyboardButton("🔍 Проверить в Platega",
+                                        callback_data=f"platega_payment:{ext_id}")])
     if status == "pending" and pay_url:
         kb.append([InlineKeyboardButton("🔗 Ссылка на оплату", url=pay_url)])
     kb.append([InlineKeyboardButton("◀️ К оплатам", callback_data="payments:paid:1")])
@@ -212,12 +215,12 @@ async def confirm_provider_payment(bot, p) -> dict:
         elif gift_tg:
             res = await apply_gift_payment(
                 gift_tg, tg_id, amount, ctx, promo_code=promo,
-                source="Anore", period_seconds=period,
+                source="Platega", period_seconds=period,
             )
         else:
             res = await apply_paid_payment(
                 tg_id, amount, ctx, promo_code=promo,
-                source="Anore", period_seconds=period,
+                source="Platega", period_seconds=period,
             )
             # в счёте за срок ехал выбор устройств на новый период:
             # ставим ровно столько, сколько взяли. Ноль — человек от

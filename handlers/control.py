@@ -159,7 +159,7 @@ CB_LABELS = {
     "gift_tariff": "🎁 Выбрал срок подарка",
     "gift_pay": "🎁 Оплатил подарок",
     "pay_provider_menu": "💰 Финансы",
-    "anore_menu": "💳 Платёжная система",
+    "platega_menu": "💳 Платёжная система",
     "servers_menu": "🖥 Серверы",
     "payments": "💰 Оплаты",
     "payment_view": "💰 Открыл платёж",

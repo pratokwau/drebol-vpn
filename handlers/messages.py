@@ -47,7 +47,8 @@ from core.states import (
     AWAITING_PANEL_SYNC_DAILY, AWAITING_PANEL_SYNC_INTERVAL,
     AWAITING_DIGEST_HOUR,
     AWAITING_DM_USER,
-    AWAITING_ANORE_KEY, AWAITING_ANORE_SHOP, AWAITING_ANORE_WEBHOOK_SECRET,
+    AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
+    AWAITING_PLATEGA_PAYOUT_SECRET,
     AWAITING_PAYOUT_AMOUNT, AWAITING_PAYOUT_ADDRESS,
     AWAITING_SERVER_NAME, AWAITING_SERVER_PRICE, AWAITING_SERVER_DAY,
     AWAITING_SERVER_EDIT_PRICE, AWAITING_SERVER_EDIT_DAY,
@@ -1428,14 +1429,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Ключи платёжной системы ──────────────────────────────────────────────
-    if state in (AWAITING_ANORE_KEY, AWAITING_ANORE_SHOP,
-                 AWAITING_ANORE_WEBHOOK_SECRET):
+    if state in (AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
+                 AWAITING_PLATEGA_PAYOUT_SECRET):
         context.user_data.pop("state", None)
         from handlers.payprovider import apply_credential
         field = {
-            AWAITING_ANORE_KEY: "anore_api_key",
-            AWAITING_ANORE_SHOP: "anore_shop_id",
-            AWAITING_ANORE_WEBHOOK_SECRET: "anore_webhook_secret",
+            AWAITING_PLATEGA_MERCHANT: "platega_merchant_id",
+            AWAITING_PLATEGA_SECRET: "platega_secret",
+            AWAITING_PLATEGA_PAYOUT_SECRET: "platega_payout_secret",
         }[state]
         await apply_credential(update.message, context, field, text)
         return
@@ -1447,7 +1448,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await apply_server_step(update.message, context, state, text)
         return
 
-    # ── Выплата из anore: сумма → реквизиты ─────────────────────────────────
+    # ── Выплата из Platega: сумма → реквизиты ───────────────────────────────
     if state == AWAITING_PAYOUT_AMOUNT:
         from handlers.payprovider import apply_payout_amount
         await apply_payout_amount(update.message, context, text)

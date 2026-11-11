@@ -2244,7 +2244,7 @@ def _renew_base(full_row) -> tuple:
 
 async def apply_paid_payment(tg_id: int, amount: int, context,
                              promo_code: str | None = None,
-                             source: str = "Anore",
+                             source: str = "Platega",
                              period_seconds: int | None = None,
                              gift_from: int | None = None) -> dict:
     """Засчитывает оплату, пришедшую из платёжной системы.
@@ -2405,7 +2405,7 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
 
 async def apply_gift_payment(gift_tg: int, giver_tg: int, amount: int, context,
                              promo_code: str | None = None,
-                             source: str = "Anore",
+                             source: str = "Platega",
                              period_seconds: int | None = None) -> dict:
     """Засчитывает оплаченный подарок: подписка открывается у получателя.
 

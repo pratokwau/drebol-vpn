@@ -523,7 +523,7 @@ CABINET_PAGE = r"""<!doctype html>
    refund_pending: {text: "Возврат в обработке", kind: "warn"}
  };
  function payProvider(raw) {
-   var map = {anore: "Платёжная система", platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
+   var map = {anore: "Anore", platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
    return map[String(raw).toLowerCase()] || String(raw);
  }
  // "2026-10-20 10:00" -> "20.10.2026 · 10:00"
@@ -889,7 +889,7 @@ CABINET_PAGE = r"""<!doctype html>
  }
 
  // Продление: тарифы, счёт, ожидание подтверждения. Подтверждение
- // приходит вебхуком anore, а опрос — страховка: страница опрашивает
+ // приходит колбэком Platega, а опрос — страховка: страница опрашивает
  // статус счёта каждые 10 секунд, пока ждёт.
  var renewTimer = null;
  var renewPayUrl = "";
@@ -1765,7 +1765,7 @@ async def build_current(bot_username: str) -> tuple:
     cfg = load_config()
     og_bytes = _asset("og.webp")
     # /logo.png на сервере — новый логотип (тот же base64, что в шапке
-    # сайта): его же можно вставить в настройки платёжной формы anore.
+    # сайта): его же можно вставить в настройки платёжной формы Platega.
     # assets/logo.png — старый логотип, его сюда больше не кладём.
     try:
         logo_bytes = base64.b64decode(LOGO_URL.split(",", 1)[1])

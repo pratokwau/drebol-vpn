@@ -14,10 +14,10 @@
 Кабинет показывает срок, трафик, LTE, устройства, платежи и рефералку.
 Действия — те же, что уже есть в боте для самого человека: отключить
 своё устройство, перевыпустить свой ключ и продлить подписку. Продление
-идёт через тот же anore-счёт, что и в боте, а подтверждение — вебхуком
-anore на /api/webhooks/anore, опрос статусов фоновой задачей бота —
-страховка. После оплаты anore возвращает человека по редиректу из
-настроек магазина.
+идёт через тот же счёт Platega, что и в боте, а подтверждение — колбэком
+Platega на /api/webhooks/platega, опрос статусов фоновой задачей бота —
+страховка. После оплаты Platega возвращает человека по редиректу из
+счёта (страницы /pay/* на сайте).
 """
 
 from __future__ import annotations
@@ -663,7 +663,7 @@ def build_app():
             out.append({"id": t[0], "name": fmt_duration(q["seconds"]),
                         "period": fmt_duration(q["seconds"]),
                         "price": q["price"]})
-        pending = await get_active_payment(tg_id, "anore")
+        pending = await get_active_payment(tg_id, "platega")
         return web.json_response({
             "tariffs": out,
             "devices": {"count": quote0["extra"], "price": quote0["dev_price"]},
@@ -676,7 +676,7 @@ def build_app():
         })
 
     async def renew(request):
-        """Создаёт счёт за продление — тот же anore-счёт, что и в боте.
+        """Создаёт счёт за продление — тот же счёт Platega, что и в боте.
         Повторное нажатие на тот же тариф не плодит счета: возвращается
         уже созданная ссылка. Подтверждение — вебхуком, опрос — страховка."""
         tg_id = await session_user(request)
@@ -694,19 +694,20 @@ def build_app():
         if await is_blacklisted(tg_id):
             return web.json_response({"error": "blocked"}, status=403)
         from core.database import (add_payment, get_active_payment, get_tariff,
-                              get_user_info)
+                              get_user_info, set_payment_external_id,
+                              set_payment_status)
         from paidsub.storage import get_paid_sub_by_tg_id
-        import services.anore_api as an
+        import services.platega_api as pg
         row = await get_paid_sub_by_tg_id(tg_id)
         if not row:
             return web.json_response({"error": "no_sub"}, status=404)
         tariff = await get_tariff(tariff_id) if tariff_id else None
         if not tariff or not tariff[4]:
             return web.json_response({"error": "bad_tariff"}, status=400)
-        if not an.is_configured():
+        if not pg.is_configured():
             return web.json_response({"error": "pay_unavailable"}, status=503)
         q = await _renew_quote(tg_id, tariff)
-        existing = await get_active_payment(tg_id, "anore")
+        existing = await get_active_payment(tg_id, "platega")
         if (existing and existing[4] == q["price"]
                 and existing[5] == q["seconds"] and existing[8]
                 and (len(existing) < 12 or existing[11] == q["extra"])):
@@ -715,9 +716,8 @@ def build_app():
                                       "amount": existing[4], "reused": True})
         user = await get_user_info(tg_id)
         # После оплаты клиент попадает на страницу «спасибо» на сайте,
-        # а через 5 секунд — в Telegram-бота. Редиректы магазина
-        # (t.me/drebolvpn_bot) переопределяются для этого счёта.
-        # Нет домена — возвращаемся в кабинет, как раньше.
+        # а через 5 секунд — в Telegram-бота. Редиректы задаются прямо
+        # в счёте. Нет домена — возвращаемся в кабинет, как раньше.
         from web.site_deploy import pay_redirect_urls
         urls = pay_redirect_urls()
         cabinet_url = ""
@@ -726,21 +726,26 @@ def build_app():
             cabinet_url = (site.cabinet_link() or "") + "/payments"
         except Exception:
             cabinet_url = ""
-        res = await an.create_payment(
+        # строку создаём ДО запроса к платёжке: её id едет в payload,
+        # а по payload колбэк находит счёт обратно
+        pid = await add_payment(
+            tg_id, "platega", None, q["price"], q["seconds"],
+            "", promo_code=q["promo_code"], kind=q["kind"],
+            extra=q["extra"])
+        res = await pg.create_payment(
             amount=q["price"],
             description=f"Подписка Drebol VPN · {q['name']} · {tg_id}",
             tg_id=tg_id, username=user[2] if user else None,
+            order_id=f"drebol-{pid}",
             success_url=urls.get("success") or cabinet_url or None,
             fail_url=urls.get("fail") or cabinet_url or None,
             back_url=urls.get("back") or cabinet_url or None)
         if not res.get("ok"):
-            logging.error("кабинет: счёт anore не создан для %s: %s",
+            logging.error("кабинет: счёт Platega не создан для %s: %s",
                           tg_id, res.get("error"))
+            await set_payment_status(pid, "error", res.get("error"))
             return web.json_response({"error": "pay_failed"}, status=502)
-        pid = await add_payment(
-            tg_id, "anore", res["payment_id"], q["price"], q["seconds"],
-            res["url"], promo_code=q["promo_code"], kind=q["kind"],
-            extra=q["extra"])
+        await set_payment_external_id(pid, res["payment_id"], res["url"])
         return web.json_response({"payment_id": pid, "url": res["url"],
                                   "amount": q["price"]})
 
@@ -761,50 +766,74 @@ def build_app():
         return web.json_response({"id": p[0], "status": p[7], "amount": p[4],
                                   "url": p[8], "period": p[5]})
 
-    async def anore_webhook(request):
-        """Вебхук anore: мгновенное подтверждение оплаты.
+    async def platega_webhook(request):
+        """Колбэк Platega: мгновенное подтверждение оплаты.
 
-        anore шлёт POST с заголовком Anore-Signature (HMAC-SHA256 по
-        сырому телу, секрет — из настроек магазина). События:
-        payment.succeeded — засчитать счёт, payment.canceled — пометить
-        отменённым, payment.expired — пометить истёкшим (счёт anore
-        живёт 4 часа). Счёт ищем по id платежа anore (external_id в базе).
-        Если вебхук придёт раньше опроса или дважды — подтверждение
+        Platega шлёт POST с заголовками X-MerchantId / X-Secret (те же,
+        что в настройках бота). Тело: id (uuid уведомления), status,
+        paymentMethod, payload. Счёт ищем по payload — туда мы кладём
+        «drebol-<id строки в базе>». Статусы: CONFIRMED — засчитать счёт,
+        CANCELED — пометить отменённым, CHARGEBACKED / DISPUTED — возврат,
+        PARTIALLY_REFUNDED — учесть частичный возврат.
+        Если колбэк придёт раньше опроса или дважды — подтверждение
         идемпотентно: засчитываются только счета в статусе pending.
         """
-        import services.anore_api as an
-        raw = await request.read()
-        if not an.verify_webhook(raw, request.headers.get("Anore-Signature")):
-            logging.warning("кабинет: вебхук anore с неверной подписью")
-            return web.json_response({"error": "bad_signature"}, status=401)
+        import services.platega_api as pg
+        if not pg.verify_callback(request.headers):
+            logging.warning("кабинет: колбэк Platega с неверными заголовками")
+            return web.json_response({"error": "bad_auth"}, status=401)
         try:
-            body = json.loads(raw.decode("utf-8"))
+            body = await request.json()
         except Exception:
             return web.json_response({"error": "bad_json"}, status=400)
-        event = body.get("event")
-        pay_id = body.get("id")
-        if event not in ("payment.succeeded", "payment.canceled",
-                         "payment.expired") or not pay_id:
+        status = (body.get("status") or "").upper()
+        payload = str(body.get("payload") or "")
+        if status not in ("CONFIRMED", "CANCELED", "CHARGEBACKED",
+                          "PARTIALLY_REFUNDED", "DISPUTED") or not payload:
             return web.json_response({"ok": True, "ignored": True})
-        from core.database import (
-            get_payment_by_external, get_payment, set_payment_status,
-        )
-        p = await get_payment_by_external(str(pay_id))
-        if not p:
-            logging.warning("кабинет: вебхук anore на неизвестный счёт %s", pay_id)
+        if not payload.startswith("drebol-"):
+            logging.warning("кабинет: колбэк Platega с чужим payload %s", payload)
             return web.json_response({"ok": True, "unknown": True})
-        row = await get_payment(p[0])
-        if not row or row[7] != "pending":
+        try:
+            pay_row_id = int(payload.split("-", 1)[1])
+        except (TypeError, ValueError):
+            return web.json_response({"ok": True, "unknown": True})
+        from core.database import (
+            get_payment, get_payment_by_external, set_payment_status,
+            set_partial_refunded,
+        )
+        row = await get_payment(pay_row_id)
+        if not row:
+            logging.warning("кабинет: колбэк Platega на неизвестный счёт %s", payload)
+            return web.json_response({"ok": True, "unknown": True})
+        if row[7] != "pending":
             return web.json_response({"ok": True, "already": True})
-        if event == "payment.canceled":
-            await set_payment_status(p[0], "canceled")
+        if status == "CANCELED":
+            await set_payment_status(pay_row_id, "canceled")
             return web.json_response({"ok": True})
-        if event == "payment.expired":
-            await set_payment_status(p[0], "expired")
+        if status in ("CHARGEBACKED", "DISPUTED"):
+            if _bot is None:
+                logging.error("кабинет: колбэк Platega о возврате, а бот не подключён к API")
+                return web.json_response({"error": "no_bot"}, status=500)
+            from types import SimpleNamespace
+            from handlers.payments import finalize_refund
+            await finalize_refund(SimpleNamespace(bot=_bot), pay_row_id)
+            return web.json_response({"ok": True})
+        if status == "PARTIALLY_REFUNDED":
+            refunded = body.get("refundedAmount")
+            if refunded is not None:
+                try:
+                    await set_partial_refunded(pay_row_id, int(float(refunded)))
+                except (TypeError, ValueError):
+                    pass
             return web.json_response({"ok": True})
         if _bot is None:
-            logging.error("кабинет: вебхук anore, а бот не подключён к API")
+            logging.error("кабинет: колбэк Platega, а бот не подключён к API")
             return web.json_response({"error": "no_bot"}, status=500)
+        p = await get_payment_by_external(row[3]) if row[3] else None
+        if not p:
+            logging.warning("кабинет: колбэк Platega, счёт %s без external_id", payload)
+            return web.json_response({"ok": True, "unknown": True})
         from handlers.payments import confirm_provider_payment
         await confirm_provider_payment(_bot, p)
         return web.json_response({"ok": True})
@@ -824,7 +853,7 @@ def build_app():
     app.router.add_get("/api/renew-options", renew_options)
     app.router.add_post("/api/renew", renew)
     app.router.add_get("/api/payment", payment_status)
-    app.router.add_post("/api/webhooks/anore", anore_webhook)
+    app.router.add_post("/api/webhooks/platega", platega_webhook)
     return app
 
 

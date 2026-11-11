@@ -100,14 +100,14 @@ from handlers.tariffs import (
     handle_tariff_edit,
 )
 from handlers.payprovider import (
-    handle_pay_provider_menu, handle_anore_menu,
-    handle_anore_set_key, handle_anore_set_shop,
-    handle_anore_set_webhook_secret, handle_anore_test,
-    handle_anore_balance, handle_anore_payments, handle_anore_payouts,
-    handle_anore_payout_new, handle_anore_payout_method,
-    handle_anore_payout_do, handle_anore_shop,
-    handle_anore_reconcile, handle_anore_reconcile_fix,
-    handle_anore_rates, handle_anore_payment, handle_anore_payout,
+    handle_pay_provider_menu, handle_platega_menu,
+    handle_platega_set_merchant, handle_platega_set_secret,
+    handle_platega_set_payout_secret, handle_platega_test,
+    handle_platega_balance, handle_platega_payouts,
+    handle_platega_payout_new, handle_platega_payout_method,
+    handle_platega_payout_bank, handle_platega_payout_do,
+    handle_platega_settings, handle_platega_payment, handle_platega_payout,
+    handle_platega_refund, handle_platega_refund_do,
 )
 from handlers.finance import (
     handle_servers_menu, handle_server_view, handle_server_add,
@@ -800,8 +800,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_tariff_edit(query, context, int(data.split(":")[1]), "period")
     elif data == "pay_provider_menu":
         await handle_pay_provider_menu(query, context)
-    elif data == "anore_menu":
-        await handle_anore_menu(query, context)
+    elif data == "platega_menu":
+        await handle_platega_menu(query, context)
     elif data == "servers_menu":
         await handle_servers_menu(query, context)
     elif data == "server_add":
@@ -822,40 +822,37 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("server_paid:"):
         _sid, _ans = data.split(":")[1], data.split(":")[2]
         await handle_server_paid_answer(query, int(_sid), _ans)
-    elif data == "anore_set_key":
-        await handle_anore_set_key(query, context)
-    elif data == "anore_set_shop":
-        await handle_anore_set_shop(query, context)
-    elif data == "anore_set_webhook_secret":
-        await handle_anore_set_webhook_secret(query, context)
-    elif data == "anore_test":
-        await handle_anore_test(query, context)
-    elif data == "anore_balance":
-        await handle_anore_balance(query, context)
-    elif data == "anore_payments":
-        await handle_anore_payments(query, context)
-    elif data.startswith("anore_payments:"):
-        await handle_anore_payments(query, context, data.split(":", 1)[1])
-    elif data.startswith("anore_payment:"):
-        await handle_anore_payment(query, context, data.split(":", 1)[1])
-    elif data == "anore_payouts":
-        await handle_anore_payouts(query, context)
-    elif data.startswith("anore_payout:"):
-        await handle_anore_payout(query, context, data.split(":", 1)[1])
-    elif data == "anore_rates":
-        await handle_anore_rates(query, context)
-    elif data == "anore_payout_new":
-        await handle_anore_payout_new(query, context)
-    elif data.startswith("anore_payout_method:"):
-        await handle_anore_payout_method(query, context, data.split(":", 1)[1])
-    elif data == "anore_payout_do":
-        await handle_anore_payout_do(query, context)
-    elif data == "anore_shop":
-        await handle_anore_shop(query, context)
-    elif data == "anore_reconcile":
-        await handle_anore_reconcile(query, context)
-    elif data == "anore_reconcile_fix":
-        await handle_anore_reconcile_fix(query, context)
+    elif data == "platega_set_merchant":
+        await handle_platega_set_merchant(query, context)
+    elif data == "platega_set_secret":
+        await handle_platega_set_secret(query, context)
+    elif data == "platega_set_payout_secret":
+        await handle_platega_set_payout_secret(query, context)
+    elif data == "platega_test":
+        await handle_platega_test(query, context)
+    elif data == "platega_balance":
+        await handle_platega_balance(query, context)
+    elif data.startswith("platega_payment:"):
+        await handle_platega_payment(query, context, data.split(":", 1)[1])
+    elif data.startswith("platega_refund:"):
+        await handle_platega_refund(query, context, int(data.split(":", 1)[1]))
+    elif data.startswith("platega_refund_ok:"):
+        _pid, _rev = data.split(":")[1], data.split(":")[2]
+        await handle_platega_refund_do(query, context, int(_pid), _rev == "1")
+    elif data == "platega_payouts":
+        await handle_platega_payouts(query, context)
+    elif data.startswith("platega_payout:"):
+        await handle_platega_payout(query, context, int(data.split(":", 1)[1]))
+    elif data == "platega_payout_new":
+        await handle_platega_payout_new(query, context)
+    elif data.startswith("platega_payout_method:"):
+        await handle_platega_payout_method(query, context, data.split(":", 1)[1])
+    elif data.startswith("platega_payout_bank:"):
+        await handle_platega_payout_bank(query, context, data.split(":", 1)[1])
+    elif data == "platega_payout_do":
+        await handle_platega_payout_do(query, context)
+    elif data == "platega_settings":
+        await handle_platega_settings(query, context)
     elif data == "paid_sub_presets":
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":
