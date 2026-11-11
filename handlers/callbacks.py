@@ -100,7 +100,7 @@ from handlers.tariffs import (
     handle_tariff_edit,
 )
 from handlers.payprovider import (
-    handle_pay_provider_menu,
+    handle_pay_provider_menu, handle_anore_menu,
     handle_anore_set_key, handle_anore_set_shop,
     handle_anore_set_webhook_secret, handle_anore_test,
     handle_anore_balance, handle_anore_payments, handle_anore_payouts,
@@ -108,6 +108,12 @@ from handlers.payprovider import (
     handle_anore_payout_do, handle_anore_shop,
     handle_anore_reconcile, handle_anore_reconcile_fix,
     handle_anore_rates, handle_anore_payment, handle_anore_payout,
+)
+from handlers.finance import (
+    handle_servers_menu, handle_server_view, handle_server_add,
+    handle_server_edit_price, handle_server_edit_day,
+    handle_server_del, handle_server_del_ok,
+    handle_server_mark, handle_server_paid_answer,
 )
 from handlers.broadcast import (
     handle_broadcast_start, handle_broadcast_segment,
@@ -794,6 +800,28 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_tariff_edit(query, context, int(data.split(":")[1]), "period")
     elif data == "pay_provider_menu":
         await handle_pay_provider_menu(query, context)
+    elif data == "anore_menu":
+        await handle_anore_menu(query, context)
+    elif data == "servers_menu":
+        await handle_servers_menu(query, context)
+    elif data == "server_add":
+        await handle_server_add(query, context)
+    elif data.startswith("server_view:"):
+        await handle_server_view(query, int(data.split(":", 1)[1]))
+    elif data.startswith("server_edit_price:"):
+        await handle_server_edit_price(query, context, int(data.split(":", 1)[1]))
+    elif data.startswith("server_edit_day:"):
+        await handle_server_edit_day(query, context, int(data.split(":", 1)[1]))
+    elif data.startswith("server_del_ok:"):
+        await handle_server_del_ok(query, int(data.split(":", 1)[1]))
+    elif data.startswith("server_del:"):
+        await handle_server_del(query, int(data.split(":", 1)[1]))
+    elif data.startswith("server_mark:"):
+        _sid, _status = data.split(":")[1], data.split(":")[2]
+        await handle_server_mark(query, int(_sid), _status)
+    elif data.startswith("server_paid:"):
+        _sid, _ans = data.split(":")[1], data.split(":")[2]
+        await handle_server_paid_answer(query, int(_sid), _ans)
     elif data == "anore_set_key":
         await handle_anore_set_key(query, context)
     elif data == "anore_set_shop":

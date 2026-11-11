@@ -523,7 +523,7 @@ CABINET_PAGE = r"""<!doctype html>
    refund_pending: {text: "Возврат в обработке", kind: "warn"}
  };
  function payProvider(raw) {
-   var map = {anore: "Платёжка", platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
+   var map = {anore: "Платёжная система", platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
    return map[String(raw).toLowerCase()] || String(raw);
  }
  // "2026-10-20 10:00" -> "20.10.2026 · 10:00"
@@ -937,7 +937,7 @@ CABINET_PAGE = r"""<!doctype html>
                '<button class="btn btn-ghost" type="button" onclick="pollPayment(' +
                d.pending.id + ', 90)">Проверить оплату</button></div>';
      }
-     html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через Платёжку.</p>';
+     html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через платёжную систему.</p>';
      d.tariffs.forEach(function (t) {
        html += '<button class="btn btn-ghost renew-tariff" type="button" style="margin-top:8px" onclick="renewPay(' +
                t.id + ')">' + esc(t.period) + ' — <b class="rt-price">' +

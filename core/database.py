@@ -385,6 +385,32 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Серверы, за которые платит админ: ежемесячные расходы.
+        # pay_day — день месяца (1..31); если в месяце дней меньше,
+        # оплата приходится на последний день месяца.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS servers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                price_rub INTEGER NOT NULL,
+                pay_day INTEGER NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Отметки об оплате серверов: один сервер — одна запись за месяц.
+        # status: 'paid' — оплачен, 'unpaid' — не оплачен.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS server_payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id INTEGER NOT NULL,
+                period TEXT NOT NULL,
+                status TEXT NOT NULL,
+                marked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                marked_by INTEGER,
+                UNIQUE(server_id, period)
+            )
+        """)
         # Докуп устройств: счёт бывает за срок ('period') и за слоты ('devices'),
         # extra — сколько устройств куплено. Слоты живут вместе с подпиской.
         for table, col, decl in (
@@ -1161,6 +1187,137 @@ async def payments_summary() -> dict:
         "by_provider": by_provider,
         "payers": payers,
         "avg": round(sum_total / cnt_total) if cnt_total else 0,
+    }
+
+
+# ── Серверы (расходы) ────────────────────────────────────────────────────────
+
+async def add_server(name: str, price_rub: int, pay_day: int) -> int:
+    """Новый сервер в учёте расходов. Возвращает его id."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT INTO servers (name, price_rub, pay_day) VALUES (?, ?, ?)",
+            (name.strip(), int(price_rub), int(pay_day)),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def list_servers(only_active: bool = True) -> list[tuple]:
+    """Серверы: id, name, price_rub, pay_day, active. Сортировка — по дню оплаты."""
+    q = "SELECT id, name, price_rub, pay_day, active FROM servers"
+    if only_active:
+        q += " WHERE active = 1"
+    q += " ORDER BY pay_day, name"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(q) as cur:
+            return await cur.fetchall()
+
+
+async def get_server(server_id: int) -> tuple | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, name, price_rub, pay_day, active FROM servers WHERE id = ?",
+            (server_id,),
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def update_server_field(server_id: int, field: str, value) -> None:
+    """Правит одно поле сервера: name, price_rub или pay_day."""
+    if field not in ("name", "price_rub", "pay_day"):
+        raise ValueError(field)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            f"UPDATE servers SET {field} = ? WHERE id = ?", (value, server_id)
+        )
+        await db.commit()
+
+
+async def delete_server(server_id: int) -> None:
+    """Мягкое удаление: сервер скрывается из списка, история оплат остаётся."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE servers SET active = 0 WHERE id = ?", (server_id,))
+        await db.commit()
+
+
+async def set_server_payment(server_id: int, period: str, status: str,
+                             marked_by: int | None = None) -> None:
+    """Отметка об оплате сервера за месяц 'YYYY-MM': 'paid' или 'unpaid'."""
+    if status not in ("paid", "unpaid"):
+        raise ValueError(status)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO server_payments (server_id, period, status, marked_by)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(server_id, period) DO UPDATE"
+            " SET status = excluded.status, marked_at = CURRENT_TIMESTAMP,"
+            "     marked_by = excluded.marked_by",
+            (server_id, period, status, marked_by),
+        )
+        await db.commit()
+
+
+async def get_server_payment(server_id: int, period: str) -> str | None:
+    """Статус оплаты сервера за месяц: 'paid' / 'unpaid' / None (не отмечен)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT status FROM server_payments WHERE server_id = ? AND period = ?",
+            (server_id, period),
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+
+async def servers_with_status(period: str) -> list[dict]:
+    """Активные серверы со статусом оплаты за месяц."""
+    rows = await list_servers()
+    out = []
+    for sid, name, price, day, _active in rows:
+        out.append({
+            "id": sid, "name": name, "price": price, "day": day,
+            "status": await get_server_payment(sid, period),
+        })
+    return out
+
+
+async def finance_summary(period: str) -> dict:
+    """Доходы и расходы за календарный месяц 'YYYY-MM'.
+
+    Доходы — фактически оплаченные счета (по дате оплаты, местное время
+    сервера). Расходы — активные серверы из учёта; оплаченные — по отметкам.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'paid'"
+            " AND strftime('%Y-%m', COALESCE(paid_at, created_at), 'localtime') = ?",
+            (period,),
+        ) as cur:
+            income = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COALESCE(SUM(price_rub), 0) FROM servers WHERE active = 1"
+        ) as cur:
+            expenses = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COALESCE(SUM(s.price_rub), 0) FROM server_payments sp"
+            " JOIN servers s ON s.id = sp.server_id"
+            " WHERE sp.period = ? AND sp.status = 'paid' AND s.active = 1",
+            (period,),
+        ) as cur:
+            paid = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COALESCE(SUM(s.price_rub), 0) FROM server_payments sp"
+            " JOIN servers s ON s.id = sp.server_id"
+            " WHERE sp.period = ? AND sp.status = 'unpaid' AND s.active = 1",
+            (period,),
+        ) as cur:
+            unpaid = (await cur.fetchone())[0]
+    return {
+        "income": income,
+        "expenses": expenses,
+        "expenses_paid": paid,
+        "expenses_unpaid": unpaid,
+        "profit": income - expenses,
     }
 
 

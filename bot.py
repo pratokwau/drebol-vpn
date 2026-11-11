@@ -195,8 +195,8 @@ async def post_init(app: Application):
                 await ctx.bot.send_message(
                     chat_id=ADMIN_ID,
                     text="\n".join(_reconcile_lines(rep)) + "\n\n"
-                         "Засчитать пропущенные: админка → Платёжка "
-                         "→ 🔍 Сверка Платёжки.",
+                         "Засчитать пропущенные: админка → Финансы "
+                         "→ Платёжная система → 🔍 Сверка.",
                     parse_mode="HTML",
                 )
             except Exception:
@@ -204,6 +204,15 @@ async def post_init(app: Application):
 
         app.job_queue.run_repeating(_anore_reconcile_job,
                                     interval=24 * 3600, first=3600)
+
+        # Серверы: в день оплаты в 23:00 мск спрашивает админа, оплачен ли сервер.
+        from datetime import time as _time
+        from zoneinfo import ZoneInfo
+        from handlers.finance import server_payment_reminder_job
+        app.job_queue.run_daily(
+            server_payment_reminder_job,
+            time=_time(23, 0, tzinfo=ZoneInfo("Europe/Moscow")),
+        )
 
 
         async def _recovered_job(ctx):

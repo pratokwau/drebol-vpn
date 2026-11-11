@@ -11,7 +11,7 @@ from core.database import (
 from paidsub.time_parser import fmt_duration
 
 PROVIDER_LABELS = {
-    "anore": "Платёжка",
+    "anore": "Платёжная система",
     "platega": "Platega",
     "manual": "вручную",
 }
@@ -116,12 +116,12 @@ async def handle_payments_menu(query, context: ContextTypes.DEFAULT_TYPE = None,
     kb.append(switch[:2])
     kb.append(switch[2:])
 
-    # Оплаты теперь живут внутри Платёжки: админ возвращается туда,
+    # Оплаты теперь живут внутри Финансов: админ возвращается туда,
     # а помощник — в свою панель (admin_panel показывает её помощникам,
     # а pay_provider_menu им закрыт — там ключи API).
     from config import ADMIN_ID
     if query.from_user.id == ADMIN_ID:
-        back_btn = InlineKeyboardButton("◀️ В Платёжку",
+        back_btn = InlineKeyboardButton("◀️ В Финансы",
                                         callback_data="pay_provider_menu")
     else:
         back_btn = InlineKeyboardButton("◀️ Назад", callback_data="admin_panel")

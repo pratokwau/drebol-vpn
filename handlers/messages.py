@@ -49,6 +49,8 @@ from core.states import (
     AWAITING_DM_USER,
     AWAITING_ANORE_KEY, AWAITING_ANORE_SHOP, AWAITING_ANORE_WEBHOOK_SECRET,
     AWAITING_PAYOUT_AMOUNT, AWAITING_PAYOUT_ADDRESS,
+    AWAITING_SERVER_NAME, AWAITING_SERVER_PRICE, AWAITING_SERVER_DAY,
+    AWAITING_SERVER_EDIT_PRICE, AWAITING_SERVER_EDIT_DAY,
     AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
     AWAITING_TARIFF_EDIT_PERIOD, AWAITING_TARIFF_EDIT_PRICE,
     AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
@@ -1436,6 +1438,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             AWAITING_ANORE_WEBHOOK_SECRET: "anore_webhook_secret",
         }[state]
         await apply_credential(update.message, context, field, text)
+        return
+
+    # ── Серверы (расходы): добавление и правка ───────────────────────────────
+    if state in (AWAITING_SERVER_NAME, AWAITING_SERVER_PRICE, AWAITING_SERVER_DAY,
+                 AWAITING_SERVER_EDIT_PRICE, AWAITING_SERVER_EDIT_DAY):
+        from handlers.finance import apply_server_step
+        await apply_server_step(update.message, context, state, text)
         return
 
     # ── Выплата из anore: сумма → реквизиты ─────────────────────────────────

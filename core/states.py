@@ -110,6 +110,13 @@ AWAITING_ANORE_WEBHOOK_SECRET = "awaiting_anore_webhook_secret"
 AWAITING_PAYOUT_AMOUNT = "awaiting_payout_amount"
 AWAITING_PAYOUT_ADDRESS = "awaiting_payout_address"
 
+# Серверы (расходы): добавление и правка
+AWAITING_SERVER_NAME = "awaiting_server_name"
+AWAITING_SERVER_PRICE = "awaiting_server_price"
+AWAITING_SERVER_DAY = "awaiting_server_day"
+AWAITING_SERVER_EDIT_PRICE = "awaiting_server_edit_price"
+AWAITING_SERVER_EDIT_DAY = "awaiting_server_edit_day"
+
 # Сообщение юзеру из профиля
 AWAITING_DM_USER = "awaiting_dm_user"
 

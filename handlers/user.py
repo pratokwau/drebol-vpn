@@ -915,7 +915,7 @@ async def handle_pay_invoice(query, context, tariff_id: int | None = None,
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=(
-                    "⚠️ <b>Ошибка создания счёта Платёжки</b>\n\n"
+                    "⚠️ <b>Ошибка создания счёта платёжной системы</b>\n\n"
                     f"👤 <code>{user.id}</code>\n"
                     f"<code>{result['error']}</code>"
                 ),

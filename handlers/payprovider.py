@@ -1,4 +1,4 @@
-"""Раздел «Платёжка»: настройки приёма платежей через anore.
+"""Раздел «Платёжная система»: настройки приёма платежей через anore.
 
 Бот сам выставляет счёт и сам засчитывает оплату — подтверждать вручную
 не нужно. Другого способа приёма платежей в боте нет.
@@ -22,16 +22,16 @@ from core.states import (
 
 
 def provider_label() -> str:
-    return "Платёжка"
+    return "Платёжная система"
 
 
 def provider_line() -> str:
-    """Строка о платёжке для админских экранов."""
+    """Строка о платёжной системе для админских экранов."""
     import services.anore_api as an
     cfg = load_config()
     if not an.is_configured():
-        return "💳 Платёжка  ·  ⚠️ <b>ключи не заданы</b>"
-    return (f"💳 Платёжка  ·  магазин <b>{cfg.get('anore_shop_id')}</b>"
+        return "💳 Платёжная система  ·  ⚠️ <b>ключи не заданы</b>"
+    return (f"💳 Платёжная система  ·  магазин <b>{cfg.get('anore_shop_id')}</b>"
             f"{' · 🔔 вебхук' if cfg.get('anore_webhook_secret') else ''}")
 
 
@@ -44,14 +44,46 @@ def _mask(value: str) -> str:
 
 
 async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
+    """Раздел «Финансы»: доходы, расходы и прибыль за месяц + подразделы."""
+    if context:
+        context.user_data.pop("state", None)
+    from core.database import finance_summary
+    from handlers.finance import current_period, fmt_price, month_title
+    period = current_period()
+    s = await finance_summary(period)
+    spent = ""
+    if s["expenses"]:
+        spent = (f" (оплачено {fmt_price(s['expenses_paid'])}"
+                 f", не оплачено {fmt_price(s['expenses_unpaid'])})")
+    lines = ["💰 <b>Финансы</b>", "",
+             f"📅 {month_title(period)}", "",
+             f"💵 Доходы: <b>{fmt_price(s['income'])}</b>",
+             f"🖥 Расходы: <b>{fmt_price(s['expenses'])}</b> в месяц{spent}",
+             f"💹 Прибыль: <b>{fmt_price(s['profit'])}</b>", "",
+             "<i>Доходы — оплаченные счета за месяц. "
+             "Расходы — серверы из списка «🖥 Серверы».</i>"]
+    rows = [
+        [InlineKeyboardButton("💰 Оплаты", callback_data="payments:paid:1")],
+        [InlineKeyboardButton("🖥 Серверы", callback_data="servers_menu")],
+        [InlineKeyboardButton("💳 Платёжная система", callback_data="anore_menu")],
+        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+    ]
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(rows), disable_web_page_preview=True,
+    )
+
+
+async def handle_anore_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
+    """Экран «Платёжная система»: ключи, баланс, счета, выплаты, сверка."""
     if context:
         context.user_data.pop("state", None)
     cfg = load_config()
 
     import services.anore_api as an
     ready = an.is_configured()
-    lines = ["💳 <b>Платёжка</b>", "",
-             f"<blockquote>Приём платежей: <b>Платёжка</b>\n"
+    lines = ["💳 <b>Платёжная система</b>", "",
+             f"<blockquote>Приём платежей: <b>Платёжная система</b>\n"
              f"🔑 Ключ: <code>{_mask(cfg.get('anore_api_key'))}</code>\n"
              f"🏬 ID магазина: <code>{cfg.get('anore_shop_id') or 'не задан'}</code>\n"
              f"🔔 Секрет вебхука: <code>{_mask(cfg.get('anore_webhook_secret'))}</code></blockquote>", "",
@@ -71,7 +103,6 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
                      "настройках anore после сохранения url вебхука.")
 
     rows = [
-        [InlineKeyboardButton("💰 Оплаты", callback_data="payments:paid:1")],
         [InlineKeyboardButton("🔑 API-ключ", callback_data="anore_set_key"),
          InlineKeyboardButton("🏬 ID магазина", callback_data="anore_set_shop")],
         [InlineKeyboardButton("🔔 Секрет вебхука", callback_data="anore_set_webhook_secret"),
@@ -81,8 +112,8 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
         [InlineKeyboardButton("🧾 Счета anore", callback_data="anore_payments"),
          InlineKeyboardButton("🏬 Настройки кассы", callback_data="anore_shop")],
         [InlineKeyboardButton("💱 Курсы выплат", callback_data="anore_rates"),
-         InlineKeyboardButton("🔍 Сверка Платёжки", callback_data="anore_reconcile")],
-        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+         InlineKeyboardButton("🔍 Сверка", callback_data="anore_reconcile")],
+        [InlineKeyboardButton("◀️ К финансам", callback_data="pay_provider_menu")],
     ]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
@@ -100,7 +131,7 @@ async def handle_anore_set_key(query, context: ContextTypes.DEFAULT_TYPE):
         "⚠️ Сообщение с ключом лучше потом удалить из чата.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
         ]),
     )
 
@@ -113,7 +144,7 @@ async def handle_anore_set_shop(query, context: ContextTypes.DEFAULT_TYPE):
         "одним сообщением — просто число.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
         ]),
     )
 
@@ -127,7 +158,7 @@ async def handle_anore_set_webhook_secret(query, context: ContextTypes.DEFAULT_T
         "⚠️ Сообщение с секретом лучше потом удалить из чата.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
         ]),
     )
 
@@ -149,7 +180,7 @@ async def handle_anore_test(query, context: ContextTypes.DEFAULT_TYPE):
         text, parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔁 Ещё раз", callback_data="anore_test"),
-             InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+             InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
         ]),
     )
 
@@ -187,7 +218,7 @@ async def apply_credential(message, context: ContextTypes.DEFAULT_TYPE,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔌 Проверить", callback_data="anore_test"),
-             InlineKeyboardButton("◀️ К платёжке", callback_data="pay_provider_menu")],
+             InlineKeyboardButton("◀️ К финансам", callback_data="pay_provider_menu")],
         ]),
     )
 
@@ -241,7 +272,7 @@ async def handle_anore_balance(query, context: ContextTypes.DEFAULT_TYPE):
             _anore_error_text(r["error"]), parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔁 Ещё раз", callback_data="anore_balance"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
             ]),
         )
         return
@@ -272,7 +303,7 @@ async def handle_anore_balance(query, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("💸 Вывести", callback_data="anore_payout_new"),
              InlineKeyboardButton("💸 Выплаты", callback_data="anore_payouts")],
             [InlineKeyboardButton("🔁 Обновить", callback_data="anore_balance"),
-             InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+             InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
         ]),
     )
 
@@ -302,7 +333,7 @@ async def handle_anore_payments(query, context: ContextTypes.DEFAULT_TYPE = None
             _anore_error_text(r["error"]), parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔁 Ещё раз", callback_data=refresh_cb),
-                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
             ]),
         )
         return
@@ -357,7 +388,7 @@ async def handle_anore_payments(query, context: ContextTypes.DEFAULT_TYPE = None
         reply_markup=InlineKeyboardMarkup(
             frows + rows + [
                 [InlineKeyboardButton("🔁 Обновить", callback_data=refresh_cb),
-                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
             ]),
     )
 
@@ -440,7 +471,7 @@ async def handle_anore_rates(query, context: ContextTypes.DEFAULT_TYPE = None):
             _anore_error_text(r["error"]), parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔁 Ещё раз", callback_data="anore_rates"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
             ]),
         )
         return
@@ -458,7 +489,7 @@ async def handle_anore_rates(query, context: ContextTypes.DEFAULT_TYPE = None):
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔁 Обновить", callback_data="anore_rates"),
-             InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+             InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
         ]),
     )
 
@@ -533,7 +564,7 @@ async def reconcile_anore(limit: int = 50) -> dict:
 
 def _reconcile_lines(rep: dict) -> list[str]:
     """Текст отчёта сверки для экрана и для фонового алерта."""
-    lines = ["🔍 <b>Сверка Платёжки</b>",
+    lines = ["🔍 <b>Сверка</b>",
              f"Проверено счетов: <b>{rep['checked']}</b> · "
              f"в порядке: <b>{rep['ok_count']}</b>", ""]
     if not rep["checked"]:
@@ -583,7 +614,7 @@ async def handle_anore_reconcile(query, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔁 Ещё раз", callback_data="anore_reconcile"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
             ]),
         )
         return
@@ -595,7 +626,7 @@ async def handle_anore_reconcile(query, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Засчитать пропущенные ({len(rep['missed'])})",
             callback_data="anore_reconcile_fix")])
     rows.append([InlineKeyboardButton("🔁 Обновить", callback_data="anore_reconcile"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")])
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")])
     await query.edit_message_text(
         "\n".join(_reconcile_lines(rep)), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(rows),
@@ -644,7 +675,7 @@ async def handle_anore_reconcile_fix(query, context: ContextTypes.DEFAULT_TYPE):
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔍 К сверке", callback_data="anore_reconcile"),
-             InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+             InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
         ]),
     )
 
@@ -658,7 +689,7 @@ async def handle_anore_payouts(query, context: ContextTypes.DEFAULT_TYPE):
             _anore_error_text(r["error"]), parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔁 Ещё раз", callback_data="anore_payouts"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
             ]),
         )
         return
@@ -694,7 +725,7 @@ async def handle_anore_payouts(query, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("➕ Новая выплата", callback_data="anore_payout_new"),
                  InlineKeyboardButton("💰 Баланс", callback_data="anore_balance")],
                 [InlineKeyboardButton("🔁 Обновить", callback_data="anore_payouts"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
             ]),
     )
 
@@ -941,7 +972,7 @@ async def handle_anore_payout_do(query, context: ContextTypes.DEFAULT_TYPE):
             _anore_error_text(r["error"]), parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("💸 Выплаты", callback_data="anore_payouts"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+                 InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
             ]),
         )
         return
@@ -999,6 +1030,6 @@ async def handle_anore_shop(query, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🌐 Открыть кабинет anore",
                                   url="https://anore.cc/app/settings")],
-            [InlineKeyboardButton("◀️ Назад", callback_data="pay_provider_menu")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="anore_menu")],
         ]),
     )
