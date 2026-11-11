@@ -1001,13 +1001,6 @@ async def handle_how_to(query):
     await query.edit_message_text(
         "❓ <b>Как подключиться</b>\n"
         "Три шага, пара минут.\n\n"
-        "<b>📱 Android — наше приложение Drebol VPN</b>  <i>— рекомендуем</i>\n"
-        "<blockquote>"
-        "1️⃣ Скачайте приложение — кнопка ниже\n"
-        "2️⃣ Скопируйте ссылку подписки на главном экране бота\n"
-        "3️⃣ Вставьте её в приложение — серверы подтянутся сами\n"
-        "4️⃣ Включите VPN — готово ✅"
-        "</blockquote>\n\n"
         "<b>iOS, Android, Windows, macOS — INCY</b>\n"
         "<blockquote>"
         "<a href=\"https://apps.apple.com/ru/app/incy/id6756943388\">iOS</a>  ·  "
@@ -1026,8 +1019,6 @@ async def handle_how_to(query):
         "<i>Дальше всё так же: скопируйте ссылку и вставьте её в Happ.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📱 Скачать приложение",
-                                  url="https://vpn.drbl.tech/drebolapp.apk")],
             [InlineKeyboardButton("◀️ Назад", callback_data="info")],
         ]),
         disable_web_page_preview=True,
@@ -1042,9 +1033,7 @@ async def handle_about(query):
     lines = [
         "📕 <b>О сервисе</b>",
         "<b>Drebol VPN</b> — быстрый VPN без логов, который живёт в Telegram.", "",
-        "<blockquote>📱 <b>Своё приложение</b>\n"
-        "Drebol VPN для Android — подключение в один тап, серверы с пингом, автообновление подписки\n\n"
-        "🖥 <b>Любая платформа</b>\n"
+        "<blockquote>🖥 <b>Любая платформа</b>\n"
         "iOS, Android, Windows и macOS\n\n"
         "🛡 <b>Без логов</b>\n"
         "Не храним данные о вашей активности\n\n"
@@ -1810,7 +1799,7 @@ async def start_screen(user, fresh: bool = False):
                     f"{_link_block(row[5])}\n\n"
                     "<b>Как подключиться</b>\n"
                     "1️⃣ Скопируйте ссылку выше\n"
-                    "2️⃣ Откройте приложение Drebol VPN (Android) или INCY и вставьте её\n"
+                    "2️⃣ Откройте INCY и вставьте её\n"
                     "3️⃣ Включите VPN — готово ✅")
         else:
             text = (f"👋 Привет, {name}!\n"

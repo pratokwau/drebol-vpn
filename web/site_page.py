@@ -3011,7 +3011,6 @@ DEFAULT_TEXTS = {
     "hero_shimmer": "И без цензуры.",
     "hero_lead": "Удобный и быстрый VPN прямо в Telegram. Подключение в пару нажатий: запустили бота, получили ключ и наслаждайтесь свободным интернетом на всех устройствах.",
     "hero_btn": "Открыть в Telegram",
-    "hero_app_btn": "Скачать приложение",
     "hero_hud_status": "Защищённое соединение",
     "hero_hud_speed": "Высокая скорость · 4K Ready",
 
@@ -3077,7 +3076,7 @@ DEFAULT_TEXTS = {
     "step2_title": "Получите ключ",
     "step2_desc": "Подпишитесь на новостной канал — бот мгновенно выдаст персональный ключ доступа.",
     "step3_title": "Подключитесь",
-    "step3_desc": "Нажмите кнопку «Подключить» или вставьте ключ в приложение на телефоне или ПК. Всё готово!",
+    "step3_desc": "Скопируйте ключ, вставьте его в VPN-клиент и нажмите «Подключить». Всё готово!",
 
     # Тарифы
     "tariffs_title": "Честные цены. Без скрытых платежей.",
@@ -3996,7 +3995,6 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
       <div class="hero-actions">
         <a class="btn btn-main btn-beam" href="{bot_url}">{_TG}{escape(txt['hero_btn'])}</a>
         {hero_second}
-        <a class="btn btn-ghost" href="https://vpn.drbl.tech/drebolapp.apk" download="drebolapp.apk">📱 {escape(txt['hero_app_btn'])}</a>
       </div>
       {hint_html}
       <div class="chips-wrap">
