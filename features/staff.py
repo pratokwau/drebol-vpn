@@ -3,7 +3,7 @@
 Каждому помощнику права выдаются поштучно: тикеты, карточки пользователей,
 подписки, оплаты, промокоды, чёрный список, рассылки, статистика. Что не
 выдано — то закрыто: и кнопки, и ввод текстом. Всё, что помощник делает,
-видно в «🛰 Контроль → Аудит админки».
+видно в «📜 Логи → Аудит админки».
 
 Права заданы белым списком кнопок. Новая кнопка в админке помощнику по
 умолчанию недоступна, пока её не впишут в нужное право, — так безопаснее.
@@ -22,6 +22,7 @@ from core.states import (
     AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
     AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK, AWAITING_BL_UNTIL,
     AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
+    AWAITING_LOG_FILTER_USER, AWAITING_LOG_FILTER_DATE, AWAITING_LOG_EXPORT_USER,
 )
 
 # Что открыто каждому помощнику независимо от прав: вход в панель и выход из неё
@@ -113,9 +114,10 @@ PERMS = {
     "stats": {
         "label": "📊 Статистика",
         "hint": "сводка по деньгам и людям, кто онлайн, трафик",
-        "exact": {"dashboard", "ctl_menu", "ctl_online", "ctl_feed"},
-        "prefix": ("act_feed:", "user_feed:", "ctl_hist:", "payment_stats:"),
-        "states": set(),
+        "exact": {"dashboard", "ctl_menu", "ctl_online", "ctl_feed", "log_storage_menu"},
+        "prefix": ("act_f", "user_feed:", "ctl_hist:", "payment_stats:", "log_export"),
+        "states": {AWAITING_LOG_FILTER_USER, AWAITING_LOG_FILTER_DATE,
+                   AWAITING_LOG_EXPORT_USER},
         "button": ("📊 Статистика", "dashboard"),
     },
 }
@@ -277,7 +279,7 @@ async def handle_helpers_menu(query, context=None):
         lines.append("<blockquote>Пока никого.</blockquote>")
     lines += ["", "<i>Права выдаются поштучно: тикеты, карточки людей, подписки, "
               "оплаты, промокоды, чёрный список, рассылки, статистика. Что не выдано — "
-              "закрыто. Действия помощников видны в 🛰 Контроль → Аудит админки.</i>"]
+              "закрыто. Действия помощников видны в 📜 Логи → Аудит админки.</i>"]
     kb.append([InlineKeyboardButton("➕ Добавить помощника", callback_data="helper_add")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",

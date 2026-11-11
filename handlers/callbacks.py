@@ -64,6 +64,12 @@ from handlers.control import (
     handle_digest_hour_menu, handle_digest_set_hour, handle_digest_now,
     handle_digest_custom,
     handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
+    handle_log_filter_menu, handle_log_filter_kind, handle_log_filter_date,
+    handle_log_filter_user_prompt, handle_log_filter_user_pick,
+    handle_log_filter_user_clear, handle_log_filter_clear,
+    handle_export_menu, handle_export, handle_storage_menu,
+    handle_retention_set, handle_purge_now,
+    _log_filter, _save_log_filter,
 )
 from features.staff import (
     is_helper, helper_can, handle_helper_panel, handle_helper_card, handle_helper_perm,
@@ -364,7 +370,51 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_control_menu(query, context)
     elif data.startswith("act_feed:"):
         _, scope, pg = data.split(":")
-        await handle_activity_feed(query, scope, int(pg))
+        await handle_activity_feed(query, scope, int(pg), context)
+    elif data.startswith("act_filter:"):
+        scope = data.split(":", 1)[1]
+        f = _log_filter(context)
+        f["scope"] = scope
+        _save_log_filter(context, f)
+        await handle_log_filter_menu(query, context)
+    elif data.startswith("act_fk:"):
+        await handle_log_filter_kind(query, context, data.split(":", 1)[1])
+    elif data.startswith("act_fd:"):
+        await handle_log_filter_date(query, context, data.split(":", 1)[1])
+    elif data == "act_fu":
+        await handle_log_filter_user_prompt(query, context)
+    elif data.startswith("act_fu_pick:"):
+        await handle_log_filter_user_pick(query, context, int(data.split(":", 1)[1]))
+    elif data == "act_fu_clear":
+        await handle_log_filter_user_clear(query, context)
+    elif data.startswith("act_fapply:"):
+        await handle_activity_feed(query, data.split(":", 1)[1], 1, context)
+    elif data == "act_fclear":
+        await handle_log_filter_clear(query, context)
+    elif data == "log_export_menu":
+        await handle_export_menu(query, context)
+    elif data.startswith("log_export:"):
+        kind = data.split(":", 1)[1]
+        if kind == "user":
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            from core.states import AWAITING_LOG_EXPORT_USER
+            context.user_data["state"] = AWAITING_LOG_EXPORT_USER
+            await query.edit_message_text(
+                "👤 <b>Выгрузка по человеку</b>\n\nПришли TG ID, @username или имя.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("◀️ К выгрузке", callback_data="log_export_menu")]]),
+            )
+        else:
+            await handle_export(query, context, kind)
+    elif data.startswith("log_export_pick:"):
+        await handle_export(query, context, "user", int(data.split(":", 1)[1]))
+    elif data == "log_storage_menu":
+        await handle_storage_menu(query, context)
+    elif data.startswith("log_retention:"):
+        await handle_retention_set(query, context, int(data.split(":", 1)[1]))
+    elif data == "log_purge_now":
+        await handle_purge_now(query, context)
     elif data.startswith("user_feed:"):
         _, uid, scope, pg = data.split(":")
         await handle_user_activity(query, int(uid), int(pg), scope)

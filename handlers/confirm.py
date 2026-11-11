@@ -13,7 +13,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 OK_PREFIX = "ok:"
 
-# Как действие называется в аудите «Контроля»
+# Как действие называется в аудите «Логов»
 CONFIRM_TITLES = {
     "paid_sub_delete": "Удаление подписки",
     "sub_delete": "Удаление админской подписки",

@@ -272,6 +272,22 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(tg_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(tg_id, created_at)")
+        # Журнал ошибок: падения бота, ошибки панели и платёжки.
+        # Текст сообщений, пароли, токены и ключи сюда не попадают —
+        # log_error чистит всё подозрительное до записи.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS error_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                source TEXT NOT NULL,
+                level TEXT NOT NULL DEFAULT 'error',
+                message TEXT NOT NULL,
+                details TEXT,
+                tg_id INTEGER
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_error_time ON error_log(created_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_error_source ON error_log(source, created_at)")
         # Помощь с подключением: кому уже написали и кто подключался хоть раз.
         # Время ставим только у отправленных подсказок — для отметки
         # «подключался» ни время, ни адрес подключения не храним.
@@ -1250,6 +1266,137 @@ async def log_activity(tg_id: int, action: str, details: str | None = None,
         pass
 
 
+# ── Журнал ошибок ────────────────────────────────────────────────────────────
+
+_SECRET_RE = None
+
+
+def _sanitize_error_text(text: str | None, limit: int = 500) -> str | None:
+    """Чистит текст ошибки перед записью в журнал: пароли, токены, ключи
+    и заголовки авторизации заменяются на <скрыто>. Текст сообщений,
+    адреса и содержимое ответов сюда не попадают вовсе — их не передают
+    вызывающие места, а не этот фильтр."""
+    import re
+    if text is None:
+        return None
+    global _SECRET_RE
+    if _SECRET_RE is None:
+        _SECRET_RE = re.compile(
+            r"(?i)(token|secret|password|passwd|pwd|api[-_]?key|apikey|"
+            r"auth|authorization|bearer|session|private[-_]?key)"
+            r"(\s*[:=]\s*|\s+)([\"']?)([^\s\"',;}]+)")
+    out = _SECRET_RE.sub(r"\1\2\3<скрыто>", str(text))
+    return out[:limit]
+
+
+async def log_error(source: str, level: str = "error", message: str = "",
+                    details: str | None = None, tg_id: int | None = None) -> bool:
+    """Одна запись журнала ошибок. Одинаковые ошибки чаще раза в 10 минут
+    не пишутся — иначе опрос платёжки при лежащем API завалил бы журнал
+    одинаковыми строками. Ошибки глотаем: журнал не должен ломать бота."""
+    try:
+        msg = (_sanitize_error_text(str(message), 300) or "").strip()
+        if not msg:
+            return False
+        det = _sanitize_error_text(details, 500) if details else None
+        lvl = level if level in ("error", "warning") else "error"
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM error_log WHERE source = ? AND level = ? "
+                "AND message = ? AND created_at > datetime('now', '-10 minutes')",
+                (source, lvl, msg),
+            ) as cur:
+                if (await cur.fetchone())[0]:
+                    return False
+            await db.execute(
+                "INSERT INTO error_log (source, level, message, details, tg_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (source, lvl, msg, det, tg_id),
+            )
+            await db.commit()
+        return True
+    except Exception:
+        return False
+
+
+async def list_errors(page: int = 1, per_page: int = 15):
+    """Журнал ошибок с пагинацией. Время отдаём в местном поясе."""
+    offset = (page - 1) * per_page
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM error_log") as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute("""
+            SELECT id, source, level, message, details,
+                   datetime(created_at, 'localtime'), tg_id
+            FROM error_log
+            ORDER BY id DESC LIMIT ? OFFSET ?
+        """, (per_page, offset)) as cur:
+            rows = await cur.fetchall()
+    return rows, max(1, (total + per_page - 1) // per_page)
+
+
+async def get_error_entry(entry_id: int):
+    """Одна запись журнала ошибок для подробностей."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, source, level, message, details,
+                   datetime(created_at, 'localtime'), tg_id
+            FROM error_log WHERE id = ?
+        """, (int(entry_id),)) as cur:
+            return await cur.fetchone()
+
+
+async def count_errors() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT COUNT(*) FROM error_log") as cur:
+            return (await cur.fetchone())[0]
+
+
+async def purge_errors(days: int = 90) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "DELETE FROM error_log WHERE created_at < datetime('now', ?)",
+            (f"-{int(days)} days",),
+        )
+        await db.commit()
+        return cur.rowcount or 0
+
+
+async def get_activity_entry(entry_id: int):
+    """Одна запись журнала действий для подробностей."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT a.id, a.tg_id, a.action, a.details,
+                   datetime(a.created_at, 'localtime'), u.first_name, u.username
+            FROM activity_log a LEFT JOIN users u ON u.id = a.tg_id
+            WHERE a.id = ?
+        """, (int(entry_id),)) as cur:
+            return await cur.fetchone()
+
+
+async def activity_stats() -> dict:
+    """Сколько записей в журналах, самая старая и размер файла базы."""
+    import os
+    async with aiosqlite.connect(DB_PATH) as db:
+        async def one(q):
+            async with db.execute(q) as cur:
+                row = await cur.fetchone()
+                return row[0] if row else 0
+        act_rows = await one("SELECT COUNT(*) FROM activity_log")
+        err_rows = await one("SELECT COUNT(*) FROM error_log")
+        oldest_act = await one(
+            "SELECT datetime(MIN(created_at), 'localtime') FROM activity_log")
+        oldest_err = await one(
+            "SELECT datetime(MIN(created_at), 'localtime') FROM error_log")
+    try:
+        db_bytes = os.path.getsize(DB_PATH)
+    except OSError:
+        db_bytes = 0
+    return {"activity_rows": act_rows, "error_rows": err_rows,
+            "oldest_activity": oldest_act, "oldest_error": oldest_err,
+            "db_bytes": db_bytes}
+
+
 def _activity_where(scope: str):
     from config import ADMIN_ID
     if scope == "important":
@@ -1266,15 +1413,38 @@ def _activity_where(scope: str):
     return "a.is_admin = 0", []
 
 
-async def list_activity(scope: str = "all", page: int = 1, per_page: int = 15):
-    """Журнал с пагинацией. Время отдаём в местном поясе."""
+async def list_activity(scope: str = "all", page: int = 1, per_page: int = 15,
+                        user_id: int | None = None, kind: str | None = None,
+                        date_from: str | None = None,
+                        date_to: str | None = None):
+    """Журнал с пагинацией. Время отдаём в местном поясе.
+
+    Фильтры (все опционально, сочетаются с областью):
+    user_id — только этот человек (tg_id, индекс есть);
+    kind — вид действия: cb / cmd / msg / ev (префиксный LIKE);
+    date_from/date_to — даты «ГГГГ-ММ-ДД» в местном поясе, включительно.
+    Строки: (id, tg_id, action, details, время, имя, username)."""
     where, params = _activity_where(scope)
+    conds = [where]
+    if user_id is not None:
+        conds.append("a.tg_id = ?")
+        params = params + [int(user_id)]
+    if kind in ("cb", "cmd", "msg", "ev"):
+        conds.append("a.action LIKE ?")
+        params = params + [f"{kind}:%"]
+    if date_from:
+        conds.append("date(a.created_at, 'localtime') >= ?")
+        params = params + [date_from]
+    if date_to:
+        conds.append("date(a.created_at, 'localtime') <= ?")
+        params = params + [date_to]
+    where = " AND ".join(f"({c})" for c in conds)
     offset = (page - 1) * per_page
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(f"SELECT COUNT(*) FROM activity_log a WHERE {where}", params) as cur:
             total = (await cur.fetchone())[0]
         async with db.execute(f"""
-            SELECT a.tg_id, a.action, a.details, datetime(a.created_at, 'localtime'),
+            SELECT a.id, a.tg_id, a.action, a.details, datetime(a.created_at, 'localtime'),
                    u.first_name, u.username
             FROM activity_log a LEFT JOIN users u ON u.id = a.tg_id
             WHERE {where}

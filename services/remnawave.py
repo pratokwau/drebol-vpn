@@ -637,7 +637,7 @@ def _usage_page_keyboard(node_uuid, page, total_pages, back_to):
     rows.append([InlineKeyboardButton(
         "🔄 Обновить", callback_data=f"{back_to}:{page}")])
     rows.append([InlineKeyboardButton("◀️ К узлам", callback_data="rw_usage"),
-                 InlineKeyboardButton("◀️ К контролю",
+                 InlineKeyboardButton("◀️ К логам",
                                       callback_data="ctl_menu")])
     return InlineKeyboardMarkup(rows)
 
@@ -731,7 +731,7 @@ async def handle_rw_usage(query, context=None):
                                       callback_data="rw_usage_period")])
     rows.append([InlineKeyboardButton("🔄 Обновить",
                                       callback_data="rw_usage")])
-    rows.append([InlineKeyboardButton("◀️ К контролю",
+    rows.append([InlineKeyboardButton("◀️ К логам",
                                       callback_data="ctl_menu")])
     text = "\n".join(
         ["📊 <b>Трафик</b>", ""]
@@ -1189,6 +1189,25 @@ async def panel_sync_tick(context):
                     parse_mode="HTML")
             except Exception:
                 pass
+
+        # исход сверки — в журнал системных событий и, при ошибке, в журнал ошибок
+        try:
+            from core.database import log_activity, log_error
+            if panel_res.get("ok"):
+                await log_activity(
+                    ADMIN_ID, "ev:panel_sync",
+                    f"проверено {panel_res.get('checked', 0)}, "
+                    f"обновлено {panel_res.get('updated_subs', 0)}, "
+                    f"сирот {len(panel_res.get('orphans') or [])}, "
+                    f"нет в панели {len(panel_res.get('missing') or [])}",
+                    is_admin=True)
+            else:
+                err = str(panel_res.get("error") or "неизвестная ошибка")[:200]
+                await log_activity(ADMIN_ID, "ev:panel_sync_failed", err,
+                                   is_admin=True)
+                await log_error("panel", "error", f"сверка с панелью: {err}")
+        except Exception:
+            pass
     finally:
         _SYNC_RUNNING = False
 
@@ -1241,10 +1260,10 @@ def _back():
 
 
 def _usage_back():
-    """Возврат из просмотра потребления: он живёт в «Контроле»,
+    """Возврат из просмотра потребления: он живёт в «Логах»,
     а не в меню Remnawave, поэтому ведём туда, а не в rw_menu."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ К контролю", callback_data="ctl_menu")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ К логам", callback_data="ctl_menu")]])
 
 
 async def handle_rw_menu(query, context=None):

@@ -33,6 +33,7 @@ from core.states import (
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
     AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_CONTACT,
+    AWAITING_LOG_FILTER_USER, AWAITING_LOG_FILTER_DATE, AWAITING_LOG_EXPORT_USER,
     AWAITING_GIFT_USER,
     AWAITING_CABINET_PORT, AWAITING_CABINET_PUBLIC, AWAITING_CABINET_UPSTREAM,
     AWAITING_TURNSTILE_SITE, AWAITING_TURNSTILE_SECRET,
@@ -489,7 +490,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🕘 К времени сводки",
                                       callback_data="ctl_digest_hour"),
-                 InlineKeyboardButton("◀️ К контролю", callback_data="ctl_menu")]]),
+                 InlineKeyboardButton("◀️ К логам", callback_data="ctl_menu")]]),
         )
         return
 
@@ -1291,6 +1292,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state == AWAITING_FIND_USER:
         from handlers.admin import handle_user_search
         await handle_user_search(update.message, context, text)
+        return
+
+    # ── Логи: фильтр ленты и выгрузка ──────────────────────────────────────────
+    if state == AWAITING_LOG_FILTER_USER and (is_admin or helper_input):
+        from handlers.control import handle_log_filter_user_input
+        await handle_log_filter_user_input(update.message, context, text)
+        return
+    if state == AWAITING_LOG_FILTER_DATE and (is_admin or helper_input):
+        from handlers.control import handle_log_filter_date_input
+        await handle_log_filter_date_input(update.message, context, text)
+        return
+    if state == AWAITING_LOG_EXPORT_USER and (is_admin or helper_input):
+        from handlers.control import handle_log_export_user_input
+        await handle_log_export_user_input(update.message, context, text)
         return
 
     # ── Новый помощник ────────────────────────────────────────────────────────

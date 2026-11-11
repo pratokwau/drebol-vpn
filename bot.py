@@ -11,6 +11,14 @@ logger = logging.getLogger(__name__)
 async def _on_error(update, context):
     """Логирует ошибку обработчика и показывает алерт, вместо мёртвой кнопки."""
     logger.exception("Ошибка обработчика: %s", context.error)
+    try:
+        from core.database import log_error
+        err = context.error
+        # log_error сам чистит токены и режет до 300/500 символов
+        await log_error("bot", "error",
+                        f"{type(err).__name__}: {err}" if err else "неизвестная ошибка")
+    except Exception:
+        pass
     if update and update.callback_query:
         try:
             await update.callback_query.answer("⚠️ Ошибка, смотри лог", show_alert=True)
@@ -267,6 +275,14 @@ async def post_init(app: Application):
     if started.get("ok"):
         print(f"Кабинет слушает порт {started.get('port')}")
 
+    # бот поднялся целиком — одна запись в журнал системных событий
+    try:
+        from config import ADMIN_ID
+        from core.database import log_activity
+        await log_activity(ADMIN_ID, "ev:bot_started", "запуск бота", is_admin=True)
+    except Exception:
+        pass
+
 
 
 def main():
@@ -286,9 +302,11 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CallbackQueryHandler(callback_router))
-    # /h123 — открыть запись истории подписок прямо из ленты «Контроля»
-    from handlers.control import hist_command
+    # /h123 — открыть запись истории подписок прямо из ленты «Логов»
+    from handlers.control import hist_command, activity_command, error_command
     app.add_handler(MessageHandler(filters.Regex(r"^/h\d+$"), hist_command))
+    app.add_handler(MessageHandler(filters.Regex(r"^/a\d+$"), activity_command))
+    app.add_handler(MessageHandler(filters.Regex(r"^/e\d+$"), error_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
     app.add_error_handler(_on_error)

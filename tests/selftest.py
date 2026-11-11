@@ -625,7 +625,7 @@ async def admin_flow(bot, sub_id):
         ("статистика", lambda: ha.handle_dashboard(FakeQuery(ADMIN_ID))),
         ("здоровье панели и узлов", lambda: ha.handle_healthcheck(FakeQuery(ADMIN_ID))),
         ("карточка пользователя", lambda: ha.handle_user_profile(FakeQuery(ADMIN_ID), TEST_TG_ID)),
-        ("контроль", lambda: hc.handle_control_menu(FakeQuery(ADMIN_ID), ctx(bot))),
+        ("логи", lambda: hc.handle_control_menu(FakeQuery(ADMIN_ID), ctx(bot))),
         ("кто онлайн", lambda: hc.handle_online(FakeQuery(ADMIN_ID))),
         ("запросы", lambda: ph.handle_paid_requests(FakeQuery(ADMIN_ID))),
         ("история действий", lambda: ph.handle_paid_history(FakeQuery(ADMIN_ID), 1)),

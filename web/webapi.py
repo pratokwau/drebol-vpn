@@ -447,8 +447,21 @@ def build_app():
         row = await get_user_by_login_email(email)
         if not row or not row[1] or not check_secret(password, row[1]):
             _pw_fail_hit(email)
+            try:
+                from core.database import log_activity
+                # tg_id известен, только если почта есть в базе; иначе 0.
+                # Почту, пароль и хеш не пишем никогда.
+                await log_activity(row[0] if row else 0, "ev:cabinet_login_failed",
+                                   "вход в кабинет по паролю")
+            except Exception:
+                pass
             return web.json_response({"error": "bad_login"}, status=401)
         _pw_fail_clear(email)
+        try:
+            from core.database import log_activity
+            await log_activity(row[0], "ev:cabinet_login", "вход в кабинет по паролю")
+        except Exception:
+            pass
         token = await web_session_new(row[0], "password", SESSION_DAYS)
         return web.json_response({"token": token, "days": SESSION_DAYS})
 

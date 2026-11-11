@@ -77,11 +77,23 @@ async def _request(method: str, path: str, payload: dict | None = None,
                     body = text
                 return r.status, body, ""
     except asyncio.TimeoutError:
+        await _log_api_error("таймаут запроса к anore")
         return None, None, "таймаут запроса к anore"
     except aiohttp.ClientError as e:
+        await _log_api_error(f"сеть: {str(e)[:80]}")
         return None, None, f"сеть: {str(e)[:80]}"
     except Exception as e:
+        await _log_api_error(str(e)[:80])
         return None, None, str(e)[:80]
+
+
+async def _log_api_error(text: str):
+    """Ошибка вызова anore — в журнал ошибок. Не ломает запрос при сбое БД."""
+    try:
+        from core.database import log_error
+        await log_error("anore", "error", text)
+    except Exception:
+        pass
 
 
 def _err_text(status: int, body) -> str:

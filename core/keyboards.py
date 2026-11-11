@@ -71,7 +71,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b("📊 Статистика", "dashboard")],
         [b("💳 Платёжка", "pay_provider_menu")],
         # люди и подписки
-        [b("🔍 Найти юзера", "find_user"), b("🛰 Контроль", "ctl_menu")],
+        [b("🔍 Найти юзера", "find_user"), b("📜 Логи", "ctl_menu")],
         [b("💳 Платные подписки", "paid_subs"), b("📋 Админские", "admin_subs")],
         # общение
         [b(tickets_label, "ticket_list:1"), b("📣 Рассылка", "broadcast")],

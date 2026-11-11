@@ -125,3 +125,8 @@ AWAITING_BL_ADD = "awaiting_bl_add"
 AWAITING_BL_REASON = "awaiting_bl_reason"
 AWAITING_BL_CHECK = "awaiting_bl_check"
 AWAITING_BL_UNTIL = "awaiting_bl_until"
+
+# Логи: фильтр ленты и выгрузка
+AWAITING_LOG_FILTER_USER = "awaiting_log_filter_user"
+AWAITING_LOG_FILTER_DATE = "awaiting_log_filter_date"
+AWAITING_LOG_EXPORT_USER = "awaiting_log_export_user"
