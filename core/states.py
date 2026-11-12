@@ -106,9 +106,6 @@ AWAITING_TARIFF_EDIT_PRICE = "awaiting_tariff_edit_price"
 # Платёжная система
 AWAITING_PLATEGA_MERCHANT = "awaiting_platega_merchant"
 AWAITING_PLATEGA_SECRET = "awaiting_platega_secret"
-AWAITING_PLATEGA_PAYOUT_SECRET = "awaiting_platega_payout_secret"
-AWAITING_PAYOUT_AMOUNT = "awaiting_payout_amount"
-AWAITING_PAYOUT_ADDRESS = "awaiting_payout_address"
 
 # Серверы (расходы): добавление и правка
 AWAITING_SERVER_NAME = "awaiting_server_name"

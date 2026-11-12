@@ -7,8 +7,8 @@
 (счёт создаётся через /v2 без заданного способа). Настройки кассы
 (способы, комиссия, редиректы, Callback URL) живут только в кабинете
 Platega — API их не отдаёт и не меняет, поэтому в боте они показаны
-отдельным экраном «🏬 Настройки Platega» как справка. А вот баланс,
-вывод средств и возвраты — живые данные из API.
+отдельным экраном «🏬 Настройки Platega» как справка. А вот баланс
+и возвраты — живые данные из API.
 
 Возвраты у Platega ЕСТЬ (в отличие от anore): проверка → запуск →
 итог приходит колбэком (статус CHARGEBACKED) или виден опросом.
@@ -21,8 +21,6 @@ from config import load_config, save_config
 from core.keyboards import back_admin
 from core.states import (
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
-    AWAITING_PLATEGA_PAYOUT_SECRET,
-    AWAITING_PAYOUT_ADDRESS, AWAITING_PAYOUT_AMOUNT,
 )
 
 
@@ -37,8 +35,7 @@ def provider_line() -> str:
     if not pg.is_configured():
         return "💳 Platega  ·  ⚠️ <b>ключи не заданы</b>"
     merchant = (cfg.get("platega_merchant_id") or "").strip()
-    tail = " · 💸 выплаты" if pg.is_payout_configured() else " · 💸 выплаты не настроены"
-    return (f"💳 Platega  ·  merchant <code>{_mask(merchant)}</code>{tail}")
+    return f"💳 Platega  ·  merchant <code>{_mask(merchant)}</code>"
 
 
 def _mask(value: str) -> str:
@@ -81,19 +78,17 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
 
 
 async def handle_platega_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
-    """Экран «Платёжная система»: ключи, баланс, выплаты, возвраты."""
+    """Экран «Платёжная система»: ключи, баланс, возвраты."""
     if context:
         context.user_data.pop("state", None)
     cfg = load_config()
 
     import services.platega_api as pg
     ready = pg.is_configured()
-    payout_ready = pg.is_payout_configured()
     lines = ["💳 <b>Платёжная система</b>", "",
              f"<blockquote>Приём платежей: <b>Platega</b>\n"
              f"🏬 Merchant ID: <code>{_mask(cfg.get('platega_merchant_id'))}</code>\n"
-             f"🔑 X-Secret: <code>{_mask(cfg.get('platega_secret'))}</code>\n"
-             f"💸 Секрет Payout API: <code>{_mask(cfg.get('platega_payout_secret'))}</code></blockquote>", "",
+             f"🔑 API ключ: <code>{_mask(cfg.get('platega_secret'))}</code></blockquote>", "",
              "<i>Бот сам выставляет счёт и сам засчитывает оплату — "
              "подтверждать вручную не нужно.</i>",
              "<i>Оплата подтверждается колбэком мгновенно, опрос — "
@@ -102,21 +97,14 @@ async def handle_platega_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
              "на карточке оплаченного счёта в «💰 Оплаты».</i>"]
     if not ready:
         lines.append("\n⚠️ <b>Не хватает данных</b> — заполни Merchant ID "
-                     "и X-Secret из кабинета Platega (Настройки → API-ключи). "
+                     "и API ключ из кабинета Platega (Настройки → API-ключи). "
                      "Пока их нет, клиенты не смогут оплатить подписку.")
-    if ready and not payout_ready:
-        lines.append("\n⚠️ <b>Выплаты не настроены</b> — нужен отдельный "
-                     "секрет из раздела Payout API в кабинете Platega "
-                     "плюс IP сервера в белом списке ключа. "
-                     "Приём платежей работает и без него.")
 
     rows = [
         [InlineKeyboardButton("🏬 Merchant ID", callback_data="platega_set_merchant"),
-         InlineKeyboardButton("🔑 X-Secret", callback_data="platega_set_secret")],
-        [InlineKeyboardButton("💸 Секрет Payout API", callback_data="platega_set_payout_secret"),
-         InlineKeyboardButton("🔌 Проверить", callback_data="platega_test")],
-        [InlineKeyboardButton("💰 Баланс", callback_data="platega_balance"),
-         InlineKeyboardButton("💸 Выплаты", callback_data="platega_payouts")],
+         InlineKeyboardButton("🔑 API ключ", callback_data="platega_set_secret")],
+        [InlineKeyboardButton("🔌 Проверить", callback_data="platega_test"),
+         InlineKeyboardButton("💰 Баланс", callback_data="platega_balance")],
         [InlineKeyboardButton("🏬 Настройки Platega", callback_data="platega_settings")],
         [InlineKeyboardButton("◀️ К финансам", callback_data="pay_provider_menu")],
     ]
@@ -144,27 +132,10 @@ async def handle_platega_set_merchant(query, context: ContextTypes.DEFAULT_TYPE)
 async def handle_platega_set_secret(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_PLATEGA_SECRET
     await query.edit_message_text(
-        "🔑 <b>X-Secret Platega</b>\n\n"
-        "<i>Пришли API-ключ (X-Secret) из личного кабинета Platega "
+        "🔑 <b>API ключ Platega</b>\n\n"
+        "<i>Пришли API ключ из личного кабинета Platega "
         "(Настройки → API-ключи) одним сообщением.</i>\n\n"
         "⚠️ Сообщение с ключом лучше потом удалить из чата.",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="platega_menu")],
-        ]),
-    )
-
-
-async def handle_platega_set_payout_secret(query, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["state"] = AWAITING_PLATEGA_PAYOUT_SECRET
-    await query.edit_message_text(
-        "💸 <b>Секрет Payout API Platega</b>\n\n"
-        "<i>Пришли секрет из раздела Payout API в кабинете Platega "
-        "одним сообщением. Это ОТДЕЛЬНЫЙ секрет — не X-Secret из "
-        "API-ключей. Генерируется в кабинете и показывается один раз.</i>\n\n"
-        "<i>И не забудь внести IP сервера (95.85.251.169) в белый "
-        "список ключа в том же разделе — иначе Payout API ответит 403.</i>\n\n"
-        "⚠️ Сообщение с секретом лучше потом удалить из чата.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ Назад", callback_data="platega_menu")],
@@ -183,7 +154,7 @@ async def handle_platega_test(query, context: ContextTypes.DEFAULT_TYPE):
         text = (
             "❌ <b>Не удалось подключиться</b>\n\n"
             f"<blockquote><code>{escape(str(r['error']))}</code></blockquote>\n\n"
-            "<i>Проверь Merchant ID и X-Secret в личном кабинете Platega.</i>"
+            "<i>Проверь Merchant ID и API ключ в личном кабинете Platega.</i>"
         )
     await query.edit_message_text(
         text, parse_mode="HTML",
@@ -196,12 +167,11 @@ async def handle_platega_test(query, context: ContextTypes.DEFAULT_TYPE):
 
 async def apply_credential(message, context: ContextTypes.DEFAULT_TYPE,
                            field: str, raw: str):
-    """Сохраняет Merchant ID, X-Secret или секрет Payout API, введённый в чате."""
+    """Сохраняет Merchant ID или API ключ, введённый в чате."""
     value = (raw or "").strip()
     labels = {
         "platega_merchant_id": "Merchant ID",
-        "platega_secret": "X-Secret",
-        "platega_payout_secret": "Секрет Payout API",
+        "platega_secret": "API ключ",
     }
     if not value or len(value) > 200:
         await message.reply_text(
@@ -232,7 +202,7 @@ async def apply_credential(message, context: ContextTypes.DEFAULT_TYPE,
     )
 
 
-# ── Баланс, счета и выплаты ───────────────────────────────────────────────
+# ── Баланс и счета ────────────────────────────────────────────────────────
 # Живые данные из API Platega (GET /balance/all, GET /transaction/{id}).
 # Списка счетов у Platega нет — счета смотрят в «💰 Оплаты» (база бота)
 # и проверяют живым статусом кнопкой на карточке счёта.
@@ -246,42 +216,6 @@ def _fmt_money(value, currency: str = "₽") -> str:
         return f"{float(value):,.2f}".replace(",", " ").replace(".", ",") + f" {currency}"
     except (TypeError, ValueError):
         return str(value)
-
-
-def _fmt_amount(amount, unit: str) -> str:
-    """10 000 ₽ / 42,5 USDT — с разделителем тысяч для целых сумм."""
-    try:
-        v = float(amount)
-    except (TypeError, ValueError):
-        return f"{amount} {unit}"
-    if v == int(v):
-        return f"{int(v):,}".replace(",", " ") + f" {unit}"
-    return f"{v:g} {unit}"
-
-
-def _mask_address(method: str, address: str) -> str:
-    """Реквизиты показываем только в маске: карта — последние 4 цифры,
-    телефон — первые и последние 2 цифры, кошелёк — первые и последние
-    4 символа."""
-    a = (address or "").strip()
-    if method == "card":
-        digits = "".join(ch for ch in a if ch.isdigit())
-        return f"•••• {digits[-4:]}" if len(digits) >= 4 else "••••"
-    if method == "sbp":
-        digits = "".join(ch for ch in a if ch.isdigit())
-        return f"+{digits[:1]} ••• ••• ••{digits[-2:]}" if len(digits) >= 6 else "••••"
-    return f"{a[:4]}…{a[-4:]}" if len(a) > 8 else a
-
-
-_PAYOUT_STATUS = {
-    "created": "⏳ Создана",
-    "pending": "⏳ На обработке",
-    "approved": "🔄 Принята оператором",
-    "paid": "✅ Выплачено",
-    "rejected": "❌ Отклонено",
-    "failed": "❌ Неудачная",
-    "completed": "✅ Выплачено",
-}
 
 
 def _platega_error_text(error: str) -> str:
@@ -314,13 +248,10 @@ async def handle_platega_balance(query, context: ContextTypes.DEFAULT_TYPE):
         + (f" (заморожено {_fmt_money(r.get('frozen_usdt'), 'USDT')})"
            if r.get("frozen_usdt") else "")
         + "</blockquote>", "",
-        "<i>Вывод — от 1 000 до 100 000 ₽ на карту и по СБП.</i>",
     ]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💸 Вывести", callback_data="platega_payout_new"),
-             InlineKeyboardButton("💸 Выплаты", callback_data="platega_payouts")],
             [InlineKeyboardButton("🔁 Обновить", callback_data="platega_balance"),
              InlineKeyboardButton("◀️ Назад", callback_data="platega_menu")],
         ]),
@@ -515,367 +446,6 @@ async def handle_platega_refund_do(query, context: ContextTypes.DEFAULT_TYPE,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К платежу",
                                   callback_data=f"payment_view:{payment_id}")],
-        ]),
-    )
-
-
-# ── Выплаты ───────────────────────────────────────────────────────────────
-# У Payout API Platega нет списка выплат — историю созданных ботом
-# выплат ведём в своей базе (таблица payouts).
-
-async def handle_platega_payouts(query, context: ContextTypes.DEFAULT_TYPE):
-    from core.database import list_payout_records
-    items = await list_payout_records(limit=10)
-    lines = ["💸 <b>Выплаты Platega</b> — последние 10", ""]
-    if not items:
-        lines.append("<i>Выплат пока не было.</i>")
-    rows: list = []
-    for (pid, _prov, ext_id, method, amount, currency, status,
-         masked, _created) in items:
-        import services.platega_api as pg
-        method_label = pg.PAYOUT_METHODS.get(method, method or "")
-        unit = "USDT" if currency == "USDT" else "₽"
-        st = _PAYOUT_STATUS.get((status or "").lower(), status or "")
-        lines.append(
-            f"• {amount} {unit} · {method_label} · {st}"
-            + (f" · {masked}" if masked else "")
-        )
-        rows.append([InlineKeyboardButton(
-            f"🔍 {amount} {unit} · {st}",
-            callback_data=f"platega_payout:{pid}")])
-    await query.edit_message_text(
-        "\n".join(lines), parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(
-            rows + [
-                [InlineKeyboardButton("➕ Новая выплата", callback_data="platega_payout_new"),
-                 InlineKeyboardButton("💰 Баланс", callback_data="platega_balance")],
-                [InlineKeyboardButton("🔁 Обновить", callback_data="platega_payouts"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="platega_menu")],
-            ]),
-    )
-
-
-async def handle_platega_payout(query, context: ContextTypes.DEFAULT_TYPE,
-                                payout_id: int):
-    """Одна выплата из истории бота."""
-    from core.database import get_payout_record
-    row = await get_payout_record(payout_id)
-    if not row:
-        await query.answer("Выплата не найдена", show_alert=True)
-        return
-    import services.platega_api as pg
-    (pid, _prov, ext_id, method, amount, currency, status,
-     masked, created) = row
-    method_label = pg.PAYOUT_METHODS.get(method, method or "")
-    unit = "USDT" if currency == "USDT" else "₽"
-    st = _PAYOUT_STATUS.get((status or "").lower(), status or "")
-    lines = ["💸 <b>Выплата</b>", "",
-             f"<blockquote>Статус: <b>{st}</b>\n"
-             f"Сумма: <b>{amount} {unit}</b>\n"
-             f"Способ: {method_label}\n"
-             f"Реквизиты: <code>{masked or '—'}</code>\n"
-             f"Создана: {str(created)[:19]}"
-             + (f"\nID в Platega: <code>{ext_id}</code>" if ext_id else "")
-             + f"\nID: <code>{pid}</code></blockquote>", "",
-             "<i>Статус выплаты Platega по API не отдаёт — здесь то, "
-             "что вернулось при создании.</i>"]
-    await query.edit_message_text(
-        "\n".join(lines), parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="platega_payouts")],
-        ]),
-    )
-
-
-# ── Создание выплаты: сумма → способ → (банк) → реквизиты → подтверждение ──
-# Реквизиты (номер карты / телефон / адрес кошелька) в боте НЕ хранятся —
-# только в этой заявке. После ввода сообщение с реквизитами лучше удалить
-# из чата.
-
-async def handle_platega_payout_new(query, context: ContextTypes.DEFAULT_TYPE):
-    import services.platega_api as pg
-    if not pg.is_payout_configured():
-        await query.edit_message_text(
-            "❌ <b>Выплаты не настроены</b>\n\n"
-            "<i>Задай секрет Payout API в «💳 Платёжная система» и внеси "
-            "IP сервера в белый список в кабинете Platega.</i>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ Назад", callback_data="platega_menu")],
-            ]),
-        )
-        return
-    context.user_data["state"] = AWAITING_PAYOUT_AMOUNT
-    context.user_data.pop("payout", None)
-    r = await pg.get_balance()
-    rub = r.get("rub") if r.get("ok") else None
-    text = (
-        "💸 <b>Новая выплата</b>\n\n"
-        "<i>Пришли сумму: рубли — для карты и СБП, USDT — для крипты. "
-        "Целое число или с копейками.</i>\n\n"
-        + (f"Баланс: <b>{_fmt_money(rub)}</b>\n" if rub is not None else "")
-        + "Карта РФ и СБП — от 1 000 до 100 000 ₽, USDT — от 1 до 100 000."
-    )
-    await query.edit_message_text(
-        text, parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="platega_payouts")],
-        ]),
-    )
-
-
-async def apply_payout_amount(message, context: ContextTypes.DEFAULT_TYPE,
-                              raw: str):
-    import services.platega_api as pg
-    text = (raw or "").strip().replace(" ", "").replace(",", ".")
-    try:
-        amount = float(text)
-    except ValueError:
-        await message.reply_text(
-            "❌ <b>Сумма — число</b>\n\n"
-            "<i>Пришли сумму ещё раз.</i>",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-    if amount <= 0:
-        await message.reply_text(
-            "❌ <b>Сумма должна быть больше нуля</b>",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-    context.user_data.pop("state", None)
-    context.user_data["payout"] = {"amount": amount}
-    rows = [[InlineKeyboardButton(label, callback_data=f"platega_payout_method:{code}")]
-            for code, label in pg.PAYOUT_METHODS.items()]
-    rows.append([InlineKeyboardButton("◀️ Отмена", callback_data="platega_payouts")])
-    unit = "₽" if amount >= 1000 else "USDT"
-    await message.reply_text(
-        f"💸 <b>Выплата {_fmt_amount(amount, unit)}</b>\n\n<i>Куда выводим?</i>",
-        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
-    )
-
-
-async def handle_platega_payout_method(query, context: ContextTypes.DEFAULT_TYPE,
-                                       method: str):
-    import services.platega_api as pg
-    payout = context.user_data.get("payout") or {}
-    if method not in pg.PAYOUT_METHODS:
-        await query.answer("Неизвестный способ", show_alert=True)
-        return
-    low, high = pg.payout_limits(method)
-    if not low <= float(payout.get("amount", 0)) <= high:
-        unit = "₽" if method in ("card", "sbp") else "USDT"
-        await query.edit_message_text(
-            f"❌ <b>Сумма не подходит</b>\n\n"
-            f"<i>{pg.PAYOUT_METHODS[method]} — от {low:,} до {high:,} {unit}.</i>"
-            .replace(",", " "),
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ Назад", callback_data="platega_payout_new")],
-            ]),
-        )
-        return
-    payout["method"] = method
-    context.user_data["payout"] = payout
-    if method == "sbp":
-        # для СБП нужен банк получателя — показываем справочник
-        await query.edit_message_text("🏦 Запрашиваю список банков…")
-        r = await pg.get_sbp_banks()
-        if not r.get("ok"):
-            await query.edit_message_text(
-                _platega_error_text(r["error"]), parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("◀️ Назад", callback_data="platega_payout_new")],
-                ]),
-            )
-            return
-        items = r.get("items", [])
-        if not items:
-            await query.edit_message_text(
-                "❌ <b>Список банков пуст</b> — попробуй позже.",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("◀️ Назад", callback_data="platega_payout_new")],
-                ]),
-            )
-            return
-        rows = []
-        for b in items[:30]:
-            bid = str(b.get("id") or b.get("bankId") or "")
-            name = b.get("name") or b.get("bankName") or bid
-            if bid:
-                rows.append([InlineKeyboardButton(
-                    str(name)[:40], callback_data=f"platega_payout_bank:{bid}")])
-        rows.append([InlineKeyboardButton("◀️ Отмена", callback_data="platega_payouts")])
-        context.user_data["payout_banks"] = {
-            str(b.get("id") or b.get("bankId")): (b.get("name") or b.get("bankName") or "")
-            for b in items if b.get("id") or b.get("bankId")
-        }
-        await query.edit_message_text(
-            "🏦 <b>Выбери банк получателя</b>",
-            parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
-        )
-        return
-    context.user_data["state"] = AWAITING_PAYOUT_ADDRESS
-    if method == "card":
-        hint = ("<i>Пришли полный номер карты РФ одним сообщением "
-                "(пробелы допустимы). CVV и PIN никогда не нужны.</i>")
-    else:
-        hint = ("<i>Пришли адрес кошелька USDT в этой сети одним "
-                "сообщением.</i>")
-    await query.edit_message_text(
-        f"{pg.PAYOUT_METHODS[method]}\n\n{hint}\n\n"
-        "⚠️ Сообщение с реквизитами лучше потом удалить из чата.",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="platega_payouts")],
-        ]),
-    )
-
-
-async def handle_platega_payout_bank(query, context: ContextTypes.DEFAULT_TYPE,
-                                     bank_id: str):
-    """Банк для СБП выбран — теперь просим телефон."""
-    payout = context.user_data.get("payout") or {}
-    if payout.get("method") != "sbp":
-        await query.answer("Сначала выбери способ СБП", show_alert=True)
-        return
-    banks = context.user_data.get("payout_banks") or {}
-    payout["bank_id"] = bank_id
-    payout["bank_name"] = banks.get(bank_id, "")
-    context.user_data["payout"] = payout
-    context.user_data["state"] = AWAITING_PAYOUT_ADDRESS
-    await query.edit_message_text(
-        f"📱 <b>СБП</b> · {banks.get(bank_id, '')}\n\n"
-        "<i>Пришли телефон получателя одним сообщением — 11 цифр, "
-        "начинается с 7 или 8.</i>\n\n"
-        "⚠️ Сообщение с реквизитами лучше потом удалить из чата.",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="platega_payouts")],
-        ]),
-    )
-
-
-def _address_ok(method: str, address: str) -> str | None:
-    """Возвращает текст ошибки или None, если реквизиты похожи на правду."""
-    a = (address or "").strip()
-    if not a:
-        return "Пустое значение"
-    if method == "card":
-        digits = "".join(ch for ch in a if ch.isdigit())
-        if not (13 <= len(digits) <= 19):
-            return "Номер карты — 13–19 цифр"
-        return None
-    if method == "sbp":
-        digits = "".join(ch for ch in a if ch.isdigit())
-        if len(digits) != 11 or digits[0] not in "78":
-            return "Телефон — 11 цифр, начинается с 7 или 8"
-        return None
-    if method == "usdt_trc20":
-        if not (a.startswith("T") and len(a) == 34):
-            return "Адрес TRON — 34 символа, начинается с T"
-        return None
-    if method in ("usdt_bep20", "usdt_erc20"):
-        if not (a.startswith("0x") and len(a) == 42):
-            return "Адрес сети — 0x и 40 hex-символов"
-        return None
-    if method == "usdt_ton":
-        if len(a) < 40:
-            return "Адрес TON выглядит слишком коротким"
-        return None
-    return None
-
-
-async def apply_payout_address(message, context: ContextTypes.DEFAULT_TYPE,
-                               raw: str):
-    import services.platega_api as pg
-    payout = context.user_data.get("payout") or {}
-    method = payout.get("method")
-    amount = payout.get("amount")
-    if not method or not amount:
-        context.user_data.pop("state", None)
-        await message.reply_text(
-            "❌ <b>Заявка потерялась</b> — начни выплату заново.",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-    address = (raw or "").strip()
-    err = _address_ok(method, address)
-    if err:
-        await message.reply_text(
-            f"❌ <b>{err}</b>\n\n<i>Пришли реквизиты ещё раз.</i>",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-    payout["address"] = address
-    context.user_data["payout"] = payout
-    context.user_data.pop("state", None)
-    unit = "₽" if method in ("card", "sbp") else "USDT"
-    bank_line = (f"\nБанк: {payout.get('bank_name')}"
-                 if payout.get("bank_name") else "")
-    await message.reply_text(
-        "💸 <b>Проверь выплату</b>\n\n"
-        f"<blockquote>Сумма: <b>{_fmt_amount(amount, unit)}</b>\n"
-        f"Куда: {pg.PAYOUT_METHODS[method]}{bank_line}\n"
-        f"Реквизиты: <code>{_mask_address(method, address)}</code>"
-        "</blockquote>\n\n"
-        "<i>Выплата создаётся сразу после подтверждения. "
-        "Сообщение с реквизитами лучше удалить из чата.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Вывести", callback_data="platega_payout_do"),
-             InlineKeyboardButton("❌ Отмена", callback_data="platega_payouts")],
-        ]),
-    )
-
-
-async def handle_platega_payout_do(query, context: ContextTypes.DEFAULT_TYPE):
-    import services.platega_api as pg
-    from core.database import add_payout_record
-    payout = context.user_data.pop("payout", None)
-    if not payout or not payout.get("address"):
-        await query.edit_message_text(
-            "❌ <b>Заявка потерялась</b> — начни выплату заново.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💸 Выплаты", callback_data="platega_payouts")],
-            ]),
-        )
-        return
-    await query.edit_message_text("💸 Создаю выплату в Platega…")
-    r = await pg.create_payout(
-        payout["amount"], payout["method"], payout["address"],
-        bank_id=payout.get("bank_id"),
-    )
-    if not r.get("ok"):
-        await query.edit_message_text(
-            _platega_error_text(r["error"]), parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("💸 Выплаты", callback_data="platega_payouts"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="platega_menu")],
-            ]),
-        )
-        return
-    method = payout["method"]
-    unit = "₽" if method in ("card", "sbp") else "USDT"
-    await add_payout_record(
-        "platega", r.get("id"), method, payout["amount"], unit,
-        r.get("status"), _mask_address(method, payout["address"]))
-    lines = [
-        "✅ <b>Выплата создана</b>", "",
-        f"<blockquote>ID: <code>{r.get('id')}</code>\n"
-        f"Сумма: <b>{_fmt_amount(payout['amount'], unit)}</b>\n"
-        f"Статус: {_PAYOUT_STATUS.get((r.get('status') or '').lower(), r.get('status'))}\n"
-        f"Реквизиты: <code>{_mask_address(method, payout['address'])}</code></blockquote>",
-    ]
-    if r.get("amount") is not None:
-        lines.append(f"\nСписано с баланса: <b>{r['amount']} USDT</b>")
-    await query.edit_message_text(
-        "\n".join(lines), parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💸 Выплаты", callback_data="platega_payouts"),
-             InlineKeyboardButton("💰 Баланс", callback_data="platega_balance")],
         ]),
     )
 

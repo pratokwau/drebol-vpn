@@ -385,22 +385,6 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Выплаты мерчанта (Payout API Platega): у Platega нет списка
-        # выплат, поэтому историю созданных ботом выплат ведём сами.
-        # amount — текстом: для USDT сумма дробная.
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS payouts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider TEXT NOT NULL DEFAULT 'platega',
-                external_id TEXT,
-                method TEXT,
-                amount TEXT,
-                currency TEXT,
-                status TEXT,
-                address_masked TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
         # Серверы, за которые платит админ: ежемесячные расходы.
         # pay_day — день месяца (1..31); если в месяце дней меньше,
         # оплата приходится на последний день месяца.
@@ -1180,45 +1164,6 @@ async def expire_stale_payments(minutes: int = 60) -> int:
         """, (f"-{minutes} minutes",))
         await db.commit()
         return cur.rowcount or 0
-
-
-async def add_payout_record(provider: str, external_id: str | None,
-                            method: str, amount, currency: str,
-                            status: str | None,
-                            address_masked: str | None) -> int:
-    """Записывает созданную ботом выплату (история для админки)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("""
-            INSERT INTO payouts (provider, external_id, method, amount,
-                                 currency, status, address_masked)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (provider, external_id, method, str(amount), currency,
-              status, address_masked))
-        await db.commit()
-        return cur.lastrowid
-
-
-async def list_payout_records(limit: int = 10) -> list[tuple]:
-    """Последние выплаты, новые сверху:
-    (id, provider, external_id, method, amount, currency, status,
-    address_masked, created_at)."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT id, provider, external_id, method, amount, currency,
-                   status, address_masked, created_at
-            FROM payouts ORDER BY id DESC LIMIT ?
-        """, (limit,)) as cur:
-            return await cur.fetchall()
-
-
-async def get_payout_record(payout_id: int) -> tuple | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("""
-            SELECT id, provider, external_id, method, amount, currency,
-                   status, address_masked, created_at
-            FROM payouts WHERE id = ?
-        """, (payout_id,)) as cur:
-            return await cur.fetchone()
 
 
 async def payments_summary() -> dict:

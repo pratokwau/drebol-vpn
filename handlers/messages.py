@@ -48,8 +48,6 @@ from core.states import (
     AWAITING_DIGEST_HOUR,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
-    AWAITING_PLATEGA_PAYOUT_SECRET,
-    AWAITING_PAYOUT_AMOUNT, AWAITING_PAYOUT_ADDRESS,
     AWAITING_SERVER_NAME, AWAITING_SERVER_PRICE, AWAITING_SERVER_DAY,
     AWAITING_SERVER_EDIT_PRICE, AWAITING_SERVER_EDIT_DAY,
     AWAITING_TARIFF_PERIOD, AWAITING_TARIFF_PRICE,
@@ -1429,14 +1427,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Ключи платёжной системы ──────────────────────────────────────────────
-    if state in (AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
-                 AWAITING_PLATEGA_PAYOUT_SECRET):
+    if state in (AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET):
         context.user_data.pop("state", None)
         from handlers.payprovider import apply_credential
         field = {
             AWAITING_PLATEGA_MERCHANT: "platega_merchant_id",
             AWAITING_PLATEGA_SECRET: "platega_secret",
-            AWAITING_PLATEGA_PAYOUT_SECRET: "platega_payout_secret",
         }[state]
         await apply_credential(update.message, context, field, text)
         return
@@ -1449,14 +1445,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ── Выплата из Platega: сумма → реквизиты ───────────────────────────────
-    if state == AWAITING_PAYOUT_AMOUNT:
-        from handlers.payprovider import apply_payout_amount
-        await apply_payout_amount(update.message, context, text)
-        return
-    if state == AWAITING_PAYOUT_ADDRESS:
-        from handlers.payprovider import apply_payout_address
-        await apply_payout_address(update.message, context, text)
-        return
 
     # ── Сообщение юзеру из профиля ─────────────────────────────────────────────
     if state == AWAITING_DM_USER:

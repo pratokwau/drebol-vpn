@@ -102,11 +102,9 @@ from handlers.tariffs import (
 from handlers.payprovider import (
     handle_pay_provider_menu, handle_platega_menu,
     handle_platega_set_merchant, handle_platega_set_secret,
-    handle_platega_set_payout_secret, handle_platega_test,
-    handle_platega_balance, handle_platega_payouts,
-    handle_platega_payout_new, handle_platega_payout_method,
-    handle_platega_payout_bank, handle_platega_payout_do,
-    handle_platega_settings, handle_platega_payment, handle_platega_payout,
+    handle_platega_test, handle_platega_balance,
+    handle_platega_settings, handle_platega_payment,
+    handle_platega_refund, handle_platega_refund_do,
     handle_platega_refund, handle_platega_refund_do,
 )
 from handlers.finance import (
@@ -826,31 +824,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_platega_set_merchant(query, context)
     elif data == "platega_set_secret":
         await handle_platega_set_secret(query, context)
-    elif data == "platega_set_payout_secret":
-        await handle_platega_set_payout_secret(query, context)
-    elif data == "platega_test":
-        await handle_platega_test(query, context)
-    elif data == "platega_balance":
-        await handle_platega_balance(query, context)
-    elif data.startswith("platega_payment:"):
-        await handle_platega_payment(query, context, data.split(":", 1)[1])
-    elif data.startswith("platega_refund:"):
-        await handle_platega_refund(query, context, int(data.split(":", 1)[1]))
-    elif data.startswith("platega_refund_ok:"):
-        _pid, _rev = data.split(":")[1], data.split(":")[2]
-        await handle_platega_refund_do(query, context, int(_pid), _rev == "1")
-    elif data == "platega_payouts":
-        await handle_platega_payouts(query, context)
-    elif data.startswith("platega_payout:"):
-        await handle_platega_payout(query, context, int(data.split(":", 1)[1]))
-    elif data == "platega_payout_new":
-        await handle_platega_payout_new(query, context)
-    elif data.startswith("platega_payout_method:"):
-        await handle_platega_payout_method(query, context, data.split(":", 1)[1])
-    elif data.startswith("platega_payout_bank:"):
-        await handle_platega_payout_bank(query, context, data.split(":", 1)[1])
-    elif data == "platega_payout_do":
-        await handle_platega_payout_do(query, context)
     elif data == "platega_settings":
         await handle_platega_settings(query, context)
     elif data == "paid_sub_presets":

@@ -16,20 +16,12 @@ status, paymentMethod, payload. Отвечать 200. Выдавать подп�
 
 Возвраты ЕСТЬ (в отличие от anore): cancel-supported → cancel /
 cancel-partial; итог — только через колбэк (refundStatus).
-
-Выводы — отдельный Payout API: https://app.platega.io/api/v1,
-авторизация HMAC (PG-HMAC), секрет — отдельный, из раздела Payout API
-в кабинете; IP сервера должен быть в белом списке ключа.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
 import hmac
-import json
-import time
 import uuid
 
 import aiohttp
@@ -37,7 +29,6 @@ import aiohttp
 from config import load_config
 
 BASE_URL = "https://app.platega.io"
-PAYOUT_BASE_URL = "https://app.platega.io/api/v1"
 
 # PaymentMethodInt из документации
 PAYMENT_METHODS = {
@@ -77,13 +68,6 @@ INVOICE_TTL_MINUTES = 15
 def is_configured() -> bool:
     cfg = load_config()
     return bool(cfg.get("platega_merchant_id") and cfg.get("platega_secret"))
-
-
-def is_payout_configured() -> bool:
-    """Настроены ли выводы: нужен отдельный секрет Payout API."""
-    cfg = load_config()
-    return bool(cfg.get("platega_merchant_id")
-                and cfg.get("platega_payout_secret"))
 
 
 def _merchant_id() -> str:
@@ -384,193 +368,3 @@ async def test_connection() -> dict:
     if status in (200, 404):
         return {"ok": True, "message": "ключи приняты"}
     return {"ok": False, "error": _err_text(status, body)}
-
-
-# ── Выводы (Payout API) ──────────────────────────────────────────────────────
-# Отдельный API на HMAC-подписи (PG-HMAC): строка подписи —
-# METHOD\nPATH\ntimestamp\nidempotency-key\nsha256_hex(body),
-# заголовок Authorization: PG-HMAC kid={MERCHANT_ID}, ts={ts}, sig={sig}.
-# Секрет — отдельный, из раздела Payout API в кабинете; IP сервера
-# должен быть в белом списке ключа. У Payout API нет списка выплат —
-# историю созданных ботом выплат ведём в своей базе (таблица payouts).
-
-PAYOUT_METHODS = {
-    "card": "💳 Карта РФ",
-    "sbp": "📱 СБП по телефону",
-    "usdt_trc20": "💎 USDT · TRON",
-    "usdt_ton": "💎 USDT · TON",
-    "usdt_bep20": "💎 USDT · BNB Chain",
-    "usdt_erc20": "💎 USDT · Ethereum",
-}
-
-_USDT_NETWORKS = {
-    "usdt_trc20": "TRX-TRC20",
-    "usdt_ton": "TON",
-    "usdt_bep20": "BSC-BEP20",
-    "usdt_erc20": "ETH-ERC20",
-}
-
-
-def payout_limits(method: str) -> tuple[int, int]:
-    """(минимум, максимум) суммы вывода.
-
-    Для рублей лимиты из документации (1000–100000 ₽); для USDT
-    документация лимитов не даёт — широкие (1–100000), отсекает
-    только мусор.
-    """
-    if method in ("card", "sbp"):
-        return 1000, 100000
-    return 1, 100000
-
-
-def _payout_headers(method: str, path: str, body: bytes) -> dict:
-    """Заголовки PG-HMAC для запроса к Payout API."""
-    cfg = load_config()
-    secret = (cfg.get("platega_payout_secret") or "").strip()
-    merchant = _merchant_id()
-    ts = str(int(time.time()))
-    idem = uuid.uuid4().hex
-    body_hash = hashlib.sha256(body).hexdigest()
-    sign_string = f"{method}\n{path}\n{ts}\n{idem}\n{body_hash}"
-    sig = base64.b64encode(
-        hmac.new(secret.encode("utf-8"), sign_string.encode("utf-8"),
-                 hashlib.sha256).digest()
-    ).decode("ascii")
-    return {
-        "Authorization": f"PG-HMAC kid={merchant}, ts={ts}, sig={sig}",
-        "X-Idempotency-Key": idem,
-        "Content-Type": "application/json",
-    }
-
-
-async def _payout_request(method: str, path: str,
-                          payload: dict | None = None,
-                          timeout: int = 30
-                          ) -> tuple[int | None, dict | str | None, str]:
-    """Запрос к Payout API. Возвращает (http_код, тело, текст_ошибки)."""
-    url = f"{PAYOUT_BASE_URL}{path}"
-    body = json.dumps(payload or {}).encode("utf-8") if payload is not None else b""
-    if method == "GET":
-        body = b""
-    headers = _payout_headers(method, path, body)
-    try:
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=timeout)
-        ) as s:
-            async with s.request(method, url, data=body or None,
-                                 headers=headers) as r:
-                text = await r.text()
-                try:
-                    parsed = await r.json(content_type=None)
-                except Exception:
-                    parsed = text
-                return r.status, parsed, ""
-    except asyncio.TimeoutError:
-        await _log_api_error("таймаут запроса к Payout API Platega")
-        return None, None, "таймаут запроса к Payout API"
-    except aiohttp.ClientError as e:
-        await _log_api_error(f"сеть: {str(e)[:80]}")
-        return None, None, f"сеть: {str(e)[:80]}"
-    except Exception as e:
-        await _log_api_error(str(e)[:80])
-        return None, None, str(e)[:80]
-
-
-def _payout_api_error(status: int | None, err: str) -> dict:
-    if status in (401, 403):
-        return {"ok": False, "payout_api_disabled": True,
-                "error": "Payout API не включён для этой кассы — "
-                         "включи его в кабинете Platega (раздел Payout API), "
-                         "внеси IP сервера в белый список и задай секрет в боте"}
-    return {"ok": False, "error": err or f"HTTP {status}"}
-
-
-async def create_payout(amount, method: str, address: str,
-                        bank_id: str | None = None) -> dict:
-    """Создаёт заявку на вывод.
-
-    amount — рубли для card/sbp, USDT для usdt_*.
-    address — номер карты (card), телефон 11 цифр с 7/8 (sbp) или
-    адрес кошелька (usdt_*). Для sbp нужен bank_id из справочника
-    банков (/sbp-banks). Никакие CVV/PIN/секреты сюда не передаются.
-    В ответе — id записи вывода и списанная сумма в USDT.
-    """
-    if method not in PAYOUT_METHODS:
-        return {"ok": False, "error": f"Неизвестный способ вывода: {method}"}
-    low, high = payout_limits(method)
-    try:
-        amount_num = float(amount)
-    except (TypeError, ValueError):
-        return {"ok": False, "error": "сумма — число"}
-    if not low <= amount_num <= high:
-        unit = "₽" if method in ("card", "sbp") else "USDT"
-        return {"ok": False,
-                "error": f"Сумма для {PAYOUT_METHODS[method]} — "
-                         f"от {low} до {high} {unit}"}
-    if method == "card":
-        path = "/payouts/card-rub"
-        payload = {"cardNumber": str(address).replace(" ", ""),
-                   "amountRub": int(amount_num),
-                   "payoutMethod": "CARD", "currencyRequested": "RUB"}
-    elif method == "sbp":
-        if not bank_id:
-            return {"ok": False, "error": "не выбран банк получателя"}
-        phone = "".join(ch for ch in str(address) if ch.isdigit())
-        if len(phone) != 11 or phone[0] not in "78":
-            return {"ok": False,
-                    "error": "телефон — 11 цифр, начинается с 7 или 8"}
-        path = "/payouts/sbp-rub"
-        payload = {"phone": phone, "bankId": str(bank_id),
-                   "amountRub": int(amount_num),
-                   "payoutMethod": "SBP", "currencyRequested": "RUB"}
-    else:
-        path = "/payouts/crypto"
-        payload = {"walletAddress": str(address).strip(),
-                   "currency": "USDT",
-                   "network": _USDT_NETWORKS[method],
-                   "amount": amount_num,
-                   "payoutMethod": "CRYPTO", "currencyRequested": "USDT"}
-    status, body, err = await _payout_request("POST", path, payload)
-    if status not in (200, 201) or not isinstance(body, dict):
-        return _payout_api_error(status, err)
-    return {"ok": True,
-            "id": body.get("withdrawalRecordId") or body.get("id"),
-            "status": body.get("status"),
-            "amount": body.get("amountUsdtDebited") or body.get("amount"),
-            "raw": body}
-
-
-async def get_cards() -> dict:
-    """Сохранённые карты мерчанта (для выбора реквизитов)."""
-    status, body, err = await _payout_request("GET", "/cards")
-    if status not in (200, 201) or not isinstance(body, (list, dict)):
-        return _payout_api_error(status, err)
-    items = body if isinstance(body, list) else body.get("items", [])
-    return {"ok": True, "items": items, "raw": body}
-
-
-async def get_wallets() -> dict:
-    """Сохранённые криптокошельки мерчанта."""
-    status, body, err = await _payout_request("GET", "/wallets")
-    if status not in (200, 201) or not isinstance(body, (list, dict)):
-        return _payout_api_error(status, err)
-    items = body if isinstance(body, list) else body.get("items", [])
-    return {"ok": True, "items": items, "raw": body}
-
-
-async def get_sbp_recipients() -> dict:
-    """Сохранённые получатели СБП (телефон + банк)."""
-    status, body, err = await _payout_request("GET", "/sbp-recipients")
-    if status not in (200, 201) or not isinstance(body, (list, dict)):
-        return _payout_api_error(status, err)
-    items = body if isinstance(body, list) else body.get("items", [])
-    return {"ok": True, "items": items, "raw": body}
-
-
-async def get_sbp_banks() -> dict:
-    """Справочник банков для выплат по СБП (кэшировать на стороне бота)."""
-    status, body, err = await _payout_request("GET", "/sbp-banks")
-    if status not in (200, 201) or not isinstance(body, (list, dict)):
-        return _payout_api_error(status, err)
-    items = body if isinstance(body, list) else body.get("items", [])
-    return {"ok": True, "items": items, "raw": body}
