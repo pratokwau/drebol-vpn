@@ -1032,9 +1032,9 @@ async def handle_how_to(query):
 
 
 async def handle_about(query):
-    cfg = load_config()
-    privacy_url = cfg.get("privacy_url", "")
-    terms_url = cfg.get("terms_url", "")
+    from web.site_deploy import doc_url
+    privacy_url = doc_url("privacy")
+    terms_url = doc_url("terms")
 
     lines = [
         "📕 <b>О сервисе</b>",

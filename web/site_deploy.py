@@ -1789,8 +1789,8 @@ async def build_current(bot_username: str) -> tuple:
     page = build_page(
         bot_username=bot_username,
         cabinet_url=cabinet,
-        privacy_url=cfg.get("privacy_url", "") or "",
-        terms_url=cfg.get("terms_url", "") or "",
+        privacy_url=doc_url("privacy"),
+        terms_url=doc_url("terms"),
         channel_url=cfg.get("channel_url", "") or "",
         # Логотип — тот же файл, что и на странице подписки: прямая ссылка
         # на assets/logo.png в репозитории. /logo.png на сервере не берём:
@@ -1845,6 +1845,21 @@ def doc_page_urls() -> dict:
         "rules": f"{base}/rules/",
         "consent": f"{base}/consent/",
     }
+
+
+def doc_url(kind: str) -> str:
+    """Действующая ссылка на документ Сервиса.
+
+    Ссылка из настроек (privacy_url/terms_url) действует, пока это не
+    Teletype: документы переехали с Teletype на сайт, и старая ссылка
+    в настройках считается незаданной — ведёт на страницу сайта.
+    """
+    key = "privacy_url" if kind == "privacy" else "terms_url"
+    stored = (load_config().get(key) or "").strip()
+    if stored and "teletype.in" not in stored:
+        return stored
+    base = site_url().rstrip("/")
+    return f"{base}/{kind}/" if base else stored
 
 
 def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",

@@ -275,16 +275,18 @@ async def handle_set_channel(query, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-def _doc_line(label: str, key: str) -> str:
-    """Строка документа: задан или нет."""
-    return f"{label}: {'✅ задана' if load_config().get(key) else '<i>не задана</i>'}"
+def _doc_line(label: str, kind: str) -> str:
+    """Строка документа: действующая ссылка или «не задана»."""
+    from web.site_deploy import doc_url
+    url = doc_url(kind)
+    return f"{label}: {f'<a href=\"{url}\">открыть</a>' if url else '<i>не задана</i>'}"
 
 
 async def handle_documents_menu(query):
     await query.edit_message_text(
         "📄 <b>Документы</b>\n\n"
-        f"<blockquote>{_doc_line('📋 Политика конфиденциальности', 'privacy_url')}\n"
-        f"{_doc_line('📄 Пользовательское соглашение', 'terms_url')}</blockquote>\n\n"
+        f"<blockquote>{_doc_line('📋 Политика конфиденциальности', 'privacy')}\n"
+        f"{_doc_line('📄 Пользовательское соглашение', 'terms')}</blockquote>\n\n"
         "<i>Ссылки видны клиентам в «О сервисе» и на сайте.</i>",
         parse_mode="HTML",
         reply_markup=documents_keyboard(),
