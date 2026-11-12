@@ -56,37 +56,29 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
 # ── Админка ───────────────────────────────────────────────────────────────────
 
 def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
+    """Дашборд админки: пять разделов-хабов вместо плоского списка.
+
+    Тикеты — отдельной кнопкой с бейджем непрочитанных, техработы —
+    только когда включены (иначе они в ⚙️ Системе). Все экраны функций
+    живут внутри хабов, их callback_data не менялись.
+    """
     tickets_label = f"🎫 Тикеты · 🔴 {unread_tickets}" if unread_tickets else "🎫 Тикеты"
     # включённые техработы должны бросаться в глаза, чтобы про них не забыли
     import core.maintenance as mnt
-    mnt_label = "🔴 Техработы ВКЛЮЧЕНЫ" if mnt.is_maintenance() else "🛠 Техработы и функции"
 
     def b(text, cb):
         return InlineKeyboardButton(text, callback_data=cb)
 
-    # Кнопки сгруппированы по смыслу и стоят парами — так вся админка
-    # помещается на один экран телефона без прокрутки
-    return InlineKeyboardMarkup([
-        # сводка и деньги
-        [b("📊 Статистика", "dashboard"), b("💰 Финансы", "pay_provider_menu")],
-        # люди и подписки
-        [b("🔍 Найти юзера", "find_user"), b("📜 Логи", "ctl_menu")],
-        [b("💳 Платные подписки", "paid_subs"), b("📋 Админские", "admin_subs")],
-        # общение
-        [b(tickets_label, "ticket_list:1"), b("📣 Рассылка", "broadcast")],
-        [b("👥 Помощники", "helpers_menu"), b("📢 Канал", "channel_menu")],
-        # удержание и защита
-        [b("🎯 Возврат ушедших", "winback_settings"), b("⏰ Напоминания", "remind_settings")],
-        [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
-        # инфраструктура
-        [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Веб-доступ", "web_menu")],
-        [b("🌐 Проверка операторов", "netcheck_menu")],
-        [b("💾 Бэкап и перенос", "backup_menu"), b("📄 Документы", "documents_menu")],
-        [b("🛟 Поддержка", "support_settings"), b("🧾 Лог-канал", "log_channel_settings")],
-        [b(mnt_label, "mnt_menu")],
-        [b("🔄 Обновиться с GitHub", "git_update")],
-        [b("🏠 Главное меню", "back_start")],
-    ])
+    rows = [
+        [b("💰 Деньги", "adm_money"), b("🛰 Серверы", "adm_servers")],
+        [b("👥 Люди", "adm_people"), b("📣 Маркетинг", "adm_marketing")],
+        [b("⚙️ Система", "adm_system"), b(tickets_label, "ticket_list:1")],
+    ]
+    if mnt.is_maintenance():
+        rows.append([b("🔴 Техработы ВКЛЮЧЕНЫ", "mnt_menu")])
+    rows.append([b("🔄 Обновить", "admin_panel")])
+    rows.append([b("🏠 Главное меню", "back_start")])
+    return InlineKeyboardMarkup(rows)
 
 
 def channel_keyboard() -> InlineKeyboardMarkup:

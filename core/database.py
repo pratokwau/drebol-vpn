@@ -551,6 +551,25 @@ async def init_db():
 
 # ── Падения серверов ────────────────────────────────────────────────────────
 
+async def get_probe_sub_url() -> str | None:
+    """Ссылка любой подписки из базы — для пробы страницы подписки.
+
+    key.drbl.tech без sub ID отдаёт 502 даже когда всё работает,
+    поэтому здоровье страницы проверяется только по настоящей ссылке.
+    Ссылка используется только для HEAD-запроса с самого сервера
+    и никуда не уходит.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        for table in ("paid_subs", "admin_subs"):
+            async with db.execute(
+                f"SELECT sub_url FROM {table} ORDER BY id DESC LIMIT 1"
+            ) as cur:
+                row = await cur.fetchone()
+            if row and row[0]:
+                return row[0]
+    return None
+
+
 async def record_downtime_status(target: str, kind: str, ok: bool,
                                 detail: str = "", now: int | None = None):
     """Фиксирует переход состояния цели. ok=True закрывает открытое

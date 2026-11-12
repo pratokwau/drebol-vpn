@@ -542,8 +542,15 @@ async def probe_sites() -> dict:
     Ответ с любым кодом ниже 500 — жив; 5xx, таймаут или ошибка
     соединения — лежит. Проверяется с самого сервера, через тот же
     Caddy, что видят пользователи.
+
+    Нюанс: key.drbl.tech без sub ID отдаёт 502 даже когда всё работает
+    (проверено живьём 2026-11-12), поэтому страницу подписки пробуем
+    только по настоящей ссылке из базы. Если подписок в базе нет —
+    проверяем, что процесс страницы слушает свой порт 3010.
     """
     import aiohttp
+
+    from core.database import get_probe_sub_url
 
     out: dict[str, dict] = {}
     timeout = aiohttp.ClientTimeout(total=6)
@@ -551,19 +558,42 @@ async def probe_sites() -> dict:
     # на сервере переменных прокси нет.
     async with aiohttp.ClientSession(timeout=timeout,
                                      trust_env=True) as session:
-        for url in SITE_URLS:
-            start = time.monotonic()
+        start = time.monotonic()
+        try:
+            async with session.head("https://vpn.drbl.tech/",
+                                    allow_redirects=True) as resp:
+                code = resp.status
+                ok = code < 500
+                err = "" if ok else f"HTTP {code}"
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            code, ok, err = None, False, str(exc)[:80]
+        out["site:vpn.drbl.tech"] = {
+            "ok": ok, "code": code,
+            "ms": int((time.monotonic() - start) * 1000), "error": err}
+
+        sub_url = await get_probe_sub_url()
+        start = time.monotonic()
+        if sub_url:
             try:
-                async with session.head(url, allow_redirects=True) as resp:
+                async with session.head(sub_url,
+                                        allow_redirects=True) as resp:
                     code = resp.status
                     ok = code < 500
                     err = "" if ok else f"HTTP {code}"
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 code, ok, err = None, False, str(exc)[:80]
-            ms = int((time.monotonic() - start) * 1000)
-            domain = urlparse(url).hostname or url
-            out[f"site:{domain}"] = {"ok": ok, "code": code,
-                                     "ms": ms, "error": err}
+        else:
+            # подписок нет — хотя бы TCP до процесса страницы
+            try:
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection("127.0.0.1", 3010), timeout=5)
+                writer.close()
+                code, ok, err = None, True, ""
+            except (OSError, asyncio.TimeoutError) as exc:
+                code, ok, err = None, False, str(exc)[:80]
+        out["site:key.drbl.tech"] = {
+            "ok": ok, "code": code,
+            "ms": int((time.monotonic() - start) * 1000), "error": err}
     return out
 
 

@@ -15,6 +15,13 @@ T2, Ростелеком. Один запрос на домен: 5 локаци�
   блокировки на уровне оператора;
 - no_probe — у Globalping сейчас нет онлайн-пробы в этой сети —
   это НЕ блок, просто повторить позже.
+
+Нюанс страницы подписки: key.drbl.tech без sub ID в пути отдаёт 502
+от Caddy даже когда всё работает (проверено живьём 2026-11-12: голый
+домен и случайный ID — 502, настоящая ссылка подписки — 200). Поэтому
+502 от key.drbl.tech считается «домен доступен, нужен sub ID», а не
+ошибкой сервера. Здоровье самой страницы проверяется отдельно, с
+сервера, по настоящей ссылке подписки (services.panel.probe_sites).
 """
 
 from __future__ import annotations
@@ -37,6 +44,10 @@ OPERATORS: list[tuple[str, list[str]]] = [
     ("T2", ["AS12958", "AS15378"]),
     ("Ростелеком", ["AS12389"]),
 ]
+
+# Домены, у которых голый путь без sub ID всегда даёт 502: такой ответ
+# означает «домен доступен, нужен sub ID», а не ошибку сервера.
+SUB_ID_DOMAINS = frozenset({"key.drbl.tech"})
 
 # (подпись, домен) — что проверяем
 TARGETS: list[tuple[str, str]] = [
@@ -162,8 +173,16 @@ async def _check_one(session: aiohttp.ClientSession,
     if not measurement or measurement.get("status") != "finished":
         return {"label": label, "domain": domain,
                 "error": "проверка не завершилась вовремя"}
-    return {"label": label, "domain": domain,
-            "operators": _parse_result(measurement, operators)}
+    ops = _parse_result(measurement, operators)
+    if domain in SUB_ID_DOMAINS:
+        # 502 без sub ID — норма для страницы подписки: домен доступен,
+        # оператор не блокирует. Настоящее здоровье страницы — в
+        # probe_sites (проба по живой ссылке подписки с сервера).
+        for op in ops.values():
+            if op.get("state") == "error" and op.get("code") == 502:
+                op["state"] = "ok"
+                op["sub_id"] = True
+    return {"label": label, "domain": domain, "operators": ops}
 
 
 _RETRY_ATTEMPTS = 3

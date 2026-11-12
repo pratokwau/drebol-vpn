@@ -104,6 +104,13 @@ def _render(results: list[dict]) -> str:
     else:
         lines.append(f"✅ Доступно: {ok} · ❌ Недоступно: {blocked} · "
                      f"⚠️ Ошибка сервера: {error} · — без пробы: {no_probe}")
+    # Подписка: 502 без sub ID — норма, а не поломка
+    if any(op.get("sub_id")
+           for r in results for op in (r.get("operators") or {}).values()):
+        lines.append("")
+        lines.append("ℹ️ <i>Подписка: 502 без sub ID — это нормально. "
+                     "Страница живёт только по ссылке подписки, а здесь "
+                     "важно, что оператор не блокирует домен.</i>")
     return "\n".join(lines).strip()
 
 
