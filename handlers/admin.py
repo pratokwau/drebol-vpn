@@ -10,6 +10,27 @@ from core.states import (
 )
 
 
+async def _redraw(query, text, markup):
+    """Перерисовка экрана, который обновляется своей же кнопкой.
+
+    Если с прошлого показа ничего не изменилось, Telegram отклоняет
+    edit с «Message is not modified» — это не ошибка, а подтверждение,
+    что данные актуальны. Показываем тост вместо алерта об ошибке.
+    Остальные ошибки пробрасываем дальше, как раньше.
+    """
+    try:
+        await query.edit_message_text(
+            text, parse_mode="HTML", reply_markup=markup)
+    except Exception as e:
+        if "not modified" in str(e).lower():
+            try:
+                await query.answer("✅ Уже актуально")
+            except Exception:
+                pass
+            return
+        raise
+
+
 async def handle_admin_panel(query):
     """Дашборд админки: живые цифры сверху, разделы — пять хабов.
 
@@ -70,10 +91,10 @@ async def handle_admin_panel(query):
     if mnt.is_maintenance():
         summary += ("\n\n🔴 <b>Техработы включены</b> — пользователи видят "
                     "заглушку")
-    await query.edit_message_text(
+    await _redraw(
+        query,
         "🌑 <b>Drebol VPN · Админка</b>" + summary,
-        parse_mode="HTML",
-        reply_markup=admin_keyboard(unread),
+        admin_keyboard(unread),
     )
 
 
@@ -149,10 +170,10 @@ async def handle_dashboard(query):
         "</blockquote>"
     )
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text(
+    await _redraw(
+        query,
         text,
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
+        InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Обновить", callback_data="dashboard")],
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
