@@ -105,7 +105,6 @@ from handlers.payprovider import (
     handle_platega_test, handle_platega_balance,
     handle_platega_settings, handle_platega_payment,
     handle_platega_refund, handle_platega_refund_do,
-    handle_platega_refund, handle_platega_refund_do,
 )
 from handlers.finance import (
     handle_servers_menu, handle_server_view, handle_server_add,
@@ -824,6 +823,17 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_platega_set_merchant(query, context)
     elif data == "platega_set_secret":
         await handle_platega_set_secret(query, context)
+    elif data == "platega_test":
+        await handle_platega_test(query, context)
+    elif data == "platega_balance":
+        await handle_platega_balance(query, context)
+    elif data.startswith("platega_payment:"):
+        await handle_platega_payment(query, context, data.split(":", 1)[1])
+    elif data.startswith("platega_refund:"):
+        await handle_platega_refund(query, context, int(data.split(":", 1)[1]))
+    elif data.startswith("platega_refund_ok:"):
+        _pid, _rev = data.split(":")[1], data.split(":")[2]
+        await handle_platega_refund_do(query, context, int(_pid), _rev == "1")
     elif data == "platega_settings":
         await handle_platega_settings(query, context)
     elif data == "paid_sub_presets":
