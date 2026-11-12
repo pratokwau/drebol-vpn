@@ -71,6 +71,35 @@ async def post_init(app: Application):
                 n["tag"] for n in r["nodes"] if n["enabled"] and not n["reachable"]
             )
 
+            # История падений — в таблицу downtime_events, для экрана
+            # «📉 Падения и сбои». Узлы и подписки пишем только пока
+            # панель отвечает: иначе их состояние неизвестно, а не «упали».
+            import time as _time
+            from core.database import record_downtime_status
+            _now = int(_time.time())
+            if "downtime_since" not in cfg:
+                cfg["downtime_since"] = _now
+                save_config(cfg)
+            await record_downtime_status(
+                "panel", "service", panel_ok,
+                str(r["panel"].get("error") or ""), now=_now)
+            if panel_ok:
+                await record_downtime_status(
+                    "sub", "service", sub_ok,
+                    str(r["sub"].get("error") or ""), now=_now)
+                for _n in r["nodes"]:
+                    if _n["enabled"]:
+                        await record_downtime_status(
+                            f"node:{_n['tag']}", "node", _n["reachable"],
+                            str(_n.get("error") or ""), now=_now)
+            # Сайт и страница подписки — своим путём через Caddy,
+            # независимо от панели.
+            from services.panel import probe_sites
+            for _target, _st in (await probe_sites()).items():
+                await record_downtime_status(
+                    _target, "site", _st["ok"],
+                    str(_st.get("error") or ""), now=_now)
+
             alerts = []
             changed = False
 

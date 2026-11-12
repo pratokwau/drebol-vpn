@@ -110,6 +110,7 @@ from handlers.netcheck import (
     handle_netcheck_menu, handle_netcheck_run,
     handle_netcheck_settings, handle_netcheck_toggle,
 )
+from handlers.downtime import handle_downtime_menu
 from handlers.finance import (
     handle_servers_menu, handle_server_view, handle_server_add,
     handle_server_edit_price, handle_server_edit_day,
@@ -538,6 +539,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_clear_log_channel(query)
     elif data == "rw_menu":
         await handle_rw_menu(query, context)
+    elif data == "rw_downtime":
+        await handle_downtime_menu(query, context)
     elif data == "rw_url":
         await handle_rw_url(query, context)
     elif data == "rw_token":

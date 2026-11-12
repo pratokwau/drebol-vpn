@@ -533,6 +533,40 @@ async def get_traffic_snapshot() -> dict:
 
 # ── Проверка живости ──────────────────────────────────────────────────────────
 
+SITE_URLS = ("https://vpn.drbl.tech/", "https://key.drbl.tech/")
+
+
+async def probe_sites() -> dict:
+    """Сайт и страница подписки — живы или нет (HTTP HEAD).
+
+    Ответ с любым кодом ниже 500 — жив; 5xx, таймаут или ошибка
+    соединения — лежит. Проверяется с самого сервера, через тот же
+    Caddy, что видят пользователи.
+    """
+    import aiohttp
+
+    out: dict[str, dict] = {}
+    timeout = aiohttp.ClientTimeout(total=6)
+    # trust_env: в песочнице без прокси из окружения TLS не проходит;
+    # на сервере переменных прокси нет.
+    async with aiohttp.ClientSession(timeout=timeout,
+                                     trust_env=True) as session:
+        for url in SITE_URLS:
+            start = time.monotonic()
+            try:
+                async with session.head(url, allow_redirects=True) as resp:
+                    code = resp.status
+                    ok = code < 500
+                    err = "" if ok else f"HTTP {code}"
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                code, ok, err = None, False, str(exc)[:80]
+            ms = int((time.monotonic() - start) * 1000)
+            domain = urlparse(url).hostname or url
+            out[f"site:{domain}"] = {"ok": ok, "code": code,
+                                     "ms": ms, "error": err}
+    return out
+
+
 async def probe_servers() -> dict:
     """Панель, выдача подписок и узлы — живы или нет.
 

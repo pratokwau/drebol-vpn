@@ -1288,6 +1288,7 @@ async def handle_rw_menu(query, context=None):
     if is_configured():
         kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
+        kb.append([InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")])
         kb.append([InlineKeyboardButton("🔄 Синхронизация",
                                         callback_data="panel_sync_menu")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])

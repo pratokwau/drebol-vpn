@@ -530,7 +530,94 @@ async def init_db():
             new_url = strip_default_port(old_url)
             if new_url != old_url:
                 await db.execute("UPDATE admin_subs SET sub_url = ? WHERE id = ?", (new_url, row_id))
+        # Падения серверов: одно событие на каждое падение цели.
+        # target: panel | sub | node:<имя> | site:<домен>; ended_at NULL —
+        # цель всё ещё лежит. Пишет проверка здоровья (bot.py, раз в 5 мин).
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS downtime_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                detail TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_downtime_target "
+            "ON downtime_events(target, started_at)")
         await db.commit()
+
+
+# ── Падения серверов ────────────────────────────────────────────────────────
+
+async def record_downtime_status(target: str, kind: str, ok: bool,
+                                detail: str = "", now: int | None = None):
+    """Фиксирует переход состояния цели. ok=True закрывает открытое
+    падение, ok=False открывает новое, если его ещё нет. Вызывается
+    проверкой здоровья раз в 5 минут — повторные одинаковые состояния
+    ничего не пишут."""
+    import time
+    now = now if now is not None else int(time.time())
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+                "SELECT id FROM downtime_events "
+                "WHERE target = ? AND ended_at IS NULL",
+                (target,)) as cur:
+            row = await cur.fetchone()
+        if ok:
+            if row:
+                await db.execute(
+                    "UPDATE downtime_events SET ended_at = ? WHERE id = ?",
+                    (now, row[0]))
+                await db.commit()
+        elif not row:
+            await db.execute(
+                "INSERT INTO downtime_events (target, kind, started_at, detail) "
+                "VALUES (?, ?, ?, ?)",
+                (target, kind, now, detail or ""))
+            await db.commit()
+
+
+async def get_downtime_events(since_ts: int) -> list[dict]:
+    """Все падения, начавшиеся не раньше since_ts, плюс открытые,
+    начавшиеся раньше. Новые первыми."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+                "SELECT id, target, kind, started_at, ended_at, detail "
+                "FROM downtime_events "
+                "WHERE started_at >= ? OR ended_at IS NULL "
+                "ORDER BY started_at DESC",
+                (since_ts,)) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+def downtime_summary(events: list[dict], since_ts: int, now: int) -> dict:
+    """Считает по событиям статистику за окно [since_ts, now]:
+    {target: {incidents, downtime_sec, open_since, last_start, last_end}}.
+    Чистая функция — без БД."""
+    out: dict[str, dict] = {}
+    for ev in events:
+        start = max(int(ev["started_at"]), since_ts)
+        end = int(ev["ended_at"]) if ev.get("ended_at") else now
+        if end <= since_ts or start >= now:
+            continue
+        t = out.setdefault(ev["target"], {
+            "kind": ev.get("kind") or "",
+            "incidents": 0, "downtime_sec": 0,
+            "open_since": None, "last_start": None, "last_end": None,
+        })
+        t["incidents"] += 1
+        t["downtime_sec"] += max(0, end - start)
+        if ev.get("ended_at") is None:
+            t["open_since"] = int(ev["started_at"])
+        if t["last_start"] is None or int(ev["started_at"]) > t["last_start"]:
+            t["last_start"] = int(ev["started_at"])
+            t["last_end"] = (int(ev["ended_at"])
+                             if ev.get("ended_at") else None)
+    return out
 
 
 async def upsert_user(user_id: int, first_name: str, username: str | None):
