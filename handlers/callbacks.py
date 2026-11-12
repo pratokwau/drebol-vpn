@@ -106,6 +106,9 @@ from handlers.payprovider import (
     handle_platega_settings, handle_platega_payment,
     handle_platega_refund, handle_platega_refund_do,
 )
+from handlers.netcheck import (
+    handle_netcheck_menu, handle_netcheck_run,
+)
 from handlers.finance import (
     handle_servers_menu, handle_server_view, handle_server_add,
     handle_server_edit_price, handle_server_edit_day,
@@ -836,6 +839,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_platega_refund_do(query, context, int(_pid), _rev == "1")
     elif data == "platega_settings":
         await handle_platega_settings(query, context)
+    elif data == "netcheck_menu":
+        await handle_netcheck_menu(query, context)
+    elif data == "netcheck_run":
+        await handle_netcheck_run(query, context)
     elif data == "paid_sub_presets":
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":

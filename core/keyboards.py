@@ -80,6 +80,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
         # инфраструктура
         [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Веб-доступ", "web_menu")],
+        [b("🌐 Проверка операторов", "netcheck_menu")],
         [b("💾 Бэкап и перенос", "backup_menu"), b("📄 Документы", "documents_menu")],
         [b("🛟 Поддержка", "support_settings"), b("🧾 Лог-канал", "log_channel_settings")],
         [b(mnt_label, "mnt_menu")],
