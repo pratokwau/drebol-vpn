@@ -1462,7 +1462,8 @@ def app_version_json() -> str:
 
 
 def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"",
-                 cabinet: str = "", pay_pages: dict | None = None) -> dict:
+                 cabinet: str = "", pay_pages: dict | None = None,
+                 doc_pages: dict | None = None) -> dict:
     c = creds()
     try:
         cli = _client()
@@ -1498,6 +1499,10 @@ chmod 755 {WEB_ROOT}
                 if pay_pages and pay_pages.get(kind):
                     with sftp.open(f"/tmp/drebol_pay_{kind}.html", "w") as f:
                         f.write(pay_pages[kind])
+            for kind in ("privacy", "terms"):
+                if doc_pages and doc_pages.get(kind):
+                    with sftp.open(f"/tmp/drebol_doc_{kind}.html", "w") as f:
+                        f.write(doc_pages[kind])
             robots_txt, sitemap_xml = seo_files()
             with sftp.open("/tmp/drebol_robots.txt", "w") as f:
                 f.write(robots_txt)
@@ -1560,6 +1565,14 @@ for kind in success fail back; do
     mkdir -p {WEB_ROOT}/pay/$kind
     mv /tmp/drebol_pay_$kind.html {WEB_ROOT}/pay/$kind/index.html
     chmod 644 {WEB_ROOT}/pay/$kind/index.html
+  fi
+done
+# Документы: /privacy/ и /terms/
+for kind in privacy terms; do
+  if [ -f /tmp/drebol_doc_$kind.html ]; then
+    mkdir -p {WEB_ROOT}/$kind
+    mv /tmp/drebol_doc_$kind.html {WEB_ROOT}/$kind/index.html
+    chmod 644 {WEB_ROOT}/$kind/index.html
   fi
 done
 [ -f /tmp/drebol_logo ] && mv /tmp/drebol_logo {WEB_ROOT}/{LOGO_NAME} || true
@@ -1817,8 +1830,22 @@ def pay_redirect_urls() -> dict:
     }
 
 
+def doc_page_urls() -> dict:
+    """Адреса документов Сервиса на сайте.
+
+    Пусто, если домен не задан.
+    """
+    base = site_url().rstrip("/")
+    if not base:
+        return {}
+    return {
+        "privacy": f"{base}/privacy/",
+        "terms": f"{base}/terms/",
+    }
+
+
 def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",
-              pay: str = "") -> str:
+              pay: str = "", doc: str = "") -> str:
     """Отпечаток того, что должно лежать на сервере.
 
     По нему автообновление понимает, поменялось ли хоть что-нибудь: цена
@@ -1834,6 +1861,7 @@ def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",
     h.update(str(load_config().get("webapi_public") or "").encode("utf-8"))
     h.update(cabinet.encode("utf-8"))
     h.update(pay.encode("utf-8"))
+    h.update(doc.encode("utf-8"))
     # фавикон и robots.txt тоже едут на сервер — их смена должна
     # вызывать перезалив, а не молча пропускаться автообновлением
     h.update(base64.b64decode(FAVICON_ICO_B64))
@@ -1845,17 +1873,19 @@ def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",
 
 async def deploy(bot_username: str) -> dict:
     """Собирает страницу и раскатывает её на сервер."""
-    from web.site_page import build_pay_pages
+    from web.site_page import build_pay_pages, build_doc_pages
     page, og_bytes, logo_bytes = await build_current(bot_username)
     cabinet = cabinet_page(bot_username)
     pay_pages = build_pay_pages()
     pay = "".join(pay_pages[k] for k in ("success", "fail", "back"))
+    doc_pages = build_doc_pages()
+    doc = "".join(doc_pages[k] for k in ("privacy", "terms"))
     res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes,
-                                  cabinet, pay_pages)
+                                  cabinet, pay_pages, doc_pages)
     if res.get("ok"):
         # вместе со страницей уехал и переходник — можно показывать кнопки приложений
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
-                   site_page_hash=page_hash(page, og_bytes, logo_bytes, cabinet, pay),
+                   site_page_hash=page_hash(page, og_bytes, logo_bytes, cabinet, pay, doc),
                    site_add_page=True, site_cabinet=bool(load_config().get("webapi_public")))
     return res
 
@@ -1868,16 +1898,18 @@ async def _build_and_maybe_deploy(bot_username: str) -> tuple:
     Кабинет едет вместе со страницей: раньше автообновление заливало его
     пустым (аргумент не передавался), и кабинет бы стёрся.
     """
-    from web.site_page import build_pay_pages
+    from web.site_page import build_pay_pages, build_doc_pages
     page, og_bytes, logo_bytes = await build_current(bot_username)
     cabinet = cabinet_page(bot_username)
     pay_pages = build_pay_pages()
     pay = "".join(pay_pages[k] for k in ("success", "fail", "back"))
-    fresh = page_hash(page, og_bytes, logo_bytes, cabinet, pay)
+    doc_pages = build_doc_pages()
+    doc = "".join(doc_pages[k] for k in ("privacy", "terms"))
+    fresh = page_hash(page, og_bytes, logo_bytes, cabinet, pay, doc)
     if fresh == load_config().get("site_page_hash"):
         return "unchanged", None
     res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes,
-                                  cabinet, pay_pages)
+                                  cabinet, pay_pages, doc_pages)
     if res.get("ok"):
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
                    site_page_hash=fresh)
