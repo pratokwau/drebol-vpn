@@ -7,6 +7,9 @@ AWAITING_SUPPORT_MSG = "awaiting_support_msg"
 AWAITING_ADMIN_REPLY = "awaiting_admin_reply"
 AWAITING_PRIVACY_URL = "awaiting_privacy_url"
 AWAITING_TERMS_URL = "awaiting_terms_url"
+AWAITING_REFUND_URL = "awaiting_refund_url"
+AWAITING_RULES_URL = "awaiting_rules_url"
+AWAITING_CONSENT_URL = "awaiting_consent_url"
 
 # Создание подписки
 AWAITING_SUB_TG_ID = "awaiting_sub_tg_id"

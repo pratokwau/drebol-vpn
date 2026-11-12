@@ -1035,6 +1035,9 @@ async def handle_about(query):
     from web.site_deploy import doc_url
     privacy_url = doc_url("privacy")
     terms_url = doc_url("terms")
+    refund_url = doc_url("refund")
+    rules_url = doc_url("rules")
+    consent_url = doc_url("consent")
 
     lines = [
         "📕 <b>О сервисе</b>",
@@ -1051,6 +1054,12 @@ async def handle_about(query):
         docs.append(f'<a href="{privacy_url}">Политика конфиденциальности</a>')
     if terms_url:
         docs.append(f'<a href="{terms_url}">Пользовательское соглашение</a>')
+    if refund_url:
+        docs.append(f'<a href="{refund_url}">Политика возврата</a>')
+    if rules_url:
+        docs.append(f'<a href="{rules_url}">Правила использования</a>')
+    if consent_url:
+        docs.append(f'<a href="{consent_url}">Согласие на обработку данных</a>')
     if docs:
         lines += ["", "📄 " + "  ·  ".join(docs)]
 

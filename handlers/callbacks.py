@@ -16,6 +16,7 @@ from handlers.user import (
 from handlers.admin import (
     handle_admin_panel, handle_set_channel, handle_git_update,
     handle_set_privacy_url, handle_set_terms_url, handle_documents_menu,
+    handle_set_refund_url, handle_set_rules_url, handle_set_consent_url,
     handle_channel_menu, handle_dashboard, handle_healthcheck,
     handle_find_user, handle_user_profile,
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
@@ -384,6 +385,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_set_privacy_url(query, context)
     elif data == "set_terms_url":
         await handle_set_terms_url(query, context)
+    elif data == "set_refund_url":
+        await handle_set_refund_url(query, context)
+    elif data == "set_rules_url":
+        await handle_set_rules_url(query, context)
+    elif data == "set_consent_url":
+        await handle_set_consent_url(query, context)
     elif data == "git_update":
         await handle_git_update(query)
     elif data == "dashboard":

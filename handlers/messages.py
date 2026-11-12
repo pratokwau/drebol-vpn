@@ -10,6 +10,7 @@ from core.states import (
     AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
     AWAITING_SUPPORT_MSG, AWAITING_ADMIN_REPLY,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
+    AWAITING_REFUND_URL, AWAITING_RULES_URL, AWAITING_CONSENT_URL,
     AWAITING_PRESET_EXPIRE,
     AWAITING_PRESET_HWID, AWAITING_PRESET_TRAFFIC, AWAITING_PRESET_LTE,
     AWAITING_SUB_TG_ID,
@@ -325,6 +326,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _save("terms_url", text)
         context.user_data.pop("state", None)
         await update.message.reply_text("✅ Соглашение сохранено.", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_REFUND_URL:
+        if not text.startswith("http"):
+            await update.message.reply_text("❌ Некорректная ссылка.", reply_markup=back_admin())
+            return
+        _save("refund_url", text)
+        context.user_data.pop("state", None)
+        await update.message.reply_text("✅ Политика возврата сохранена.", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_RULES_URL:
+        if not text.startswith("http"):
+            await update.message.reply_text("❌ Некорректная ссылка.", reply_markup=back_admin())
+            return
+        _save("rules_url", text)
+        context.user_data.pop("state", None)
+        await update.message.reply_text("✅ Правила использования сохранены.", reply_markup=back_admin())
+        return
+
+    if state == AWAITING_CONSENT_URL:
+        if not text.startswith("http"):
+            await update.message.reply_text("❌ Некорректная ссылка.", reply_markup=back_admin())
+            return
+        _save("consent_url", text)
+        context.user_data.pop("state", None)
+        await update.message.reply_text("✅ Согласие сохранено.", reply_markup=back_admin())
         return
 
     if state == AWAITING_ADMIN_REPLY:

@@ -109,9 +109,15 @@ def documents_keyboard() -> InlineKeyboardMarkup:
     cfg = load_config()
     privacy_label = "📋 Изменить политику конф." if cfg.get("privacy_url") else "📋 Политика конфиденциальности"
     terms_label = "📄 Изменить польз. соглашение" if cfg.get("terms_url") else "📄 Пользовательское соглашение"
+    refund_label = "↩️ Изменить политику возврата" if cfg.get("refund_url") else "↩️ Политика возврата"
+    rules_label = "📏 Изменить правила использования" if cfg.get("rules_url") else "📏 Правила использования"
+    consent_label = "🔏 Изменить согласие на обработку" if cfg.get("consent_url") else "🔏 Согласие на обработку данных"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(privacy_label, callback_data="set_privacy_url")],
         [InlineKeyboardButton(terms_label, callback_data="set_terms_url")],
+        [InlineKeyboardButton(refund_label, callback_data="set_refund_url")],
+        [InlineKeyboardButton(rules_label, callback_data="set_rules_url")],
+        [InlineKeyboardButton(consent_label, callback_data="set_consent_url")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
 

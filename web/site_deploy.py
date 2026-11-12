@@ -1850,12 +1850,15 @@ def doc_page_urls() -> dict:
 def doc_url(kind: str) -> str:
     """Действующая ссылка на документ Сервиса.
 
-    Ссылка из настроек (privacy_url/terms_url) действует, пока это не
-    Teletype: документы переехали с Teletype на сайт, и старая ссылка
-    в настройках считается незаданной — ведёт на страницу сайта.
+    Ссылка из настроек (privacy_url, terms_url, refund_url, rules_url,
+    consent_url) действует, пока это не Teletype: документы переехали
+    с Teletype на сайт, и старая ссылка в настройках считается
+    незаданной — ведёт на страницу сайта.
     """
-    key = "privacy_url" if kind == "privacy" else "terms_url"
-    stored = (load_config().get(key) or "").strip()
+    keys = {"privacy": "privacy_url", "terms": "terms_url",
+            "refund": "refund_url", "rules": "rules_url",
+            "consent": "consent_url"}
+    stored = (load_config().get(keys[kind]) or "").strip()
     if stored and "teletype.in" not in stored:
         return stored
     base = site_url().rstrip("/")

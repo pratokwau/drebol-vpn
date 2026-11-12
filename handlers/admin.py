@@ -5,6 +5,7 @@ from config import INSTALL_DIR, load_config, save_config
 from core.keyboards import admin_keyboard, back_admin, documents_keyboard, channel_keyboard
 from core.states import (
     AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
+    AWAITING_REFUND_URL, AWAITING_RULES_URL, AWAITING_CONSENT_URL,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
     AWAITING_DM_USER,
 )
@@ -286,7 +287,10 @@ async def handle_documents_menu(query):
     await query.edit_message_text(
         "📄 <b>Документы</b>\n\n"
         f"<blockquote>{_doc_line('📋 Политика конфиденциальности', 'privacy')}\n"
-        f"{_doc_line('📄 Пользовательское соглашение', 'terms')}</blockquote>\n\n"
+        f"{_doc_line('📄 Пользовательское соглашение', 'terms')}\n"
+        f"{_doc_line('↩️ Политика возврата', 'refund')}\n"
+        f"{_doc_line('📏 Правила использования', 'rules')}\n"
+        f"{_doc_line('🔏 Согласие на обработку данных', 'consent')}</blockquote>\n\n"
         "<i>Ссылки видны клиентам в «О сервисе» и на сайте.</i>",
         parse_mode="HTML",
         reply_markup=documents_keyboard(),
@@ -306,6 +310,33 @@ async def handle_set_terms_url(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_TERMS_URL
     await query.edit_message_text(
         "📄 <b>Пользовательское соглашение</b>\n\n<i>Пришли ссылку на документ.</i>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_set_refund_url(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_REFUND_URL
+    await query.edit_message_text(
+        "↩️ <b>Политика возврата</b>\n\n<i>Пришли ссылку на документ.</i>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_set_rules_url(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_RULES_URL
+    await query.edit_message_text(
+        "📏 <b>Правила использования</b>\n\n<i>Пришли ссылку на документ.</i>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_set_consent_url(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_CONSENT_URL
+    await query.edit_message_text(
+        "🔏 <b>Согласие на обработку данных</b>\n\n<i>Пришли ссылку на документ.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
