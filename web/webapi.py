@@ -777,6 +777,10 @@ def build_app():
         PARTIALLY_REFUNDED — учесть частичный возврат.
         Если колбэк придёт раньше опроса или дважды — подтверждение
         идемпотентно: засчитываются только счета в статусе pending.
+        Возвраты обрабатываются ВСЕГДА, а не только для pending: возврат
+        в кабинете Platega приходит уже после подтверждения, и прежний
+        ранний выход «не pending — игнорировать» молча терял его —
+        платёж оставался «оплаченным» и шёл в чистую прибыль.
         """
         import services.platega_api as pg
         if not pg.verify_callback(request.headers):
@@ -806,10 +810,11 @@ def build_app():
         if not row:
             logging.warning("кабинет: колбэк Platega на неизвестный счёт %s", payload)
             return web.json_response({"ok": True, "unknown": True})
-        if row[7] != "pending":
-            return web.json_response({"ok": True, "already": True})
         if status == "CANCELED":
-            await set_payment_status(pay_row_id, "canceled")
+            # отмена — только пока счёт ждёт оплаты; оплаченный счёт
+            # отменённым уже не станет
+            if row[7] == "pending":
+                await set_payment_status(pay_row_id, "canceled")
             return web.json_response({"ok": True})
         if status in ("CHARGEBACKED", "DISPUTED"):
             if _bot is None:
@@ -820,13 +825,20 @@ def build_app():
             await finalize_refund(SimpleNamespace(bot=_bot), pay_row_id)
             return web.json_response({"ok": True})
         if status == "PARTIALLY_REFUNDED":
-            refunded = body.get("refundedAmount")
-            if refunded is not None:
-                try:
-                    await set_partial_refunded(pay_row_id, int(float(refunded)))
-                except (TypeError, ValueError):
-                    pass
+            # частичный возврат — тоже после подтверждения; уже полностью
+            # возвращённый счёт не трогаем
+            if row[7] not in ("refunded", "chargebacked"):
+                refunded = body.get("refundedAmount")
+                if refunded is not None:
+                    try:
+                        await set_partial_refunded(pay_row_id, int(float(refunded)))
+                    except (TypeError, ValueError):
+                        pass
             return web.json_response({"ok": True})
+        # CONFIRMED — только для pending: подтверждение идемпотентно,
+        # повторный колбэк по оплаченному счёту просто игнорируется
+        if row[7] != "pending":
+            return web.json_response({"ok": True, "already": True})
         if _bot is None:
             logging.error("кабинет: колбэк Platega, а бот не подключён к API")
             return web.json_response({"error": "no_bot"}, status=500)

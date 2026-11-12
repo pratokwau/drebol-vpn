@@ -58,17 +58,21 @@ async def handle_pay_provider_menu(query, context: ContextTypes.DEFAULT_TYPE = N
     if s["expenses"]:
         spent = (f" (оплачено {fmt_price(s['expenses_paid'])}"
                  f", не оплачено {fmt_price(s['expenses_unpaid'])})")
+    refunds_line = (f"\n↩️ Возвраты: <b>{fmt_price(s['refunds'])}</b>"
+                    if s.get("refunds") else "")
     lines = ["💰 <b>Финансы</b>", "",
              f"📅 {month_title(period)}", "",
-             f"💵 Доходы: <b>{fmt_price(s['income'])}</b>",
+             f"💵 Доходы: <b>{fmt_price(s['income'])}</b>{refunds_line}",
              f"🖥 Расходы: <b>{fmt_price(s['expenses'])}</b> в месяц{spent}",
              f"💹 Прибыль: <b>{fmt_price(s['profit'])}</b>", "",
-             "<i>Доходы — оплаченные счета за месяц. "
+             "<i>Доходы — оплаченные счета за месяц НЕТТО: частичные "
+             "возвраты вычтены, полностью возвращённые исключены. "
              "Расходы — серверы из списка «🖥 Серверы».</i>"]
     rows = [
         [InlineKeyboardButton("💰 Оплаты", callback_data="payments:paid:1")],
         [InlineKeyboardButton("🖥 Серверы", callback_data="servers_menu")],
         [InlineKeyboardButton("💳 Платёжная система", callback_data="platega_menu")],
+        [InlineKeyboardButton("🔍 Сверка с Platega", callback_data="reconcile_menu")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ]
     await query.edit_message_text(

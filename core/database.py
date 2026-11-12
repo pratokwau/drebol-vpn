@@ -1278,10 +1278,13 @@ async def payments_summary() -> dict:
         async with db.execute(q, params) as cur:
             return await cur.fetchone()
 
+    # суммы — нетто: частичные возвраты вычтены (раньше платёж с
+    # частичным возвратом шёл в итоги целиком)
     paid = "status = 'paid'"
+    _net = "amount - COALESCE(partial_refunded, 0)"
     async with aiosqlite.connect(DB_PATH) as db:
         def period(expr):
-            return (f"SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
+            return (f"SELECT COUNT(*), COALESCE(SUM({_net}), 0) FROM payments "
                     f"WHERE {paid} AND {expr}")
 
         today = await _row(db, period(
@@ -1290,13 +1293,14 @@ async def payments_summary() -> dict:
             "COALESCE(paid_at, created_at) >= datetime('now', '-7 days')"))
         month = await _row(db, period(
             "COALESCE(paid_at, created_at) >= datetime('now', '-30 days')"))
-        total = await _row(db, f"SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments WHERE {paid}")
+        total = await _row(db, f"SELECT COUNT(*), COALESCE(SUM({_net}), 0) FROM payments WHERE {paid}")
         pending = await _row(db, "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments WHERE status = 'pending'")
         failed = await _row(db, "SELECT COUNT(*) FROM payments WHERE status IN ('canceled','expired','error')")
         refunds = await _row(db, "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments WHERE status IN ('refunded','refund_pending','chargebacked')")
+        partial = await _row(db, f"SELECT COUNT(*), COALESCE(SUM(partial_refunded), 0) FROM payments WHERE {paid} AND partial_refunded > 0")
 
         async with db.execute(
-            f"SELECT provider, COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
+            f"SELECT provider, COUNT(*), COALESCE(SUM({_net}), 0) FROM payments "
             f"WHERE {paid} GROUP BY provider ORDER BY 3 DESC"
         ) as cur:
             by_provider = await cur.fetchall()
@@ -1312,7 +1316,9 @@ async def payments_summary() -> dict:
         "total_count": cnt_total, "total_sum": sum_total,
         "pending_count": pending[0], "pending_sum": pending[1],
         "failed_count": failed[0],
-        "refund_count": refunds[0], "refund_sum": refunds[1],
+        # возвратов: полные (счета) + частичные (суммы по оплаченным)
+        "refund_count": refunds[0] + partial[0],
+        "refund_sum": refunds[1] + partial[1],
         "by_provider": by_provider,
         "payers": payers,
         "avg": round(sum_total / cnt_total) if cnt_total else 0,
@@ -1410,19 +1416,59 @@ async def servers_with_status(period: str) -> list[dict]:
     return out
 
 
+async def refunds_total() -> tuple[int, int]:
+    """Возвраты за всё время: (полные, частичные).
+
+    Полные — суммы счетов в статусе refunded/chargebacked; частичные —
+    накопленные partial_refunded по оплаченным счетам. Нужно, чтобы
+    выручка считалась нетто: раньше возвраты нигде не вычитались,
+    и платёж с частичным возвратом шёл в чистую прибыль целиком.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments"
+            " WHERE status IN ('refunded', 'chargebacked')"
+        ) as cur:
+            full = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COALESCE(SUM(partial_refunded), 0) FROM payments"
+            " WHERE status = 'paid'"
+        ) as cur:
+            partial = (await cur.fetchone())[0]
+    return int(full), int(partial)
+
+
 async def finance_summary(period: str) -> dict:
     """Доходы и расходы за календарный месяц 'YYYY-MM'.
 
     Доходы — фактически оплаченные счета (по дате оплаты, местное время
-    сервера). Расходы — активные серверы из учёта; оплаченные — по отметкам.
+    сервера) НЕТТО: частичные возвраты вычтены, полностью возвращённые
+    счета исключены. Расходы — активные серверы из учёта; оплаченные —
+    по отметкам. Период возвратов — по дате оплаты счёта, чтобы цифры
+    месяца сходились: income = income_gross - refunds.
     """
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = 'paid'"
+            "SELECT COALESCE(SUM(amount - COALESCE(partial_refunded, 0)), 0)"
+            " FROM payments WHERE status = 'paid'"
             " AND strftime('%Y-%m', COALESCE(paid_at, created_at), 'localtime') = ?",
             (period,),
         ) as cur:
             income = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments"
+            " WHERE status IN ('refunded', 'chargebacked')"
+            " AND strftime('%Y-%m', COALESCE(paid_at, created_at), 'localtime') = ?",
+            (period,),
+        ) as cur:
+            full_refunds = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT COALESCE(SUM(partial_refunded), 0) FROM payments"
+            " WHERE status = 'paid'"
+            " AND strftime('%Y-%m', COALESCE(paid_at, created_at), 'localtime') = ?",
+            (period,),
+        ) as cur:
+            partial_refunds = (await cur.fetchone())[0]
         async with db.execute(
             "SELECT COALESCE(SUM(price_rub), 0) FROM servers WHERE active = 1"
         ) as cur:
@@ -1441,13 +1487,49 @@ async def finance_summary(period: str) -> dict:
             (period,),
         ) as cur:
             unpaid = (await cur.fetchone())[0]
+    refunds = int(full_refunds) + int(partial_refunds)
     return {
         "income": income,
+        "income_gross": int(income) + refunds,
+        "refunds": refunds,
         "expenses": expenses,
         "expenses_paid": paid,
         "expenses_unpaid": unpaid,
         "profit": income - expenses,
     }
+
+
+async def list_reconcile_payments(days: int = 60,
+                                    limit: int = 40) -> list[tuple]:
+    """Счета Platega за последние дни — для сверки с платёжной системой.
+
+    Возвращает (id, tg_id, external_id, amount, status, partial_refunded,
+    paid_at). Ручные счета (manual-*) исключены: их в Platega нет.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, tg_id, external_id, amount, status,"
+            " COALESCE(partial_refunded, 0), paid_at"
+            " FROM payments"
+            " WHERE provider = 'platega' AND external_id IS NOT NULL"
+            " AND external_id NOT LIKE 'manual-%'"
+            " AND created_at >= datetime('now', ?)"
+            " ORDER BY id DESC LIMIT ?",
+            (f"-{int(days)} days", int(limit)),
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def get_payment_money(payment_id: int) -> tuple[int, str | None]:
+    """(частично возвращено, когда полностью возвращён) для карточки счёта."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COALESCE(partial_refunded, 0), refunded_at FROM payments"
+            " WHERE id = ?",
+            (payment_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    return (row[0], row[1]) if row else (0, None)
 
 
 async def list_payments(page: int = 1, status: str = "paid",

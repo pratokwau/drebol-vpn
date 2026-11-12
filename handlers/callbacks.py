@@ -111,6 +111,9 @@ from handlers.netcheck import (
     handle_netcheck_settings, handle_netcheck_toggle,
 )
 from handlers.downtime import handle_downtime_menu
+from handlers.reconcile import (
+    handle_reconcile_menu, handle_reconcile_run, handle_reconcile_fix,
+)
 from handlers.admin_sections import (
     handle_admin_money, handle_admin_servers, handle_admin_people,
     handle_admin_marketing, handle_admin_system,
@@ -360,6 +363,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_admin_marketing(query, context)
     elif data == "adm_system":
         await handle_admin_system(query, context)
+    elif data == "reconcile_menu":
+        await handle_reconcile_menu(query, context)
+    elif data == "reconcile_run":
+        await handle_reconcile_run(query, context)
+    elif data == "reconcile_fix":
+        await handle_reconcile_fix(query, context)
     elif data == "channel_menu":
         await handle_channel_menu(query)
 

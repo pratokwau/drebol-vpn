@@ -154,6 +154,13 @@ async def handle_payment_view(query, payment_id: int):
         lines.append(f"🎟 Промокод: <b>{promo}</b>")
     lines.append(f"💳 Способ: <b>{PROVIDER_LABELS.get(provider, provider)}</b>")
     lines.append(f"📌 Статус: <b>{STATUS_LABELS.get(status, status)}</b>")
+    from core.database import get_payment_money
+    _partial, _refunded_at = await get_payment_money(p_id)
+    if _partial:
+        lines.append(f"↩️ Возвращено частями: <b>{_partial} ₽</b>")
+        lines.append(f"💵 Чистыми: <b>{amount - _partial} ₽</b>")
+    if _refunded_at:
+        lines.append(f"↩️ Возвращён: {_fmt_ts(_refunded_at)}")
     lines.append(f"🕐 Создан: {_fmt_ts(created)}")
     if paid:
         lines.append(f"✅ Оплачен: {_fmt_ts(paid)}")

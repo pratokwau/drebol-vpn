@@ -106,12 +106,19 @@ async def handle_dashboard(query):
     price = cfg.get("paid_price", 0) or 0
 
     # Выручка: точная сумма из истории + оценка по оплатам без сохранённой суммы
+    # МИНУС возвраты: раньше платёж с возвратом (полным или частичным)
+    # шёл в выручку целиком
+    from core.database import refunds_total
+    _full_ref, _part_ref = await refunds_total()
+    _refunds = _full_ref + _part_ref
     unknown_pays = s["payments_confirmed"] - s["revenue_known"]
-    revenue = s["revenue_total"] + unknown_pays * price
+    revenue = s["revenue_total"] + unknown_pays * price - _refunds
     if unknown_pays > 0:
         revenue_note = f" <i>(точно по {s['revenue_known']} из {s['payments_confirmed']}, остальное ~{price}₽)</i>"
     else:
         revenue_note = ""
+    if _refunds > 0:
+        revenue_note += f" <i>· возвраты −{_refunds} ₽</i>"
 
     # Сверка базы с панелью, которая обслуживает подписки
     db_paid = s["paid_total"]
