@@ -32,69 +32,32 @@ async def _redraw(query, text, markup):
 
 
 async def handle_admin_panel(query):
-    """Дашборд админки: живые цифры сверху, разделы — пять хабов.
-
-    Цифры: деньги за текущий месяц, пользователи, подписки, состояние
-    серверов (последнее известное из проверки здоровья, раз в 5 мин),
-    падения за 30 дней. Кнопки ведут в хабы — плоского списка из
-    14 рядов больше нет.
-    """
-    import time
-    from core.database import (
-        get_unread_tickets_count, get_dashboard_stats,
-        get_downtime_events, finance_summary,
-    )
-    from handlers.finance import current_period, fmt_price, month_title
+    from core.database import get_unread_tickets_count
     unread = await get_unread_tickets_count()
-    cfg = load_config()
-    now = int(time.time())
+    # короткая сводка дня прямо на входе — чтобы не ходить в статистику ради цифр
+    summary = ""
     try:
+        from core.database import get_dashboard_stats
         s = await get_dashboard_stats()
-        fin = await finance_summary(current_period())
-        falls = len(await get_downtime_events(now - 30 * 86400))
-        dead = cfg.get("dead_nodes") or []
-        if not cfg.get("panel_healthy", True):
-            servers = "🔴 панель недоступна"
-        elif dead:
-            servers = f"🟡 узлы недоступны: {', '.join(dead)}"
-        elif not cfg.get("sub_healthy", True):
-            servers = "🟡 ссылки подписок не отдаются"
-        else:
-            servers = "🟢 всё работает"
-        try:
-            from paidsub.storage import count_paid_soon
-            soon = await count_paid_soon()
-            soon_line = f"\n⏳ Заканчиваются (3 дня): <b>{soon}</b>"
-        except Exception:
-            soon_line = ""
+        todo = []
+        if unread:
+            todo.append(f"🎫 открытых тикетов: <b>{unread}</b>")
         summary = (
             "\n\n<blockquote>"
-            f"💵 {month_title(current_period())}: "
-            f"доход <b>{fmt_price(fin['income'])}</b> · "
-            f"расходы <b>{fmt_price(fin['expenses'])}</b> · "
-            f"прибыль <b>{fmt_price(fin['profit'])}</b>\n"
-            f"👥 Пользователей: <b>{s['users_total']}</b>  ·  "
-            f"сегодня <b>+{s['users_today']}</b>\n"
-            f"💳 Активных подписок: <b>{s['paid_active']}</b>  ·  "
-            f"платящих <b>{s['paying_active']}</b>{soon_line}\n"
-            f"🎟 Активных промокодов: <b>{s['promos_active']}</b>\n"
-            f"🖥 Серверы: {servers}\n"
-            f"📉 Падений за 30 дней: <b>{falls}</b>"
+            f"👥 Пользователей: <b>{s['users_total']}</b>  ·  сегодня <b>+{s['users_today']}</b>\n"
+            f"💳 Активных подписок: <b>{s['paid_active']}</b>  ·  платящих <b>{s['paying_active']}</b>\n"
+            f"💵 Сегодня: <b>{s['revenue_today']} ₽</b>  ·  оплат <b>{s['payments_today']}</b>"
             "</blockquote>"
         )
-        if unread:
-            summary += f"\n\n⏳ <b>Ждут вас</b>\n🎫 открытых тикетов: <b>{unread}</b>"
+        if todo:
+            summary += "\n\n⏳ <b>Ждут вас</b>\n" + "\n".join(todo)
     except Exception:
-        summary = (f"\n\n🔴 Открытых тикетов: <b>{unread}</b>"
-                   if unread else "")
-    import core.maintenance as mnt
-    if mnt.is_maintenance():
-        summary += ("\n\n🔴 <b>Техработы включены</b> — пользователи видят "
-                    "заглушку")
-    await _redraw(
-        query,
-        "🌑 <b>Drebol VPN · Админка</b>" + summary,
-        admin_keyboard(unread),
+        if unread:
+            summary = f"\n\n🔴 Открытых тикетов: <b>{unread}</b>"
+    await query.edit_message_text(
+        "🛠 <b>Админка</b>" + summary,
+        parse_mode="HTML",
+        reply_markup=admin_keyboard(unread),
     )
 
 

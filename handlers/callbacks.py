@@ -114,10 +114,6 @@ from handlers.downtime import handle_downtime_menu
 from handlers.reconcile import (
     handle_reconcile_menu, handle_reconcile_run, handle_reconcile_fix,
 )
-from handlers.admin_sections import (
-    handle_admin_money, handle_admin_servers, handle_admin_people,
-    handle_admin_marketing, handle_admin_system,
-)
 from handlers.finance import (
     handle_servers_menu, handle_server_view, handle_server_add,
     handle_server_edit_price, handle_server_edit_day,
@@ -353,16 +349,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await handle_helper_panel(query)
         else:
             await handle_admin_panel(query)
-    elif data == "adm_money":
-        await handle_admin_money(query, context)
-    elif data == "adm_servers":
-        await handle_admin_servers(query, context)
-    elif data == "adm_people":
-        await handle_admin_people(query, context)
-    elif data == "adm_marketing":
-        await handle_admin_marketing(query, context)
-    elif data == "adm_system":
-        await handle_admin_system(query, context)
     elif data == "reconcile_menu":
         await handle_reconcile_menu(query, context)
     elif data == "reconcile_run":
