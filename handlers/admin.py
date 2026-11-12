@@ -40,6 +40,12 @@ async def handle_admin_panel(query):
             servers = "🟡 ссылки подписок не отдаются"
         else:
             servers = "🟢 всё работает"
+        try:
+            from paidsub.storage import count_paid_soon
+            soon = await count_paid_soon()
+            soon_line = f"\n⏳ Заканчиваются (3 дня): <b>{soon}</b>"
+        except Exception:
+            soon_line = ""
         summary = (
             "\n\n<blockquote>"
             f"💵 {month_title(current_period())}: "
@@ -49,7 +55,8 @@ async def handle_admin_panel(query):
             f"👥 Пользователей: <b>{s['users_total']}</b>  ·  "
             f"сегодня <b>+{s['users_today']}</b>\n"
             f"💳 Активных подписок: <b>{s['paid_active']}</b>  ·  "
-            f"платящих <b>{s['paying_active']}</b>\n"
+            f"платящих <b>{s['paying_active']}</b>{soon_line}\n"
+            f"🎟 Активных промокодов: <b>{s['promos_active']}</b>\n"
             f"🖥 Серверы: {servers}\n"
             f"📉 Падений за 30 дней: <b>{falls}</b>"
             "</blockquote>"

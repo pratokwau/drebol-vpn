@@ -56,6 +56,17 @@ def _scope_where(scope: str) -> tuple:
     return raw, []
 
 
+async def count_paid_soon() -> int:
+    """Активные подписки, заканчивающиеся в ближайшие SOON_DAYS дней."""
+    where, params = _scope_where("soon")
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"SELECT COUNT(*) FROM paid_subs WHERE {where}", params
+        ) as cur:
+            row = await cur.fetchone()
+    return row[0] if row else 0
+
+
 async def list_paid_subs(page: int = 1, scope: str = "all", sort: str = "new",
                          per_page: int = SUBS_PER_PAGE) -> tuple[list, int]:
     """Страница списка: строки (id, tg_id, email, срок, ГБ, создана, статус, продлений)."""

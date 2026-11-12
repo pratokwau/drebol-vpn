@@ -52,6 +52,8 @@ async def handle_admin_money(query, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💰 Финансы", callback_data="pay_provider_menu")],
         [InlineKeyboardButton("💳 Платные подписки", callback_data="paid_subs"),
          InlineKeyboardButton("📋 Админские", callback_data="admin_subs")],
+        [InlineKeyboardButton("🎟 Промокоды", callback_data="promo_menu"),
+         InlineKeyboardButton("🏷 Тарифы", callback_data="tariffs_menu")],
     ])
 
 
@@ -110,6 +112,8 @@ async def handle_admin_people(query, context: ContextTypes.DEFAULT_TYPE):
                               callback_data="winback_settings"),
          InlineKeyboardButton("⏰ Напоминания",
                               callback_data="remind_settings")],
+        [InlineKeyboardButton("⚡ Массовые действия",
+                              callback_data="paid_bulk_menu")],
     ])
 
 
@@ -118,6 +122,7 @@ async def handle_admin_marketing(query, context: ContextTypes.DEFAULT_TYPE):
     await _render(query, "📣 <b>Маркетинг</b>", [
         [InlineKeyboardButton("📣 Рассылка", callback_data="broadcast")],
         [InlineKeyboardButton("📢 Канал", callback_data="channel_menu")],
+        [InlineKeyboardButton("🎁 Рефералы", callback_data="referral_settings")],
         [InlineKeyboardButton("📄 Документы", callback_data="documents_menu")],
     ])
 
@@ -136,6 +141,8 @@ async def handle_admin_system(query, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("🧾 Лог-канал",
                               callback_data="log_channel_settings")],
         [InlineKeyboardButton(mnt_label, callback_data="mnt_menu")],
+        [InlineKeyboardButton("⚙️ Настройки подписок",
+                              callback_data="paid_sub_presets")],
         [InlineKeyboardButton("🔄 Обновиться с GitHub",
                               callback_data="git_update")],
     ])
