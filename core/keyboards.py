@@ -64,6 +64,9 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
     def b(text, cb):
         return InlineKeyboardButton(text, callback_data=cb)
 
+    # время сводки — прямо в подписи кнопки, чтобы было видно настройку
+    sync_time = (load_config().get("morning_sync") or {}).get("time", "09:00")
+
     # Кнопки сгруппированы по смыслу и стоят парами — так вся админка
     # помещается на один экран телефона без прокрутки
     return InlineKeyboardMarkup([
@@ -85,6 +88,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b("🛟 Поддержка", "support_settings"), b("🧾 Лог-канал", "log_channel_settings")],
         [b(mnt_label, "mnt_menu")],
         [b("🔄 Обновиться с GitHub", "git_update")],
+        [b(f"⏰ Синхронизация · {sync_time}", "morning_menu")],
         [b("🏠 Главное меню", "back_start")],
     ])
 

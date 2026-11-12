@@ -92,16 +92,34 @@ async def post_init(app: Application):
                         await record_downtime_status(
                             f"node:{_n['tag']}", "node", _n["reachable"],
                             str(_n.get("error") or ""), now=_now)
+            alerts = []
+            changed = False
+
             # Сайт и страница подписки — своим путём через Caddy,
             # независимо от панели.
             from services.panel import probe_sites
-            for _target, _st in (await probe_sites()).items():
+            _sites = await probe_sites()
+            for _target, _st in _sites.items():
                 await record_downtime_status(
                     _target, "site", _st["ok"],
                     str(_st.get("error") or ""), now=_now)
-
-            alerts = []
-            changed = False
+            # переходы сайтов — в алерты: раньше о них молчали,
+            # а падение сайта админ узнавал от клиентов
+            _site_labels = {
+                "site:vpn.drbl.tech": "Сайт vpn.drbl.tech",
+                "site:key.drbl.tech": "Страница подписки key.drbl.tech",
+            }
+            _down_before = set(cfg.get("sites_down") or [])
+            _down_now = {t for t, st in _sites.items() if not st["ok"]}
+            if _down_now != _down_before:
+                cfg["sites_down"] = sorted(_down_now)
+                changed = True
+                for _t in sorted(_down_now - _down_before):
+                    alerts.append(
+                        f"🔴 <b>{_site_labels.get(_t, _t)} недоступен!</b>")
+                for _t in sorted(_down_before - _down_now):
+                    alerts.append(
+                        f"🟢 <b>{_site_labels.get(_t, _t)} снова доступен.</b>")
 
             if panel_ok != cfg.get("panel_healthy", True):
                 cfg["panel_healthy"] = panel_ok
@@ -137,6 +155,11 @@ async def post_init(app: Application):
 
             if changed:
                 save_config(cfg)
+            # состояние (panel_healthy и т.п.) пишем всегда, а отправку
+            # алертов можно выключить в настройках синхронизации
+            from handlers.morning import alerts_enabled
+            if not alerts_enabled():
+                return
             for text in alerts:
                 try:
                     await ctx.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="HTML")
@@ -215,6 +238,11 @@ async def post_init(app: Application):
             server_payment_reminder_job,
             time=_time(23, 0, tzinfo=ZoneInfo("Europe/Moscow")),
         )
+
+        # Утренняя синхронизация: сводка, сверка Platega, операторы —
+        # каждый день в 09:00 МСК (время меняется в настройках админки).
+        from handlers.morning import schedule_morning_sync
+        schedule_morning_sync(app)
 
 
         async def _recovered_job(ctx):

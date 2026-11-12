@@ -58,6 +58,9 @@ AWAITING_PROMO_NEW_EXPIRE = "awaiting_promo_new_expire"
 # Подарок подписки
 AWAITING_GIFT_USER = "awaiting_gift_user"
 
+# Утренняя синхронизация: ввод времени ЧЧ:ММ
+AWAITING_MORNING_TIME = "awaiting_morning_time"
+
 # Управление юзером
 AWAITING_FIND_USER = "awaiting_find_user"
 

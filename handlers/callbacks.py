@@ -114,6 +114,10 @@ from handlers.downtime import handle_downtime_menu
 from handlers.reconcile import (
     handle_reconcile_menu, handle_reconcile_run, handle_reconcile_fix,
 )
+from handlers.morning import (
+    handle_morning_menu, handle_morning_toggle, handle_morning_set_time,
+    handle_morning_run_now,
+)
 from handlers.finance import (
     handle_servers_menu, handle_server_view, handle_server_add,
     handle_server_edit_price, handle_server_edit_day,
@@ -355,6 +359,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_reconcile_run(query, context)
     elif data == "reconcile_fix":
         await handle_reconcile_fix(query, context)
+    elif data == "morning_menu":
+        await handle_morning_menu(query, context)
+    elif data.startswith("morning_toggle:"):
+        await handle_morning_toggle(
+            query, context, data.split(":", 1)[1])
+    elif data == "morning_set_time":
+        await handle_morning_set_time(query, context)
+    elif data == "morning_run_now":
+        await handle_morning_run_now(query, context)
     elif data == "channel_menu":
         await handle_channel_menu(query)
 

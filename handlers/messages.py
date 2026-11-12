@@ -55,6 +55,7 @@ from core.states import (
     AWAITING_MAINTENANCE_TEXT, AWAITING_HELPER_ID,
     AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK, AWAITING_BL_UNTIL,
     AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
+    AWAITING_MORNING_TIME,
 )
 
 
@@ -249,6 +250,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ══════════════════════════════════════════════════════════════════════════
     # АДМИН
     # ══════════════════════════════════════════════════════════════════════════
+
+    # ── Синхронизация: время сводки ─────────────────────────────────────
+    if state == AWAITING_MORNING_TIME and is_admin:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from handlers.morning import apply_morning_time
+        _back = InlineKeyboardMarkup([[
+            InlineKeyboardButton("⏰ Синхронизация",
+                                 callback_data="morning_menu")]])
+        new_time = await apply_morning_time(update.message, context)
+        if not new_time:
+            await update.message.reply_text(
+                "❌ Не понял время. Пришли в формате ЧЧ:ММ, "
+                "например 09:00.", reply_markup=_back)
+            return
+        await update.message.reply_text(
+            f"✅ Время сводки: <b>{new_time}</b> МСК — с завтрашнего утра "
+            "сводка, сверка и операторы приходят в это время.",
+            parse_mode="HTML", reply_markup=_back)
+        return
 
     if state == AWAITING_CHANNEL:
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup

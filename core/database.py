@@ -1416,6 +1416,42 @@ async def servers_with_status(period: str) -> list[dict]:
     return out
 
 
+async def get_digest_stats() -> dict:
+    """Цифры для утренней сводки: вчерашний день нетто.
+
+    Выручка — из таблицы платежей (оплаченные минус частичные
+    возвраты, полностью возвращённые исключены); возвраты — по дате
+    refunded_at. Даты — местное время сервера.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async def _one(q, params=()):
+            async with db.execute(q, params) as cur:
+                row = await cur.fetchone()
+                return row[0] if row else 0
+
+        y = "date('now', '-1 day', 'localtime')"
+        revenue_y = await _one(
+            "SELECT COALESCE(SUM(amount - COALESCE(partial_refunded, 0)), 0)"
+            " FROM payments WHERE status = 'paid'"
+            f" AND date(COALESCE(paid_at, created_at), 'localtime') = {y}")
+        pays_y = await _one(
+            "SELECT COUNT(*) FROM payments WHERE status = 'paid'"
+            f" AND date(COALESCE(paid_at, created_at), 'localtime') = {y}")
+        users_y = await _one(
+            "SELECT COUNT(*) FROM users"
+            f" WHERE date(created_at, 'localtime') = {y}")
+        refunds_y = await _one(
+            "SELECT COALESCE(SUM(amount), 0) FROM payments"
+            " WHERE status IN ('refunded', 'chargebacked')"
+            f" AND date(refunded_at, 'localtime') = {y}")
+    return {
+        "revenue_yesterday": int(revenue_y),
+        "payments_yesterday": int(pays_y),
+        "users_yesterday": int(users_y),
+        "refunds_yesterday": int(refunds_y),
+    }
+
+
 async def refunds_total() -> tuple[int, int]:
     """Возвраты за всё время: (полные, частичные).
 

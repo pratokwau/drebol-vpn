@@ -141,26 +141,16 @@ async def handle_reconcile_menu(query, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def handle_reconcile_run(query, context: ContextTypes.DEFAULT_TYPE):
-    """Живая проверка счетов + список расхождений."""
-    await query.edit_message_text("🔍 Проверяю счета в Platega…")
-    if not pg.is_configured():
-        await query.edit_message_text(
-            "🔍 <b>Сверка с Platega</b>\n\n⚠️ Platega не настроена.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(_back_rows()),
-        )
-        return
+async def run_reconciliation() -> dict:
+    """Живая сверка счетов с Platega (без экрана).
+
+    Возвращает {checked, issues: [(row, issue)], impact, fixable}.
+    Исправления НЕ применяет — их делает handle_reconcile_fix.
+    Переиспользуется утренней синхронизацией.
+    """
     rows = await list_reconcile_payments(DAYS, LIMIT)
     if not rows:
-        await query.edit_message_text(
-            "🔍 <b>Сверка с Platega</b>\n\n"
-            "Счетов Platega за последние "
-            f"{DAYS} дней нет — сверять нечего.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(_back_rows()),
-        )
-        return
+        return {"checked": 0, "issues": [], "impact": 0, "fixable": []}
     sem = asyncio.Semaphore(_CONCURRENCY)
 
     async def _one(row):
@@ -170,7 +160,6 @@ async def handle_reconcile_run(query, context: ContextTypes.DEFAULT_TYPE):
     results = await asyncio.gather(
         *[_one(r) for r in rows], return_exceptions=True)
     issues: list[tuple[tuple, dict]] = []
-    checked = len(rows)
     for row, res in zip(rows, results):
         if isinstance(res, Exception):
             issues.append((row, {"kind": "unchecked",
@@ -182,6 +171,34 @@ async def handle_reconcile_run(query, context: ContextTypes.DEFAULT_TYPE):
             issues.append((row, found))
     fixable = [(row, iss) for row, iss in issues if iss.get("fix")]
     impact = sum(max(0, iss.get("impact") or 0) for _, iss in issues)
+    return {"checked": len(rows), "issues": issues,
+            "impact": impact, "fixable": fixable}
+
+
+async def handle_reconcile_run(query, context: ContextTypes.DEFAULT_TYPE):
+    """Живая проверка счетов + список расхождений."""
+    await query.edit_message_text("🔍 Проверяю счета в Platega…")
+    if not pg.is_configured():
+        await query.edit_message_text(
+            "🔍 <b>Сверка с Platega</b>\n\n⚠️ Platega не настроена.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(_back_rows()),
+        )
+        return
+    res = await run_reconciliation()
+    checked = res["checked"]
+    issues = res["issues"]
+    fixable = res["fixable"]
+    impact = res["impact"]
+    if checked == 0:
+        await query.edit_message_text(
+            "🔍 <b>Сверка с Platega</b>\n\n"
+            "Счетов Platega за последние "
+            f"{DAYS} дней нет — сверять нечего.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(_back_rows()),
+        )
+        return
     context.user_data["reconcile_fix"] = [
         {"payment_id": row[0], **iss["fix"]} for row, iss in fixable
     ]
