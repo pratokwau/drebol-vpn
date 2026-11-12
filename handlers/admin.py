@@ -54,10 +54,12 @@ async def handle_admin_panel(query):
     except Exception:
         if unread:
             summary = f"\n\n🔴 Открытых тикетов: <b>{unread}</b>"
-    await query.edit_message_text(
+    # _redraw: двойное нажатие «Назад в админку» не должно падать
+    # с «Message is not modified» — см. фикс кнопки «Обновить»
+    await _redraw(
+        query,
         "🛠 <b>Админка</b>" + summary,
-        parse_mode="HTML",
-        reply_markup=admin_keyboard(unread),
+        admin_keyboard(unread),
     )
 
 
