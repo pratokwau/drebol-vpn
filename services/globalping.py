@@ -47,12 +47,13 @@ _POLL_TIMEOUT = 60.0
 
 
 async def _post_measurement(session: aiohttp.ClientSession,
-                            target: str) -> str | None:
+                            target: str,
+                            operators: list[tuple[str, str]]) -> str | None:
     """Создаёт HTTP-измерение; возвращает его id или None при ошибке."""
     payload = {
         "type": "http",
         "target": target,
-        "locations": [{"magic": asn} for _, asn in OPERATORS],
+        "locations": [{"magic": asn} for _, asn in operators],
         "limit": 1,
         "measurementOptions": {
             "protocol": "HTTPS",
@@ -80,7 +81,8 @@ async def _fetch_measurement(session: aiohttp.ClientSession,
         return None
 
 
-def _parse_result(measurement: dict | None) -> dict[str, dict]:
+def _parse_result(measurement: dict | None,
+                  operators: list[tuple[str, str]]) -> dict[str, dict]:
     """Сырое измерение -> {оператор: {state, code, ms, city}}."""
     out: dict[str, dict] = {}
     results = (measurement or {}).get("results") or []
@@ -88,7 +90,7 @@ def _parse_result(measurement: dict | None) -> dict[str, dict]:
     for r in results:
         probe = r.get("probe") or {}
         by_asn[probe.get("asn")] = r
-    for label, asn in OPERATORS:
+    for label, asn in operators:
         r = by_asn.get(int(asn[2:]))
         if r is None:
             out[label] = {"state": "no_probe"}
@@ -130,9 +132,10 @@ def _short_error(res: dict) -> str:
 
 
 async def _check_one(session: aiohttp.ClientSession,
-                     label: str, domain: str) -> dict:
+                     label: str, domain: str,
+                     operators: list[tuple[str, str]]) -> dict:
     """Один домен: создать измерение, дождаться, распарсить."""
-    mid = await _post_measurement(session, domain)
+    mid = await _post_measurement(session, domain, operators)
     if not mid:
         return {"label": label, "domain": domain, "error": "Globalping не ответил"}
     deadline = asyncio.get_event_loop().time() + _POLL_TIMEOUT
@@ -146,21 +149,50 @@ async def _check_one(session: aiohttp.ClientSession,
         return {"label": label, "domain": domain,
                 "error": "проверка не завершилась вовремя"}
     return {"label": label, "domain": domain,
-            "operators": _parse_result(measurement)}
+            "operators": _parse_result(measurement, operators)}
 
 
-async def check_all() -> list[dict]:
-    """Проверяет все домены со всех операторов. Возвращает список
+async def check_all(domains: list[tuple[str, str]] | None = None,
+                  operators: list[tuple[str, str]] | None = None) -> list[dict]:
+    """Проверяет выбранные домены с выбранных операторов. По умолчанию —
+    все домены (TARGETS) со всех операторов (OPERATORS). Возвращает список
     {label, domain, operators: {оператор: {...}} | error}."""
+    domains = domains or TARGETS
+    operators = operators or OPERATORS
     timeout = aiohttp.ClientTimeout(total=90)
     # trust_env: учитывать прокси из окружения (в песочнице без этого
     # TLS-рукопожатие падает; на сервере переменных прокси нет).
     async with aiohttp.ClientSession(timeout=timeout,
                                      trust_env=True) as session:
         return await asyncio.gather(
-            *[_check_one(session, label, domain)
-              for label, domain in TARGETS]
+            *[_check_one(session, label, domain, operators)
+              for label, domain in domains]
         )
+
+
+def summarize_operators(results: list[dict]) -> dict[str, str]:
+    """Итог по операторам: {оператор: mark}, где mark — один из:
+    ✅ — все проверенные домены доступны;
+    ❌ — хотя бы один домен недоступен (блок);
+    ⚠️ — есть ошибка сервера (5xx), блоков нет;
+    — — ни по одному домену нет онлайн-пробы."""
+    marks: dict[str, str] = {}
+    for r in results:
+        for label, op in (r.get("operators") or {}).items():
+            state = op.get("state")
+            cur = marks.get(label)
+            if state == "blocked":
+                marks[label] = "❌"
+            elif state == "error":
+                if cur != "❌":
+                    marks[label] = "⚠️"
+            elif state == "ok":
+                if cur not in ("❌", "⚠️"):
+                    marks[label] = "✅"
+            else:  # no_probe
+                if cur is None:
+                    marks[label] = "—"
+    return marks
 
 
 def summarize(results: list[dict]) -> tuple[int, int, int, int]:

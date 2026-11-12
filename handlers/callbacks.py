@@ -108,6 +108,7 @@ from handlers.payprovider import (
 )
 from handlers.netcheck import (
     handle_netcheck_menu, handle_netcheck_run,
+    handle_netcheck_settings, handle_netcheck_toggle,
 )
 from handlers.finance import (
     handle_servers_menu, handle_server_view, handle_server_add,
@@ -843,6 +844,11 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_netcheck_menu(query, context)
     elif data == "netcheck_run":
         await handle_netcheck_run(query, context)
+    elif data == "netcheck_settings":
+        await handle_netcheck_settings(query, context)
+    elif data.startswith("netcheck_toggle:"):
+        _kind, _idx = data.split(":")[1], data.split(":")[2]
+        await handle_netcheck_toggle(query, context, _kind, int(_idx))
     elif data == "paid_sub_presets":
         await handle_paid_presets_menu(query)
     elif data == "paid_preset_trial":
