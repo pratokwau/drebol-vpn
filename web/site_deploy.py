@@ -1499,7 +1499,7 @@ chmod 755 {WEB_ROOT}
                 if pay_pages and pay_pages.get(kind):
                     with sftp.open(f"/tmp/drebol_pay_{kind}.html", "w") as f:
                         f.write(pay_pages[kind])
-            for kind in ("privacy", "terms"):
+            for kind in ("privacy", "terms", "refund", "rules", "consent"):
                 if doc_pages and doc_pages.get(kind):
                     with sftp.open(f"/tmp/drebol_doc_{kind}.html", "w") as f:
                         f.write(doc_pages[kind])
@@ -1567,8 +1567,8 @@ for kind in success fail back; do
     chmod 644 {WEB_ROOT}/pay/$kind/index.html
   fi
 done
-# Документы: /privacy/ и /terms/
-for kind in privacy terms; do
+# Документы: /privacy/, /terms/, /refund/, /rules/, /consent/
+for kind in privacy terms refund rules consent; do
   if [ -f /tmp/drebol_doc_$kind.html ]; then
     mkdir -p {WEB_ROOT}/$kind
     mv /tmp/drebol_doc_$kind.html {WEB_ROOT}/$kind/index.html
@@ -1841,6 +1841,9 @@ def doc_page_urls() -> dict:
     return {
         "privacy": f"{base}/privacy/",
         "terms": f"{base}/terms/",
+        "refund": f"{base}/refund/",
+        "rules": f"{base}/rules/",
+        "consent": f"{base}/consent/",
     }
 
 
@@ -1879,7 +1882,7 @@ async def deploy(bot_username: str) -> dict:
     pay_pages = build_pay_pages()
     pay = "".join(pay_pages[k] for k in ("success", "fail", "back"))
     doc_pages = build_doc_pages()
-    doc = "".join(doc_pages[k] for k in ("privacy", "terms"))
+    doc = "".join(doc_pages[k] for k in ("privacy", "terms", "refund", "rules", "consent"))
     res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes,
                                   cabinet, pay_pages, doc_pages)
     if res.get("ok"):
@@ -1904,7 +1907,7 @@ async def _build_and_maybe_deploy(bot_username: str) -> tuple:
     pay_pages = build_pay_pages()
     pay = "".join(pay_pages[k] for k in ("success", "fail", "back"))
     doc_pages = build_doc_pages()
-    doc = "".join(doc_pages[k] for k in ("privacy", "terms"))
+    doc = "".join(doc_pages[k] for k in ("privacy", "terms", "refund", "rules", "consent"))
     fresh = page_hash(page, og_bytes, logo_bytes, cabinet, pay, doc)
     if fresh == load_config().get("site_page_hash"):
         return "unchanged", None
