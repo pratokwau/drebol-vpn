@@ -85,8 +85,21 @@ async def cmd_start(update: Update, context) -> None:
         "Напишите ваш вопрос — он сразу уйдёт в поддержку, а ответ "
         "придёт сюда же.\n\n"
         "<i>Команды вводить не нужно: всё, что вы пишете, — это обращение. "
-        "Можно прислать текст, фото или файл.</i>",
+        "Можно прислать текст, фото или файл.\n\n"
+        "✅ на вашем сообщении — значит, оно отправлено в поддержку.</i>",
         parse_mode="HTML")
+
+
+async def _react_sent(msg) -> None:
+    """✅ на сообщение юзера — подтверждение, что оно ушло в поддержку.
+
+    Реакция — приятный бонус, а не обязательная часть: если Telegram
+    её не принял, пересылка всё равно уже выполнена, молча идём дальше.
+    """
+    try:
+        await msg.set_reaction("✅")
+    except Exception as e:
+        log.debug("set_reaction failed: %s", e)
 
 
 async def on_user_message(update: Update, context) -> None:
@@ -113,6 +126,7 @@ async def on_user_message(update: Update, context) -> None:
     try:
         await msg.copy(chat_id=group_id, message_thread_id=topic_id)
         await db.touch_support_topic(user.id)
+        await _react_sent(msg)
     except Exception as e:
         log.error("copy to topic failed for %s: %s", user.id, e)
         await msg.reply_text(
