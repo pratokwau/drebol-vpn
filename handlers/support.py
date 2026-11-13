@@ -29,7 +29,11 @@ def support_bot_url() -> str:
 
 
 def support_button(text: str = "🛟 Поддержка", force: bool = False):
-    """Кнопка поддержки: открывает экран со ссылкой на бота поддержки.
+    """Кнопка поддержки: ведёт СРАЗУ на аккаунт бота поддержки.
+
+    Это URL-кнопка — тап открывает чат с ботом поддержки напрямую,
+    без промежуточного экрана. Если юзернейм бота не задан, кнопка
+    ведёт на экран «поддержка пока не настроена».
 
     force — показать даже если функция выключена в техработах (для админа).
     None означает, что кнопки быть не должно.
@@ -37,6 +41,9 @@ def support_button(text: str = "🛟 Поддержка", force: bool = False):
     import core.maintenance as mnt
     if not force and not mnt.feature_enabled("support"):
         return None
+    url = support_bot_url()
+    if url:
+        return InlineKeyboardButton(text, url=url)
     return InlineKeyboardButton(text, callback_data="support_open")
 
 
