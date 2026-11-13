@@ -45,7 +45,6 @@ from core.states import (
     AWAITING_SITE_DOMAIN, AWAITING_SITE_TEXT, AWAITING_BACKUP_FILE,
     AWAITING_RW_URL, AWAITING_RW_TOKEN, AWAITING_RW_USAGE_PERIOD,
     AWAITING_PANEL_SYNC_DAILY, AWAITING_PANEL_SYNC_INTERVAL,
-    AWAITING_DIGEST_HOUR,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
     AWAITING_SERVER_NAME, AWAITING_SERVER_PRICE, AWAITING_SERVER_DAY,
@@ -417,38 +416,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("⏰ К расписанию",
                                       callback_data="panel_sync_schedule"),
                  InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
-        )
-        return
-
-    # ── Сводка: своё время ─────────────────────────────────────────────────────
-    if state == AWAITING_DIGEST_HOUR:
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-        from handlers.control import parse_digest_time
-        # локальный импорт обязателен: в других ветках handle_text есть
-        # свои from config import — из-за этого load_config/save_config
-        # считаются локальными для всей функции, и без этой строки ветка
-        # падала бы с UnboundLocalError до любого ответа
-        from config import load_config, save_config
-        parsed = parse_digest_time(text)
-        if parsed is None:
-            await update.message.reply_text(
-                "❌ Не понял время. Пришли час (<code>9</code>) или время "
-                "(<code>9:30</code>).",
-                parse_mode="HTML", reply_markup=back_admin())
-            return
-        hour, minute = parsed
-        cfg = load_config()
-        cfg["digest_hour"] = hour
-        cfg["digest_minute"] = minute
-        save_config(cfg)
-        context.user_data.pop("state", None)
-        await update.message.reply_text(
-            f"✅ Сводка: <b>каждый день в {hour}:{minute:02d}</b>.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🕘 К времени сводки",
-                                      callback_data="ctl_digest_hour"),
-                 InlineKeyboardButton("◀️ К логам", callback_data="ctl_menu")]]),
         )
         return
 

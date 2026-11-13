@@ -283,6 +283,31 @@ async def morning_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             f"активных подписок <b>{s['paid_active']}</b>")
         if soon:
             lines.append(f"⏳ Заканчиваются (3 дня): <b>{soon}</b>")
+        # ── То, что раньше жило в отдельной сводке из Логов ─────────────
+        # Триалы, активность, кончившиеся подписки, поддержка и онлайн —
+        # теперь всё в главной сводке 09:00, отдельная сводка из Логов
+        # удалена.
+        try:
+            from core.database import digest_stats, support_stats
+            from services.panel import get_online_emails
+            dg = await digest_stats(1)
+            sp = await support_stats()
+            online = await get_online_emails()
+            lines.append(
+                f"🆓 Триалов вчера: <b>{dg['trials']}</b> · "
+                f"🟢 Заходили: <b>{dg['active']}</b> · "
+                f"действий: <b>{dg['actions']}</b>")
+            lines.append(
+                f"⏳ Кончился период: <b>{dg['ended']}</b> · "
+                f"🔴 Отключено: <b>{dg['expired']}</b>")
+            on_line = (f"<b>{len(online['emails'])}</b>" if online.get("ok")
+                       else "<i>панель не ответила</i>")
+            lines.append(
+                f"💬 Поддержка: открытых тем <b>{sp['open_topics']}</b> · "
+                f"новых вчера <b>{sp['new_yesterday']}</b> · "
+                f"🔌 Сейчас онлайн: {on_line}")
+        except Exception:
+            pass
         if open_falls:
             lines.append("🔴 Сейчас лежит: " +
                          ", ".join(_fall_label(f) for f in open_falls))

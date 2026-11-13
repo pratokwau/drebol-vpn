@@ -583,31 +583,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
         await query_or_msg.reply_text(text, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
 
 
-# ── Лог-канал ────────────────────────────────────────────────────────────────
-
-async def handle_log_channel_settings(query):
-    cfg = load_config()
-    channel_id = cfg.get("log_channel_id")
-    if channel_id:
-        status_line = f"📢 Канал: <code>{channel_id}</code>"
-    else:
-        status_line = "📢 Канал: <i>не задан</i>"
-    await query.edit_message_text(
-        "🧾 <b>Лог-канал</b>\n\n"
-        f"<blockquote>{status_line}</blockquote>\n\n"
-        "<i>Сюда бот дублирует важные события: оплаты, регистрации, алерты. "
-        "Бот должен быть админом в канале.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📝 Изменить" if channel_id else "📝 Указать канал",
-                                  callback_data="set_log_channel")]
-            + ([InlineKeyboardButton("🗑 Отключить", callback_data="clear_log_channel")]
-               if channel_id else []),
-            [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
-        ]),
-    )
-
-
 async def handle_set_log_channel(query, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["state"] = AWAITING_LOG_CHANNEL
     await query.edit_message_text(
@@ -623,16 +598,24 @@ async def handle_clear_log_channel(query):
     cfg.pop("log_channel_id", None)
     save_config(cfg)
     await query.answer("🗑 Лог-канал отключён", show_alert=True)
-    await handle_log_channel_settings(query)
+    await handle_support_group_settings(query)
 
 
 # ── Группа поддержки (темы обращений + логи) ───────────────────────────────────
 
 async def handle_support_group_settings(query):
+    """🛟 Поддержка — админка: статистика, открытые темы, группа и бот.
+
+    В группе сидят два бота и ты: главный шлёт сюда логи, второй —
+    бот поддержки — ведёт темы обращений. Здесь — всё по поддержке:
+    сколько тем открыто, кто ждёт ответа, и настройки группы и токена.
+    """
+    from core.database import get_open_support_topics, support_stats
     cfg = load_config()
     group_id = cfg.get("support_group_id")
     token_set = bool(cfg.get("support_bot_token"))
     username = cfg.get("support_bot_username")
+    log_channel_id = cfg.get("log_channel_id")
     if group_id:
         status_line = f"👥 Группа: <code>{group_id}</code>"
     else:
@@ -642,14 +625,49 @@ async def handle_support_group_settings(query):
                       + (f" (@{username})" if username else ""))
     else:
         token_line = "🤖 Бот поддержки: <i>токен не задан</i>"
-    await query.edit_message_text(
-        "👥 <b>Группа поддержки</b>\n\n"
-        f"<blockquote>{status_line}\n{token_line}</blockquote>\n\n"
+    if log_channel_id:
+        log_line = f"🧾 Лог-канал: <code>{log_channel_id}</code>"
+    else:
+        log_line = "🧾 Лог-канал: <i>не задан</i>"
+    lines = [
+        "🛟 <b>Поддержка и логи</b>", "",
+        f"<blockquote>{status_line}\n{token_line}\n{log_line}</blockquote>",
+    ]
+    topics = await get_open_support_topics() if group_id else []
+    try:
+        sp = await support_stats()
+    except Exception:
+        sp = {"open_topics": len(topics), "new_yesterday": 0, "closed_total": 0}
+    lines.append(
+        f"📊 Открытых тем: <b>{sp['open_topics']}</b> · "
+        f"новых вчера: <b>{sp['new_yesterday']}</b> · "
+        f"закрыто всего: <b>{sp['closed_total']}</b>")
+    if topics:
+        lines.append("")
+        lines.append("<b>Ждут ответа:</b>")
+        # ссылка на тему: https://t.me/c/<id без -100>/<topic_id>
+        gid = str(group_id)
+        internal = gid[4:] if gid.startswith("-100") else gid.lstrip("-")
+        for user_id, topic_id, _g, topic_name in topics[:10]:
+            url = f"https://t.me/c/{internal}/{topic_id}"
+            label = topic_name or str(user_id)
+            lines.append(f"• <a href=\"{url}\">{label}</a>")
+        if len(topics) > 10:
+            lines.append(f"• …и ещё {len(topics) - 10}")
+    elif group_id:
+        lines.append("")
+        lines.append("<i>Открытых тем нет — все обращения закрыты.</i>")
+    lines.append("")
+    lines.append(
         "<i>Группа с включёнными темами: на каждое обращение бот поддержки "
         "создаёт тему, ты отвечаешь прямо в ней, а ответ уходит человеку "
         "в бота поддержки. Сюда же идут логи бота (вместо канала). "
-        "Оба бота должны быть админами в группе.</i>",
-        parse_mode="HTML",
+        "Оба бота должны быть админами в группе. "
+        "Лог-канал — запасной вариант: если группа не задана, "
+        "логи идут в него.</i>")
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📝 Изменить" if group_id else "📝 Указать группу",
                                   callback_data="set_support_group")]
@@ -657,6 +675,10 @@ async def handle_support_group_settings(query):
                if group_id else []),
             [InlineKeyboardButton("🤖 Сменить токен" if token_set else "🤖 Ввести токен бота",
                                   callback_data="set_support_token")],
+            [InlineKeyboardButton("📝 Лог-канал" if log_channel_id else "📝 Указать лог-канал",
+                                  callback_data="set_log_channel")]
+            + ([InlineKeyboardButton("🗑 Отключить лог-канал", callback_data="clear_log_channel")]
+               if log_channel_id else []),
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
     )

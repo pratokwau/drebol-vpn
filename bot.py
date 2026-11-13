@@ -301,8 +301,7 @@ async def post_init(app: Application):
 
         app.job_queue.run_once(_recovered_job, when=60)
 
-        from handlers.control import digest_tick, purge_tick, connect_help_tick
-        app.job_queue.run_repeating(digest_tick, interval=600, first=90)
+        from handlers.control import purge_tick, connect_help_tick
         app.job_queue.run_repeating(purge_tick, interval=24 * 3600, first=3600)
         app.job_queue.run_repeating(connect_help_tick, interval=1800, first=240)
 

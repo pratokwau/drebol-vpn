@@ -2666,6 +2666,30 @@ async def get_open_support_topics() -> list:
             return await cur.fetchall()
 
 
+async def support_stats() -> dict:
+    """Цифры поддержки для сводки и админки: открытые темы, новые за вчера.
+
+    Считается по support_topics (живая система бота поддержки), а не по
+    support_messages — та таблица осталась от старых тикетов и больше
+    не пополняется.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async def _one(q, params=()):
+            async with db.execute(q, params) as cur:
+                row = await cur.fetchone()
+                return row[0] if row else 0
+        y = "date('now', '-1 day', 'localtime')"
+        open_topics = await _one(
+            "SELECT COUNT(*) FROM support_topics WHERE status = 'open'")
+        new_y = await _one(
+            "SELECT COUNT(*) FROM support_topics "
+            f"WHERE date(created_at, 'localtime') = {y}")
+        closed_total = await _one(
+            "SELECT COUNT(*) FROM support_topics WHERE status = 'closed'")
+    return {"open_topics": int(open_topics), "new_yesterday": int(new_y),
+            "closed_total": int(closed_total)}
+
+
 async def touch_support_topic(user_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(

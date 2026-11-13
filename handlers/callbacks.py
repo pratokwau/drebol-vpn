@@ -19,7 +19,7 @@ from handlers.admin import (
     handle_set_refund_url, handle_set_rules_url, handle_set_consent_url,
     handle_channel_menu, handle_dashboard, handle_healthcheck,
     handle_find_user, handle_user_profile,
-    handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
+    handle_set_log_channel, handle_clear_log_channel,
     handle_support_group_settings, handle_set_support_group, handle_clear_support_group,
     handle_set_support_token,
     handle_remind_settings, handle_toggle_remind, handle_set_remind,
@@ -60,9 +60,7 @@ from core.maintenance import (
 )
 from handlers.control import (
     handle_control_menu, handle_activity_feed, handle_user_activity,
-    handle_online, handle_digest_toggle,
-    handle_digest_hour_menu, handle_digest_set_hour, handle_digest_now,
-    handle_digest_custom,
+    handle_online,
     handle_connect_help_menu, handle_connect_help_toggle, handle_connect_help_set,
     handle_log_filter_menu, handle_log_filter_kind, handle_log_filter_date,
     handle_log_filter_user_prompt, handle_log_filter_user_pick,
@@ -436,16 +434,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_user_activity(query, int(uid), int(pg))
     elif data == "ctl_online":
         await handle_online(query)
-    elif data == "ctl_digest_toggle":
-        await handle_digest_toggle(query, context)
-    elif data == "ctl_digest_hour":
-        await handle_digest_hour_menu(query)
-    elif data.startswith("ctl_digest_set:"):
-        await handle_digest_set_hour(query, context, int(data.split(":")[1]))
-    elif data == "ctl_digest_now":
-        await handle_digest_now(query, context)
-    elif data == "ctl_digest_custom":
-        await handle_digest_custom(query, context)
     elif data == "ctl_ch_menu":
         await handle_connect_help_menu(query, context)
     elif data == "ctl_ch_toggle":
@@ -530,8 +518,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data in ("cab_turnstile_site", "cab_turnstile_secret"):
         from web.webapi import handle_turnstile_ask
         await handle_turnstile_ask(query, context, data.split("_")[2])
-    elif data == "log_channel_settings":
-        await handle_log_channel_settings(query)
     elif data == "set_log_channel":
         await handle_set_log_channel(query, context)
     elif data == "clear_log_channel":

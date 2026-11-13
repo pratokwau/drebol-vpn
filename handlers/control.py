@@ -118,9 +118,6 @@ CB_LABELS = {
     "ctl_menu": "📜 Открыл логи",
     "act_feed": "📜 Смотрел ленту",
     "ctl_online": "🔌 Смотрел, кто онлайн",
-    "ctl_digest_now": "📤 Сводка вручную + бэкап",
-    "ctl_digest_toggle": "📨 Сводка вкл/выкл",
-    "ctl_digest_hour": "🕘 Время сводки",
     "dashboard": "📊 Смотрел статистику",
     "paid_subs": "💳 Список подписок",
     "paid_sub_view": "💳 Открыл подписку",
@@ -447,12 +444,10 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
               for tg_id, action, details, ts, fn, un in s["recent_events"]]
         lines.append("<blockquote expandable>" + "\n".join(ev) + "</blockquote>")
 
-    digest_on = cfg.get("digest_enabled", True)
     ch_label = (f"через {int(cfg.get('connect_help_hours', 3))} ч"
                 if cfg.get("connect_help_enabled", True) else "выключена")
     lines.append("\n⚙️ <b>Автоматика</b>")
     lines.append("<blockquote>"
-                 f"📨 Сводка в личку: <b>{f'каждый день в {digest_time_text(cfg)}, с бэкапом' if digest_on else 'выключена'}</b>\n"
                  f"🛟 Помощь с подключением: <b>{ch_label}</b>\n"
                  f"🗄 Журнал хранится <b>{int(cfg.get('activity_retention_days', 90))}</b> дней"
                  "</blockquote>")
@@ -472,14 +467,6 @@ async def handle_control_menu(query, context: ContextTypes.DEFAULT_TYPE = None):
         ],
         [InlineKeyboardButton("🔍 Найти человека", callback_data="find_user"),
          InlineKeyboardButton("🛟 Помощь с подключением", callback_data="ctl_ch_menu")],
-        [InlineKeyboardButton(
-            "📨 Сводка · вкл ✅" if digest_on else "📨 Сводка · выкл",
-            callback_data="ctl_digest_toggle",
-        )],
-        [
-            InlineKeyboardButton("🕘 Время сводки", callback_data="ctl_digest_hour"),
-            InlineKeyboardButton("📤 Сводка сейчас + бэкап", callback_data="ctl_digest_now"),
-        ],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ]
     await query.edit_message_text(
@@ -1207,90 +1194,6 @@ async def handle_online(query):
                                   reply_markup=kb)
 
 
-# ── Ежедневная сводка ────────────────────────────────────────────────────────
-
-def digest_time_text(cfg: dict) -> str:
-    """Время сводки одной строкой: «9:30». Минуты появились со вводом
-    своего времени; у старых настроек их нет — тогда ровно час."""
-    hour = int(cfg.get("digest_hour", 9) or 9)
-    minute = int(cfg.get("digest_minute", 0) or 0)
-    return f"{hour}:{minute:02d}"
-
-
-async def build_digest(day_offset: int = 1) -> str:
-    from core.database import digest_stats
-    from services.panel import get_online_emails
-    d = await digest_stats(day_offset)
-    online = await get_online_emails()
-
-    head = "за сегодня (на текущий момент)" if day_offset == 0 else f"за {d['label']}"
-    lines = [
-        f"📊 <b>Сводка {head}</b>\n",
-        f"🆕 Новых пользователей: <b>{d['new_users']}</b>",
-        f"🟢 Заходили в бот: <b>{d['active']}</b> · действий: <b>{d['actions']}</b>",
-        f"🆓 Выдано триалов: <b>{d['trials']}</b>",
-        f"💰 Оплат: <b>{d['paid_cnt']}</b> на <b>{d['paid_sum']} ₽</b>",
-    ]
-    if d["ref_cnt"]:
-        # Оплаты считаются по дню оплаты, возвраты — по дню возврата,
-        # поэтому без итога цифра расходилась бы с разделом «Оплаты»
-        lines.append(f"↩️ Возвратов: <b>{d['ref_cnt']}</b> на <b>{d['ref_sum']} ₽</b>")
-        lines.append(f"🧾 Итого за день: <b>{(d['paid_sum'] or 0) - (d['ref_sum'] or 0)} ₽</b>")
-    lines.append(f"⏳ Кончился период: <b>{d['ended']}</b> · 🔴 отключено: <b>{d['expired']}</b>")
-    lines.append(f"💬 В поддержку: <b>{d['sup_msgs']}</b> сообщ. от <b>{d['sup_users']}</b> чел.")
-    on_line = (f"<b>{len(online['emails'])}</b>" if online.get("ok")
-               else "<i>панель не ответила</i>")
-    lines.append(f"\n🔌 Сейчас онлайн: {on_line} · активных подписок: <b>{d['active_subs']}</b>")
-    return "\n".join(lines)
-
-
-async def digest_tick(context):
-    """Раз в 10 минут: пора ли слать сводку за вчера.
-
-    Не планируем задачу на точное время — так сводка не потеряется, если в
-    назначенный час бот лежал: уйдёт, как только он поднимется.
-
-    Сводка уходит одним сообщением вместе со свежим бэкапом дня: архив
-    собирается в момент отправки (тот же make_archive, что и в «Бэкапе»),
-    а текст сводки становится подписью к файлу. Если архив не собрался
-    или подпись не влезла в лимит Telegram (1024 символа) — сводка всё
-    равно уйдёт обычным текстовым сообщением, без файла.
-    """
-    import io
-    from config import ADMIN_ID
-    cfg = load_config()
-    if not cfg.get("digest_enabled", True):
-        return
-    now = datetime.now()
-    today = now.strftime("%Y-%m-%d")
-    hour = int(cfg.get("digest_hour", 9))
-    minute = int(cfg.get("digest_minute", 0) or 0)
-    if (now.hour, now.minute) < (hour, minute) or cfg.get("digest_last") == today:
-        return
-    cfg["digest_last"] = today
-    save_config(cfg)
-    try:
-        text = await build_digest(1)
-    except Exception:
-        return
-    caption = (text + "\n\n💾 К сводке приложен свежий бэкап дня "
-               "(внутри ключи — не пересылай).")
-    try:
-        from features.backup import make_archive
-        blob, name, _counts = make_archive()
-        if len(caption) > 1024:
-            raise ValueError("подпись длиннее 1024 символов")
-        await context.bot.send_document(
-            chat_id=ADMIN_ID, document=io.BytesIO(blob), filename=name,
-            caption=caption, parse_mode="HTML")
-    except Exception:
-        try:
-            await context.bot.send_message(chat_id=ADMIN_ID, text=text,
-                                           parse_mode="HTML")
-        except Exception:
-            pass
-
-
 async def purge_tick(context):
     """Раз в сутки чистит оба журнала: действия и ошибки — за один и тот же срок."""
     from core.database import purge_activity, purge_errors
@@ -1299,111 +1202,6 @@ async def purge_tick(context):
     removed_err = await purge_errors(days)
     logger.info("purge_tick: удалено %s записей действий и %s записей ошибок (старше %s дн.)",
                 removed_act, removed_err, days)
-
-
-async def handle_digest_toggle(query, context):
-    cfg = load_config()
-    cfg["digest_enabled"] = not cfg.get("digest_enabled", True)
-    save_config(cfg)
-    await handle_control_menu(query, context)
-
-
-async def handle_digest_hour_menu(query):
-    cfg = load_config()
-    cur = int(cfg.get("digest_hour", 9))
-    cur_min = int(cfg.get("digest_minute", 0) or 0)
-    hours = [7, 8, 9, 10, 12, 15, 18, 21]
-    rows = [[
-        InlineKeyboardButton(("• " if h == cur else "") + f"{h}:00",
-                             callback_data=f"ctl_digest_set:{h}")
-        for h in hours[i:i + 4]
-    ] for i in range(0, len(hours), 4)]
-    rows.append([InlineKeyboardButton("⌨️ Своё время", callback_data="ctl_digest_custom")])
-    rows.append(_back("ctl_menu"))
-    await query.edit_message_text(
-        "🕘 <b>Во сколько присылать сводку?</b>\n\n"
-        f"Сейчас: <b>{cur}:{cur_min:02d}</b>\n"
-        "Сводка приходит за прошедшие сутки.",
-        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
-    )
-
-
-async def handle_digest_custom(query, context):
-    """Просит ввести своё время сводки текстом: час или час и минуты."""
-    from core.states import AWAITING_DIGEST_HOUR
-    context.user_data["state"] = AWAITING_DIGEST_HOUR
-    await query.edit_message_text(
-        "🕘 <b>Своё время сводки</b>\n\n"
-        "Пришли время, когда присылать сводку: просто час "
-        "(<code>9</code>) или час и минуты (<code>9:30</code>).\n\n"
-        "<i>Проверка ходит каждые 10 минут, поэтому сводка придёт "
-        "в первый проход после указанного времени.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([_back("ctl_digest_hour")]),
-    )
-
-
-def parse_digest_time(text: str) -> tuple | None:
-    """«9», «09», «9:30» → (час, минуты). Всё остальное — None."""
-    import re
-    m = re.fullmatch(r"\s*(\d{1,2})(?::(\d{1,2}))?\s*", text or "")
-    if not m:
-        return None
-    hour, minute = int(m.group(1)), int(m.group(2) or 0)
-    if not 0 <= hour <= 23:
-        return None
-    if not 0 <= minute <= 59:
-        return None
-    return hour, minute
-
-
-async def handle_digest_set_hour(query, context, hour: int):
-    if not 0 <= hour <= 23:
-        return
-    cfg = load_config()
-    cfg["digest_minute"] = 0
-    cfg["digest_hour"] = hour
-    save_config(cfg)
-    await handle_control_menu(query, context)
-
-
-async def handle_digest_now(query, context):
-    """Сводка вручную: текст — в сообщении, бэкап — файлом следом.
-
-    В отличие от плановой сводки, здесь текст нельзя сделать подписью
-    к файлу: сообщение уже открыто в меню, поэтому сводка остаётся
-    текстом на месте, а архив уходит отдельным сообщением сразу за ним.
-    """
-    import io
-    from html import escape
-    await query.edit_message_text("📤 Собираю сводку...")
-    try:
-        text = await build_digest(0)
-    except Exception as e:
-        await query.edit_message_text(
-            f"❌ <b>Не собрать сводку</b>\n\n<code>{escape(str(e)[:200])}</code>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([_back("ctl_menu")]),
-        )
-        return
-    await query.edit_message_text(
-        text, parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([_back("ctl_menu")]),
-    )
-    try:
-        from features.backup import make_archive
-        blob, name, _counts = make_archive()
-        await context.bot.send_document(
-            chat_id=query.from_user.id, document=io.BytesIO(blob), filename=name,
-            caption=("💾 <b>Бэкап Drebol VPN на сегодня</b>\n\n"
-                     "<i>Внутри ключи — не пересылай.</i>"),
-            parse_mode="HTML")
-    except Exception as e:
-        await query.edit_message_text(
-            text + f"\n\n⚠️ Бэкап не собрался: <code>{escape(str(e)[:150])}</code>",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([_back("ctl_menu")]),
-        )
 
 
 # ── Помощь с подключением ────────────────────────────────────────────────────

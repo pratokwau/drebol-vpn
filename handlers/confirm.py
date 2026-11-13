@@ -167,7 +167,7 @@ async def _site_delete(arg):
 async def _clear_log_channel(arg):
     return ("🗑 <b>Отключить лог-канал?</b>\n\n"
             "События перестанут дублироваться в канал. Вернуть можно, снова указав его ID.",
-            "🗑 Да, отключить", "log_channel_settings", "admin_panel")
+            "🗑 Да, отключить", "support_group_settings", "admin_panel")
 
 
 async def _bl_del(arg):

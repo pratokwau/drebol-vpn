@@ -84,7 +84,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Веб-доступ", "web_menu")],
         [b("🌐 Проверка операторов", "netcheck_menu")],
         [b("💾 Бэкап и перенос", "backup_menu"), b("📄 Документы", "documents_menu")],
-        [b("🧾 Лог-канал", "log_channel_settings"), b("👥 Группа поддержки", "support_group_settings")],
+        [b("🛟 Поддержка и логи", "support_group_settings")],
         [b(mnt_label, "mnt_menu")],
         [b("🔄 Обновиться с GitHub", "git_update")],
         [b(f"⏰ Синхронизация · {sync_time}", "morning_menu")],
