@@ -51,6 +51,22 @@ async def post_init(app: Application):
         print(f"[support-bot] ensure failed: {e}")
 
     if app.job_queue:
+        from functools import wraps
+
+        def _gated(fn, key):
+            """Оборачивает фоновую задачу тумблером из настроек синхронизации.
+
+            Тумблер читается на каждом тике, поэтому выключение в админке
+            («⏰ Синхронизация») срабатывает без перезапуска бота.
+            """
+            @wraps(fn)
+            async def _wrapper(ctx):
+                from handlers.morning import job_enabled
+                if not job_enabled(key):
+                    return
+                return await fn(ctx)
+            return _wrapper
+
         from paidsub.handlers import check_expired_subs
         app.job_queue.run_repeating(check_expired_subs, interval=10, first=10)
 
@@ -66,7 +82,12 @@ async def post_init(app: Application):
             """Следит за панелью, выдачей подписок и узлами.
 
             Уведомляет только при смене состояния, чтобы не спамить каждые 5 минут.
+            Выключается тумблером «healthcheck» в настройках синхронизации
+            (тогда же останавливается и запись падений в статистику).
             """
+            from handlers.morning import job_enabled
+            if not job_enabled("healthcheck"):
+                return
             from config import ADMIN_ID, load_config, save_config
             from services.panel import probe_servers, is_configured
             from core.log_channel import send_log
@@ -241,14 +262,10 @@ async def post_init(app: Application):
         poll_every = int(load_config().get("invoice_poll_seconds", 60) or 60)
         app.job_queue.run_repeating(_platega_poll_job, interval=poll_every, first=30)
 
-        # Серверы: в день оплаты в 23:00 мск спрашивает админа, оплачен ли сервер.
-        from datetime import time as _time
-        from zoneinfo import ZoneInfo
-        from handlers.finance import server_payment_reminder_job
-        app.job_queue.run_daily(
-            server_payment_reminder_job,
-            time=_time(23, 0, tzinfo=ZoneInfo("Europe/Moscow")),
-        )
+        # Напоминание об оплате серверов больше не живёт отдельным
+        # run_daily в 23:00 — оно теперь часть утренней синхронизации
+        # (время — только там, в 09:00) и включается тумблером
+        # «server_reminder» в настройках синхронизации.
 
         # Утренняя синхронизация: сводка, сверка Platega, операторы —
         # каждый день в 09:00 МСК (время меняется в настройках админки).
@@ -291,7 +308,8 @@ async def post_init(app: Application):
 
         # сайт сам подхватывает новые цены и настройки
         from web.site_deploy import site_sync_tick
-        app.job_queue.run_repeating(site_sync_tick, interval=120, first=300)
+        app.job_queue.run_repeating(
+            _gated(site_sync_tick, "site_sync"), interval=120, first=300)
 
         # после обновления с GitHub — один раз проверить, поменялся ли сайт
         from web.site_deploy import site_update_pending_job
@@ -302,7 +320,9 @@ async def post_init(app: Application):
 
         from features.blacklist import blacklist_sync_tick
         bl_hours = int(load_config().get("blacklist_sync_hours", 6) or 6)
-        app.job_queue.run_repeating(blacklist_sync_tick, interval=bl_hours * 3600, first=120)
+        app.job_queue.run_repeating(
+            _gated(blacklist_sync_tick, "blacklist_sync"),
+            interval=bl_hours * 3600, first=120)
 
         from features.blacklist import blacklist_expire_tick
         app.job_queue.run_repeating(blacklist_expire_tick, interval=300, first=150)
@@ -316,7 +336,8 @@ async def post_init(app: Application):
         # синхронизация с панелью по расписанию: тик каждые 15 минут
         # проверяет, подошло ли время, и запускает сверку, если пора
         from services.remnawave import panel_sync_tick
-        app.job_queue.run_repeating(panel_sync_tick, interval=900, first=900)
+        app.job_queue.run_repeating(
+            _gated(panel_sync_tick, "panel_sync"), interval=900, first=900)
 
     # Личный кабинет: http-api для сайта и мини-приложения.
     # Бота отдаём в API, чтобы оно само слало коды сброса пароля в чат.

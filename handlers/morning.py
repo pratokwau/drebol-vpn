@@ -28,6 +28,17 @@ DEFAULTS = {
     "netcheck_days": 2,
     "netcheck_last_run": None,
     "alerts": True,
+    # ── Все остальные синхронизации и проверки бота ─────────────────────
+    # Единая панель управления: время — только здесь (09:00), а каждая
+    # задача включается/выключается своим тумблером. Фоновые задачи
+    # (панель, ЧС, сайт, здоровье) проверяют свой тумблер на каждом тике,
+    # поэтому выключение срабатывает без перезапуска бота.
+    "support_topics": True,
+    "panel_sync": True,
+    "blacklist_sync": True,
+    "site_sync": True,
+    "server_reminder": True,
+    "healthcheck": True,
 }
 
 _FALL_LABELS = {
@@ -70,6 +81,15 @@ def parse_time(text: str) -> tuple[int, int] | None:
 def alerts_enabled() -> bool:
     """Выключатель алертов о падениях (читает проверку здоровья)."""
     return bool(get_morning_cfg().get("alerts", True))
+
+
+def job_enabled(key: str) -> bool:
+    """Включена ли фоновая задача (панель, ЧС, сайт, здоровье и т.д.).
+
+    Читается на каждом тике задачи, поэтому тумблер в настройках
+    синхронизации срабатывает без перезапуска бота.
+    """
+    return bool(get_morning_cfg().get(key, True))
 
 
 def schedule_morning_sync(application) -> None:
@@ -282,10 +302,16 @@ async def morning_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         if ran:
             save_morning_cfg(
                 {"netcheck_last_run": date.today().isoformat()})
-    support_section = await _support_topics_section(context.bot)
-    if support_section:
-        lines.append("")
-        lines.append(support_section)
+    if cfg.get("support_topics"):
+        support_section = await _support_topics_section(context.bot)
+        if support_section:
+            lines.append("")
+            lines.append(support_section)
+    if cfg.get("server_reminder"):
+        # Напоминание об оплате серверов — в то же время, что и сводка:
+        # время для всех дневных задач только здесь, в синхронизации.
+        from handlers.finance import server_payment_reminder_job
+        await server_payment_reminder_job(context)
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID, text="\n".join(lines), parse_mode="HTML")
@@ -299,15 +325,31 @@ def _toggle_label(on: bool) -> str:
 
 async def handle_morning_menu(query,
                               context: ContextTypes.DEFAULT_TYPE):
-    """Экран настроек синхронизации."""
+    """Экран настроек синхронизации — единая панель всех задач бота.
+
+    Время — только здесь: все дневные задачи (сводка, сверка, операторы,
+    темы поддержки, напоминание о серверах) идут в это время. Фоновые
+    проверки (панель, ЧС, сайт, здоровье) крутятся на своих интервалах,
+    но включаются и выключаются отсюда же.
+    """
     cfg = get_morning_cfg()
     lines = [
         "⏰ <b>Синхронизация</b>", "",
         f"🕘 Время: <b>{cfg['time']}</b> МСК · каждый день",
+        "",
+        "<b>Ежедневно в это время:</b>",
         f"🌅 Сводка: <b>{_toggle_label(cfg['enabled'])}</b>",
         f"🔍 Сверка с Platega: <b>{_toggle_label(cfg['reconcile'])}</b>",
         f"🌐 Проверка операторов: <b>{_toggle_label(cfg['netcheck'])}</b>"
         f" · раз в {cfg['netcheck_days']} дн.",
+        f"👥 Темы поддержки: <b>{_toggle_label(cfg['support_topics'])}</b>",
+        f"🖥 Напоминание о серверах: <b>{_toggle_label(cfg['server_reminder'])}</b>",
+        "",
+        "<b>Фоновые проверки (на своих интервалах):</b>",
+        f"🔄 Синхронизация с панелью: <b>{_toggle_label(cfg['panel_sync'])}</b>",
+        f"🚫 Синхронизация ЧС: <b>{_toggle_label(cfg['blacklist_sync'])}</b>",
+        f"🌐 Автообновление сайта: <b>{_toggle_label(cfg['site_sync'])}</b>",
+        f"💓 Проверка здоровья: <b>{_toggle_label(cfg['healthcheck'])}</b>",
         f"🔔 Алерты о падениях: <b>{_toggle_label(cfg['alerts'])}</b>",
         "",
         "<i>Сводка приходит тебе в личку. Проверка операторов — только "
@@ -326,6 +368,24 @@ async def handle_morning_menu(query,
             f"🌐 Операторы: {_toggle_label(cfg['netcheck'])}",
             callback_data="morning_toggle:netcheck")],
         [InlineKeyboardButton(
+            f"👥 Темы поддержки: {_toggle_label(cfg['support_topics'])}",
+            callback_data="morning_toggle:support_topics")],
+        [InlineKeyboardButton(
+            f"🖥 Серверы: {_toggle_label(cfg['server_reminder'])}",
+            callback_data="morning_toggle:server_reminder")],
+        [InlineKeyboardButton(
+            f"🔄 Панель: {_toggle_label(cfg['panel_sync'])}",
+            callback_data="morning_toggle:panel_sync")],
+        [InlineKeyboardButton(
+            f"🚫 ЧС: {_toggle_label(cfg['blacklist_sync'])}",
+            callback_data="morning_toggle:blacklist_sync")],
+        [InlineKeyboardButton(
+            f"🌐 Сайт: {_toggle_label(cfg['site_sync'])}",
+            callback_data="morning_toggle:site_sync")],
+        [InlineKeyboardButton(
+            f"💓 Здоровье: {_toggle_label(cfg['healthcheck'])}",
+            callback_data="morning_toggle:healthcheck")],
+        [InlineKeyboardButton(
             f"🔔 Алерты: {_toggle_label(cfg['alerts'])}",
             callback_data="morning_toggle:alerts")],
         [InlineKeyboardButton("▶️ Запустить сейчас",
@@ -341,7 +401,9 @@ async def handle_morning_menu(query,
 async def handle_morning_toggle(query, context: ContextTypes.DEFAULT_TYPE,
                                 key: str):
     """Переключатель в настройках синхронизации."""
-    if key not in ("enabled", "reconcile", "netcheck", "alerts"):
+    if key not in ("enabled", "reconcile", "netcheck", "alerts",
+                   "support_topics", "panel_sync", "blacklist_sync",
+                   "site_sync", "server_reminder", "healthcheck"):
         return
     cfg = get_morning_cfg()
     save_morning_cfg({key: not cfg.get(key, True)})
