@@ -1289,12 +1289,65 @@ async def handle_rw_menu(query, context=None):
         kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")])
+        kb.append([InlineKeyboardButton("📖 Инструкция: CDN", callback_data="rw_cdn_guide")])
         kb.append([InlineKeyboardButton("🔄 Синхронизация",
                                         callback_data="panel_sync_menu")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
                                   disable_web_page_preview=True)
+
+
+async def handle_rw_cdn_guide(query, context=None):
+    """Полная инструкция: CDN для подписок с нуля (Yandex Cloud).
+
+    Подписки идут через отдельный CDN-ресурс sub.drbl.tech с полностью
+    выключенным кэшем — иначе один юзер получит чужой конфиг.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if context:
+        context.user_data.pop("state", None)
+    lines = [
+        "📖 <b>CDN для подписок с нуля</b>",
+        "",
+        "<b>1. Сертификат</b>",
+        "Certificate Manager → Создать:",
+        "Имя: <code>sub-drbl-tech</code>, Домены: <code>sub.drbl.tech</code>, проверка DNS.",
+        "В DNS добавь TXT <code>_acme-challenge.sub.drbl.tech</code> (значение даст Яндекс).",
+        "Дождись статуса Issued.",
+        "",
+        "<b>2. Ресурс CDN</b>",
+        "Cloud CDN → Создать ресурс:",
+        "Источник: <code>key.drbl.tech</code>, протокол HTTPS.",
+        "Заголовок Host: «Свое значение» = <code>key.drbl.tech</code>.",
+        "Доменное имя: <code>sub.drbl.tech</code>.",
+        "Сертификат: из Certificate Manager — <code>sub-drbl-tech</code>.",
+        "<b>Кеширование в CDN: ВЫКЛЮЧИТЬ</b> (в ссылке токен юзера!).",
+        "Методы: GET, HEAD. Остальное не трогать.",
+        "",
+        "<b>3. DNS</b>",
+        "На вкладке Обзор ресурса → «Настройки DNS»: скопируй домен вида",
+        "<code>xxx.topology.gslb.yccdn.ru</code>.",
+        "В DNS: CNAME <code>sub.drbl.tech</code> → этот домен.",
+        "",
+        "<b>4. Сервер (body-brown)</b>",
+        "Панель: в <code>/opt/remnawave/.env</code> <code>SUB_PUBLIC_DOMAIN=sub.drbl.tech</code>, затем",
+        "<code>cd /opt/remnawave && docker compose up -d --force-recreate remnawave</code>",
+        "Подписка: в <code>/opt/remnawave/subscription/.env</code> <code>TRUST_PROXY=2</code>, затем",
+        "<code>cd /opt/remnawave/subscription && docker compose up -d --force-recreate remnawave-subscription-page</code>",
+        "",
+        "<b>5. Проверка</b>",
+        "<code>curl https://sub.drbl.tech/&lt;uuid&gt;</code> → 200.",
+        "Решающий тест: INCY на МТС без VPN обновляет подписку по новому URL.",
+        "",
+        "<b>Цена:</b> 150 ₽/мес за ресурс (150 ГБ + 100 млн запросов), сверх — ~1,05 ₽/ГБ.",
+        "Старые ссылки key.drbl.tech продолжат работать.",
+    ]
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
+        disable_web_page_preview=True)
 
 
 async def handle_panel_sync_menu(query, context=None):
