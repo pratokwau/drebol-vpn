@@ -89,7 +89,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b(mnt_label, "mnt_menu")],
         [b("🔄 Обновиться с GitHub", "git_update")],
         [b(f"⏰ Синхронизация · {sync_time}", "morning_menu")],
-        [b("🏠 Главное меню", "back_start")],
+        [b("◀️ Назад", "back_start")],
     ])
 
 
@@ -141,7 +141,7 @@ def support_keyboard(page: int, total_pages: int, has_files: bool = False,
     if can_close:
         extra.append(InlineKeyboardButton("✅ Вопрос решён", callback_data="support_close"))
     rows.append(extra)
-    rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")])
+    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="back_start")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -156,7 +156,7 @@ def support_topics_keyboard(topics: dict) -> InlineKeyboardMarkup:
             pair = []
     if pair:
         rows.append(pair)
-    rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")])
+    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="back_start")])
     return InlineKeyboardMarkup(rows)
 
 

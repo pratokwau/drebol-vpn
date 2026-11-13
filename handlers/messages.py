@@ -191,7 +191,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "<blockquote>Сначала нужна подписка — промокод действует на её оплату.</blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")]
+                    [InlineKeyboardButton("◀️ Назад", callback_data="back_start")]
                 ]),
             )
             return
@@ -228,7 +228,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📅 Подписка до: <b>{res['until']}</b></blockquote>",
                 parse_mode="HTML",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")]
+                    [InlineKeyboardButton("◀️ К подписке", callback_data="my_paid_sub")]
                 ]),
             )
             return

@@ -256,7 +256,7 @@ async def handle_my_paid_sub(query):
     if cab:
         kb_rows.append(cab)
     kb_rows.append([InlineKeyboardButton("📡 LTE-интернет", callback_data="my_lte")])
-    kb_rows.append([InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")])
+    kb_rows.append([InlineKeyboardButton("◀️ Назад", callback_data="back_start")])
 
     await query.edit_message_text(
         "⚙️ <b>Моя подписка</b>\n\n"
@@ -1375,7 +1375,7 @@ async def handle_referral(query, context):
     share_url = f"https://t.me/share/url?url={ref_link}&text={share_text}"
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("📤 Поделиться с другом", url=share_url)],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
     ])
 
     await query.edit_message_text(
@@ -1407,7 +1407,7 @@ async def handle_info(query):
             [InlineKeyboardButton("❓ Как подключиться", callback_data="how_to")],
             [InlineKeyboardButton("💰 Цены", callback_data="prices"),
              InlineKeyboardButton("📕 О сервисе", callback_data="about")],
-            [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")],
+            [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
         ]),
     )
 

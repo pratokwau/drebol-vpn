@@ -127,7 +127,7 @@ def contact_screen() -> tuple:
             "Опишите вопрос одним сообщением, так ответим быстрее.</i>")
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🛟 Написать в поддержку", url=support_url())],
-        [InlineKeyboardButton("🏠 Главное меню", callback_data="back_start")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
     ])
     return text, kb
 
@@ -272,7 +272,7 @@ async def handle_support_close(query, user_id: int):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🛟 Новый вопрос", callback_data="support_open"),
-             InlineKeyboardButton("🏠 Меню", callback_data="back_start")],
+             InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
         ]),
     )
 

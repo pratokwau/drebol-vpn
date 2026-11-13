@@ -94,7 +94,7 @@ async def show_feature_off(key: str, query=None, message=None):
     text = (f"⏸ <b>{name}</b>\n\n"
             "<blockquote>Раздел временно недоступен.</blockquote>\n\n"
             "<i>Попробуйте чуть позже.</i>")
-    await _deliver(text, _one_button("🏠 Главное меню", "back_start"),
+    await _deliver(text, _one_button("◀️ Назад", "back_start"),
                    query=query, message=message)
 
 
