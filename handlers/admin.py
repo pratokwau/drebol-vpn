@@ -383,14 +383,16 @@ async def handle_git_update(query):
             + site_note,
             parse_mode="HTML",
         )
-        subprocess.Popen(
-            ["systemctl", "restart", "drebol-vpn"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        # Бот поддержки — отдельный сервис: тоже перезапустить, чтобы
-        # подхватил новый код (если сервис ещё не создан — просто не стартует).
+        # Сначала доп. сервисы, потом основной бот: рестарт основного
+        # убивает этот процесс, поэтому его команда — последней.
+        # (Дополнительно: post_init основного бота и PartOf в unit'е
+        # тоже перезапускают бота поддержки — тройная страховка.)
         subprocess.Popen(
             ["systemctl", "restart", "drebol-support-bot"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        subprocess.Popen(
+            ["systemctl", "restart", "drebol-vpn"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:

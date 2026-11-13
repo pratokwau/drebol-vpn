@@ -19,6 +19,9 @@ def _unit_text(python_exe: str, install_dir: str) -> str:
         "[Unit]\n"
         "Description=Drebol VPN support bot\n"
         "After=network.target\n"
+        # PartOf: при рестарте основного бота systemd перезапускает
+        # и бота поддержки — он всегда на свежем коде после обновы.
+        "PartOf=drebol-vpn.service\n"
         "\n"
         "[Service]\n"
         "Type=simple\n"

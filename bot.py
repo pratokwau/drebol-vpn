@@ -39,6 +39,17 @@ async def post_init(app: Application):
     await init_db()
     from config import load_config
 
+    # Бот поддержки — доп. сервис: при каждом старте основного бота
+    # переставить его unit (с PartOf) и перезапустить, чтобы он всегда
+    # был на свежем коде после обновы. Не блокирует запуск основного бота.
+    try:
+        if load_config().get("support_bot_token"):
+            from services.support_service import ensure_support_bot_running
+            _ok, _detail = await ensure_support_bot_running()
+            print(f"[support-bot] ensure: {_ok} {_detail}")
+    except Exception as e:
+        print(f"[support-bot] ensure failed: {e}")
+
     if app.job_queue:
         from paidsub.handlers import check_expired_subs
         app.job_queue.run_repeating(check_expired_subs, interval=10, first=10)
