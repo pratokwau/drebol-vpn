@@ -1337,17 +1337,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             username = None
         if username:
             _save("support_bot_username", username)
-            await update.message.reply_text(
-                f"✅ Токен сохранён. Бот поддержки: <b>@{username}</b>\n\n"
-                f"<i>Осталось запустить бота поддержки отдельным сервисом — "
-                f"скажи мне, и я дам команду.</i>",
-                parse_mode="HTML", reply_markup=back_admin())
+            base = (f"✅ Токен сохранён. Бот поддержки: <b>@{username}</b>\n\n")
         else:
-            await update.message.reply_text(
-                "✅ Токен сохранён, но юзернейм узнать не удалось "
-                "(Telegram не ответил). Проверь токен — если он неверный, "
-                "бот поддержки не запустится.",
-                parse_mode="HTML", reply_markup=back_admin())
+            base = ("✅ Токен сохранён, но юзернейм узнать не удалось "
+                    "(Telegram не ответил). Проверь токен — если он неверный, "
+                    "бот поддержки не запустится.\n\n")
+        # Автозапуск: ставим systemd-сервис и запускаем бота поддержки.
+        from services.support_service import ensure_support_bot_running
+        ok, detail = await ensure_support_bot_running()
+        if ok:
+            base += "<i>🤖 Бот поддержки запущен автоматически (сервис drebol-support-bot).</i>"
+        else:
+            base += (f"<i>⚠️ Бот поддержки не запустился сам: {detail}. "
+                     f"Запусти вручную: systemctl restart drebol-support-bot.</i>")
+        await update.message.reply_text(base, parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Winback: дни ─────────────────────────────────────────────────────────
