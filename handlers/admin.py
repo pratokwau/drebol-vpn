@@ -6,7 +6,7 @@ from core.keyboards import admin_keyboard, back_admin, documents_keyboard, chann
 from core.states import (
     AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_REFUND_URL, AWAITING_RULES_URL, AWAITING_CONSENT_URL,
-    AWAITING_FIND_USER, AWAITING_LOG_CHANNEL,
+    AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_GROUP,
     AWAITING_DM_USER,
 )
 
@@ -637,6 +637,57 @@ async def handle_clear_log_channel(query):
     save_config(cfg)
     await query.answer("🗑 Лог-канал отключён", show_alert=True)
     await handle_log_channel_settings(query)
+
+
+# ── Группа поддержки (темы тикетов + логи) ───────────────────────────────────
+
+async def handle_support_group_settings(query):
+    cfg = load_config()
+    group_id = cfg.get("support_group_id")
+    token_set = bool(cfg.get("support_bot_token"))
+    if group_id:
+        status_line = f"👥 Группа: <code>{group_id}</code>"
+    else:
+        status_line = "👥 Группа: <i>не задана</i>"
+    token_line = ("🤖 Бот поддержки: <i>токен задан</i>" if token_set
+                  else "🤖 Бот поддержки: <i>токен не задан</i>")
+    await query.edit_message_text(
+        "👥 <b>Группа поддержки</b>\n\n"
+        f"<blockquote>{status_line}\n{token_line}</blockquote>\n\n"
+        "<i>Группа с включёнными темами: на каждое обращение бот поддержки "
+        "создаёт тему, ты отвечаешь прямо в ней, а ответ уходит человеку "
+        "в бота поддержки. Сюда же идут логи бота (вместо канала). "
+        "Оба бота должны быть админами в группе.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Изменить" if group_id else "📝 Указать группу",
+                                  callback_data="set_support_group")]
+            + ([InlineKeyboardButton("🗑 Отключить", callback_data="clear_support_group")]
+               if group_id else []),
+            [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+        ]),
+    )
+
+
+async def handle_set_support_group(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_SUPPORT_GROUP
+    await query.edit_message_text(
+        "👥 <b>Группа поддержки</b>\n\n"
+        "Пришли ID группы — число вида <code>-1001234567890</code>.\n\n"
+        "<i>В группе должны быть включены темы (форум), а оба бота — "
+        "админами. ID можно узнать, переслав сообщение из группы боту "
+        "@userinfobot.</i>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_clear_support_group(query):
+    cfg = load_config()
+    cfg.pop("support_group_id", None)
+    save_config(cfg)
+    await query.answer("🗑 Группа поддержки отключена", show_alert=True)
+    await handle_support_group_settings(query)
 
 
 # ── Winback ──────────────────────────────────────────────────────────────────

@@ -69,6 +69,8 @@ AWAITING_FIND_USER = "awaiting_find_user"
 
 # Лог-канал
 AWAITING_LOG_CHANNEL = "awaiting_log_channel"
+# Группа поддержки (темы тикетов + логи)
+AWAITING_SUPPORT_GROUP = "awaiting_support_group"
 AWAITING_SUPPORT_CONTACT = "awaiting_support_contact"
 AWAITING_CABINET_PORT = "awaiting_cabinet_port"
 AWAITING_CABINET_PUBLIC = "awaiting_cabinet_public"

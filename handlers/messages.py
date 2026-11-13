@@ -33,7 +33,7 @@ from core.states import (
     AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
     AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
-    AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_CONTACT,
+    AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_GROUP, AWAITING_SUPPORT_CONTACT,
     AWAITING_LOG_FILTER_USER, AWAITING_LOG_FILTER_DATE, AWAITING_LOG_EXPORT_USER,
     AWAITING_GIFT_USER,
     AWAITING_CABINET_PORT, AWAITING_CABINET_PUBLIC, AWAITING_CABINET_UPSTREAM,
@@ -1396,6 +1396,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"⚠️ ID сохранён (<code>{channel_id}</code>), но тестовое сообщение не отправлено.\n"
                 f"Убедись, что бот — админ канала.\n\n<code>{e}</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+        return
+
+    # ── Группа поддержки (темы тикетов + логи) ─────────────────────────────
+    if state == AWAITING_SUPPORT_GROUP:
+        try:
+            group_id = int(text)
+        except ValueError:
+            await update.message.reply_text("❌ Введи числовой ID (напр. -1001234567890).", reply_markup=back_admin())
+            return
+        _save("support_group_id", group_id)
+        context.user_data.pop("state", None)
+        try:
+            await context.bot.send_message(chat_id=group_id, text="✅ Группа поддержки подключена! Сюда будут приходить темы обращений и логи бота.", parse_mode="HTML")
+            await update.message.reply_text(f"✅ Группа поддержки: <code>{group_id}</code>", parse_mode="HTML", reply_markup=back_admin())
+        except Exception as e:
+            await update.message.reply_text(
+                f"⚠️ ID сохранён (<code>{group_id}</code>), но тестовое сообщение не отправлено.\n"
+                f"Убедись, что бот — админ группы и в ней включены темы.\n\n<code>{e}</code>",
                 parse_mode="HTML", reply_markup=back_admin(),
             )
         return

@@ -46,6 +46,18 @@ async def init_db():
                 await db.execute(f"ALTER TABLE support_messages ADD COLUMN {col}")
             except Exception:
                 pass
+        # Темы обращений в группе поддержки (бот поддержки): один юзер —
+        # одна тема. status: open — идёт диалог, closed — тема закрыта.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS support_topics (
+                user_id INTEGER PRIMARY KEY,
+                topic_id INTEGER NOT NULL,
+                group_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_msg_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS admin_subs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2611,6 +2623,57 @@ def format_client(first_name, username, tg_id, html: bool = True) -> str:
     tid = f"<code>{tg_id}</code>" if (tg_id and html) else (str(tg_id) if tg_id else None)
     parts = [p for p in (name, uname, tid) if p]
     return " • ".join(parts) if parts else "—"
+
+
+# ── Темы обращений в группе поддержки ─────────────────────────────────────────
+
+async def get_support_topic(user_id: int) -> tuple | None:
+    """Тема юзера в группе поддержки: (topic_id, group_id, status)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT topic_id, group_id, status FROM support_topics "
+            "WHERE user_id = ?", (user_id,)
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def set_support_topic(user_id: int, topic_id: int, group_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO support_topics (user_id, topic_id, group_id, status) "
+            "VALUES (?, ?, ?, 'open') "
+            "ON CONFLICT(user_id) DO UPDATE SET topic_id = excluded.topic_id, "
+            "group_id = excluded.group_id, status = 'open', "
+            "last_msg_at = CURRENT_TIMESTAMP",
+            (user_id, topic_id, group_id))
+        await db.commit()
+
+
+async def touch_support_topic(user_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE support_topics SET last_msg_at = CURRENT_TIMESTAMP "
+            "WHERE user_id = ?", (user_id,))
+        await db.commit()
+
+
+async def set_support_topic_status(user_id: int, status: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE support_topics SET status = ? WHERE user_id = ?",
+            (status, user_id))
+        await db.commit()
+
+
+async def get_user_by_topic(topic_id: int, group_id: int) -> int | None:
+    """Юзер по теме группы (для ответов из темы)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT user_id FROM support_topics "
+            "WHERE topic_id = ? AND group_id = ?", (topic_id, group_id)
+        ) as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else None
 
 
 # ── Winback ──────────────────────────────────────────────────────────────────
