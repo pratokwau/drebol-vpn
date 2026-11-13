@@ -54,10 +54,15 @@ async def init_db():
                 topic_id INTEGER NOT NULL,
                 group_id INTEGER NOT NULL,
                 status TEXT NOT NULL DEFAULT 'open',
+                topic_name TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_msg_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            await db.execute("ALTER TABLE support_topics ADD COLUMN topic_name TEXT")
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS admin_subs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2637,16 +2642,28 @@ async def get_support_topic(user_id: int) -> tuple | None:
             return await cur.fetchone()
 
 
-async def set_support_topic(user_id: int, topic_id: int, group_id: int) -> None:
+async def set_support_topic(user_id: int, topic_id: int, group_id: int,
+                          topic_name: str | None = None) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO support_topics (user_id, topic_id, group_id, status) "
-            "VALUES (?, ?, ?, 'open') "
+            "INSERT INTO support_topics (user_id, topic_id, group_id, status, topic_name) "
+            "VALUES (?, ?, ?, 'open', ?) "
             "ON CONFLICT(user_id) DO UPDATE SET topic_id = excluded.topic_id, "
             "group_id = excluded.group_id, status = 'open', "
+            "topic_name = COALESCE(excluded.topic_name, support_topics.topic_name), "
             "last_msg_at = CURRENT_TIMESTAMP",
-            (user_id, topic_id, group_id))
+            (user_id, topic_id, group_id, topic_name))
         await db.commit()
+
+
+async def get_open_support_topics() -> list:
+    """Все открытые темы поддержки: (user_id, topic_id, group_id, topic_name)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT user_id, topic_id, group_id, topic_name FROM support_topics "
+            "WHERE status = 'open' ORDER BY last_msg_at DESC"
+        ) as cur:
+            return await cur.fetchall()
 
 
 async def touch_support_topic(user_id: int) -> None:

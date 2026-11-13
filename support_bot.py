@@ -45,14 +45,15 @@ async def _ensure_topic(bot, user) -> int | None:
     row = await db.get_support_topic(user.id)
     if row and row[2] == "open":
         return int(row[0])
+    topic_name = _topic_name(user.first_name, user.username, user.id)
     try:
         topic = await bot.create_forum_topic(
-            chat_id=group_id, name=_topic_name(user.first_name, user.username, user.id))
+            chat_id=group_id, name=topic_name)
     except Exception as e:
         log.error("create_forum_topic failed for %s: %s", user.id, e)
         return None
     topic_id = int(topic.message_thread_id)
-    await db.set_support_topic(user.id, topic_id, int(group_id))
+    await db.set_support_topic(user.id, topic_id, int(group_id), topic_name)
     # карточка в теме: кто это, чтобы было видно без открытия профиля
     try:
         await bot.send_message(

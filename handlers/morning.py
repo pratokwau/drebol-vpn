@@ -161,6 +161,69 @@ async def _netcheck_section(cfg: dict) -> tuple[str | None, bool]:
     return line, True
 
 
+async def _support_topics_section(bot) -> str | None:
+    """Проверка тем поддержки: юзер сменил имя/ник — переименовать тему.
+
+    Идёт в утреннюю сводку. Свежие данные берём через токен бота
+    поддержки (getChat) — именно ему писали эти люди, поэтому он их
+    точно знает. Переименование — через основного бота (он админ группы).
+    Возвращает строку для сводки или None, если проверять нечего.
+    """
+    from config import load_config
+    cfg = load_config()
+    token = cfg.get("support_bot_token")
+    group_id = cfg.get("support_group_id")
+    if not token or not group_id:
+        return None
+    from core.database import get_open_support_topics, set_support_topic, format_client
+    topics = await get_open_support_topics()
+    if not topics:
+        return None
+    renamed: list[str] = []
+    failed = 0
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        for user_id, topic_id, gid, stored_name in topics:
+            if int(gid) != int(group_id):
+                continue
+            try:
+                async with session.get(
+                        f"https://api.telegram.org/bot{token}/getChat",
+                        params={"chat_id": user_id},
+                        timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    data = await resp.json()
+                if not data.get("ok"):
+                    failed += 1
+                    continue
+                u = data["result"]
+                new_name = format_client(
+                    u.get("first_name"), u.get("username"), user_id, html=False)[:120]
+            except Exception:
+                failed += 1
+                continue
+            if not new_name or new_name == (stored_name or ""):
+                continue
+            try:
+                await bot.edit_forum_topic(
+                    chat_id=int(group_id), message_thread_id=int(topic_id),
+                    name=new_name)
+            except Exception:
+                failed += 1
+                continue
+            await set_support_topic(user_id, int(topic_id), int(group_id), new_name)
+            renamed.append(new_name)
+    if not renamed and not failed:
+        return f"👥 Темы поддержки: ✅ всё актуально ({len(topics)})."
+    parts = [f"👥 Темы поддержки: проверено {len(topics)}"]
+    if renamed:
+        parts.append(f"переименовано <b>{len(renamed)}</b>: " +
+                     ", ".join(renamed[:5]) +
+                     (f" и ещё {len(renamed) - 5}" if len(renamed) > 5 else ""))
+    if failed:
+        parts.append(f"не удалось проверить: <b>{failed}</b>")
+    return " · ".join(parts)
+
+
 async def morning_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ежедневная сводка админу: цифры + сверка + операторы (если пора)."""
     cfg = get_morning_cfg()
@@ -219,6 +282,10 @@ async def morning_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         if ran:
             save_morning_cfg(
                 {"netcheck_last_run": date.today().isoformat()})
+    support_section = await _support_topics_section(context.bot)
+    if support_section:
+        lines.append("")
+        lines.append(support_section)
     try:
         await context.bot.send_message(
             chat_id=ADMIN_ID, text="\n".join(lines), parse_mode="HTML")
