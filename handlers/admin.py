@@ -387,6 +387,12 @@ async def handle_git_update(query):
             ["systemctl", "restart", "drebol-vpn"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+        # Бот поддержки — отдельный сервис: тоже перезапустить, чтобы
+        # подхватил новый код (если сервис ещё не создан — просто не стартует).
+        subprocess.Popen(
+            ["systemctl", "restart", "drebol-support-bot"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
     except subprocess.TimeoutExpired:
         await query.edit_message_text("⌛️ <b>GitHub не ответил вовремя</b>\n\n<i>Попробуй позже.</i>",
                                       parse_mode="HTML", reply_markup=back_admin())
