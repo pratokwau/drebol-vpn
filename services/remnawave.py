@@ -1289,7 +1289,7 @@ async def handle_rw_menu(query, context=None):
         kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")])
-        kb.append([InlineKeyboardButton("📖 Инструкция: CDN", callback_data="rw_cdn_guide")])
+        kb.append([InlineKeyboardButton("☁️ Яндекс Клауд", callback_data="rw_yandex")])
         kb.append([InlineKeyboardButton("🔄 Синхронизация",
                                         callback_data="panel_sync_menu")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
@@ -1298,8 +1298,39 @@ async def handle_rw_menu(query, context=None):
                                   disable_web_page_preview=True)
 
 
-async def handle_rw_cdn_guide(query, context=None):
-    """Полная инструкция: CDN для подписок с нуля (Yandex Cloud).
+async def handle_rw_yandex(query, context=None):
+    """Меню «Яндекс Клауд»: CDN-зеркало подписки и белые списки."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if context:
+        context.user_data.pop("state", None)
+    lines = ["☁️ <b>Яндекс Клауд</b>", "",
+             "<i>CDN-зеркало страницы подписки и белые списки.</i>"]
+    kb = [
+        [InlineKeyboardButton("📄 Страница подписки", callback_data="rw_yandex_sub")],
+        [InlineKeyboardButton("📋 Белые списки", callback_data="rw_yandex_whitelist")],
+        [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")],
+    ]
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb),
+                                  disable_web_page_preview=True)
+
+
+async def handle_rw_yandex_whitelist(query, context=None):
+    """Белые списки Яндекс Клауд — настройка появится позже."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if context:
+        context.user_data.pop("state", None)
+    lines = ["📋 <b>Белые списки</b>", "",
+             "<i>Настройка белых списков появится позже.</i>"]
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ К Яндекс Клауд", callback_data="rw_yandex")]]),
+        disable_web_page_preview=True)
+
+
+async def handle_rw_yandex_sub(query, context=None):
+    """Страница подписки: зеркало через CDN (Yandex Cloud).
 
     Подробно по каждому полю: какой сертификат делать,
     что писать в ресурсе CDN, что включать и выключать.
@@ -1312,7 +1343,7 @@ async def handle_rw_cdn_guide(query, context=None):
     if context:
         context.user_data.pop("state", None)
     lines = [
-        "📖 <b>CDN для подписок с нуля</b>",
+        "📄 <b>Страница подписки — зеркало через CDN</b>",
         "",
         "sub.drbl.tech — только зеркало ссылки подписки (кнопка «🪞 Зеркало подписки»",
         "в «Моей подписке»), основная ссылка остаётся key.drbl.tech.",
@@ -1372,7 +1403,7 @@ async def handle_rw_cdn_guide(query, context=None):
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
+            [InlineKeyboardButton("◀️ К Яндекс Клауд", callback_data="rw_yandex")]]),
         disable_web_page_preview=True)
 
 

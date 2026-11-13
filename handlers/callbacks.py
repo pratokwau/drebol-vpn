@@ -35,7 +35,7 @@ from features.fraud import (
 )
 from services.remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
-    handle_rw_cdn_guide,
+    handle_rw_yandex, handle_rw_yandex_sub, handle_rw_yandex_whitelist,
     handle_rw_squads, handle_rw_squad_toggle,
     handle_rw_usage, handle_rw_usage_node, handle_rw_usage_all,
     handle_rw_usage_period, handle_rw_usage_set, handle_rw_usage_custom,
@@ -572,8 +572,15 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_clear_log_channel(query)
     elif data == "rw_menu":
         await handle_rw_menu(query, context)
+    elif data == "rw_yandex":
+        await handle_rw_yandex(query, context)
+    elif data == "rw_yandex_sub":
+        await handle_rw_yandex_sub(query, context)
+    elif data == "rw_yandex_whitelist":
+        await handle_rw_yandex_whitelist(query, context)
     elif data == "rw_cdn_guide":
-        await handle_rw_cdn_guide(query, context)
+        # Старая кнопка «Инструкция: CDN» — ведёт на настройку зеркала.
+        await handle_rw_yandex_sub(query, context)
     elif data == "rw_downtime":
         await handle_downtime_menu(query, context)
     elif data == "rw_url":
