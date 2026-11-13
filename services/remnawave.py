@@ -1301,8 +1301,10 @@ async def handle_rw_menu(query, context=None):
 async def handle_rw_cdn_guide(query, context=None):
     """Полная инструкция: CDN для подписок с нуля (Yandex Cloud).
 
-    Подписки идут через отдельный CDN-ресурс sub.drbl.tech с полностью
-    выключенным кэшем — иначе один юзер получит чужой конфиг.
+    sub.drbl.tech — только зеркало ссылки подписки (кнопка
+    «🪞 Зеркало подписки» в «Моей подписке»), основная ссылка
+    остаётся key.drbl.tech. Кэш в CDN полностью выключен —
+    иначе один юзер получит чужой конфиг.
     """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if context:
@@ -1330,18 +1332,13 @@ async def handle_rw_cdn_guide(query, context=None):
         "<code>xxx.topology.gslb.yccdn.ru</code>.",
         "В DNS: CNAME <code>sub.drbl.tech</code> → этот домен.",
         "",
-        "<b>4. Сервер (body-brown)</b>",
-        "Панель: в <code>/opt/remnawave/.env</code> <code>SUB_PUBLIC_DOMAIN=sub.drbl.tech</code>, затем",
-        "<code>cd /opt/remnawave && docker compose up -d --force-recreate remnawave</code>",
-        "Подписка: в <code>/opt/remnawave/subscription/.env</code> <code>TRUST_PROXY=2</code>, затем",
-        "<code>cd /opt/remnawave/subscription && docker compose up -d --force-recreate remnawave-subscription-page</code>",
-        "",
-        "<b>5. Проверка</b>",
+        "<b>4. Проверка</b>",
         "<code>curl https://sub.drbl.tech/&lt;uuid&gt;</code> → 200.",
-        "Решающий тест: INCY на МТС без VPN обновляет подписку по новому URL.",
+        "Решающий тест: INCY на МТС без VPN обновляет подписку по зеркальной ссылке",
+        "(кнопка «🪞 Зеркало подписки» в «Моей подписке»).",
         "",
         "<b>Цена:</b> 150 ₽/мес за ресурс (150 ГБ + 100 млн запросов), сверх — ~1,05 ₽/ГБ.",
-        "Старые ссылки key.drbl.tech продолжат работать.",
+        "Основная ссылка остаётся key.drbl.tech, sub.drbl.tech — только зеркало.",
     ]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
