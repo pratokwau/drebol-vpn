@@ -21,6 +21,7 @@ from handlers.admin import (
     handle_find_user, handle_user_profile,
     handle_log_channel_settings, handle_set_log_channel, handle_clear_log_channel,
     handle_support_group_settings, handle_set_support_group, handle_clear_support_group,
+    handle_set_support_token,
     handle_remind_settings, handle_toggle_remind, handle_set_remind,
     handle_toggle_remind_trials, handle_remind_test, handle_set_remind_quiet,
     handle_dm_user, handle_payment_stats,
@@ -539,6 +540,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_support_group_settings(query)
     elif data == "set_support_group":
         await handle_set_support_group(query, context)
+    elif data == "set_support_token":
+        await handle_set_support_token(query, context)
     elif data == "clear_support_group":
         await handle_clear_support_group(query)
     elif data == "rw_menu":

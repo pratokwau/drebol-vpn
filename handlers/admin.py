@@ -7,6 +7,7 @@ from core.states import (
     AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_REFUND_URL, AWAITING_RULES_URL, AWAITING_CONSENT_URL,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_GROUP,
+    AWAITING_SUPPORT_TOKEN,
     AWAITING_DM_USER,
 )
 
@@ -623,12 +624,16 @@ async def handle_support_group_settings(query):
     cfg = load_config()
     group_id = cfg.get("support_group_id")
     token_set = bool(cfg.get("support_bot_token"))
+    username = cfg.get("support_bot_username")
     if group_id:
         status_line = f"👥 Группа: <code>{group_id}</code>"
     else:
         status_line = "👥 Группа: <i>не задана</i>"
-    token_line = ("🤖 Бот поддержки: <i>токен задан</i>" if token_set
-                  else "🤖 Бот поддержки: <i>токен не задан</i>")
+    if token_set:
+        token_line = ("🤖 Бот поддержки: <i>токен задан</i>"
+                      + (f" (@{username})" if username else ""))
+    else:
+        token_line = "🤖 Бот поддержки: <i>токен не задан</i>"
     await query.edit_message_text(
         "👥 <b>Группа поддержки</b>\n\n"
         f"<blockquote>{status_line}\n{token_line}</blockquote>\n\n"
@@ -642,6 +647,8 @@ async def handle_support_group_settings(query):
                                   callback_data="set_support_group")]
             + ([InlineKeyboardButton("🗑 Отключить", callback_data="clear_support_group")]
                if group_id else []),
+            [InlineKeyboardButton("🤖 Сменить токен" if token_set else "🤖 Ввести токен бота",
+                                  callback_data="set_support_token")],
             [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
         ]),
     )
@@ -655,6 +662,21 @@ async def handle_set_support_group(query, context: ContextTypes.DEFAULT_TYPE):
         "<i>В группе должны быть включены темы (форум), а оба бота — "
         "админами. ID можно узнать, переслав сообщение из группы боту "
         "@userinfobot.</i>",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def handle_set_support_token(query, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["state"] = AWAITING_SUPPORT_TOKEN
+    await query.edit_message_text(
+        "🤖 <b>Токен бота поддержки</b>\n\n"
+        "Пришли токен бота поддержки — строку вида "
+        "<code>123456789:AAEhBOweik6ad9r_QXMENQjcrGbqCr9Y7c4w</code>.\n\n"
+        "<i>Токен выдаёт @BotFather при создании бота. "
+        "После сохранения бот сам узнает свой юзернейм — "
+        "он нужен для кнопки «Поддержка» в основном боте. "
+        "Не пересылай токен никому: по нему можно управлять ботом.</i>",
         parse_mode="HTML",
         reply_markup=back_admin(),
     )

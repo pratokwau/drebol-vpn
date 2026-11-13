@@ -32,6 +32,7 @@ from core.states import (
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
     AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_GROUP,
+    AWAITING_SUPPORT_TOKEN,
     AWAITING_LOG_FILTER_USER, AWAITING_LOG_FILTER_DATE, AWAITING_LOG_EXPORT_USER,
     AWAITING_GIFT_USER,
     AWAITING_CABINET_PORT, AWAITING_CABINET_PUBLIC, AWAITING_CABINET_UPSTREAM,
@@ -1307,6 +1308,46 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Убедись, что бот — админ группы и в ней включены темы.\n\n<code>{e}</code>",
                 parse_mode="HTML", reply_markup=back_admin(),
             )
+        return
+
+    # ── Токен бота поддержки ─────────────────────────────────────────────────
+    if state == AWAITING_SUPPORT_TOKEN:
+        token = text.strip()
+        # Токен Telegram-бота: цифры, двоеточие, ~35 символов.
+        import re as _re
+        if not _re.fullmatch(r"\d{5,}:[A-Za-z0-9_-]{30,}", token):
+            await update.message.reply_text(
+                "❌ Это не похоже на токен бота. Пришли строку из @BotFather — "
+                "она начинается с цифр, потом двоеточие.",
+                parse_mode="HTML", reply_markup=back_admin())
+            return
+        _save("support_bot_token", token)
+        context.user_data.pop("state", None)
+        # Узнаём юзернейм бота по токену — он нужен для кнопки «Поддержка».
+        username = None
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as _s:
+                async with _s.get(f"https://api.telegram.org/bot{token}/getMe",
+                                  timeout=aiohttp.ClientTimeout(total=15)) as _r:
+                    _d = await _r.json()
+                    if _d.get("ok"):
+                        username = _d["result"].get("username")
+        except Exception:
+            username = None
+        if username:
+            _save("support_bot_username", username)
+            await update.message.reply_text(
+                f"✅ Токен сохранён. Бот поддержки: <b>@{username}</b>\n\n"
+                f"<i>Осталось запустить бота поддержки отдельным сервисом — "
+                f"скажи мне, и я дам команду.</i>",
+                parse_mode="HTML", reply_markup=back_admin())
+        else:
+            await update.message.reply_text(
+                "✅ Токен сохранён, но юзернейм узнать не удалось "
+                "(Telegram не ответил). Проверь токен — если он неверный, "
+                "бот поддержки не запустится.",
+                parse_mode="HTML", reply_markup=back_admin())
         return
 
     # ── Winback: дни ─────────────────────────────────────────────────────────
