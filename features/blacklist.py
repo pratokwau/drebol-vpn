@@ -656,8 +656,8 @@ HIST_WORDS = {
 def _who_line(u, tg_id) -> str:
     if not u:
         return f"<code>{tg_id}</code> · ботом не пользовался"
-    name = html.escape(u[1] or str(tg_id))
-    return (f"{name} (@{html.escape(u[2])})" if u[2] else name) + f" · <code>{tg_id}</code>"
+    from core.database import format_client
+    return format_client(u[1], u[2], tg_id)
 
 
 def _by_line(by_id) -> str:

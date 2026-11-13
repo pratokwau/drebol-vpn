@@ -309,8 +309,8 @@ def _esc(value) -> str:
 
 
 def _who(first_name, username, tg_id) -> str:
-    name = _esc(first_name or tg_id)
-    return f"{name} (@{_esc(username)})" if username else name
+    from core.database import format_client
+    return format_client(first_name, username, tg_id)
 
 
 def _short_ts(ts: str) -> str:

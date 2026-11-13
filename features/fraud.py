@@ -180,8 +180,8 @@ async def who_line(tg_id: int) -> str:
     from paidsub.handlers import _esc_name
 
     u = await get_user_info(tg_id)
-    name = _esc_name(u[1] if u else None, tg_id)
-    uname = f" (@{escape(u[2])})" if u and u[2] else ""
+    from core.database import format_client
+    who = format_client(u[1] if u else None, u[2] if u else None, tg_id)
     since = f" · с {str(u[3])[:10]}" if u and len(u) > 3 and u[3] else ""
 
     row = await get_paid_sub_by_tg_id(tg_id)
@@ -198,8 +198,7 @@ async def who_line(tg_id: int) -> str:
     seen = " · ".join(x for x in (
         f"устройств: {marks.get('hwid', 0)}" if marks.get("hwid") else "",
         f"адресов: {marks.get('ip', 0)}" if marks.get("ip") else "") if x)
-    return (f"👤 <b>{name}</b>{uname}\n"
-            f"<code>{tg_id}</code>{since}\n"
+    return (f"👤 {who}{since}\n"
             f"💳 {sub}" + (f"\n🔎 {seen}" if seen else ""))
 
 

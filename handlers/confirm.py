@@ -51,12 +51,11 @@ def confirm_keyboard(yes_label: str, yes_cb: str, no_cb: str, back_cb: str) -> I
 async def _who(tg_id) -> str:
     if not tg_id:
         return "без привязки к Telegram"
-    from core.database import get_user_info
+    from core.database import get_user_info, format_client
     u = await get_user_info(tg_id)
     if not u:
         return f"<code>{tg_id}</code>"
-    name = html.escape(u[1] or str(tg_id))
-    return (f"{name} (@{html.escape(u[2])})" if u[2] else name) + f" · <code>{tg_id}</code>"
+    return format_client(u[1], u[2], tg_id)
 
 
 async def _panel_enabled(email) -> bool | None:

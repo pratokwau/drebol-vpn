@@ -108,12 +108,12 @@ async def handle_ticket_list(query, page: int = 1, status: str = "open"):
     for i, row in enumerate(rows, 1):
         (user_id, first_name, username, _total, unread, last_time,
          last_text, last_from_admin, t_status, topic, waiting) = row
-        name = escape(str(first_name or user_id))
-        uname = f" @{escape(username)}" if username else ""
+        from core.database import format_client
+        who_line = format_client(first_name, username, user_id)
         preview = escape((last_text or "").replace("\n", " ")[:60])
         who = "🛡" if last_from_admin else "👤"
         wait = fmt_wait(waiting)
-        head = f"{i}. {STATUS_MARK.get(t_status, '💬')} <b>{name}</b>{uname}"
+        head = f"{i}. {STATUS_MARK.get(t_status, '💬')} {who_line}"
         if unread:
             head += f" · <b>+{unread}</b>"
         lines.append(head)
@@ -177,8 +177,13 @@ async def handle_ticket_view(query, user_id: int, page: int = 1):
     await mark_ticket_read(user_id)
 
     user_info = await get_user_info(user_id)
+    from core.database import format_client
+    who_line = format_client(
+        user_info[1] if user_info else None,
+        user_info[2] if user_info else None,
+        user_id,
+    )
     first_name = escape(str(user_info[1] if user_info else user_id))
-    username = f" @{escape(user_info[2])}" if user_info and user_info[2] else ""
 
     msgs, total_pages = await get_support_messages(user_id, page)
     has_files = (await count_support_files(user_id)) > 0
@@ -191,7 +196,7 @@ async def handle_ticket_view(query, user_id: int, page: int = 1):
         status_line += f" · ⏳ <b>{wait}</b>"
 
     head = (
-        f"🎫 <b>{first_name}</b>{username}  ·  <code>{user_id}</code>\n"
+        f"🎫 {who_line}\n"
         f"📌 {topic_label(ticket['topic'])}  ·  {status_line}"
     )
 

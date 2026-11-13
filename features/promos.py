@@ -55,8 +55,8 @@ def reward_text(kind: str, value: int) -> str:
 def _who(u, tg_id) -> str:
     if not u:
         return f"<code>{tg_id}</code>"
-    name = html.escape(str(u[1] or tg_id))
-    return (f"{name} (@{html.escape(u[2])})" if u[2] else name) + f" · <code>{tg_id}</code>"
+    from core.database import format_client
+    return format_client(u[1], u[2], tg_id)
 
 
 # ── Выдача ───────────────────────────────────────────────────────────────────

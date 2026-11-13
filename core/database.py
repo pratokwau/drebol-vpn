@@ -2595,6 +2595,24 @@ async def get_user_info(user_id: int) -> tuple | None:
             return await cur.fetchone()
 
 
+def format_client(first_name, username, tg_id, html: bool = True) -> str:
+    """Единый формат клиента везде в админке: имя • @юзернейм • tg_id.
+
+    Пустые части пропускаются. html=True — tg_id в <code> (текст сообщения),
+    False — голый id (подписи кнопок, там HTML не работает).
+    """
+    import html as _html
+
+    def esc(v):
+        return _html.escape(str(v)) if html else str(v)
+
+    name = esc(first_name) if first_name else None
+    uname = f"@{esc(username)}" if username else None
+    tid = f"<code>{tg_id}</code>" if (tg_id and html) else (str(tg_id) if tg_id else None)
+    parts = [p for p in (name, uname, tid) if p]
+    return " • ".join(parts) if parts else "—"
+
+
 # ── Winback ──────────────────────────────────────────────────────────────────
 
 async def winback_stage(tg_id: int) -> int:

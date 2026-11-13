@@ -411,10 +411,10 @@ SUB_MARKS = {"active": "🟢", "expired": "🔴"}
 
 
 def _found_label(tg_id, first_name, username, sub_status) -> str:
+    from core.database import format_client
     mark = SUB_MARKS.get(sub_status, "⚪️")
-    name = str(first_name or tg_id)
-    tail = f" @{username}" if username else f" · {tg_id}"
-    return f"{mark} {name}{tail}"[:60]
+    # подпись кнопки — plain text, без HTML
+    return f"{mark} {format_client(first_name, username, tg_id, html=False)}"[:60]
 
 
 async def handle_find_user(query, context: ContextTypes.DEFAULT_TYPE):
@@ -490,17 +490,19 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
 
     from html import escape
     _, first_name, username = user_info
-    # имя человек задаёт сам — экранируем, иначе карточка не откроется
-    first_name = escape(str(first_name or tg_id))
-    uname = escape(f"@{username}" if username else f"id{tg_id}")
+    # единый формат клиента: имя — кликабельная ссылка, дальше • @юзернейм • id
+    name_html = escape(str(first_name or tg_id))
+    who = f'<b><a href="tg://user?id={tg_id}">{name_html}</a></b>'
+    if username:
+        who += f" • @{escape(username)}"
+    who += f" • <code>{tg_id}</code>"
     # помощнику карточка без денег и без управления подпиской
     from features.staff import is_helper
     viewer = getattr(query_or_msg, "from_user", None)
     limited = bool(viewer) and is_helper(viewer.id)
 
     lines = [
-        f'👤 <b><a href="tg://user?id={tg_id}">{first_name}</a></b>',
-        f"{uname}  ·  <code>{tg_id}</code>",
+        f"👤 {who}",
     ]
 
     from features.blacklist import entry as bl_entry, public_reason

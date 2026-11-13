@@ -2145,16 +2145,34 @@ async def check_expired_subs(context):
                                "триал" if times_renewed == 0 else "оплаченный")
             await log_activity(tg_id, "ev:expired")
 
-        # Единственное, что делаем в панели, — ещё раз отдаём ей ту же дату
-        # окончания. Запрос идемпотентный, зато если срок в панели когда-то
-        # разъехался с базой (например, правили руками), он снова сойдётся.
-        from services.panel import update_client_expire
-        synced = await update_client_expire(email, expire_str)
-        if not synced.get("success"):
-            from core.log_channel import send_log as _send_log
-            await _send_log(context.bot,
-                f"⚠️ Срок в панели не сошёлся с базой: <code>{email}</code> — "
-                f"{synced.get('error', '?')}\nПроверь, закрыт ли доступ.")
+        # Панель закрывает доступ сама по своему сроку. Перезаписывать её
+        # прошедшей датой Remnawave не даёт («Validation failed») — а разница
+        # в секунды не стоит ни запроса, ни тревоги. Проверяем только, что
+        # панель не даёт доступ сильно дольше базы (правили руками).
+        try:
+            from services.panel import _name as _panel_name
+            import services.remnawave as rw
+            from datetime import datetime as _dt
+            _r = await rw.user_by_name(_panel_name(email))
+            _panel_exp = ((_r.get("data") or {}).get("expireAt")
+                          if _r.get("ok") else None)
+            _drift = 0
+            if _panel_exp:
+                _pdt = _dt.fromisoformat(str(_panel_exp).replace("Z", "+00:00"))
+                if _pdt.tzinfo is not None:
+                    _pdt = _pdt.replace(tzinfo=None)
+                _drift = (_pdt - expire_dt).total_seconds()
+            # панель даёт доступ дольше базы больше чем на 5 минут —
+            # это уже не погрешность, а ручная правка: доступ открыт зря
+            if _drift > 300:
+                from core.log_channel import send_log as _send_log
+                await _send_log(context.bot,
+                    f"⚠️ Панель даёт доступ дольше базы: <code>{email}</code>\n"
+                    f"База до: <b>{expire_str[:16]}</b> · панель до: "
+                    f"<b>{str(_panel_exp)[:16]}</b>\n"
+                    "Отключи клиента в панели руками.")
+        except Exception:
+            pass
 
         if not tg_id:
             continue
