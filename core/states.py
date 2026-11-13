@@ -3,8 +3,6 @@ AWAITING_CHANNEL = "awaiting_channel"
 AWAITING_BROADCAST = "awaiting_broadcast"
 AWAITING_BROADCAST_BUTTONS = "awaiting_broadcast_buttons"
 AWAITING_BROADCAST_PHOTO = "awaiting_broadcast_photo"
-AWAITING_SUPPORT_MSG = "awaiting_support_msg"
-AWAITING_ADMIN_REPLY = "awaiting_admin_reply"
 AWAITING_PRIVACY_URL = "awaiting_privacy_url"
 AWAITING_TERMS_URL = "awaiting_terms_url"
 AWAITING_REFUND_URL = "awaiting_refund_url"
@@ -69,9 +67,8 @@ AWAITING_FIND_USER = "awaiting_find_user"
 
 # Лог-канал
 AWAITING_LOG_CHANNEL = "awaiting_log_channel"
-# Группа поддержки (темы тикетов + логи)
+# Группа поддержки (темы обращений + логи)
 AWAITING_SUPPORT_GROUP = "awaiting_support_group"
-AWAITING_SUPPORT_CONTACT = "awaiting_support_contact"
 AWAITING_CABINET_PORT = "awaiting_cabinet_port"
 AWAITING_CABINET_PUBLIC = "awaiting_cabinet_public"
 AWAITING_CABINET_UPSTREAM = "awaiting_cabinet_upstream"
@@ -79,7 +76,6 @@ AWAITING_TURNSTILE_SITE = "awaiting_turnstile_site"
 AWAITING_TURNSTILE_SECRET = "awaiting_turnstile_secret"
 
 # Winback
-AWAITING_QUICK_REPLY = "awaiting_quick_reply"
 AWAITING_SITE_HOST = "awaiting_site_host"
 AWAITING_SITE_USER = "awaiting_site_user"
 AWAITING_SITE_PASS = "awaiting_site_pass"

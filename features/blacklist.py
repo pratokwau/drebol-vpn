@@ -40,9 +40,9 @@ DEFAULT_REASON = "Нарушение правил сервиса"
 DATE_FMT = "%d.%m.%Y %H:%M:%S"
 PER_PAGE = 10
 
-# Что человеку из ЧС остаётся: только поддержка
-USER_ALLOWED = {"support_open", "support_files"}
-USER_ALLOWED_PREFIXES = ("support_page:",)
+# Что человеку из ЧС остаётся: только поддержка (экран со ссылкой на бота)
+USER_ALLOWED = {"support_open"}
+USER_ALLOWED_PREFIXES = ()
 
 LIST_TABS = {"manual": "Вручную", "allow": "Исключения", "people": "Люди в ЧС"}
 LIST_TITLES = {

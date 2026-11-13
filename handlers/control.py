@@ -72,17 +72,6 @@ CB_LABELS = {
     "fraud_scan": "🕵 Ручная проверка",
     "fraud_ok": "🙈 Пара не фрод",
     "support_open": "💬 Открыл поддержку",
-    "support_settings": "💬 Настройки поддержки",
-    "support_mode": "💬 Сменил режим поддержки",
-    "support_contact": "👤 Аккаунт поддержки",
-    "support_topic": "💬 Тема обращения",
-    "support_write": "✍️ Пишет в поддержку",
-    "support_close": "✅ Закрыл свой вопрос",
-    "ticket_close": "✅ Закрыл тикет",
-    "ticket_send": "⚡ Ответил шаблоном",
-    "quick_menu": "⚡ Шаблоны ответов",
-    "support_page": "💬 Листал поддержку",
-    "support_files": "📎 Файлы поддержки",
     "referral": "👥 Рефералы",
     "info": "ℹ️ Инфо",
     "prices": "💰 Цены",
@@ -210,9 +199,6 @@ CB_LABELS = {
     "mnt_menu": "⏸ Техработы",
     # работа в поддержке — в аудите видно, кто из помощников что открывал
     "admin_panel": "⚙️ Открыл панель",
-    "ticket_list": "🎫 Тикеты",
-    "ticket_view": "🎫 Открыл тикет",
-    "ticket_reply": "✏️ Начал ответ в тикет",
     "find_user": "🔍 Поиск юзера",
     "user_profile": "👤 Открыл профиль",
     "user_activity": "📜 Действия юзера",
@@ -250,12 +236,9 @@ EVENT_LABELS = {
 }
 
 STATE_LABELS = {
-    "awaiting_support_msg": "✉️ Написал в поддержку",
     "awaiting_promo_code": "🎟 Ввёл промокод",
-    "awaiting_admin_reply": "✉️ Ответил в тикет",
     "awaiting_dm_user": "📌 Написал юзеру",
     "awaiting_find_user": "🔍 Искал юзера",
-    "awaiting_support_contact": "👤 Ввёл аккаунт поддержки",
     "awaiting_cabinet_public": "🔗 Ввёл адрес API",
     "awaiting_cabinet_port": "🔌 Ввёл порт API",
     "awaiting_helper_id": "👥 Ввёл помощника",
@@ -377,7 +360,8 @@ async def log_update(update, context):
     """Журнал: каждое действие в боте, раньше всех остальных обработчиков.
 
     Хранится только тип действия — какая кнопка, команда или вид сообщения.
-    Текст сообщений не сохраняется: обращения в поддержку и так лежат в тикетах.
+    Текст сообщений не сохраняется: обращения в поддержку и так лежат
+    в истории поддержки (support_messages).
     """
     from features.staff import is_staff
     from core.database import log_activity

@@ -3,7 +3,7 @@
 
 Сводка приходит админу в личку каждый день: вчерашняя выручка нетто,
 новые пользователи, возвраты, деньги за месяц, заканчивающиеся подписки,
-тикеты, падения за сутки. Сверка с Platega — в той же сводке. Проверка
+падения за сутки. Сверка с Platega — в той же сводке. Проверка
 операторов — только когда пора (раз в 2 дня, дата последней проверки
 хранится в конфиге). Алерты о падениях — сразу, как только что-то легло,
 и тоже выключаются здесь.
@@ -173,14 +173,12 @@ async def morning_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         from core.database import (
             finance_summary, get_dashboard_stats,
             get_digest_stats, get_downtime_events,
-            get_unread_tickets_count,
         )
         from paidsub.storage import count_paid_soon
         from handlers.finance import current_period
         d = await get_digest_stats()
         fin = await finance_summary(current_period())
         s = await get_dashboard_stats()
-        unread = await get_unread_tickets_count()
         soon = await count_paid_soon()
         falls = await get_downtime_events(int(_time.time()) - 86400)
         open_falls = [f for f in falls if not f.get("ended_at")]
@@ -202,8 +200,6 @@ async def morning_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             f"активных подписок <b>{s['paid_active']}</b>")
         if soon:
             lines.append(f"⏳ Заканчиваются (3 дня): <b>{soon}</b>")
-        if unread:
-            lines.append(f"🎫 Открытых тикетов: <b>{unread}</b>")
         if open_falls:
             lines.append("🔴 Сейчас лежит: " +
                          ", ".join(_fall_label(f) for f in open_falls))

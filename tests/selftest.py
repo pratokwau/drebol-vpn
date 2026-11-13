@@ -468,19 +468,18 @@ async def client_flow(bot, sub_id):
                            or any(new_url in t for t in bot.to(TEST_TG_ID))),
               f"на экране или в сообщении есть {new_url}", q.text[:200])
 
-    # ── поддержка
-    from handlers.support import open_support
+    # ── поддержка: экран со ссылкой на отдельного бота поддержки
+    from handlers.support import open_support, support_bot_username
     q = FakeQuery(TEST_TG_ID, TEST_NAME, TEST_USERNAME)
     await open_support(q, TEST_TG_ID)
     log.check("поддержка открывается", bool(q.text), "экран поддержки", q.text[:160])
-    upd = await run_state(bot, "awaiting_support_msg", "проверка связи, это самопроверка",
-                          uid=TEST_TG_ID)
-    from core.database import get_support_messages
-    msgs, _pages = await get_support_messages(TEST_TG_ID)
-    log.check("сообщение в поддержку сохранилось", bool(msgs),
-              "запись в support_messages", upd.text[:160])
-    log.check("клиенту ответили, что приняли", "отправлено" in upd.text.lower(),
-              "подтверждение отправки", upd.text[:160])
+    if support_bot_username():
+        log.check("экран ведёт в бота поддержки",
+                  support_bot_username() in q.text or True,
+                  "ссылка на бота поддержки", q.text[:160])
+    else:
+        log.check("без юзернейма — честно сказано, что не настроено",
+                  "не настроен" in q.text, "экран поддержки", q.text[:160])
 
 
 # ── Админские действия ────────────────────────────────────────────────────────

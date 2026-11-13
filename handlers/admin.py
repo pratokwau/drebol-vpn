@@ -33,16 +33,11 @@ async def _redraw(query, text, markup):
 
 
 async def handle_admin_panel(query):
-    from core.database import get_unread_tickets_count
-    unread = await get_unread_tickets_count()
     # короткая сводка дня прямо на входе — чтобы не ходить в статистику ради цифр
     summary = ""
     try:
         from core.database import get_dashboard_stats
         s = await get_dashboard_stats()
-        todo = []
-        if unread:
-            todo.append(f"🎫 открытых тикетов: <b>{unread}</b>")
         summary = (
             "\n\n<blockquote>"
             f"👥 Пользователей: <b>{s['users_total']}</b>  ·  сегодня <b>+{s['users_today']}</b>\n"
@@ -50,17 +45,14 @@ async def handle_admin_panel(query):
             f"💵 Сегодня: <b>{s['revenue_today']} ₽</b>  ·  оплат <b>{s['payments_today']}</b>"
             "</blockquote>"
         )
-        if todo:
-            summary += "\n\n⏳ <b>Ждут вас</b>\n" + "\n".join(todo)
     except Exception:
-        if unread:
-            summary = f"\n\n🔴 Открытых тикетов: <b>{unread}</b>"
+        pass
     # _redraw: двойное нажатие «Назад в админку» не должно падать
     # с «Message is not modified» — см. фикс кнопки «Обновить»
     await _redraw(
         query,
         "🛠 <b>Админка</b>" + summary,
-        admin_keyboard(unread),
+        admin_keyboard(),
     )
 
 
@@ -133,9 +125,6 @@ async def handle_dashboard(query):
         f"Оплачивали хоть раз: <b>{s['paying_total']}</b>  ·  всего записей <b>{s['paid_total']}</b>"
         "</blockquote>\n\n"
         f"{panel_block}"
-        "⏳ <b>Ждут действия</b>\n<blockquote>"
-        f"Открытых тикетов: <b>{s['unread_tickets']}</b>"
-        "</blockquote>\n\n"
         "🎁 <b>Прочее</b>\n<blockquote>"
         f"Рефералов: <b>{s['ref_total']}</b>  (с бонусом {s['ref_rewarded']})\n"
         f"Промокодов активно: <b>{s['promos_active']}</b>  ·  активаций <b>{s['promo_uses']}</b>\n"
@@ -541,15 +530,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     if ref_stats["total"] > 0:
         lines.append(f"\n👥 Приглашено: <b>{ref_stats['total']}</b> (с бонусом: {ref_stats['rewarded']})")
 
-    # Тикеты
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT COUNT(*) FROM support_messages WHERE user_id = ? AND from_admin = 0", (tg_id,)
-        ) as cur:
-            ticket_count = (await cur.fetchone())[0]
-    if ticket_count > 0:
-        lines.append(f"🎫 Сообщений в поддержку: <b>{ticket_count}</b>")
-
     # Оплаты и история — только админу: в истории есть суммы оплат
     history_count = 0
     if not limited:
@@ -571,8 +551,6 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
     if sub and not limited:
         kb_rows.append([InlineKeyboardButton("💳 К подписке", callback_data=f"paid_sub_view:{sub[0]}")])
     info_btns = [InlineKeyboardButton("📜 Действия", callback_data=f"user_activity:{tg_id}:1")]
-    if ticket_count > 0:
-        info_btns.append(InlineKeyboardButton("🎫 Переписка", callback_data=f"ticket_view:{tg_id}:1"))
     if history_count > 0:
         info_btns.append(InlineKeyboardButton("🕐 История подписки",
                                              callback_data=f"user_feed:{tg_id}:subs:1"))
@@ -639,7 +617,7 @@ async def handle_clear_log_channel(query):
     await handle_log_channel_settings(query)
 
 
-# ── Группа поддержки (темы тикетов + логи) ───────────────────────────────────
+# ── Группа поддержки (темы обращений + логи) ───────────────────────────────────
 
 async def handle_support_group_settings(query):
     cfg = load_config()

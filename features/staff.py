@@ -1,6 +1,6 @@
 """Помощники: люди с частью админских прав.
 
-Каждому помощнику права выдаются поштучно: тикеты, карточки пользователей,
+Каждому помощнику права выдаются поштучно: карточки пользователей,
 подписки, оплаты, промокоды, чёрный список, рассылки, статистика. Что не
 выдано — то закрыто: и кнопки, и ввод текстом. Всё, что помощник делает,
 видно в «📜 Логи → Аудит админки».
@@ -17,8 +17,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config import ADMIN_ID, load_config, save_config
 from core.states import (
-    AWAITING_ADMIN_REPLY, AWAITING_DM_USER, AWAITING_FIND_USER, AWAITING_HELPER_ID,
-    AWAITING_PAID_SUB_EXTEND, AWAITING_PAID_SUB_REDUCE, AWAITING_QUICK_REPLY,
+    AWAITING_DM_USER, AWAITING_FIND_USER, AWAITING_HELPER_ID,
+    AWAITING_PAID_SUB_EXTEND, AWAITING_PAID_SUB_REDUCE,
     AWAITING_PROMO_GIVE_USER, AWAITING_PROMO_CUSTOM,
     AWAITING_BL_ADD, AWAITING_BL_REASON, AWAITING_BL_CHECK, AWAITING_BL_UNTIL,
     AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
@@ -31,16 +31,6 @@ BASE_EXACT = {"admin_panel", "back_start", "noop", "helper_panel"}
 # Права: ключ → что открывает. exact — точные кнопки, prefix — начала
 # callback'ов, states — ввод текстом, который эти кнопки запускают.
 PERMS = {
-    "tickets": {
-        "label": "🎫 Тикеты",
-        "hint": "читать обращения и отвечать в поддержке",
-        "exact": set(),
-        "prefix": ("ticket_list:", "ticket_view:", "ticket_files:", "ticket_reply:",
-                   "ticket_tab:", "ticket_quick:", "ticket_send:", "ticket_close:",
-                   "quick_menu", "quick_add", "quick_del:"),
-        "states": {AWAITING_ADMIN_REPLY, AWAITING_QUICK_REPLY},
-        "button": ("🎫 Тикеты", "ticket_list:1"),
-    },
     "users": {
         "label": "🔍 Карточки людей",
         "hint": "искать пользователя и смотреть его карточку",
@@ -123,7 +113,7 @@ PERMS = {
 }
 
 # Что получает помощник, добавленный до появления прав
-DEFAULT_PERMS = ("tickets", "users", "dm")
+DEFAULT_PERMS = ("users", "dm")
 
 # Все состояния помощников — из них messages.py узнаёт, что ввод не пользовательский
 HELPER_STATES = {st for p in PERMS.values() for st in p["states"]}
@@ -191,12 +181,6 @@ def helper_states(uid: int) -> set:
     return out
 
 
-def staff_chat_ids(perm: str = "tickets") -> list[int]:
-    """Кому слать уведомления. По умолчанию — тем, кто ведёт тикеты."""
-    return [ADMIN_ID] + [h for h in helper_ids()
-                         if h != ADMIN_ID and perm in helper_perms(h)]
-
-
 def _save_ids(ids: list[int]):
     cfg = load_config()
     cfg["helper_ids"] = ids
@@ -224,7 +208,6 @@ def _name(u, uid) -> str:
 
 async def handle_helper_panel(query):
     """Меню помощника: только то, на что у него есть права."""
-    from core.database import get_unread_tickets_count
     uid = query.from_user.id
     perms = helper_perms(uid)
 
@@ -233,10 +216,6 @@ async def handle_helper_panel(query):
         if key not in perms or not rule["button"]:
             continue
         label, cb = rule["button"]
-        if key == "tickets":
-            unread = await get_unread_tickets_count()
-            if unread:
-                label = f"🎫 Тикеты · 🔴 {unread}"
         pair.append(InlineKeyboardButton(label, callback_data=cb))
         if len(pair) == 2:
             rows.append(pair)
@@ -277,7 +256,7 @@ async def handle_helpers_menu(query, context=None):
         lines.append("<blockquote>" + "\n".join(people) + "</blockquote>")
     else:
         lines.append("<blockquote>Пока никого.</blockquote>")
-    lines += ["", "<i>Права выдаются поштучно: тикеты, карточки людей, подписки, "
+    lines += ["", "<i>Права выдаются поштучно: карточки людей, подписки, "
               "оплаты, промокоды, чёрный список, рассылки, статистика. Что не выдано — "
               "закрыто. Действия помощников видны в 📜 Логи → Аудит админки.</i>"]
     kb.append([InlineKeyboardButton("➕ Добавить помощника", callback_data="helper_add")])
@@ -402,7 +381,7 @@ async def handle_helper_input(update, context, text: str):
     await send_log(context.bot, f"👥 Новый помощник: {_name(u, uid)} · <code>{uid}</code>")
     await update.message.reply_text(
         f"✅ <b>{_name(u, uid)}</b> теперь помощник.\n\n"
-        "<blockquote>Выдано по умолчанию: тикеты, карточки людей, сообщения людям.</blockquote>"
+        "<blockquote>Выдано по умолчанию: карточки людей, сообщения людям.</blockquote>"
         + note,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([

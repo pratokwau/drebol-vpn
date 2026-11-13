@@ -40,7 +40,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
         rows.append([InlineKeyboardButton("🪪 Админская подписка", callback_data="my_sub")])
     info_btn = InlineKeyboardButton("ℹ️ Инфо", callback_data="info")
     if on("support"):
-        # в режиме «аккаунт в телеграме» кнопка уводит прямо в личку поддержки
+        # кнопка открывает экран со ссылкой на отдельного бота поддержки
         from handlers.support import support_button
         rows.append([support_button(text="🛟 Поддержка", force=is_admin), info_btn])
     else:
@@ -55,10 +55,7 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
 
 # ── Админка ───────────────────────────────────────────────────────────────────
 
-def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
-    # Поддержка и тикеты — один раздел: бейдж непрочитанных виден сразу.
-    support_label = (f"🛟 Поддержка и тикеты · 🔴 {unread_tickets}"
-                     if unread_tickets else "🛟 Поддержка и тикеты")
+def admin_keyboard() -> InlineKeyboardMarkup:
     # включённые техработы должны бросаться в глаза, чтобы про них не забыли
     import core.maintenance as mnt
     mnt_label = "🔴 Техработы ВКЛЮЧЕНЫ" if mnt.is_maintenance() else "🛠 Техработы и функции"
@@ -78,8 +75,8 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b("🔍 Найти юзера", "find_user"), b("📜 Логи", "ctl_menu")],
         [b("💳 Платные подписки", "paid_subs"), b("📋 Админские", "admin_subs")],
         # общение
-        [b(support_label, "support_settings"), b("📣 Рассылка", "broadcast")],
-        [b("👥 Помощники", "helpers_menu"), b("📢 Канал", "channel_menu")],
+        [b("📣 Рассылка", "broadcast"), b("👥 Помощники", "helpers_menu")],
+        [b("📢 Канал", "channel_menu")],
         # удержание и защита
         [b("🎯 Возврат ушедших", "winback_settings"), b("⏰ Напоминания", "remind_settings")],
         [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
@@ -122,115 +119,6 @@ def documents_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(consent_label, callback_data="set_consent_url")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
-
-
-# ── Поддержка (юзер) ──────────────────────────────────────────────────────────
-
-def support_keyboard(page: int, total_pages: int, has_files: bool = False,
-                     can_close: bool = True) -> InlineKeyboardMarkup:
-    rows = []
-    if total_pages > 1:
-        nav = []
-        if page > 1:
-            nav.append(InlineKeyboardButton("◀️", callback_data=f"support_page:{page - 1}"))
-        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
-        if page < total_pages:
-            nav.append(InlineKeyboardButton("▶️", callback_data=f"support_page:{page + 1}"))
-        rows.append(nav)
-    extra = [InlineKeyboardButton("🔄 Обновить", callback_data=f"support_page:{page}")]
-    if has_files:
-        extra.insert(0, InlineKeyboardButton("📎 Файлы", callback_data="support_files"))
-    if can_close:
-        extra.append(InlineKeyboardButton("✅ Вопрос решён", callback_data="support_close"))
-    rows.append(extra)
-    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="back_start")])
-    return InlineKeyboardMarkup(rows)
-
-
-def support_topics_keyboard(topics: dict) -> InlineKeyboardMarkup:
-    """Темы обращения: по две в ряд, чтобы экран не растягивался."""
-    rows, pair = [], []
-    for key, t in topics.items():
-        pair.append(InlineKeyboardButton(f"{t['emoji']} {t['name']}",
-                                         callback_data=f"support_topic:{key}"))
-        if len(pair) == 2:
-            rows.append(pair)
-            pair = []
-    if pair:
-        rows.append(pair)
-    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="back_start")])
-    return InlineKeyboardMarkup(rows)
-
-
-# ── Тикеты (админ) ────────────────────────────────────────────────────────────
-
-_TICKET_TABS = (("open", "🔴 Открытые"), ("answered", "✅ Отвеченные"),
-                ("closed", "🗂 Закрытые"))
-
-
-def ticket_list_keyboard(ticket_rows, page: int, total_pages: int,
-                         status: str = "open") -> InlineKeyboardMarkup:
-    keyboard = []
-    # Подробности видно в тексте сообщения, поэтому кнопка короткая:
-    # номер, имя и сколько человек ждёт
-    row_btns = []
-    for i, row in enumerate(ticket_rows, 1):
-        user_id, first_name = row[0], row[1]
-        t_status, waiting = row[8], row[10]
-        name = (first_name or str(user_id))[:12]
-        mark = {"open": "🔴", "answered": "✅", "closed": "🗂"}.get(t_status, "💬")
-        label = f"{i}. {mark} {name}"
-        if t_status == "open" and waiting:
-            from handlers.tickets import fmt_wait
-            label += f" · {fmt_wait(waiting)}"
-        row_btns.append(InlineKeyboardButton(label, callback_data=f"ticket_view:{user_id}:1"))
-        if len(row_btns) == 2:
-            keyboard.append(row_btns)
-            row_btns = []
-    if row_btns:
-        keyboard.append(row_btns)
-
-    tabs = [InlineKeyboardButton(("• " if status == key else "") + label,
-                                 callback_data=f"ticket_tab:{key}:1")
-            for key, label in _TICKET_TABS]
-    keyboard.append(tabs)
-
-    if total_pages > 1:
-        nav = []
-        if page > 1:
-            nav.append(InlineKeyboardButton("◀️", callback_data=f"ticket_tab:{status}:{page - 1}"))
-        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
-        if page < total_pages:
-            nav.append(InlineKeyboardButton("▶️", callback_data=f"ticket_tab:{status}:{page + 1}"))
-        keyboard.append(nav)
-    keyboard.append([InlineKeyboardButton("⚡ Шаблоны", callback_data="quick_menu")])
-    keyboard.append([InlineKeyboardButton("◀️ К поддержке", callback_data="support_settings")])
-    return InlineKeyboardMarkup(keyboard)
-
-
-def ticket_view_keyboard(user_id: int, page: int, total_pages: int,
-                         has_files: bool = False, closed: bool = False) -> InlineKeyboardMarkup:
-    rows = []
-    if total_pages > 1:
-        nav = []
-        if page > 1:
-            nav.append(InlineKeyboardButton("◀️", callback_data=f"ticket_view:{user_id}:{page - 1}"))
-        nav.append(InlineKeyboardButton(f"{page}/{total_pages}", callback_data="noop"))
-        if page < total_pages:
-            nav.append(InlineKeyboardButton("▶️", callback_data=f"ticket_view:{user_id}:{page + 1}"))
-        rows.append(nav)
-    rows.append([
-        InlineKeyboardButton("✏️ Ответить", callback_data=f"ticket_reply:{user_id}"),
-        InlineKeyboardButton("⚡ Шаблон", callback_data=f"ticket_quick:{user_id}"),
-    ])
-    second = [InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{user_id}")]
-    if has_files:
-        second.insert(0, InlineKeyboardButton("📎 Файлы", callback_data=f"ticket_files:{user_id}"))
-    if not closed:
-        second.append(InlineKeyboardButton("✅ Закрыть", callback_data=f"ticket_close:{user_id}"))
-    rows.append(second)
-    rows.append([InlineKeyboardButton("◀️ К тикетам", callback_data="ticket_list:1")])
-    return InlineKeyboardMarkup(rows)
 
 
 # ── Общие ─────────────────────────────────────────────────────────────────────

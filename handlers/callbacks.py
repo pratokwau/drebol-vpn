@@ -1,7 +1,6 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 from config import ADMIN_ID, load_config, save_config
-from core.states import AWAITING_SUPPORT_MSG
 from core.subscription import is_subscribed, subscribe_keyboard, subscribe_text
 from handlers.user import (
     handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_my_lte,
@@ -53,11 +52,7 @@ from web.site_deploy import (
     handle_site_deploy, handle_site_cert, handle_site_delete,
     handle_site_check, handle_site_auto,
 )
-from handlers.support import (
-    open_support, handle_support_files, show_topic_hint,
-    start_writing, handle_support_close,
-    handle_support_settings, handle_support_mode, handle_support_contact_ask,
-)
+from handlers.support import open_support
 from core.maintenance import (
     handle_maintenance_menu, handle_maintenance_toggle,
     handle_maintenance_text, handle_feature_toggle,
@@ -133,11 +128,6 @@ from handlers.broadcast import (
     handle_bcast_buttons_add, handle_bcast_buttons_skip,
     handle_bcast_edit_text, handle_bcast_cancel, handle_bcast_send,
     handle_bcast_photo_add, handle_bcast_photo_skip, handle_bcast_photo_del,
-)
-from handlers.tickets import (
-    handle_ticket_list, handle_ticket_view, handle_ticket_reply_start,
-    handle_ticket_files, handle_ticket_quick, handle_ticket_send_quick,
-    handle_ticket_close, handle_quick_menu, handle_quick_add, handle_quick_del,
 )
 from adminsub.handlers import (
     handle_admin_subs_menu, handle_presets_menu,
@@ -326,28 +316,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("dev_buy:"):
         await handle_dev_buy(query, context, int(data.split(":")[1]))
     elif data == "support_open":
-        # в режиме «аккаунт в телеграме» переписки в боте нет — состояние не ставим
-        from handlers.support import contact_mode
-        if contact_mode():
-            context.user_data.pop("state", None)
-        else:
-            context.user_data["state"] = AWAITING_SUPPORT_MSG
+        # экран со ссылкой на отдельного бота поддержки
         await open_support(query, update.effective_user.id)
-    elif data.startswith("support_topic:"):
-        await show_topic_hint(query, context, data.split(":")[1])
-    elif data.startswith("support_write:"):
-        await start_writing(query, context, data.split(":")[1])
-    elif data == "support_close":
-        context.user_data.pop("state", None)
-        await handle_support_close(query, update.effective_user.id)
-    elif data == "support_files":
-        if not contact_mode():
-            context.user_data["state"] = AWAITING_SUPPORT_MSG
-        await handle_support_files(query, update.effective_user.id)
-    elif data.startswith("support_page:"):
-        page = int(data.split(":")[1])
-        context.user_data["state"] = AWAITING_SUPPORT_MSG
-        await open_support(query, update.effective_user.id, page)
 
     # ── Только админ ─────────────────────────────────────────────────────────
     elif not adm and not staff_cb:
@@ -559,12 +529,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data in ("cab_turnstile_site", "cab_turnstile_secret"):
         from web.webapi import handle_turnstile_ask
         await handle_turnstile_ask(query, context, data.split("_")[2])
-    elif data == "support_settings":
-        await handle_support_settings(query, context)
-    elif data.startswith("support_mode:"):
-        await handle_support_mode(query, context, data.split(":")[1])
-    elif data == "support_contact":
-        await handle_support_contact_ask(query, context)
     elif data == "log_channel_settings":
         await handle_log_channel_settings(query)
     elif data == "set_log_channel":
@@ -746,33 +710,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_bcast_send(query, context)
     elif data == "bcast_cancel":
         await handle_bcast_cancel(query, context)
-
-    # Тикеты
-    elif data.startswith("ticket_list:"):
-        await handle_ticket_list(query, int(data.split(":")[1]))
-    elif data.startswith("ticket_tab:"):
-        _t = data.split(":")
-        await handle_ticket_list(query, int(_t[2]), _t[1])
-    elif data.startswith("ticket_quick:"):
-        await handle_ticket_quick(query, int(data.split(":")[1]))
-    elif data.startswith("ticket_send:"):
-        _t = data.split(":")
-        await handle_ticket_send_quick(query, int(_t[1]), int(_t[2]), context)
-    elif data.startswith("ticket_close:"):
-        await handle_ticket_close(query, int(data.split(":")[1]), context)
-    elif data == "quick_menu":
-        await handle_quick_menu(query)
-    elif data == "quick_add":
-        await handle_quick_add(query, context)
-    elif data.startswith("quick_del:"):
-        await handle_quick_del(query, int(data.split(":")[1]))
-    elif data.startswith("ticket_view:"):
-        _, uid, page = data.split(":")
-        await handle_ticket_view(query, int(uid), int(page))
-    elif data.startswith("ticket_files:"):
-        await handle_ticket_files(query, int(data.split(":")[1]))
-    elif data.startswith("ticket_reply:"):
-        await handle_ticket_reply_start(query, int(data.split(":")[1]), context)
 
     # Админские подписки
     elif data == "admin_subs":
