@@ -56,7 +56,9 @@ def main_keyboard(is_admin: bool, has_sub: bool = False, paid_sub_status: str = 
 # ── Админка ───────────────────────────────────────────────────────────────────
 
 def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
-    tickets_label = f"🎫 Тикеты · 🔴 {unread_tickets}" if unread_tickets else "🎫 Тикеты"
+    # Поддержка и тикеты — один раздел: бейдж непрочитанных виден сразу.
+    support_label = (f"🛟 Поддержка и тикеты · 🔴 {unread_tickets}"
+                     if unread_tickets else "🛟 Поддержка и тикеты")
     # включённые техработы должны бросаться в глаза, чтобы про них не забыли
     import core.maintenance as mnt
     mnt_label = "🔴 Техработы ВКЛЮЧЕНЫ" if mnt.is_maintenance() else "🛠 Техработы и функции"
@@ -76,7 +78,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b("🔍 Найти юзера", "find_user"), b("📜 Логи", "ctl_menu")],
         [b("💳 Платные подписки", "paid_subs"), b("📋 Админские", "admin_subs")],
         # общение
-        [b(tickets_label, "ticket_list:1"), b("📣 Рассылка", "broadcast")],
+        [b(support_label, "support_settings"), b("📣 Рассылка", "broadcast")],
         [b("👥 Помощники", "helpers_menu"), b("📢 Канал", "channel_menu")],
         # удержание и защита
         [b("🎯 Возврат ушедших", "winback_settings"), b("⏰ Напоминания", "remind_settings")],
@@ -85,8 +87,7 @@ def admin_keyboard(unread_tickets: int = 0) -> InlineKeyboardMarkup:
         [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Веб-доступ", "web_menu")],
         [b("🌐 Проверка операторов", "netcheck_menu")],
         [b("💾 Бэкап и перенос", "backup_menu"), b("📄 Документы", "documents_menu")],
-        [b("🛟 Поддержка", "support_settings"), b("🧾 Лог-канал", "log_channel_settings")],
-        [b("👥 Группа поддержки", "support_group_settings")],
+        [b("🧾 Лог-канал", "log_channel_settings"), b("👥 Группа поддержки", "support_group_settings")],
         [b(mnt_label, "mnt_menu")],
         [b("🔄 Обновиться с GitHub", "git_update")],
         [b(f"⏰ Синхронизация · {sync_time}", "morning_menu")],
@@ -203,7 +204,7 @@ def ticket_list_keyboard(ticket_rows, page: int, total_pages: int,
             nav.append(InlineKeyboardButton("▶️", callback_data=f"ticket_tab:{status}:{page + 1}"))
         keyboard.append(nav)
     keyboard.append([InlineKeyboardButton("⚡ Шаблоны", callback_data="quick_menu")])
-    keyboard.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
+    keyboard.append([InlineKeyboardButton("◀️ К поддержке", callback_data="support_settings")])
     return InlineKeyboardMarkup(keyboard)
 
 

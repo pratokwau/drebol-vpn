@@ -321,7 +321,7 @@ async def handle_support_settings(query, context=None, note: str = ""):
     counts = await ticket_counts()
     unread = await get_unread_tickets_count()
 
-    lines = ["💬 <b>Поддержка</b>", ""]
+    lines = ["💬 <b>Поддержка и тикеты</b>", ""]
     if note:
         lines += [note, ""]
     lines.append(
@@ -329,29 +329,28 @@ async def handle_support_settings(query, context=None, note: str = ""):
         f"⚙️ Режим: <b>{'🎫 Переписка в боте' if mode == MODE_TICKETS else '👤 Аккаунт в телеграме'}</b>\n"
         f"👤 Аккаунт: <b>{'@' + name if name else 'не задан'}</b>"
         "</blockquote>")
-    if mode == MODE_TICKETS:
-        lines.append(
-            "<blockquote>"
-            f"🎫 Открытых обращений: <b>{counts.get('open', 0)}</b>  ·  "
-            f"без ответа: <b>{unread}</b>\n"
-            f"✅ Закрытых: <b>{counts.get('closed', 0)}</b>"
-            "</blockquote>")
+    lines.append(
+        "<blockquote>"
+        f"🎫 Открытых обращений: <b>{counts.get('open', 0)}</b>  ·  "
+        f"без ответа: <b>{unread}</b>\n"
+        f"✅ Закрытых: <b>{counts.get('closed', 0)}</b>"
+        "</blockquote>")
     lines.append(
         "\n<i>🎫 Переписка в боте — человек выбирает тему, бот сначала подсказывает сам, "
         "а переписка и файлы лежат в «Тикетах».\n"
         "👤 Аккаунт в телеграме — бот ничего не спрашивает: кнопка «Поддержка» открывает "
         "личку указанного аккаунта, и человек пишет туда.</i>")
 
-    kb = [[InlineKeyboardButton(("• " if mode == MODE_TICKETS else "") + "🎫 Переписка в боте",
+    tickets_btn = ("🎫 Тикеты" + (f" · 🔴 {unread}" if unread else ""))
+    kb = [[InlineKeyboardButton(tickets_btn, callback_data="ticket_list:1")]]
+    kb.append([InlineKeyboardButton(("• " if mode == MODE_TICKETS else "") + "🎫 Переписка в боте",
                                 callback_data="support_mode:tickets"),
            InlineKeyboardButton(("• " if mode == MODE_CONTACT else "") + "👤 Аккаунт",
-                                callback_data="support_mode:contact")]]
+                                callback_data="support_mode:contact")])
     kb.append([InlineKeyboardButton("✍️ Сменить аккаунт" if name else "✍️ Указать аккаунт",
                                     callback_data="support_contact")])
     if name:
         kb.append([InlineKeyboardButton(f"🔗 Открыть @{name}", url=support_url())])
-    if mode == MODE_TICKETS:
-        kb.append([InlineKeyboardButton("🎫 К тикетам", callback_data="ticket_list:1")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
