@@ -36,11 +36,15 @@ API_BASE = "https://api.globalping.io/v1"
 # У оператора может быть несколько ASN: проб Globalping на домашних
 # сетях 0–2 на ASN, и они то появляются, то пропадают, поэтому второй
 # ASN заметно повышает шанс поймать живую пробу. ASN проверены через
-# RIPEstat whois (AS16345 = BEE-AS, AS15378 = TELE2-RU-AS).
+# RIPEstat whois (AS16345 = BEE-AS, AS15378 = TELE2-RU-AS) и по живым
+# пробам Globalping (AS8402 — тоже Vimpelcom/Билайн, 2 пробы).
+# МегаФон (AS31133) и T2 (AS12958/AS15378) — в Globalping сейчас НЕТ
+# онлайн-проб в России вообще: это ограничение сети проб, а не баг —
+# оператор показывается как «—» (нет пробы), а не как блок.
 OPERATORS: list[tuple[str, list[str]]] = [
     ("МТС", ["AS8359"]),
     ("МегаФон", ["AS31133"]),
-    ("Билайн", ["AS3216", "AS16345"]),
+    ("Билайн", ["AS3216", "AS8402", "AS16345"]),
     ("T2", ["AS12958", "AS15378"]),
     ("Ростелеком", ["AS12389"]),
 ]
@@ -70,7 +74,9 @@ async def _post_measurement(session: aiohttp.ClientSession,
         "target": target,
         "locations": [{"magic": asn} for _, asns in operators
                       for asn in asns],
-        "limit": 1,
+        # 2 пробы на ASN: у оператора их 1–2, и вторая заметно повышает
+        # шанс, что хоть одна ответит (берём лучший исход по оператору)
+        "limit": 2,
         "measurementOptions": {
             "protocol": "HTTPS",
             "request": {"method": "HEAD"},
@@ -185,7 +191,7 @@ async def _check_one(session: aiohttp.ClientSession,
     return {"label": label, "domain": domain, "operators": ops}
 
 
-_RETRY_ATTEMPTS = 3
+_RETRY_ATTEMPTS = 5
 _RETRY_PAUSE = 10.0
 
 

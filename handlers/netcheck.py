@@ -181,7 +181,8 @@ async def handle_netcheck_menu(query, context: ContextTypes.DEFAULT_TYPE = None)
         f"Операторы: {ops}", "",
         "<i>Проверка занимает 10–30 секунд. «—» значит, что у "
         "Globalping сейчас нет онлайн-пробы в этой сети — это не блок, "
-        "просто повтори позже.</i>",
+        "просто повтори позже. МегаФон и T2 в Globalping почти никогда "
+        "не появляются: у сервиса нет проб в их сетях в России.</i>",
     ]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True,
