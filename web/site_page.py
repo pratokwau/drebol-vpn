@@ -3146,6 +3146,9 @@ CSS = """
   --r-sm: 14px;
   --font-display: "Unbounded","Inter",sans-serif;
   --font-body: "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  /* Плавная кривая для всех появлений и наведений: без рывков,
+     с мягким замедлением в конце — как у премиальных сайтов. */
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -3243,13 +3246,13 @@ body, main, header, footer { position: relative; z-index: 1; }
 .brand img {
   height: 44px; width: auto; max-width: 210px; object-fit: contain;
   filter: drop-shadow(0 0 14px rgba(46,168,255,.25));
-  transition: filter .3s ease, transform .3s ease;
+  transition: filter .4s var(--ease-smooth), transform .3s ease;
 }
 .brand:hover img { filter: drop-shadow(0 0 22px rgba(46,168,255,.5)); transform: translateY(-1px); }
 .nav { display: flex; gap: 28px; }
 .nav a {
   font-size: 14px; font-weight: 600; color: var(--muted);
-  transition: color .2s ease;
+  transition: color .3s var(--ease-smooth);
 }
 .nav a:hover { color: #fff; }
 .head-actions { display: flex; gap: 10px; align-items: center; }
@@ -3260,7 +3263,7 @@ body, main, header, footer { position: relative; z-index: 1; }
   min-height: 52px; padding: 0 26px; border-radius: 999px;
   border: 1px solid transparent;
   font-size: 15px; font-weight: 700; cursor: pointer; text-align: center;
-  transition: transform .2s ease, box-shadow .25s ease, background .2s ease, border-color .2s ease;
+  transition: transform .3s var(--ease-smooth), box-shadow .35s var(--ease-smooth), background .3s var(--ease-smooth), border-color .3s var(--ease-smooth);
   position: relative; overflow: hidden;
 }
 .btn svg { width: 19px; height: 19px; flex: none; }
@@ -3351,7 +3354,7 @@ body, main, header, footer { position: relative; z-index: 1; }
   padding: 9px 17px; border-radius: 999px;
   border: 1px solid var(--line-strong); background: rgba(255,255,255,.03);
   font-size: 14px; font-weight: 600; color: var(--muted);
-  transition: border-color .2s ease, color .2s ease, transform .2s ease;
+  transition: border-color .3s var(--ease-smooth), color .3s var(--ease-smooth), transform .3s var(--ease-smooth);
 }
 .chips li:hover { border-color: rgba(46,168,255,.55); color: #fff; transform: translateY(-2px); }
 
@@ -3380,7 +3383,7 @@ body, main, header, footer { position: relative; z-index: 1; }
   position: relative; overflow: hidden;
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg);
   padding: 24px 22px;
-  transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+  transition: transform .35s var(--ease-smooth), border-color .35s var(--ease-smooth), box-shadow .35s var(--ease-smooth);
 }
 .metric-card:hover {
   transform: translateY(-3px); border-color: var(--line-strong);
@@ -3389,7 +3392,7 @@ body, main, header, footer { position: relative; z-index: 1; }
 .metric-card::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
   background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%), rgba(46,168,255,.12), transparent 70%);
-  transition: opacity .25s ease;
+  transition: opacity .35s var(--ease-smooth);
 }
 .metric-card:hover::after { opacity: 1; }
 .metric-val { font-family: var(--font-display); font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -.02em; }
@@ -3419,13 +3422,13 @@ body, main, header, footer { position: relative; z-index: 1; }
   display: flex; flex-direction: column; align-items: center; text-align: center;
   background: rgba(2,2,2,.55); border: 1px solid var(--line); border-radius: var(--r-lg);
   padding: 28px 18px 24px;
-  transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+  transition: transform .35s var(--ease-smooth), border-color .35s var(--ease-smooth), box-shadow .35s var(--ease-smooth);
 }
 .flow-node:hover { transform: translateY(-3px); border-color: rgba(46,168,255,.5); box-shadow: 0 14px 34px rgba(0,0,0,.5), 0 0 26px rgba(46,168,255,.12); }
 .flow-node::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
   background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(46,168,255,.14), transparent 70%);
-  transition: opacity .25s ease;
+  transition: opacity .35s var(--ease-smooth);
 }
 .flow-node:hover::after { opacity: 1; }
 .flow-node.core { border-color: rgba(46,168,255,.45); box-shadow: 0 0 30px rgba(46,168,255,.14); }
@@ -3469,7 +3472,7 @@ body, main, header, footer { position: relative; z-index: 1; }
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg);
   padding: 26px 24px; min-height: 210px;
   display: flex; flex-direction: column; justify-content: space-between; gap: 22px;
-  transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+  transition: transform .35s var(--ease-smooth), border-color .35s var(--ease-smooth), box-shadow .35s var(--ease-smooth);
 }
 .bento-card.wide { grid-column: span 2; }
 .bento-card:hover {
@@ -3479,7 +3482,7 @@ body, main, header, footer { position: relative; z-index: 1; }
 .bento-card::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
   background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 50%), rgba(46,168,255,.13), transparent 70%);
-  transition: opacity .25s ease;
+  transition: opacity .35s var(--ease-smooth);
 }
 .bento-card:hover::after { opacity: 1; }
 .card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
@@ -3504,13 +3507,13 @@ body, main, header, footer { position: relative; z-index: 1; }
   position: relative; overflow: hidden;
   background: var(--card); border: 1px solid var(--line); border-radius: var(--r-lg);
   padding: 28px 24px;
-  transition: transform .25s ease, border-color .25s ease;
+  transition: transform .35s var(--ease-smooth), border-color .35s var(--ease-smooth);
 }
 .step-card:hover { transform: translateY(-3px); border-color: var(--line-strong); }
 .step-card::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
   background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgba(46,168,255,.12), transparent 70%);
-  transition: opacity .25s ease;
+  transition: opacity .35s var(--ease-smooth);
 }
 .step-card:hover::after { opacity: 1; }
 .step-num {
@@ -3529,7 +3532,7 @@ body, main, header, footer { position: relative; z-index: 1; }
   display: flex; flex-direction: column;
   background: var(--card); border: 1px solid var(--line); border-radius: 26px;
   padding: 26px 22px 22px;
-  transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+  transition: transform .35s var(--ease-smooth), border-color .35s var(--ease-smooth), box-shadow .35s var(--ease-smooth);
 }
 .plan:hover {
   transform: translateY(-4px); border-color: var(--line-strong);
@@ -3538,7 +3541,7 @@ body, main, header, footer { position: relative; z-index: 1; }
 .plan::after {
   content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0;
   background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%), rgba(46,168,255,.12), transparent 70%);
-  transition: opacity .25s ease;
+  transition: opacity .35s var(--ease-smooth);
 }
 .plan:hover::after { opacity: 1; }
 .plan.best {
@@ -3586,7 +3589,7 @@ body, main, header, footer { position: relative; z-index: 1; }
   display: flex; justify-content: space-between; align-items: center; gap: 18px;
   padding: 22px 4px; cursor: pointer; list-style: none;
   font-size: 17px; font-weight: 700;
-  transition: color .2s ease;
+  transition: color .3s var(--ease-smooth);
 }
 .qa summary::-webkit-details-marker { display: none; }
 .qa summary:hover { color: #fff; }
@@ -3597,7 +3600,7 @@ body, main, header, footer { position: relative; z-index: 1; }
   transform: translate(-50%, -50%);
 }
 .qa-toggle::before { width: 16px; height: 2px; }
-.qa-toggle::after { width: 2px; height: 16px; transition: transform .25s ease; }
+.qa-toggle::after { width: 2px; height: 16px; transition: transform .35s var(--ease-smooth); }
 .qa details[open ] .qa-toggle::after { transform: translate(-50%, -50%) scaleY(0); }
 .qa p { padding: 0 4px 24px; color: var(--muted); font-size: 15px; max-width: 680px; }
 
@@ -3631,12 +3634,12 @@ body, main, header, footer { position: relative; z-index: 1; }
 }
 .foot img { height: 40px; width: auto; max-width: 190px; object-fit: contain; }
 .foot nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
-.foot nav a { font-size: 14px; color: var(--muted); transition: color .2s ease; }
+.foot nav a { font-size: 14px; color: var(--muted); transition: color .3s var(--ease-smooth); }
 .foot nav a:hover { color: #fff; }
 .copy { font-size: 13px; color: var(--soft); }
 
 /* ── Появление при скролле ──────────────────────────────────────────── */
-.reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s ease, transform .7s ease; }
+.reveal { opacity: 0; transform: translateY(16px); will-change: opacity, transform; transition: opacity .9s var(--ease-smooth), transform .9s var(--ease-smooth); }
 .reveal.in { opacity: 1; transform: none; }
 html:not(.js) .reveal { opacity: 1; transform: none; }
 
@@ -3697,11 +3700,17 @@ JS = """
   var items = document.querySelectorAll('.reveal');
   if ('IntersectionObserver' in window) {
     var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        if (e.isIntersecting) {
-          e.target.classList.add('in');
-          io.unobserve(e.target);
-        }
+      // Элементы, вошедшие в кадр одновременно (ряд карточек),
+      // появляются каскадом: каждый следующий — на 90 мс позже.
+      var visible = entries.filter(function (e) { return e.isIntersecting; });
+      visible.sort(function (a, b) {
+        return a.target.compareDocumentPosition(b.target)
+          & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+      });
+      visible.forEach(function (e, i) {
+        e.target.style.transitionDelay = (i * 90) + 'ms';
+        e.target.classList.add('in');
+        io.unobserve(e.target);
       });
     }, { rootMargin: '0px 0px -6% 0px' });
     items.forEach(function (el) { io.observe(el); });
@@ -3726,7 +3735,7 @@ JS = """
 // едут плавно. На тачскринах — нативный скролл, при prefers-reduced-motion
 // Lenis не включается вовсе.
 if (window.Lenis && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  var lenis = new Lenis({ duration: 1.2 });
+  var lenis = new Lenis({ duration: 1.35 });
   var __lenisRaf = function (time) { lenis.raf(time); requestAnimationFrame(__lenisRaf); };
   requestAnimationFrame(__lenisRaf);
   // Якоря в шапке: плавно к секции, с отступом под липкую шапку (72px + запас).
@@ -4171,6 +4180,7 @@ _PAY_PAGE_CSS = """
   --bad: #f87171;
   --font-display: "Unbounded","Inter",sans-serif;
   --font-body: "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
 }
 * { box-sizing: border-box; }
 body {
@@ -4314,6 +4324,7 @@ _DOC_PAGE_CSS = """
   --blue: #2ea8ff;
   --font-display: "Unbounded","Inter",sans-serif;
   --font-body: "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
 }
 * { box-sizing: border-box; }
 body {
