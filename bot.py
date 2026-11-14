@@ -341,7 +341,7 @@ async def post_init(app: Application):
     # Личный кабинет: http-api для сайта и мини-приложения.
     # Бота отдаём в API, чтобы оно само слало коды сброса пароля в чат.
     from web.webapi import start_server
-    started = await start_server(app.bot)
+    started = await start_server(app.bot, application=app)
     if started.get("ok"):
         print(f"Кабинет слушает порт {started.get('port')}")
 

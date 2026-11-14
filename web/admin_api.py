@@ -1,0 +1,648 @@
+"""Веб-админка Drebol VPN — фаза 1: вход, дашборд, безопасные настройки.
+
+Тот же процесс, тот же config.json и тот же bot.db, что и у Telegram-бота:
+веб — второй фронт-энд, а не вторая копия. Все действия пишут в те же
+таблицы и вызывают те же функции, что и ТГ-админка.
+
+Вход:
+• Mark — через Telegram (Login Widget / Mini App initData), tg_id == ADMIN_ID.
+• Muse — почта + пароль (таблица admin_accounts, scrypt). Капча Turnstile
+  для этого входа ОТКЛЮЧЕНА — Mark явно согласился 2026-11-15; взамен
+  блокировка 5 неверных попыток / 15 минут на пару (аккаунт, IP), хранится
+  в базе, все входы пишутся в журнал. Вход в кабинет по паролю капчу
+  требует как раньше — его не трогаем.
+
+Сессия — только HttpOnly; Secure (на https); SameSite=Strict кука
+`drebol_admin`. Токен никогда не принимается из ?token= и из
+Authorization — только из куки. Каждая меняющая операция требует
+CSRF-токен (double-submit кука + заголовок X-CSRF-Token) и Origin /
+Referer ровно https://vpn.drbl.tech. CORS для админки — только этот
+origin, никогда *.
+"""
+
+from __future__ import annotations
+
+import logging
+import secrets
+
+ADMIN_ORIGIN = "https://vpn.drbl.tech"
+SESSION_COOKIE = "drebol_admin"
+CSRF_COOKIE = "drebol_admin_csrf"
+SESSION_DAYS = 7
+SETUP_TOKEN_MINUTES = 15
+
+# Ключи, которые веб-админка никогда не возвращает и не принимает:
+# секреты — только запись через ТГ-админку, в вебе они write-only.
+SECRET_KEYS = {
+    "rw_token", "platega_secret", "support_bot_token", "site_pass",
+    "turnstile_secret_key", "platega_merchant_id",
+}
+
+# Фаза 1: только безопасные, читаемые на лету настройки.
+# morning_sync и netcheck — словари, остальные — скаляры.
+SETTINGS_ALLOWLIST = {
+    "channel_url", "force_subscribe",
+    "privacy_url", "terms_url", "refund_url", "rules_url", "consent_url",
+    "paid_trial_period", "paid_preset_hwid", "paid_preset_traffic",
+    "paid_preset_lte",
+    "referral_bonus", "referral_invited_bonus",
+    "remind_enabled", "remind_first", "remind_second", "remind_third",
+    "remind_trials", "remind_quiet_from", "remind_quiet_to",
+    "winback_enabled", "winback_paid_only", "winback_days",
+    "winback_percent", "winback_days2", "winback_percent2",
+    "winback_life_days",
+    "maintenance_enabled", "maintenance_text", "features_off",
+    "morning_sync", "netcheck",
+    "device_price", "device_max_extra",
+}
+_BOOL_KEYS = {
+    "force_subscribe", "remind_enabled", "remind_trials",
+    "winback_enabled", "winback_paid_only", "maintenance_enabled",
+}
+_INT_KEYS = {
+    "paid_trial_period", "paid_preset_hwid", "paid_preset_traffic",
+    "paid_preset_lte", "referral_bonus", "referral_invited_bonus",
+    "remind_first", "remind_second", "remind_third",
+    "winback_days", "winback_percent", "winback_days2",
+    "winback_percent2", "winback_life_days",
+    "device_price", "device_max_extra",
+}
+_URL_KEYS = {
+    "channel_url", "privacy_url", "terms_url", "refund_url",
+    "rules_url", "consent_url",
+}
+_STR_KEYS = {"maintenance_text", "remind_quiet_from", "remind_quiet_to"}
+_MORNING_BOOL = {
+    "enabled", "reconcile", "netcheck", "alerts", "support_topics",
+    "panel_sync", "blacklist_sync", "site_sync", "server_reminder",
+    "healthcheck",
+}
+_NETCHECK_KEYS = {"domains", "operators", "netcheck_days", "netcheck_last_run"}
+
+_application = None
+_morning_rescheduler = None
+
+
+def set_application(application) -> None:
+    """Telegram Application бота — для пересборки утренней задачи после
+    смены времени/включения. Ставится из webapi.start_server()."""
+    global _application
+    _application = application
+
+
+def set_morning_rescheduler(fn) -> None:
+    """Тестовый/альтернативный хук пересборки утренней задачи."""
+    global _morning_rescheduler
+    _morning_rescheduler = fn
+
+
+def _reschedule_morning() -> bool:
+    if _morning_rescheduler is not None:
+        try:
+            _morning_rescheduler()
+        except Exception as ex:
+            logging.error("админка: reschedule morning: %s", ex)
+            return False
+        return True
+    if _application is not None:
+        try:
+            from handlers.morning import schedule_morning_sync
+            schedule_morning_sync(_application)
+        except Exception as ex:
+            logging.error("админка: reschedule morning: %s", ex)
+            return False
+        return True
+    return False
+
+
+# ── Валидация настроек ───────────────────────────────────────────────────────
+
+def _is_time(text) -> bool:
+    from handlers.morning import parse_time
+    return parse_time(str(text or "")) is not None
+
+
+def validate_settings_patch(patch: dict):
+    """Проверяет PATCH настроек фазы 1.
+
+    Возвращает (clean, rejected, errors): clean — готовые к записи
+    значения; rejected — ключи, которые веб вообще не принимает
+    (секреты и неизвестные — 403, ничего не применяется);
+    errors — неверные значения (400)."""
+    if not isinstance(patch, dict):
+        return {}, [], ["patch must be an object"]
+    clean, rejected, errors = {}, [], []
+    for key, value in patch.items():
+        if key in SECRET_KEYS or key not in SETTINGS_ALLOWLIST:
+            rejected.append(key)
+            continue
+        if key == "morning_sync":
+            if not isinstance(value, dict):
+                errors.append("morning_sync must be an object")
+                continue
+            sub = {}
+            for k, v in value.items():
+                if k == "time":
+                    if not isinstance(v, str) or not _is_time(v):
+                        errors.append("morning_sync.time must be HH:MM")
+                    else:
+                        from handlers.morning import parse_time
+                        h, m = parse_time(v)
+                        sub["time"] = f"{h:02d}:{m:02d}"
+                elif k == "netcheck_days":
+                    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+                        errors.append("morning_sync.netcheck_days must be int >= 1")
+                    else:
+                        sub[k] = v
+                elif k == "netcheck_last_run":
+                    sub[k] = v if v is None or isinstance(v, str) else str(v)
+                elif k in _MORNING_BOOL:
+                    if not isinstance(v, bool):
+                        errors.append(f"morning_sync.{k} must be bool")
+                    else:
+                        sub[k] = v
+                else:
+                    rejected.append(f"morning_sync.{k}")
+            clean[key] = sub
+            continue
+        if key == "netcheck":
+            if not isinstance(value, dict):
+                errors.append("netcheck must be an object")
+                continue
+            sub = {}
+            for k, v in value.items():
+                if k not in _NETCHECK_KEYS:
+                    rejected.append(f"netcheck.{k}")
+                elif k in ("domains", "operators"):
+                    if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                        errors.append(f"netcheck.{k} must be a list of strings")
+                    else:
+                        sub[k] = list(v)
+                elif k == "netcheck_days":
+                    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+                        errors.append("netcheck.netcheck_days must be int >= 1")
+                    else:
+                        sub[k] = v
+                else:
+                    sub[k] = v
+            clean[key] = sub
+            continue
+        if key in _BOOL_KEYS:
+            if not isinstance(value, bool):
+                errors.append(f"{key} must be bool")
+            else:
+                clean[key] = value
+        elif key in _INT_KEYS:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                errors.append(f"{key} must be int >= 0")
+            else:
+                clean[key] = value
+        elif key in _URL_KEYS:
+            if not isinstance(value, str) or (value and not value.startswith(("http://", "https://"))):
+                errors.append(f"{key} must be an http(s) URL or empty")
+            else:
+                clean[key] = value
+        elif key == "features_off":
+            if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+                errors.append("features_off must be a list of strings")
+            else:
+                clean[key] = list(value)
+        elif key in _STR_KEYS:
+            if key.startswith("remind_quiet_"):
+                if not isinstance(value, str) or (value and not _is_time(value)):
+                    errors.append(f"{key} must be HH:MM or empty")
+                else:
+                    clean[key] = value
+            elif not isinstance(value, str):
+                errors.append(f"{key} must be a string")
+            else:
+                clean[key] = value
+        else:
+            clean[key] = value
+    return clean, rejected, errors
+
+
+# ── Сессии, CSRF, Origin ─────────────────────────────────────────────────────
+
+def _client_ip(request) -> str:
+    return (request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or (request.remote or "?"))
+
+
+def _secure_flag(request) -> bool:
+    if request.scheme == "https":
+        return True
+    return request.headers.get("X-Forwarded-Proto", "") == "https"
+
+
+def _set_session_cookies(response, request, token: str) -> None:
+    secure = _secure_flag(request)
+    response.set_cookie(
+        SESSION_COOKIE, token, max_age=SESSION_DAYS * 86400,
+        path="/api/admin/", httponly=True, secure=secure, samesite="Strict")
+    response.set_cookie(
+        CSRF_COOKIE, secrets.token_urlsafe(32), max_age=SESSION_DAYS * 86400,
+        path="/api/admin/", httponly=False, secure=secure, samesite="Strict")
+
+
+def _clear_session_cookies(response) -> None:
+    response.del_cookie(SESSION_COOKIE, path="/api/admin/")
+    response.del_cookie(CSRF_COOKIE, path="/api/admin/")
+
+
+async def _actor(request):
+    """Кто пришёл: {"kind": "mark", "tg_id": ...} или
+    {"kind": "muse", "account_id": ..., "email": ...}. None — нет сессии.
+    Токен читается ТОЛЬКО из куки: ?token= и Authorization не принимаются."""
+    from core.database import admin_account_by_id, admin_session_user
+    token = request.cookies.get(SESSION_COOKIE) or ""
+    sess = await admin_session_user(token)
+    if not sess:
+        return None
+    if sess["account_id"] == 0 and sess["tg_id"]:
+        from config import ADMIN_ID
+        if int(sess["tg_id"]) == int(ADMIN_ID):
+            return {"kind": "mark", "tg_id": int(sess["tg_id"])}
+        return None
+    if sess["account_id"] > 0:
+        row = await admin_account_by_id(sess["account_id"])
+        if not row or row[6]:
+            return None
+        return {"kind": "muse", "account_id": int(row[0]), "email": row[1]}
+    return None
+
+
+def _actor_label(actor: dict) -> str:
+    return "mark" if actor["kind"] == "mark" else f"muse:{actor.get('email', '')}"
+
+
+def _actor_tg_id(actor: dict) -> int:
+    return int(actor["tg_id"]) if actor["kind"] == "mark" else 0
+
+
+async def _audit(actor: dict, action: str, details: str = "") -> None:
+    from core.database import log_activity
+    # Пароли, токены и хеши сюда не попадают никогда — только кто и что.
+    await log_activity(_actor_tg_id(actor), f"admin:{action}",
+                       details, is_admin=True)
+
+
+def _check_origin(request) -> bool:
+    """Меняющий запрос — только с нашего сайта. Origin приоритетен;
+    без Origin проверяем Referer; без обоих — разрешаем (curl/тесты)."""
+    origin = request.headers.get("Origin", "")
+    if origin:
+        return origin == ADMIN_ORIGIN
+    referer = request.headers.get("Referer", "")
+    if referer:
+        return referer.startswith(ADMIN_ORIGIN + "/")
+    return True
+
+
+def _check_csrf(request) -> bool:
+    token = request.headers.get("X-CSRF-Token", "")
+    cookie = request.cookies.get(CSRF_COOKIE, "")
+    if not token or not cookie:
+        return False
+    import hmac
+    return hmac.compare_digest(token, cookie)
+
+
+def _forbidden(request, error: str, status: int = 403):
+    from aiohttp import web
+    return web.json_response({"error": error}, status=status)
+
+
+# ── Обработчики ──────────────────────────────────────────────────────────────
+
+async def _require_actor(request):
+    from aiohttp import web
+    actor = await _actor(request)
+    if not actor:
+        raise web.HTTPUnauthorized(reason="no_session")
+    return actor
+
+
+async def _require_mutation(request):
+    """Меняющий запрос: сессия + Origin + CSRF. Возвращает (actor, error)."""
+    actor = await _actor(request)
+    if not actor:
+        return None, _forbidden(request, "no_session", 401)
+    if not _check_origin(request):
+        return None, _forbidden(request, "bad_origin")
+    if not _check_csrf(request):
+        return None, _forbidden(request, "bad_csrf")
+    return actor, None
+
+
+async def auth_telegram(request):
+    from aiohttp import web
+    from core.database import admin_session_new
+    from web.webapi import check_webapp, check_widget
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    source = "webapp" if body.get("initData") else "widget"
+    who = (check_webapp(body.get("initData")) if source == "webapp"
+           else check_widget(body.get("user") or body))
+    if not who:
+        return web.json_response({"error": "bad_signature"}, status=401)
+    from config import ADMIN_ID
+    if int(who["id"]) != int(ADMIN_ID):
+        await _audit({"kind": "mark", "tg_id": int(who["id"])},
+                     "login_failed", "telegram: not admin")
+        return web.json_response({"error": "not_admin"}, status=403)
+    token = await admin_session_new(0, int(who["id"]), _client_ip(request),
+                                    request.headers.get("User-Agent", ""))
+    resp = web.json_response({"ok": True, "actor": "mark"})
+    _set_session_cookies(resp, request, token)
+    await _audit({"kind": "mark", "tg_id": int(who["id"])},
+                 "login", "telegram")
+    return resp
+
+
+async def auth_password(request):
+    """Вход Muse по почте и паролю. Без Turnstile — по решению Mark
+    2026-11-15; взамен блокировка 5/15 мин на пару (аккаунт, IP)."""
+    from aiohttp import web
+    from core.database import (
+        admin_account_by_email, admin_account_touch_login,
+        admin_login_fail_clear, admin_login_fail_hit, admin_login_locked,
+        admin_session_new,
+    )
+    from web.webapi import _valid_email, check_secret
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = _valid_email(body.get("email"))
+    password = str(body.get("password") or "")
+    if not email or not password:
+        return web.json_response({"error": "bad_request"}, status=400)
+    ip = _client_ip(request)
+    row = await admin_account_by_email(email)
+    # Аккаунта нет — тот же ответ, что и неверный пароль, и та же
+    # блокировка по «аккаунту 0», чтобы нельзя было перебирать почты.
+    account_id = int(row[0]) if row else 0
+    if await admin_login_locked(account_id, ip):
+        return web.json_response({"error": "too_many"}, status=429)
+    if (not row or row[6] or not row[2]
+            or not check_secret(password, row[2])):
+        await admin_login_fail_hit(account_id, ip)
+        await _audit({"kind": "muse", "email": email},
+                     "login_failed", "password")
+        return web.json_response({"error": "bad_login"}, status=401)
+    await admin_login_fail_clear(account_id, ip)
+    await admin_account_touch_login(account_id)
+    token = await admin_session_new(account_id, None, ip,
+                                    request.headers.get("User-Agent", ""))
+    resp = web.json_response({"ok": True, "actor": "muse", "email": row[1]})
+    _set_session_cookies(resp, request, token)
+    await _audit({"kind": "muse", "email": row[1]}, "login", "password")
+    return resp
+
+
+async def auth_setup(request):
+    """Установка пароля по одноразовой ссылке Mark'а: токен — хеш,
+    15 минут, одно использование. Пароль 8–128 символов."""
+    from aiohttp import web
+    from core.database import (
+        admin_account_by_id, admin_account_set_password,
+        admin_session_new, admin_setup_token_live, admin_setup_token_use,
+    )
+    from web.webapi import check_secret, hash_secret
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    token = str(body.get("token") or "")
+    password = str(body.get("password") or "")
+    if not token or len(password) < 8 or len(password) > 128:
+        return web.json_response({"error": "bad_request"}, status=400)
+    # Живые токены перебираем по всем аккаунтам: их единицы, а хеш
+    # scrypt не даёт искать по значению напрямую.
+    async def _find_account():
+        from core.database import admin_account_list
+        for acc in await admin_account_list():
+            for token_hash, _exp in await admin_setup_token_live(acc[0]):
+                if check_secret(token, token_hash):
+                    return acc[0], token_hash
+        return None, None
+    account_id, token_hash = await _find_account()
+    if not account_id:
+        return web.json_response({"error": "bad_token"}, status=401)
+    await admin_setup_token_use(token_hash)
+    await admin_account_set_password(account_id, hash_secret(password))
+    row = await admin_account_by_id(account_id)
+    ip = _client_ip(request)
+    sess = await admin_session_new(account_id, None, ip,
+                                   request.headers.get("User-Agent", ""))
+    resp = web.json_response({"ok": True, "actor": "muse", "email": row[1]})
+    _set_session_cookies(resp, request, sess)
+    await _audit({"kind": "muse", "email": row[1]},
+                 "setup", "password set via setup token")
+    return resp
+
+
+async def logout(request):
+    from aiohttp import web
+    from core.database import admin_session_drop
+    token = request.cookies.get(SESSION_COOKIE) or ""
+    if token:
+        await admin_session_drop(token)
+    resp = web.json_response({"ok": True})
+    _clear_session_cookies(resp)
+    return resp
+
+
+async def me(request):
+    from aiohttp import web
+    try:
+        actor = await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    if actor["kind"] == "mark":
+        return web.json_response({"ok": True, "actor": "mark",
+                                  "tg_id": actor["tg_id"]})
+    return web.json_response({"ok": True, "actor": "muse",
+                              "email": actor["email"],
+                              "account_id": actor["account_id"]})
+
+
+async def dashboard(request):
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from core.database import get_dashboard_stats
+    from services.panel import count_panel_clients
+    stats = await get_dashboard_stats()
+    try:
+        panel = await count_panel_clients()
+    except Exception as ex:
+        panel = {"success": False, "error": f"{type(ex).__name__}: {ex}"}
+    return web.json_response({"stats": stats, "panel": panel})
+
+
+def _settings_snapshot() -> dict:
+    from config import load_config
+    from handlers.morning import get_morning_cfg
+    cfg = load_config()
+    out = {k: cfg.get(k) for k in SETTINGS_ALLOWLIST
+           if k not in ("morning_sync", "netcheck")}
+    out["morning_sync"] = get_morning_cfg()
+    out["netcheck"] = cfg.get("netcheck") or {}
+    return out
+
+
+async def settings_get(request):
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    return web.json_response({"settings": _settings_snapshot()})
+
+
+async def settings_patch(request):
+    from aiohttp import web
+    from config import atomic_update
+    from handlers.morning import save_morning_cfg
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    patch = body.get("settings") if isinstance(body, dict) else None
+    if not isinstance(patch, dict):
+        return web.json_response({"error": "bad_request"}, status=400)
+    clean, rejected, errors = validate_settings_patch(patch)
+    if rejected:
+        return web.json_response(
+            {"error": "forbidden_keys", "keys": sorted(set(rejected))},
+            status=403)
+    if errors:
+        return web.json_response({"error": "bad_value", "details": errors},
+                                 status=400)
+    morning = clean.pop("morning_sync", None)
+    rescheduled = None
+    if clean:
+        def _apply(cfg):
+            cfg.update(clean)
+        atomic_update(_apply)
+    if morning is not None:
+        save_morning_cfg(morning)
+        rescheduled = _reschedule_morning()
+    await _audit(actor, "settings_update",
+                 "keys: " + ", ".join(sorted(clean.keys())
+                                      + (["morning_sync"] if morning is not None else [])))
+    return web.json_response({"ok": True, "settings": _settings_snapshot(),
+                              "morning_rescheduled": rescheduled})
+
+
+async def muse_account_create(request):
+    """Mark создаёт аккаунт Muse: только почта. В ответ — одноразовая
+    ссылка на установку пароля; она показывается один раз и нигде не
+    хранится в открытом виде."""
+    from aiohttp import web
+    from core.database import (
+        admin_account_by_email, admin_account_create, admin_setup_token_new,
+    )
+    from web.webapi import _valid_email, hash_secret
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    if actor["kind"] != "mark":
+        return web.json_response({"error": "mark_only"}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = _valid_email(body.get("email"))
+    if not email:
+        return web.json_response({"error": "bad_email"}, status=400)
+    existing = await admin_account_by_email(email)
+    if existing:
+        return web.json_response({"error": "email_taken"}, status=409)
+    account_id = await admin_account_create(email, actor["tg_id"])
+    if not account_id:
+        return web.json_response({"error": "email_taken"}, status=409)
+    token = secrets.token_urlsafe(32)
+    await admin_setup_token_new(account_id, hash_secret(token),
+                                SETUP_TOKEN_MINUTES)
+    await _audit(actor, "muse_account_create", f"email: {email}")
+    return web.json_response({
+        "ok": True, "account_id": account_id, "email": email,
+        "setup_token": token,
+        "setup_url": f"{ADMIN_ORIGIN}/admin/setup?token={token}",
+        "expires_minutes": SETUP_TOKEN_MINUTES,
+    })
+
+
+async def muse_account_list(request):
+    from aiohttp import web
+    from core.database import admin_account_list
+    try:
+        actor = await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    if actor["kind"] != "mark":
+        return web.json_response({"error": "mark_only"}, status=403)
+    rows = await admin_account_list()
+    return web.json_response({"accounts": [
+        {"id": r[0], "email": r[1], "role": r[2], "created_by_tg_id": r[3],
+         "created_at": str(r[4]), "last_login_at": str(r[5] or ""),
+         "disabled": bool(r[6])} for r in rows]})
+
+
+# ── Приложение ───────────────────────────────────────────────────────────────
+
+def build_admin_app():
+    from aiohttp import web
+
+    @web.middleware
+    async def admin_middleware(request, handler):
+        origin = request.headers.get("Origin", "")
+        if request.method == "OPTIONS":
+            if origin and origin != ADMIN_ORIGIN:
+                return web.json_response({"error": "bad_origin"}, status=403)
+            resp = web.Response(status=204)
+            if origin == ADMIN_ORIGIN:
+                resp.headers["Access-Control-Allow-Origin"] = origin
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+                resp.headers["Access-Control-Allow-Headers"] = (
+                    "Content-Type, X-CSRF-Token")
+                resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PATCH"
+            return resp
+        try:
+            resp = await handler(request)
+        except web.HTTPException as ex:
+            resp = ex
+        except Exception as ex:
+            logging.error("админка: %s: %s", type(ex).__name__, ex)
+            resp = web.json_response({"error": "server"}, status=500)
+        if origin:
+            if origin == ADMIN_ORIGIN:
+                resp.headers["Access-Control-Allow-Origin"] = origin
+                resp.headers["Access-Control-Allow-Credentials"] = "true"
+                resp.headers["Vary"] = "Origin"
+            # чужой Origin — заголовков не ставим вовсе: браузер ответ не прочитает,
+            # а * здесь не появляется никогда.
+        return resp
+
+    app = web.Application(middlewares=[admin_middleware])
+    app.router.add_post("/auth/telegram", auth_telegram)
+    app.router.add_post("/auth/password", auth_password)
+    app.router.add_post("/auth/setup", auth_setup)
+    app.router.add_post("/logout", logout)
+    app.router.add_get("/me", me)
+    app.router.add_get("/dashboard", dashboard)
+    app.router.add_get("/settings", settings_get)
+    app.router.add_patch("/settings", settings_patch)
+    app.router.add_post("/muse-account", muse_account_create)
+    app.router.add_get("/muse-account", muse_account_list)
+    return app

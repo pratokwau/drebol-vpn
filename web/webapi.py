@@ -56,7 +56,10 @@ def settings() -> dict:
     return {
         "enabled": bool(cfg.get("webapi_enabled", False)),
         "port": int(cfg.get("webapi_port", 8088) or 8088),
-        "bind": str(cfg.get("webapi_bind", "0.0.0.0") or "0.0.0.0"),
+        # Веб-админка (фаза 1): слушаем только localhost, наружу — только
+        # через nginx сайта. Старое значение по умолчанию 0.0.0.0 — находка
+        # аудита K5; явный webapi_bind в config.json по-прежнему уважается.
+        "bind": str(cfg.get("webapi_bind", "127.0.0.1") or "127.0.0.1"),
     }
 
 
@@ -372,18 +375,27 @@ def build_app():
     from aiohttp import web
 
     async def guard(request, handler):
-        if request.method == "OPTIONS":
+        # Админка — свои CORS-правила (только https://vpn.drbl.tech,
+        # никогда *): _cors() кабинета сюда не применяется.
+        is_admin = request.path.startswith("/api/admin")
+        if request.method == "OPTIONS" and not is_admin:
             return _cors(web.Response(status=204))
         ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() \
             or (request.remote or "?")
         if _too_often(ip):
+            if is_admin:
+                return web.json_response({"error": "too_many"}, status=429)
             return _cors(web.json_response({"error": "too_many"}, status=429))
         try:
+            if is_admin:
+                return await handler(request)
             return _cors(await handler(request))
         except web.HTTPException:
             raise
         except Exception as ex:
             logging.error("кабинет: %s: %s", type(ex).__name__, ex)
+            if is_admin:
+                return web.json_response({"error": "server"}, status=500)
             return _cors(web.json_response({"error": "server"}, status=500))
 
     async def health(_request):
@@ -850,7 +862,26 @@ def build_app():
         await confirm_provider_payment(_bot, p)
         return web.json_response({"ok": True})
 
+    async def admin_page_handler(_request):
+        """Страница веб-админки на самом API-сервере — запасной путь
+        (SSH-туннель), когда сайт недоступен. Основной путь — /admin/
+        на сайте, куда страницу заливает deploy()."""
+        from web.admin_page import admin_page
+        username = ""
+        try:
+            username = getattr(_bot, "username", "") or ""
+        except Exception:
+            username = ""
+        return web.Response(text=admin_page(username),
+                            content_type="text/html")
+
     app = web.Application(middlewares=[web.middleware(guard)])
+    # Веб-админка (фаза 1): подприложение /api/admin/* со своими
+    # правилами CORS/сессий/CSRF — см. web/admin_api.py.
+    from web.admin_api import build_admin_app
+    app.add_subapp("/api/admin", build_admin_app())
+    app.router.add_get("/admin/", admin_page_handler)
+    app.router.add_get("/admin/{tail:.*}", admin_page_handler)
     app.router.add_get("/api/health", health)
     app.router.add_post("/api/auth", auth)
     app.router.add_post("/api/auth/password", auth_password)
@@ -869,10 +900,20 @@ def build_app():
     return app
 
 
-async def start_server(bot=None) -> dict:
-    """Поднимает API, если он включён в настройках."""
+async def start_server(bot=None, application=None) -> dict:
+    """Поднимает API, если он включён в настройках.
+
+    application — Telegram Application бота: веб-админке он нужен,
+    чтобы пересобирать утреннюю задачу после смены времени/включения
+    (handlers.morning.schedule_morning_sync)."""
     global _runner, _bot
     _bot = bot
+    if application is not None:
+        try:
+            from web.admin_api import set_application
+            set_application(application)
+        except Exception:
+            pass
     s = settings()
     if not s["enabled"]:
         return {"ok": False, "error": "выключен"}
@@ -905,9 +946,14 @@ def is_running() -> bool:
 
 async def sessions_tick(context):
     """Раз в сутки убирает просроченные сессии и коды сброса."""
-    from core.database import password_resets_purge, web_sessions_purge
+    from core.database import (
+        admin_sessions_purge, admin_setup_purge,
+        password_resets_purge, web_sessions_purge,
+    )
     await web_sessions_purge()
     await password_resets_purge()
+    await admin_sessions_purge()
+    await admin_setup_purge()
 
 
 # ── Настройки кабинета (админка) ─────────────────────────────────────────────

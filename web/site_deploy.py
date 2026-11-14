@@ -1463,7 +1463,8 @@ def app_version_json() -> str:
 
 def _deploy_sync(page: str, og_bytes: bytes, logo_bytes: bytes = b"",
                  cabinet: str = "", pay_pages: dict | None = None,
-                 doc_pages: dict | None = None) -> dict:
+                 doc_pages: dict | None = None,
+                 admin: str = "") -> dict:
     c = creds()
     try:
         cli = _client()
@@ -1495,6 +1496,8 @@ chmod 755 {WEB_ROOT}
                 f.write(ADD_PAGE)
             with sftp.open("/tmp/drebol_cabinet.html", "w") as f:
                 f.write(cabinet or "")
+            with sftp.open("/tmp/drebol_admin.html", "w") as f:
+                f.write(admin or "")
             for kind in ("success", "fail", "back"):
                 if pay_pages and pay_pages.get(kind):
                     with sftp.open(f"/tmp/drebol_pay_{kind}.html", "w") as f:
@@ -1537,6 +1540,13 @@ chmod 755 {WEB_ROOT}
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 30s;
+    }}
+    location /api/admin/ {{
+        proxy_pass http://{upstream}/api/admin/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 30s;
     }}"""
         install = f"""set -e
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html
@@ -1558,6 +1568,11 @@ for sec in sub lte devices payments friends profile; do
 done
 mv /tmp/drebol_cabinet.html {WEB_ROOT}/cabinet.html
 chmod 644 {WEB_ROOT}/add.html {WEB_ROOT}/cabinet.html {WEB_ROOT}/cabinet/index.html
+# Веб-админка — по чистому адресу /admin/: та же страница, что отдаёт
+# API-сервер на /admin/ (запасной путь), только на сайте.
+mkdir -p {WEB_ROOT}/admin
+cp /tmp/drebol_admin.html {WEB_ROOT}/admin/index.html
+chmod 644 {WEB_ROOT}/admin/index.html
 chmod 644 {WEB_ROOT}/cabinet/*/index.html || true
 # Страницы редиректов после оплаты: /pay/success/, /pay/fail/, /pay/back/
 for kind in success fail back; do
@@ -1814,6 +1829,17 @@ def cabinet_link() -> str:
     return f"{site_url()}/cabinet" if cabinet_ready() else ""
 
 
+def admin_ready() -> bool:
+    """Веб-админка опубликована: есть домен, адрес API и страница уехала."""
+    c = creds()
+    cfg = load_config()
+    return bool(c["domain"] and cfg.get("webapi_public") and cfg.get("site_admin"))
+
+
+def admin_link() -> str:
+    return f"{site_url()}/admin" if admin_ready() else ""
+
+
 def pay_redirect_urls() -> dict:
     """Адреса страниц редиректов после оплаты на сайте.
 
@@ -1866,7 +1892,7 @@ def doc_url(kind: str) -> str:
 
 
 def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",
-              pay: str = "", doc: str = "") -> str:
+              pay: str = "", doc: str = "", admin: str = "") -> str:
     """Отпечаток того, что должно лежать на сервере.
 
     По нему автообновление понимает, поменялось ли хоть что-нибудь: цена
@@ -1883,6 +1909,7 @@ def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",
     h.update(cabinet.encode("utf-8"))
     h.update(pay.encode("utf-8"))
     h.update(doc.encode("utf-8"))
+    h.update(admin.encode("utf-8"))
     # фавикон и robots.txt тоже едут на сервер — их смена должна
     # вызывать перезалив, а не молча пропускаться автообновлением
     h.update(base64.b64decode(FAVICON_ICO_B64))
@@ -1894,20 +1921,23 @@ def page_hash(page: str, og_bytes: bytes, logo_bytes: bytes, cabinet: str = "",
 
 async def deploy(bot_username: str) -> dict:
     """Собирает страницу и раскатывает её на сервер."""
+    from web.admin_page import admin_page
     from web.site_page import build_pay_pages, build_doc_pages
     page, og_bytes, logo_bytes = await build_current(bot_username)
     cabinet = cabinet_page(bot_username)
+    admin = admin_page(bot_username)
     pay_pages = build_pay_pages()
     pay = "".join(pay_pages[k] for k in ("success", "fail", "back"))
     doc_pages = build_doc_pages()
     doc = "".join(doc_pages[k] for k in ("privacy", "terms", "refund", "rules", "consent"))
     res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes,
-                                  cabinet, pay_pages, doc_pages)
+                                  cabinet, pay_pages, doc_pages, admin)
     if res.get("ok"):
         # вместе со страницей уехал и переходник — можно показывать кнопки приложений
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
-                   site_page_hash=page_hash(page, og_bytes, logo_bytes, cabinet, pay, doc),
-                   site_add_page=True, site_cabinet=bool(load_config().get("webapi_public")))
+                   site_page_hash=page_hash(page, og_bytes, logo_bytes, cabinet, pay, doc, admin),
+                   site_add_page=True, site_cabinet=bool(load_config().get("webapi_public")),
+                   site_admin=bool(load_config().get("webapi_public")))
     return res
 
 
@@ -1919,18 +1949,20 @@ async def _build_and_maybe_deploy(bot_username: str) -> tuple:
     Кабинет едет вместе со страницей: раньше автообновление заливало его
     пустым (аргумент не передавался), и кабинет бы стёрся.
     """
+    from web.admin_page import admin_page
     from web.site_page import build_pay_pages, build_doc_pages
     page, og_bytes, logo_bytes = await build_current(bot_username)
     cabinet = cabinet_page(bot_username)
+    admin = admin_page(bot_username)
     pay_pages = build_pay_pages()
     pay = "".join(pay_pages[k] for k in ("success", "fail", "back"))
     doc_pages = build_doc_pages()
     doc = "".join(doc_pages[k] for k in ("privacy", "terms", "refund", "rules", "consent"))
-    fresh = page_hash(page, og_bytes, logo_bytes, cabinet, pay, doc)
+    fresh = page_hash(page, og_bytes, logo_bytes, cabinet, pay, doc, admin)
     if fresh == load_config().get("site_page_hash"):
         return "unchanged", None
     res = await asyncio.to_thread(_deploy_sync, page, og_bytes, logo_bytes,
-                                  cabinet, pay_pages, doc_pages)
+                                  cabinet, pay_pages, doc_pages, admin)
     if res.get("ok"):
         save_creds(site_deployed_at=datetime.now().strftime("%d.%m.%Y %H:%M"),
                    site_page_hash=fresh)

@@ -287,6 +287,59 @@ async def init_db():
         """)
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(tg_id)")
+        # Веб-админка (фаза 1): второй админ (Muse) — почта + пароль.
+        # Mark входит через Telegram (tg_id == ADMIN_ID) и пароля не имеет.
+        # password_hash пустой — аккаунт создан, но пароль ещё не задан
+        # (одноразовая ссылка на установку); пустой хеш никогда не проходит
+        # проверку, поэтому такой аккаунт войти не может.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS admin_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL DEFAULT '',
+                role TEXT NOT NULL DEFAULT 'admin',
+                created_by_tg_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login_at TIMESTAMP,
+                disabled INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        # Сессии веб-админки: account_id = 0 — Mark (Telegram), tg_id
+        # заполнен; account_id > 0 — аккаунт из admin_accounts.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS admin_sessions (
+                token TEXT PRIMARY KEY,
+                account_id INTEGER NOT NULL DEFAULT 0,
+                tg_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                ip TEXT,
+                user_agent TEXT
+            )
+        """)
+        # Одноразовые ссылки на установку/сброс пароля админа: хранится
+        # только хеш токена, живёт 15 минут, гасится после первого использования.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS admin_setup_tokens (
+                token_hash TEXT PRIMARY KEY,
+                account_id INTEGER NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        # Счётчик неверных входов в веб-админку — в базе, а не в памяти:
+        # перезапуск бота не должен сбрасывать блокировку.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS admin_login_fails (
+                account_id INTEGER NOT NULL,
+                ip TEXT NOT NULL,
+                fails INTEGER NOT NULL DEFAULT 0,
+                first_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (account_id, ip)
+            )
+        """)
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_time ON activity_log(created_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_activity_user ON activity_log(tg_id, created_at)")
         # Журнал ошибок: падения бота, ошибки панели и платёжки.
@@ -906,6 +959,237 @@ async def web_sessions_stats() -> dict:
             "today": await one("SELECT COUNT(*) FROM web_sessions "
                                "WHERE date(created_at, 'localtime') = date('now', 'localtime')"),
         }
+
+
+# ── Веб-админка: аккаунты, сессии, одноразовые токены, блокировки ──────
+# Хеши паролей/токенов — только через hash_secret()/check_secret() из
+# web/webapi.py (scrypt); здесь их не считаем, чтобы не плодить копии.
+
+async def admin_account_create(email: str, created_by_tg_id: int):
+    """Создаёт отключённый аккаунт админа (пароль задаётся по ссылке).
+    Возвращает id или None, если такая почта уже есть."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            cur = await db.execute(
+                "INSERT INTO admin_accounts (email, created_by_tg_id) "
+                "VALUES (?, ?)", (email, int(created_by_tg_id)))
+            await db.commit()
+            return cur.lastrowid
+        except Exception:
+            return None
+
+
+async def admin_account_by_email(email: str):
+    """Строка аккаунта: (id, email, password_hash, role, created_by_tg_id,
+    last_login_at, disabled) или None."""
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, email, password_hash, role, created_by_tg_id, "
+            "last_login_at, disabled FROM admin_accounts WHERE email = ?",
+            (email,)) as cur:
+            return await cur.fetchone()
+
+
+async def admin_account_by_id(account_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, email, password_hash, role, created_by_tg_id, "
+            "last_login_at, disabled FROM admin_accounts WHERE id = ?",
+            (int(account_id),)) as cur:
+            return await cur.fetchone()
+
+
+async def admin_account_list():
+    """Все аккаунты без хешей: (id, email, role, created_by_tg_id,
+    created_at, last_login_at, disabled)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, email, role, created_by_tg_id, created_at, "
+            "last_login_at, disabled FROM admin_accounts ORDER BY id") as cur:
+            return await cur.fetchall()
+
+
+async def admin_account_set_password(account_id: int, password_hash: str):
+    """Ставит пароль и включает аккаунт (установка/сброс по ссылке)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE admin_accounts SET password_hash = ?, disabled = 0 "
+            "WHERE id = ?", (password_hash, int(account_id)))
+        await db.commit()
+
+
+async def admin_account_disable(account_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE admin_accounts SET disabled = 1 WHERE id = ?",
+            (int(account_id),))
+        await db.execute(
+            "DELETE FROM admin_sessions WHERE account_id = ?",
+            (int(account_id),))
+        await db.commit()
+
+
+async def admin_account_touch_login(account_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE admin_accounts SET last_login_at = CURRENT_TIMESTAMP "
+            "WHERE id = ?", (int(account_id),))
+        await db.commit()
+
+
+async def admin_session_new(account_id: int, tg_id: int | None,
+                            ip: str = "", user_agent: str = "",
+                            days: int = 7) -> str:
+    """Заводит сессию веб-админки и отдаёт её токен."""
+    import secrets
+    token = secrets.token_urlsafe(48)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO admin_sessions "
+            "(token, account_id, tg_id, expires_at, ip, user_agent) "
+            "VALUES (?, ?, ?, datetime('now', ?), ?, ?)",
+            (token, int(account_id), tg_id, f"+{int(days)} days",
+             (ip or "")[:64], (user_agent or "")[:200]))
+        await db.commit()
+    return token
+
+
+async def admin_session_user(token: str):
+    """Чья это сессия: {account_id, tg_id, expires_at} или None.
+    Токен из URL (?token=) и из Authorization сюда не попадает вовсе —
+    его читает только кука в web/admin_api.py."""
+    if not token:
+        return None
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT account_id, tg_id, expires_at FROM admin_sessions "
+            "WHERE token = ? AND expires_at > CURRENT_TIMESTAMP",
+            (token,)) as cur:
+            row = await cur.fetchone()
+        if row:
+            await db.execute(
+                "UPDATE admin_sessions SET seen_at = CURRENT_TIMESTAMP "
+                "WHERE token = ?", (token,))
+            await db.commit()
+    if not row:
+        return None
+    return {"account_id": int(row[0]), "tg_id": row[1],
+            "expires_at": str(row[2])}
+
+
+async def admin_session_drop(token: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM admin_sessions WHERE token = ?", (token,))
+        await db.commit()
+
+
+async def admin_sessions_drop_account(account_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM admin_sessions WHERE account_id = ?",
+            (int(account_id),))
+        await db.commit()
+
+
+async def admin_sessions_purge():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM admin_sessions WHERE expires_at <= CURRENT_TIMESTAMP")
+        await db.commit()
+
+
+async def admin_setup_token_new(account_id: int, token_hash: str,
+                                minutes: int = 15):
+    """Заводит одноразовый токен установки пароля; живые старые гасятся."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE admin_setup_tokens SET used = 1 WHERE account_id = ? "
+            "AND used = 0", (int(account_id),))
+        await db.execute(
+            "INSERT INTO admin_setup_tokens (token_hash, account_id, expires_at) "
+            "VALUES (?, ?, datetime('now', ?))",
+            (token_hash, int(account_id), f"+{int(minutes)} minutes"))
+        await db.commit()
+
+
+async def admin_setup_token_live(account_id: int):
+    """Живые неиспользованные токены аккаунта: [(token_hash, expires_at)]."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT token_hash, expires_at FROM admin_setup_tokens "
+            "WHERE account_id = ? AND used = 0 "
+            "AND expires_at > CURRENT_TIMESTAMP ORDER BY rowid DESC",
+            (int(account_id),)) as cur:
+            return await cur.fetchall()
+
+
+async def admin_setup_token_use(token_hash: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE admin_setup_tokens SET used = 1 WHERE token_hash = ?",
+            (token_hash,))
+        await db.commit()
+
+
+async def admin_setup_purge():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM admin_setup_tokens "
+            "WHERE used = 1 OR expires_at <= CURRENT_TIMESTAMP")
+        await db.commit()
+
+
+# Блокировка входа: 5 неверных попыток за 15 минут — на пару
+# (аккаунт, IP). Окно живёт в базе, поэтому перезапуск бота её не сбрасывает.
+ADMIN_PW_MAX_FAILS = 5
+ADMIN_PW_FAIL_WINDOW = 15 * 60
+
+
+async def admin_login_locked(account_id: int, ip: str) -> bool:
+    """Закрыт ли вход: 5 неверных попыток за последние 15 минут.
+    Окно считаем часами SQLite (UTC), а не локальным временем процесса,
+    чтобы не зависеть от часового пояса сервера."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM admin_login_fails WHERE account_id = ? AND ip = ? "
+            "AND fails >= ? AND first_at > datetime('now', '-900 seconds')",
+            (int(account_id), ip or "", ADMIN_PW_MAX_FAILS)) as cur:
+            return await cur.fetchone() is not None
+
+
+async def admin_login_fail_hit(account_id: int, ip: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT fails FROM admin_login_fails WHERE account_id = ? AND ip = ? "
+            "AND first_at > datetime('now', '-900 seconds')",
+            (int(account_id), ip or "")) as cur:
+            row = await cur.fetchone()
+        if row:
+            await db.execute(
+                "UPDATE admin_login_fails SET fails = fails + 1 "
+                "WHERE account_id = ? AND ip = ?", (int(account_id), ip or ""))
+        else:
+            await db.execute(
+                "INSERT INTO admin_login_fails (account_id, ip, fails) "
+                "VALUES (?, ?, 1) ON CONFLICT(account_id, ip) DO UPDATE SET "
+                "fails = 1, first_at = CURRENT_TIMESTAMP",
+                (int(account_id), ip or ""))
+        await db.commit()
+
+
+async def admin_login_fail_clear(account_id: int, ip: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM admin_login_fails WHERE account_id = ? AND ip = ?",
+            (int(account_id), ip or ""))
+        await db.commit()
 
 
 async def control_today() -> dict:
