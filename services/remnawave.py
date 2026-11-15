@@ -118,8 +118,9 @@ async def list_config_profiles() -> dict:
     """Профили конфигурации панели (инбаунды и хосты) — только чтение.
 
     Используется веб-админкой для страницы «Панель Remnawave».
-    Редактирование профилей/инбаундов здесь не делается и не будет:
-    для этого нет API-клиента, правки — только через браузер в панели.
+    Редактирование — через get/update_config_profile() ниже (веб-админка
+    правит только whitelisted-поля одного инбаунда и валидирует результат
+    через get_computed_config); правки напрямую в панели — через браузер.
     """
     r = await _request("GET", CONFIG_PROFILES)
     if not r["ok"]:
@@ -154,6 +155,80 @@ async def list_config_profiles() -> dict:
         out.append({"uuid": p.get("uuid") or "", "name": p.get("name") or "",
                     "inbounds": inbounds})
     return {"ok": True, "profiles": out}
+
+
+async def get_config_profile(uuid: str) -> dict:
+    """Один профиль конфигурации целиком, включая config.inbounds.
+
+    GET /api/config-profiles/{uuid}. Ответ панели — сам профиль
+    (uuid, name, config: полный Xray-JSON, ...)."""
+    return await _request("GET", f"{CONFIG_PROFILES}/{uuid}")
+
+
+async def update_config_profile(uuid: str, config: dict) -> dict:
+    """Заменить config профиля целиком.
+
+    PATCH /api/config-profiles, тело — UpdateConfigProfileRequestDto
+    {"uuid": uuid, "config": config} (полный Xray-JSON, не дельта).
+    Вызывающий обязан сначала GET'нуть профиль и менять в копии только
+    нужные поля — панель перезапишет config как есть."""
+    return await _request("PATCH", CONFIG_PROFILES,
+                          {"uuid": uuid, "config": config})
+
+
+async def get_computed_config(uuid: str) -> dict:
+    """Вычисленный Xray-конфиг профиля после правок — для валидации.
+
+    GET /api/config-profiles/{uuid}/computed-config. Если панель приняла
+    PATCH, но конфиг не собирается, ошибка видна здесь, а не у юзеров."""
+    return await _request("GET", f"{CONFIG_PROFILES}/{uuid}/computed-config")
+
+
+HOSTS = f"{API_ROOT}/hosts"
+
+
+def _norm_host(h: dict) -> dict:
+    return {
+        "uuid": h.get("uuid") or "",
+        "inboundUuid": h.get("inboundUuid") or "",
+        "remark": h.get("remark") or "",
+        "address": h.get("address") or "",
+        "port": h.get("port"),
+        "sni": h.get("sni") or "",
+        "isDisabled": bool(h.get("isDisabled")),
+    }
+
+
+async def list_hosts() -> dict:
+    """Все хосты панели. GET /api/hosts."""
+    r = await _request("GET", HOSTS)
+    if not r["ok"]:
+        return r
+    data = r["data"]
+    raw = data if isinstance(data, list) else (data or {}).get("hosts") or []
+    return {"ok": True,
+            "hosts": [_norm_host(h) for h in raw if isinstance(h, dict)]}
+
+
+async def patch_host(uuid: str, fields: dict) -> dict:
+    """Точечная правка хоста. PATCH /api/hosts, тело {"uuid": uuid, ...fields}.
+
+    Тот же collection-паттерн, что PATCH /api/users и PATCH
+    /api/config-profiles: uuid + только меняемые поля. Валидация —
+    read-back через list_hosts() у вызывающего."""
+    body = {"uuid": uuid}
+    body.update(fields)
+    return await _request("PATCH", HOSTS, body)
+
+
+async def create_host(fields: dict) -> dict:
+    """Новый хост. POST /api/hosts. Валидация — read-back через list_hosts()."""
+    return await _request("POST", HOSTS, fields)
+
+
+async def delete_host(uuid: str) -> dict:
+    """Удалить хост. DELETE /api/hosts/{uuid}."""
+    return await _request("DELETE", f"{HOSTS}/{uuid}")
 
 
 async def get_user(username: str) -> dict:
@@ -602,7 +677,16 @@ async def rename_clients_strip_username() -> dict:
         if new is None:
             skipped += 1
             continue
-        uid = u.get("uuid")
+        # Панель отдаёт UUID пользователя как vlessUuid (поля uuid
+        # в списке нет — из-за этого переименование 2026-11-15
+        # упало с «нет uuid» у всех 78 клиентов).
+        uid = u.get("vlessUuid") or u.get("uuid")
+        if not uid:
+            # добираем детальной карточкой по имени
+            detail = await user_by_name(old)
+            if detail.get("ok") and isinstance(detail.get("data"), dict):
+                uid = (detail["data"].get("vlessUuid")
+                       or detail["data"].get("uuid"))
         if not uid:
             failed += 1
             errors.append(f"{old}: нет uuid")
