@@ -658,6 +658,77 @@ def _strip_username(panel_username: str) -> str | None:
     return f"{m.group(1) or ''}{m.group(2)}"
 
 
+async def _resolve_user_uuid(u: dict, old: str):
+    """UUID пользователя панели: в списке он называется vlessUuid
+    (поля uuid там нет — из-за этого переименование 2026-11-15
+    упало с «нет uuid» у всех 78 клиентов)."""
+    uid = u.get("vlessUuid") or u.get("uuid")
+    if uid:
+        return uid
+    # добираем детальной карточкой по имени
+    detail = await user_by_name(old)
+    if detail.get("ok") and isinstance(detail.get("data"), dict):
+        return (detail["data"].get("vlessUuid")
+                or detail["data"].get("uuid"))
+    return None
+
+
+async def _rename_one(old: str, uid: str):
+    """Переименовать одного клиента: PATCH в панели + email в базе бота.
+    Возвращает (ok, новое_имя, ошибка). Ссылка подписки и ключ не
+    меняются — они строятся от shortUuid, а не от имени."""
+    new = _strip_username(old)
+    if new is None:
+        return False, None, "уже без юза"
+    r = await update_user({"uuid": uid, "username": new})
+    if not r.get("ok"):
+        return False, None, r.get("error") or "ошибка панели"
+    # панель переименовала — правим email в базе бота
+    import core.database as db
+    try:
+        async with db.aiosqlite.connect(db.DB_PATH) as conn:
+            for table in ("paid_subs", "admin_subs"):
+                await conn.execute(
+                    f"UPDATE {table} SET email = ? WHERE email = ?",
+                    (new, old))
+            await conn.commit()
+    except Exception as e:
+        return False, None, f"панель ок, база — {e}"
+    forget(old)
+    return True, new, None
+
+
+async def list_rename_candidates() -> list:
+    """Клиенты панели, у которых в имени есть _юзернейм:
+    [(старое_имя, новое_имя)]."""
+    out = []
+    for u in await all_users():
+        old = (u.get("username") or "").strip()
+        new = _strip_username(old)
+        if new is not None:
+            out.append((old, new))
+    return out
+
+
+async def rename_one_client(old: str) -> dict:
+    """Переименовать одного клиента по его нынешнему имени в панели.
+    Возвращает {ok, old, new, error}."""
+    new = _strip_username(old)
+    if new is None:
+        return {"ok": False, "old": old, "new": None,
+                "error": "уже без юза / не по шаблону"}
+    detail = await user_by_name(old)
+    if not detail.get("ok") or not isinstance(detail.get("data"), dict):
+        return {"ok": False, "old": old, "new": None,
+                "error": detail.get("error") or "не найден в панели"}
+    uid = (detail["data"].get("vlessUuid")
+           or detail["data"].get("uuid"))
+    if not uid:
+        return {"ok": False, "old": old, "new": None, "error": "нет uuid"}
+    ok, renamed_new, err = await _rename_one(old, uid)
+    return {"ok": ok, "old": old, "new": renamed_new, "error": err}
+
+
 async def rename_clients_strip_username() -> dict:
     """Переименовать клиентов панели: убрать юзернейм с конца имени.
 
@@ -670,45 +741,22 @@ async def rename_clients_strip_username() -> dict:
     users = await all_users()
     renamed, failed, skipped = 0, 0, 0
     errors = []
-    import core.database as db
     for u in users:
         old = (u.get("username") or "").strip()
         new = _strip_username(old)
         if new is None:
             skipped += 1
             continue
-        # Панель отдаёт UUID пользователя как vlessUuid (поля uuid
-        # в списке нет — из-за этого переименование 2026-11-15
-        # упало с «нет uuid» у всех 78 клиентов).
-        uid = u.get("vlessUuid") or u.get("uuid")
-        if not uid:
-            # добираем детальной карточкой по имени
-            detail = await user_by_name(old)
-            if detail.get("ok") and isinstance(detail.get("data"), dict):
-                uid = (detail["data"].get("vlessUuid")
-                       or detail["data"].get("uuid"))
+        uid = await _resolve_user_uuid(u, old)
         if not uid:
             failed += 1
             errors.append(f"{old}: нет uuid")
             continue
-        r = await update_user({"uuid": uid, "username": new})
-        if not r.get("ok"):
+        ok, _, err = await _rename_one(old, uid)
+        if not ok:
             failed += 1
-            errors.append(f"{old}: {r.get('error') or 'ошибка панели'}")
+            errors.append(f"{old}: {err}")
             continue
-        # панель переименовала — правим email в базе бота
-        try:
-            async with db.aiosqlite.connect(db.DB_PATH) as conn:
-                for table in ("paid_subs", "admin_subs"):
-                    await conn.execute(
-                        f"UPDATE {table} SET email = ? WHERE email = ?",
-                        (new, old))
-                await conn.commit()
-        except Exception as e:
-            failed += 1
-            errors.append(f"{old}: панель ок, база — {e}")
-            continue
-        forget(old)
         renamed += 1
     return {"renamed": renamed, "failed": failed, "skipped": skipped,
             "errors": errors[:10]}
@@ -1621,6 +1669,8 @@ async def handle_panel_sync_menu(query, context=None):
                                   callback_data="panel_names_sync")],
             [InlineKeyboardButton("✏️ Убрать юз из имён клиентов",
                                   callback_data="panel_rename_strip")],
+            [InlineKeyboardButton("🧪 Переименовать одного (тест)",
+                                  callback_data="panel_rename_one:0")],
             [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
 
 
@@ -1713,6 +1763,129 @@ async def handle_panel_rename_strip(query, context=None):
             [InlineKeyboardButton("🔄 К синхронизации",
                                   callback_data="panel_sync_menu")],
             [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
+
+
+_RENAME_PAGE_SIZE = 10
+
+
+async def _find_rename_candidate(tg_id: int, kind: str):
+    """Старое имя клиента по TG ID и типу (paid — платный, admin — админский).
+    None, если такого клиента с юзом в имени уже нет."""
+    for old, _new in await list_rename_candidates():
+        if _panel_tg_id(old) != int(tg_id):
+            continue
+        if (kind == "paid") == old.startswith("paid_"):
+            return old
+    return None
+
+
+async def handle_panel_rename_one(query, context=None, page: int = 0):
+    """Тест на одном клиенте: список тех, у кого в имени есть _юзернейм.
+    Переименовывается только выбранный, остальные не трогаются."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if not is_configured():
+        await query.answer("Сначала задай адрес панели и токен", show_alert=True)
+        return
+    await query.edit_message_text("✏️ Ищу клиентов с юзом в имени…",
+                                  parse_mode="HTML")
+    cands = await list_rename_candidates()
+    if not cands:
+        await query.edit_message_text(
+            "✏️ <b>Переименование одного клиента</b>\n\n"
+            "Клиентов с юзернеймом в имени не нашлось — все уже без юза.",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 К синхронизации",
+                                      callback_data="panel_sync_menu")]]))
+        return
+    pages = (len(cands) + _RENAME_PAGE_SIZE - 1) // _RENAME_PAGE_SIZE
+    page = max(0, min(int(page), pages - 1))
+    chunk = cands[page * _RENAME_PAGE_SIZE:(page + 1) * _RENAME_PAGE_SIZE]
+    lines = ["✏️ <b>Переименование одного клиента (тест)</b>", "",
+             "Выбери клиента — переименуется только он, остальные не тронутся.",
+             f"Всего с юзом в имени: <b>{len(cands)}</b>"]
+    kb = []
+    for old, new in chunk:
+        tg_id = _panel_tg_id(old) or 0
+        kind = "paid" if old.startswith("paid_") else "admin"
+        kb.append([InlineKeyboardButton(
+            f"{old} → {new}",
+            callback_data=f"panel_rename_pick:{tg_id}:{kind}")])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(
+            "◀️", callback_data=f"panel_rename_one:{page - 1}"))
+    if page < pages - 1:
+        nav.append(InlineKeyboardButton(
+            "▶️", callback_data=f"panel_rename_one:{page + 1}"))
+    if nav:
+        kb.append(nav)
+    kb.append([InlineKeyboardButton("🔄 К синхронизации",
+                                    callback_data="panel_sync_menu")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
+async def handle_panel_rename_pick(query, context=None, tg_id: int = 0,
+                                   kind: str = "paid"):
+    """Подтверждение: показать старое → новое имя одного клиента."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if not is_configured():
+        await query.answer("Сначала задай адрес панели и токен", show_alert=True)
+        return
+    old = await _find_rename_candidate(tg_id, kind)
+    if old is None:
+        await query.answer("Этот клиент уже переименован или не найден",
+                           show_alert=True)
+        return
+    new = _strip_username(old)
+    await query.edit_message_text(
+        "✏️ <b>Переименовать одного клиента?</b>\n\n"
+        f"<code>{escape(old)}</code> → <code>{escape(new)}</code>\n\n"
+        "<i>Меняется только имя в панели и email в базе бота. "
+        "Ссылка подписки и ключ не меняются — клиент ничего не заметит.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Переименовать",
+                                  callback_data=f"panel_rename_do:{tg_id}:{kind}")],
+            [InlineKeyboardButton("◀️ К списку",
+                                  callback_data="panel_rename_one:0")]]))
+
+
+async def handle_panel_rename_do(query, context=None, tg_id: int = 0,
+                                 kind: str = "paid"):
+    """Переименовать выбранного клиента и показать результат."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if not is_configured():
+        await query.answer("Сначала задай адрес панели и токен", show_alert=True)
+        return
+    old = await _find_rename_candidate(tg_id, kind)
+    if old is None:
+        await query.answer("Этот клиент уже переименован или не найден",
+                           show_alert=True)
+        return
+    await query.edit_message_text(
+        f"✏️ Переименовываю <code>{escape(old)}</code>…", parse_mode="HTML")
+    res = await rename_one_client(old)
+    if res["ok"]:
+        lines = ["✏️ <b>Клиент переименован</b>", "",
+                 f"<code>{escape(res['old'])}</code> → "
+                 f"<code>{escape(res['new'])}</code>", "",
+                 "<i>Имя в панели и email в базе бота обновлены. "
+                 "Ссылка подписки не менялась — проверь клиента в панели, "
+                 "а потом жми «Убрать юз из имён клиентов», чтобы "
+                 "переименовать остальных.</i>"]
+    else:
+        lines = ["✏️ <b>Не получилось переименовать</b>", "",
+                 f"<code>{escape(old)}</code>",
+                 f"Ошибка: <code>{escape(res['error'] or '')}</code>"]
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🧪 Ещё одного",
+                                  callback_data="panel_rename_one:0"),
+             InlineKeyboardButton("🔄 К синхронизации",
+                                  callback_data="panel_sync_menu")]]))
 
 
 async def handle_panel_sync(query, context=None):
