@@ -114,6 +114,10 @@ td.trunc{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowr
 .empty{text-align:center;color:var(--mut);padding:26px 10px}
 .empty .big{font-size:26px;display:block;margin-bottom:6px}
 pre{white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:var(--card2);border:1px solid var(--line);border-radius:6px;padding:1px 5px}
+details{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px;background:var(--card2)}
+details summary{cursor:pointer;font-weight:700;font-size:14px}
+details p,details ul{margin-top:8px}
 #toast{position:fixed;right:20px;bottom:20px;z-index:50;display:flex;flex-direction:column;gap:8px;max-width:360px}
 .toast{background:#10161f;border:1px solid var(--line2);border-left:4px solid var(--acc);border-radius:12px;padding:12px 16px;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
 .toast.err{border-left-color:var(--bad)}
@@ -456,6 +460,81 @@ pre{white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo
           <div class="btnrow"><button id="btn-node-users" class="ghost">Трафик ноды</button></div>
           <div id="nodes-out"></div>
         </div>
+        <div class="card" id="yandex-cdn-doc"><h2>Yandex Cloud CDN перед нодами</h2><p class="sub">Инструкция: сертификат, дубликат ноды, CDN-ресурс, хост в панели. Источник — INSTRUCTION.md, карточка пересобирается скриптом build_admin_html.py.</p>
+        <p>Цель: поставить перед нодой Швеции (потом Румынии) Yandex Cloud CDN, как уже сделано для Германии и Финляндии. CDN прячет реальный IP ноды и даёт свой сертификат. Порядок: Швеция → Румыния.</p>
+        <p>Доменная схема:</p>
+        <ul><li>Германия: нода <code class="mono">denode1.drbl.tech</code>, CDN-домен <code class="mono">de1cdn.drbl.tech</code></li><li>Швеция: нода <code class="mono">senode1.drbl.tech</code>, CDN-домен <code class="mono">se1cdn.drbl.tech</code></li><li>Румыния: нода <code class="mono">ronode1.drbl.tech</code>, CDN-домен <code class="mono">ro1cdn.drbl.tech</code></li></ul>
+        <details><summary>Образец: рабочий ресурс Финляндии <code class="mono">fin1cdn.drbl.tech</code></summary>
+        <p>ID <code class="mono">bc8r6d1c6663p5pte2n7</code>, создан 19.10.2026. Точные настройки из его карточки (скриншоты 2026-11-16 01:20):</p>
+        <ul><li>Группа источников: <code class="mono">common-95-85-251-169</code> (авто-группа Яндекса, её искать не надо)</li><li>Протокол для источников: <b>HTTP</b></li><li>Доступ к контенту: Разрешен</li><li>Заголовок Host: <b>Как у клиента</b></li><li>Тип сертификата: <code class="mono">fin1cdn</code>, статус <b>Выпущен</b></li><li>Переадресация клиентов: <b>Не использовать</b></li><li>Доступ по защищённому токену / по IP-адресам / по странам: выключено</li><li>Перенаправление запросов / следование перенаправлениям: выключено</li><li>Кеширование в CDN: <b>Выключено</b>, в браузере: <b>Выключено</b>, Cookie — <b>Не игнорировать</b>, query-параметры — <b>Не кешировать</b></li><li>Скрытие заголовков источника: <b>Не скрывать</b></li><li>CORS: <b>Не добавлять</b></li><li>Настраиваемый HTTP-ответ: <b>Включено</b></li><li>gzip-сжатие: <b>Не сжимать</b>, сегментация больших файлов: <b>Не сегментировать</b></li><li>DNS: <code class="mono">fin1cdn.drbl.tech</code> → CNAME <code class="mono">8d4319fdecfff922.topology.gslb.yccdn.ru</code></li><li>Метрики за 30 дней: 37,14 ГБ из источников, 2 435 046 запросов, ответы из кеша — 0 (кэш выключен, всё идёт в origin). Финляндия через CDN реально работает, хотя IP ноды заблочен.</li></ul>
+        <p>Образец сертификата Германии <code class="mono">de1cdn</code>: ID <code class="mono">fpqbh7g6dhv19nfb1dud</code>, Issued, Managed, LETS_ENCRYPT, <code class="mono">de1cdn.drbl.tech</code>, 19.10.2026 → 17.01.2027. Проверка прав — <b>CNAME-запись</b> (не TXT!): <code class="mono">_acme-challenge.de1cdn.drbl.tech</code> → <code class="mono">fpqbh7g6dhv19nfb1dud.cm.yandexcloud.net</code>, статус Valid. CNAME делегирует проверку Яндексу — Managed-сертификат продлевается сам. CNAME и TXT одновременно НЕ добавлять.</p>
+        </details>
+        <details><summary>Шаг 1. Сертификат</summary>
+        <p>В консоли Yandex Cloud: Certificate Manager → «Создать сертификат от Let&#x27;s Encrypt».</p>
+        <ul><li><b>Имя:</b> <code class="mono">se1cdn</code> (для Румынии — <code class="mono">ro1cdn</code>)</li><li><b>Описание:</b> пусто</li><li><b>Защита от удаления:</b> включить</li><li><b>Домены</b> (каждый с новой строки): <code class="mono">se1cdn.drbl.tech</code></li><li><b>Тип проверки:</b> <b>DNS</b></li></ul>
+        <p>Нажать «Создать». Яндекс покажет CNAME-запись для проверки (имя <code class="mono">_acme-challenge.se1cdn.drbl.tech</code>, значение <code class="mono">&lt;id-сертификата&gt;.cm.yandexcloud.net</code> — ID будет свой).</p>
+        <p>Добавить эту CNAME-запись у DNS-провайдера домена <code class="mono">drbl.tech</code>. Дождаться статуса <b>Valid</b> и <b>Issued</b> в карточке сертификата.</p>
+        </details>
+        <details><summary>Шаг 2. Дубликат ноды «Швеция [CDN]» в панели и на сервере</summary>
+        <p>CDN-инбаунд живёт в отдельной ноде-дубликате на том же физическом сервере — как «Германия [CDN]» (<code class="mono">denode1.drbl.tech</code>) и «Финляндия [CDN]» (<code class="mono">finnode1.drbl.tech</code>).</p>
+        <p><b>В панели Remnawave: Nodes → Management → у ноды «Швеция» — кнопка дубликата.</b> В копии поменять:</p>
+        <ul><li>Имя: <b>«Швеция [CDN]»</b></li><li>Address: <code class="mono">senode1.drbl.tech</code> (A-запись → <code class="mono">81.90.21.84</code>)</li><li>Node Port: <code class="mono">12222</code> (как у <code class="mono">remnanode2</code> в Германии и Финляндии)</li><li>Кнопка <b>Copy docker-compose.yml</b> — в ней новый порт и секретный ключ.</li></ul>
+        <p>Проверить, что порт свободен на сервере Швеции:</p>
+        <pre>ss -tlnp | grep 12222</pre>
+        <p>(пусто — свободен).</p>
+        <p><b>На сервере Швеции (<code class="mono">81.90.21.84</code>):</b></p>
+        <pre>mkdir -p /opt/remnanode2 &amp;&amp; cd /opt/remnanode2
+        nano docker-compose.yml</pre>
+        <p>Вставить скопированный compose и поменять одну строку — <code class="mono">container_name: remnanode</code> → <code class="mono">container_name: remnanode2</code>, иначе конфликт с первой нодой. Итоговый файл (шаблон панели, одинаковый для всех [CDN]-дубликатов):</p>
+        <pre>services:
+          remnanode:
+            container_name: remnanode2
+            image: remnawave/node:latest
+            # network_mode: host
+            ports:
+              - &quot;12222:12221&quot;  # API: внешний 12222 = Node Port в панели
+              - &quot;8880:8880&quot;    # XHTTP-инбаунд (VXC)
+            restart: always
+            cap_add:
+              - NET_ADMIN
+            ulimits:
+              nofile:
+                soft: 1048576
+                hard: 1048576
+            environment:
+              - NODE_PORT=12221
+              - SECRET_KEY=&quot;...&quot;  # из панели</pre>
+        <p>Пояснения к шаблону:</p>
+        <ul><li><code class="mono">network_mode: host</code> НЕ используется — вместо него проброс портов.</li><li>Внешний API-порт <code class="mono">12222</code> = Node Port в панели; внутри контейнера API слушает <code class="mono">12221</code> (<code class="mono">NODE_PORT=12221</code>).</li><li>XHTTP-инбаунд дубликата — порт <code class="mono">8880</code> (тот же номер, что VXC у основной ноды, но инбаунды распределены между нодами: на основной ноде VXC не слушается, поэтому конфликта нет). Прецедент: у Фин VXC 8880 висит именно на ноде [CDN] (<code class="mono">finnode1.drbl.tech</code>).</li><li>Монт letsencrypt НЕ нужен (у [CDN]-ноды только XHTTP без TLS).</li><li>ВНИМАНИЕ: кавычки вокруг SECRET_KEY должны быть обычными прямыми <code class="mono">&quot;</code> — если там «ёлочки» (вставка их подменила), панель не примет ключ и нода не позеленеет.</li></ul>
+        <p>Сохранить и запустить:</p>
+        <pre>docker compose up -d &amp;&amp; docker compose logs -f -t</pre>
+        <p>Проверка: <code class="mono">docker ps</code> — у <code class="mono">remnanode2</code> должны быть <code class="mono">0.0.0.0:8880-&gt;8880</code> и <code class="mono">0.0.0.0:12222-&gt;12221</code> (как у Финляндии). В панели нода «Швеция [CDN]» должна стать зелёной.</p>
+        <p><b>В панели:</b> Next → выбрать Config Profile → Create. Профиль — тот же, что у «Германия [CDN]» (там XHTTP-инбаунд под CDN).</p>
+        <p><b>Файрвол:</b> порт <code class="mono">12222</code> открыть только для IP панели <code class="mono">144.31.223.252</code> — то же правило, что и для порта первой ноды.</p>
+        </details>
+        <details><summary>Шаг 3. CDN-ресурс в Yandex Cloud</summary>
+        <p>В консоли Yandex Cloud: <b>Cloud CDN → Create resource</b>.</p>
+        <p><b>Копирование конфигурации:</b> вверху формы — <b>Copy a configuration → <code class="mono">de1cdn</code></b> (или <code class="mono">fin1cdn</code>). Копия подставляет почти все поля. ОБЯЗАТЕЛЬНО поменять после копирования (консоль подставляет и их!):</p>
+        <ul><li><b>Доменное имя</b> — там будет <code class="mono">de1cdn.drbl.tech</code> → поменять на <code class="mono">se1cdn.drbl.tech</code> (иначе Яндекс не даст создать ресурс — домен занят).</li><li><b>Доменное имя источника</b> — <code class="mono">senode1.drbl.tech:8880</code>.</li><li><b>Сертификат</b> — <code class="mono">se1cdn</code>.</li></ul>
+        <p><b>Шаг 1 из 4 — Основные настройки:</b></p>
+        <ul><li>Доступ к контенту: включён</li><li>Запрос контента: <code class="mono">Из одного источника</code></li><li>Тип источника: <code class="mono">Сервер</code></li><li>Доменное имя источника: <code class="mono">senode1.drbl.tech:8880</code> — домен ноды-дубликата + порт XHTTP-инбаунда. <b>IP НИКОГДА не указывается</b> (как у зеркала подписки origin = <code class="mono">key.drbl.tech</code> — домен, не IP). Без <code class="mono">:8880</code> CDN пойдёт на 80-й порт, а там декой-сайт, не Xray.</li><li>Протокол для источников: <code class="mono">HTTP</code></li><li>Заголовок Host: <code class="mono">Как у клиента</code> (НЕ «Свое значение» — оно требует заполнять поле)</li><li>Доменное имя: <code class="mono">se1cdn.drbl.tech</code> (primary; после создания не меняется)</li><li>Тип сертификата: <code class="mono">Сертификат из Certificate Manager</code> → <code class="mono">se1cdn</code> (НЕ «Не использовать» — иначе будет только HTTP)</li><li>Перенаправление запросов: выключено</li><li>Следование перенаправлениям от источника: выключено</li><li>Профиль безопасности TLS: <code class="mono">Безопасный (TLSv1.2+)</code></li><li>Переадресация клиентов: <code class="mono">Не использовать</code> (как у Фин; НЕ «С HTTP на HTTPS»)</li><li>Доступ по защищённому токену / по IP-адресам / по странам: выключено</li></ul>
+        <p><b>Шаг 2 из 4 — Кеширование:</b></p>
+        <ul><li>Кеширование в CDN: <b>ВЫКЛЮЧИТЬ</b> — в форме тумблер по умолчанию ВКЛЮЧЁН, обязательно выключить (для VPN кэш нельзя включать).</li><li>Кеширование в браузере: выключено</li><li>Кеширование query-параметров: <code class="mono">Не кешировать</code></li><li>Игнорировать файлы cookie: галочка НЕ стоит (т.е. не игнорировать)</li><li>gzip-сжатие: выключено, сегментация больших файлов: выключено</li></ul>
+        <p><b>Шаг 3 из 4 — HTTP-заголовки и методы:</b></p>
+        <ul><li>Заголовки запроса к источнику / ответа клиенту: ничего не добавлять</li><li>Скрытие заголовков источника: <code class="mono">Не скрывать</code></li><li>CORS: <code class="mono">Не добавлять</code></li><li>Разрешенные методы: не трогать (по умолчанию)</li><li>Настраиваемый HTTP-ответ: <b>Включить</b> (у Фин включён)</li></ul>
+        <p><b>Шаг 4 из 4 — Дополнительно:</b> ничего не включать (лог-экспорт, shielding — выключены).</p>
+        <p>Нажать <b>Создать</b> и дождаться активации (до 15 минут).</p>
+        <p><b>DNS после создания ресурса:</b> в карточке ресурса взять домен провайдера (вида <code class="mono">xxx.topology.gslb.yccdn.ru</code>) и направить на него <code class="mono">se1cdn.drbl.tech</code> через <b>CNAME</b>. Не путать с CNAME-записью <code class="mono">_acme-challenge</code> из шага 1 — она остаётся как есть.</p>
+        </details>
+        <details><summary>Шаг 4. Хост в панели и проверка</summary>
+        <ul><li>В ноде «Швеция [CDN]» создать хост CDN-инбаунда (XHTTP VLESS) на домене <code class="mono">se1cdn.drbl.tech</code>, порт 443.</li><li>Добавить хост в шаблон автовыбора (по аналогии с Германией [LTE]).</li><li>Проверить в клиенте (INCY/Happ): подключение через <code class="mono">se1cdn.drbl.tech:443</code> работает, IP не палится.</li><li>Проверка origin без клиента: <code class="mono">curl -sk https://se1cdn.drbl.tech/api/...</code> (путь XHTTP-инбаунда) — должен вернуть 404 (не 502/000); 502 = CDN не достаёт origin, 000 = DNS/edge не готов.</li></ul>
+        </details>
+        <details><summary>Румыния — то же самое, подстановки</summary>
+        <ul><li>Сертификат: имя <code class="mono">ro1cdn</code>, домен <code class="mono">ro1cdn.drbl.tech</code>, проверка DNS (CNAME).</li><li>Дубликат ноды: «Румыния [CDN]», адрес <code class="mono">ronode1.drbl.tech</code> → A-запись на <code class="mono">89.125.166.26</code>, Node Port <code class="mono">12222</code> (проверить <code class="mono">ss -tlnp | grep 12222</code> на сервере Румынии), второй remnanode в <code class="mono">/opt/remnanode2</code>, <code class="mono">container_name: remnanode2</code>, тот же шаблон compose (порты <code class="mono">12222:12221</code> + <code class="mono">8880:8880</code>).</li><li>CDN-ресурс: копия конфигурации с <code class="mono">de1cdn</code>, домен <code class="mono">ro1cdn.drbl.tech</code>, origin <code class="mono">ronode1.drbl.tech:8880</code>, протокол HTTP, Host «Как у клиента», сертификат <code class="mono">ro1cdn</code>, переадресация клиентов «Не использовать», кеширование в CDN выключено (тумблер по умолчанию включён!), настраиваемый HTTP-ответ включён.</li><li>DNS: <code class="mono">ro1cdn.drbl.tech</code> → CNAME на домен провайдера из карточки ресурса.</li><li>Хост в панели: XHTTP VLESS <code class="mono">ro1cdn.drbl.tech:443</code> + тест в клиенте.</li></ul>
+        <p>_Написано по итогам настройки Швеции, 2026-11-16. Mark правит, если что-то не так._</p>
+        </details>
+        </div>
+        <!-- /yandex-cdn-doc -->
       </section>
 
       <!-- Логи -->
