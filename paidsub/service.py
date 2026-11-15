@@ -1213,8 +1213,3 @@ async def revoke_period(tg_id: int, period_seconds: int | None, *,
                    f"Новая дата: {new_expire_str}"
                    + (f"\n⚠️ Панель: {panel_error}" if panel_error else ""))
     return {"ok": True, "expire": new_expire_str, "panel_error": panel_error}
-
-
-# Совместимость: старое имя массового сдвига срока.
-async def bulk_shift_expire(seconds: int, direction: int, *, bot=None, panel=None) -> dict:
-    return await bulk_extend(seconds, direction, bot=bot, panel=panel)

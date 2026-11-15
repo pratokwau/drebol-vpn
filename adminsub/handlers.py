@@ -6,7 +6,7 @@ from config import load_config
 from core.keyboards import back_admin
 
 
-from adminsub.storage import list_subs, get_sub, delete_sub, update_sub_field
+from adminsub.storage import list_subs, get_sub
 from paidsub import service as _svc
 from adminsub.keyboards import (subs_list_keyboard, presets_keyboard, sub_view_keyboard,
                                sub_settings_keyboard)
@@ -321,7 +321,7 @@ async def handle_sub_settings(query, sub_id: int):
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    _, tg_id, email, _, _, _, expire, _limit_ip, limit_hwid, total_gb, _ = row[:11]
+    _, _, _, _, _, _, expire, _limit_ip, limit_hwid, total_gb, _ = row[:11]
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
     hwid_str = str(limit_hwid) if limit_hwid > 0 else "безлимит"
     from services.remnawave import lte_limit_label
@@ -413,13 +413,6 @@ async def handle_sub_reduce(query, sub_id: int, context):
         f"➖ <b>Убавить срок подписке #{sub_id}</b>\n\n" + _TIME_HINT,
         parse_mode="HTML", reply_markup=back_admin(),
     )
-
-
-async def shift_sub_expire(sub_id: int, seconds: int, direction: int, context) -> dict:
-    """Тонкая обёртка над paidsub.service.extend_sub (совместимость)."""
-    bot = context.bot if hasattr(context, "bot") else None
-    return await _svc.extend_sub(sub_id, int(seconds) * int(direction),
-                                kind="admin", bot=bot)
 
 
 # ── Устройства и адреса ───────────────────────────────────────────────────────
@@ -597,14 +590,6 @@ async def handle_sub_reissue(query, context, sub_id: int):
             [InlineKeyboardButton("◀️ К подписке", callback_data=f"sub_view:{sub_id}")]]),
         disable_web_page_preview=True,
     )
-
-
-# ── Заведение подписок в панели ───────────────────────────────────────────────
-
-
-
-
-
 
 
 # ── Ники в панели ─────────────────────────────────────────────────────────────

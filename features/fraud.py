@@ -174,7 +174,6 @@ async def report_pair(context, tg_id: int, other_tg: int, kind: str,
 
 async def who_line(tg_id: int) -> str:
     """Короткая справка о человеке: кто, когда пришёл, что с подпиской."""
-    from html import escape
     from core.database import get_user_info, user_fingerprint_stats
     from paidsub.storage import get_paid_sub_by_tg_id
     from paidsub.handlers import _esc_name

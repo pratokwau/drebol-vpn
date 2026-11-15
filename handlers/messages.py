@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -1304,8 +1304,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from handlers.finance import apply_server_step
         await apply_server_step(update.message, context, state, text)
         return
-
-    # ── Выплата из Platega: сумма → реквизиты ───────────────────────────────
 
     # ── Сообщение юзеру из профиля ─────────────────────────────────────────────
     if state == AWAITING_DM_USER:

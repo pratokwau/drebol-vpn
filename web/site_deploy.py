@@ -1396,51 +1396,59 @@ GOOGLE_VERIFICATION_CONTENT = "google-site-verification: google7280fa10130c903e.
 # Сгенерирован из drebol-favicon-e.png (64x64). Браузеры и Googlebot
 # запрашивают /favicon.ico по умолчанию — без файла это 404.
 FAVICON_ICO_B64 = (
-    "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"
-    "iON+Ag6y3Ww1aVmhAAAAAElFTkSuQmCC"
+    "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"
+    "RU5ErkJggg=="
 )
 
 
@@ -1789,7 +1797,7 @@ async def build_current(bot_username: str) -> tuple:
     Одна сборка на всех: и кнопка «Обновить», и автообновление смотрят
     ровно на то, что окажется на сервере.
     """
-    from web.site_page import LOGO_URL, build_page
+    from web.site_page import LOGO_URL, MARK_URL, build_page
     cfg = load_config()
     og_bytes = _asset("og.webp")
     # /logo.png на сервере — новый логотип (тот же base64, что в шапке
@@ -1807,10 +1815,9 @@ async def build_current(bot_username: str) -> tuple:
         privacy_url=doc_url("privacy"),
         terms_url=doc_url("terms"),
         channel_url=cfg.get("channel_url", "") or "",
-        # Логотип — тот же файл, что и на странице подписки: прямая ссылка
-        # на assets/logo.png в репозитории. /logo.png на сервере не берём:
-        # там лежит залитый когда-то через бота кадр шёлковой картинки.
-        logo_file=LOGO_URL,
+        # Знак D (тайт-кроп нового логотипа) — для шапки, hero и футера.
+        # Полный логотип (LOGO_URL) по-прежнему заливается в /logo.png.
+        logo_file=MARK_URL,
         tariffs=await site_tariffs(cfg),
         poster_file="og.webp" if og_bytes else "",
         site_texts=cfg.get("site_texts") or {},
@@ -1827,17 +1834,6 @@ def cabinet_ready() -> bool:
 
 def cabinet_link() -> str:
     return f"{site_url()}/cabinet" if cabinet_ready() else ""
-
-
-def admin_ready() -> bool:
-    """Веб-админка опубликована: есть домен, адрес API и страница уехала."""
-    c = creds()
-    cfg = load_config()
-    return bool(c["domain"] and cfg.get("webapi_public") and cfg.get("site_admin"))
-
-
-def admin_link() -> str:
-    return f"{site_url()}/admin" if admin_ready() else ""
 
 
 def pay_redirect_urls() -> dict:

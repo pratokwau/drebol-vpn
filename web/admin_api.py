@@ -335,10 +335,6 @@ async def _actor(request):
     return None
 
 
-def _actor_label(actor: dict) -> str:
-    return "mark" if actor["kind"] == "mark" else f"muse:{actor.get('email', '')}"
-
-
 def _actor_tg_id(actor: dict) -> int:
     return int(actor["tg_id"]) if actor["kind"] == "mark" else 0
 

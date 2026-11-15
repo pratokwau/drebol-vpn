@@ -49,7 +49,6 @@ STATUS_CHARGEBACKED = "chargebacked"
 STATUS_PARTIALLY_REFUNDED = "partially_refunded"
 # отдельного EXPIRED у Platega нет: неоплаченный счёт через 15 минут
 # становится CANCELED — опрос помечает его так же
-STATUS_EXPIRED = "expired"
 
 _RAW_TO_NORM = {
     "PENDING": STATUS_PENDING,
@@ -68,11 +67,6 @@ INVOICE_TTL_MINUTES = 15
 def is_configured() -> bool:
     cfg = load_config()
     return bool(cfg.get("platega_merchant_id") and cfg.get("platega_secret"))
-
-
-def _merchant_id() -> str:
-    cfg = load_config()
-    return (cfg.get("platega_merchant_id") or "").strip()
 
 
 def _headers() -> dict:

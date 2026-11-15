@@ -352,54 +352,6 @@ async def sub_devices(request):
     return web.json_response(res)
 
 
-async def sub_device_delete(request):
-    from aiohttp import web
-    actor, err = await _require_mutation(request)
-    if err is not None:
-        return err
-    from paidsub.storage import get_paid_sub
-    try:
-        sub_id = int(request.match_info["sub_id"])
-        device_id = str(request.match_info["device_id"])
-    except (KeyError, ValueError):
-        return web.json_response({"error": "bad_id"}, status=400)
-    row = await get_paid_sub(sub_id)
-    if not row:
-        return web.json_response({"error": "not_found"}, status=404)
-    svc = _service()
-    res = await svc.delete_device(sub_id, device_id)
-    if not res.get("ok"):
-        return web.json_response({"error": "action_failed",
-                                  "details": str(res.get("error") or "")},
-                                 status=400)
-    await _audit(actor, "sub_device_delete",
-                 f"sub_id: {sub_id}, device: {device_id}")
-    return web.json_response({"ok": True})
-
-
-async def sub_devices_clear(request):
-    from aiohttp import web
-    actor, err = await _require_mutation(request)
-    if err is not None:
-        return err
-    from paidsub.storage import get_paid_sub
-    try:
-        sub_id = int(request.match_info["sub_id"])
-    except (KeyError, ValueError):
-        return web.json_response({"error": "bad_id"}, status=400)
-    row = await get_paid_sub(sub_id)
-    if not row:
-        return web.json_response({"error": "not_found"}, status=404)
-    svc = _service()
-    res = await svc.clear_hwid(sub_id)
-    if not res.get("ok"):
-        return web.json_response({"error": "action_failed",
-                                  "details": str(res.get("error") or "")},
-                                 status=400)
-    await _audit(actor, "sub_devices_clear", f"sub_id: {sub_id}")
-    return web.json_response({"ok": True})
-
-
 async def subs_bulk(request):
     from aiohttp import web
     actor, err = await _require_mutation(request)
@@ -673,6 +625,3 @@ def register(app) -> None:
             f"/subs/{{sub_id}}/{action}",
             lambda req, a=action: _sub_action(req, a))
     app.router.add_get("/subs/{sub_id}/devices", sub_devices)
-    app.router.add_post("/subs/{sub_id}/devices/{device_id}/delete",
-                        sub_device_delete)
-    app.router.add_post("/subs/{sub_id}/devices/clear", sub_devices_clear)

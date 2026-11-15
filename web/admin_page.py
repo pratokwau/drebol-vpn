@@ -628,7 +628,6 @@ function fmtDate(s){
   if (m) return m[3] + "." + m[2] + "." + m[1] + " " + m[4] + ":" + m[5];
   return esc(s);
 }
-function fmtGB(n){ if (n == null || n === "") return "—"; return fmtNum(n) + " ГБ"; }
 function pill(v){
   const s = String(v == null ? "" : v).toLowerCase();
   if (["active","paid","ok","success","online","enabled","true","1"].indexOf(s) >= 0) return '<span class="pill ok">' + esc(v) + "</span>";

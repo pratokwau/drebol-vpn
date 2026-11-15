@@ -922,7 +922,6 @@ async def error_command(update, context):
 
 # ── Выгрузка логов ───────────────────────────────────────────────────────────
 
-EXPORT_SCOPES = {"today": "за сегодня", "user": "по человеку", "errors": "ошибки (все сохранённые)"}
 EXPORT_MAX_ROWS = 5000
 
 

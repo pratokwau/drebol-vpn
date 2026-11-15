@@ -6,12 +6,12 @@ from config import ADMIN_ID, load_config, save_config
 from core.keyboards import back_admin, back_main
 
 from paidsub.storage import (
-    add_paid_sub, get_paid_sub, delete_paid_sub, get_paid_sub_by_tg_id,
+    get_paid_sub, get_paid_sub_by_tg_id,
     add_request, get_pending_request, resolve_request,
     update_paid_sub_field, get_expired_paid_subs, set_expire_date,
     add_history,
     get_referrer, mark_referral_rewarded, get_all_referral_stats,
-    get_promo, promo_used_by, record_promo_use, promo_use_count, get_pending_promo,
+    get_promo, promo_used_by, promo_use_count,
 )
 from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
@@ -1570,18 +1570,6 @@ async def handle_paid_bulk_limits_apply(query, context):
     )
 
 
-async def bulk_set_limits(kind: str, value: int | None, context) -> dict:
-    """Тонкая обёртка над paidsub.service.bulk_set_limits (совместимость)."""
-    bot = context.bot if hasattr(context, "bot") else None
-    return await _svc.bulk_set_limits(kind, value, bot=bot)
-
-
-async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
-    """Тонкая обёртка над paidsub.service.bulk_extend (совместимость)."""
-    bot = context.bot if hasattr(context, "bot") else None
-    return await _svc.bulk_extend(seconds, direction, bot=bot)
-
-
 # ── Индивидуальные настройки платной подписки ─────────────────────────────────
 
 async def handle_paid_sub_settings(query, sub_id: int):
@@ -1884,24 +1872,6 @@ async def revoke_paid_period(tg_id: int, period_seconds: int | None, context,
     bot = context.bot if hasattr(context, "bot") else None
     return await _svc.revoke_period(
         tg_id, period_seconds, reason=reason, bot=bot)
-
-
-def _renew_base(full_row) -> tuple:
-    """С какой точки отсчитывать оплаченный срок.
-
-    Остаток не сгорает: если период ещё идёт (в том числе пробный), новый срок
-    прибавляется к его концу. Кончился — считаем от «сейчас».
-    Возвращает (точка отсчёта, сколько секунд остатка перенесли).
-    """
-    from paidsub.storage import parse_sub_date
-    now = datetime.now()
-    raw = full_row[18] if full_row is not None and len(full_row) > 18 else None
-    if not raw:
-        raw = full_row[6] if full_row is not None and len(full_row) > 6 else None
-    end = parse_sub_date(raw) if raw else None
-    if end and end > now:
-        return end, int((end - now).total_seconds())
-    return now, 0
 
 
 async def apply_paid_payment(tg_id: int, amount: int, context,
