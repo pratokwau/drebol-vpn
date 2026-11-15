@@ -1257,7 +1257,7 @@ async def handle_reissue_key(query, context):
 async def handle_reissue_do(query, context):
     """Меняет ссылку подписки: новый subId и UUID, данные подписки на месте."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field, add_history
+    from paidsub.storage import get_paid_sub_by_tg_id
     from core.log_channel import send_log
 
     user_id = query.from_user.id
@@ -1265,36 +1265,32 @@ async def handle_reissue_do(query, context):
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    sub_id, email = row[0], row[2]
+    sub_id = row[0]
 
     await query.edit_message_text("⏳ Перевыпускаю ключ…")
 
-    from services.panel import reissue_subscription
-    result = await reissue_subscription(email)
-    if not result["success"]:
+    from paidsub import service as _svc
+    bot = context.bot if hasattr(context, "bot") else None
+    result = await _svc.reissue_sub(sub_id, kind="paid", bot=bot)
+    if not result.get("ok"):
         # техническая причина нужна админу, человеку — что делать дальше
         await send_log(context.bot,
-            f"⚠️ Перевыпуск не удался: <code>{user_id}</code>\n"
-            f"<code>{escape(str(result['error']))}</code>")
+            f"⚠️ Перевыпуск не удался: <code>{user_id}</code>" + chr(10)
+            + f"<code>{escape(str(result.get('error')))}</code>")
         await query.edit_message_text(
-            "😕 <b>Не получилось</b>\n\n"
-            "<blockquote>Ничего не сломалось — старая ссылка продолжает работать.</blockquote>\n\n"
-            "<i>Попробуйте чуть позже или напишите в поддержку.</i>",
+            "😕 <b>Не получилось</b>" + chr(10) + chr(10)
+            + "<blockquote>Ничего не сломалось — старая ссылка продолжает работать.</blockquote>" + chr(10) + chr(10)
+            + "<i>Попробуйте чуть позже или напишите в поддержку.</i>",
             parse_mode="HTML",
             reply_markup=_kb(_support_row()
                              + [InlineKeyboardButton("◀️ Назад", callback_data="my_paid_sub")]),
         )
         return
 
-    new_url = result["sub_url"]
-    await update_paid_sub_field(sub_id, "uuid", result["new_uuid"])
-    await update_paid_sub_field(sub_id, "sub_id", result["sub_id"])
-    await update_paid_sub_field(sub_id, "sub_url", new_url)
-    await add_history(user_id, "key_reissued", f"Новая ссылка: {new_url}")
-
+    new_url = result["new_url"]
     await send_log(context.bot,
-        f"🔁 Перевыпуск ключа: <code>{user_id}</code>\n"
-        f"🔗 {escape(new_url)}"
+        f"🔁 Перевыпуск ключа: <code>{user_id}</code>" + chr(10)
+        + f"🔗 {escape(new_url)}"
     )
 
     try:
@@ -1305,10 +1301,10 @@ async def handle_reissue_do(query, context):
         copy_btn = InlineKeyboardButton("📋 Скопировать ссылку", callback_data="copy_sub")
 
     await query.edit_message_text(
-        "✅ <b>Ключ перевыпущен</b>\n\n"
-        "🔑 <b>Новая ссылка</b>\n"
-        f"<code>{escape(new_url)}</code>\n\n"
-        "<i>Удалите старую подписку в приложении и вставьте эту.</i>",
+        "✅ <b>Ключ перевыпущен</b>" + chr(10) + chr(10)
+        + "🔑 <b>Новая ссылка</b>" + chr(10)
+        + f"<code>{escape(new_url)}</code>" + chr(10) + chr(10)
+        + "<i>Удалите старую подписку в приложении и вставьте эту.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [copy_btn, InlineKeyboardButton("🔳 QR-код", callback_data="qr_code")],
@@ -1478,15 +1474,15 @@ async def handle_my_devices(query, context=None):
     """Устройства клиента: что подключено, откуда и чем — и что можно отключить."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import get_paid_sub_by_tg_id
-    from services.panel import get_client_hwids
+    from paidsub import service as _svc
     user = query.from_user
     row = await get_paid_sub_by_tg_id(user.id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    email, limit = row[2], int(row[8] or 0)
+    limit = int(row[8] or 0)
     await query.edit_message_text("📱 Смотрю устройства…")
-    r = await get_client_hwids(email)
+    r = await _svc.list_devices(row[0], kind="paid")
     cfg = load_config()
     price = int(cfg.get("device_price") or 0)
     max_extra = int(cfg.get("device_max_extra") or 5)
@@ -1574,19 +1570,18 @@ def _when_ms(value) -> str:
 async def handle_dev_del(query, context, ref: str):
     """Клиент сам отключает своё устройство и освобождает слот."""
     from paidsub.storage import get_paid_sub_by_tg_id
-    from services.panel import delete_client_hwid, resolve_hwid
+    from paidsub import service as _svc
     row = await get_paid_sub_by_tg_id(query.from_user.id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    hwid_id = await resolve_hwid(row[2], ref)
-    if hwid_id is None:
+    res = await _svc.delete_device(row[0], ref, kind="paid", history=False)
+    if res.get("ok"):
+        await query.answer("Устройство отключено")
+    elif res.get("error") == "gone":
         await query.answer("Это устройство уже отключено", show_alert=True)
-        await handle_my_devices(query, context)
-        return
-    res = await delete_client_hwid(row[2], hwid_id)
-    await query.answer("Устройство отключено" if res.get("success")
-                       else "Не получилось, попробуйте позже", show_alert=not res.get("success"))
+    else:
+        await query.answer("Не получилось, попробуйте позже", show_alert=True)
     await handle_my_devices(query, context)
 
 

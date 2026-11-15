@@ -16,6 +16,7 @@ async def _notify_user(bot: Bot, tg_id: int | None, text: str):
     except Exception:
         pass
 from adminsub.storage import list_subs, add_sub, get_sub, delete_sub, update_sub_field
+from paidsub import service as _svc
 from adminsub.keyboards import (subs_list_keyboard, presets_keyboard, sub_view_keyboard,
                                sub_settings_keyboard)
 
@@ -243,33 +244,31 @@ async def handle_sub_view(query, sub_id: int):
     from datetime import datetime
     from paidsub.storage import parse_sub_date
     from paidsub.time_parser import fmt_duration_precise
+    NL = chr(10)
 
-    row = await get_sub(sub_id)
-    if not row:
+    card = await _svc.get_sub_card(sub_id, kind="admin")
+    if not card.get("ok"):
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
+    row = card["row"]
     _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _ip, limit_hwid, total_gb, created_at = row[:11]
 
     # расход и статус спрашиваем у панели: в базе их нет
-    from services.panel import get_client_traffic, get_client_info
-    t = await get_client_traffic(email)
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
-    if t.get("success"):
-        used = _fmt_bytes(int(t.get("up", 0)) + int(t.get("down", 0)))
+    if card["panel"]["traffic_ok"]:
+        used = _fmt_bytes(int(card["panel"]["up"]) + int(card["panel"]["down"]))
         traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>  ·  израсходовано {used}"
     else:
         traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>"
 
-    info = await get_client_info(email)
-    enabled = info.get("enabled", True) if info.get("success") else True
+    enabled = card["panel"]["enabled"]
     status_icon = "🟢" if enabled else "🔴"
     status_label = "активна" if enabled else "отключена"
 
     # кто это
-    from core.database import get_user_info
-    user_info = await get_user_info(tg_id) if tg_id else None
-    uname = user_info[2] if user_info and user_info[2] else None
-    shown = escape(str(user_info[1])) if user_info and user_info[1] else str(tg_id or "—")
+    user = card["user"]
+    uname = user["username"] if user else None
+    shown = escape(str(user["first_name"])) if user and user["first_name"] else str(tg_id or "—")
     if tg_id and uname:
         tg_line = f'👤 <a href="https://t.me/{escape(uname)}">{shown}</a>'
     elif tg_id:
@@ -284,30 +283,33 @@ async def handle_sub_view(query, sub_id: int):
     expire_dt = parse_sub_date(expire)
     if expire_dt and now_dt < expire_dt:
         left = int((expire_dt - now_dt).total_seconds())
-        time_line = (f"📅 Действует до: <b>{expire}</b>\n"
-                     f"⏱ Осталось: <b>{fmt_duration_precise(left)}</b>")
+        time_line = ("📅 Действует до: <b>" + expire + "</b>" + NL +
+                     "⏱ Осталось: <b>" + fmt_duration_precise(left) + "</b>")
     else:
-        time_line = f"📅 До: <b>{expire}</b>\n⏱ <b>Истекла</b>"
+        time_line = "📅 До: <b>" + expire + "</b>" + NL + "⏱ <b>Истекла</b>"
 
-    await query.edit_message_text(
-        f"📄 <b>Админская подписка #{sub_id}</b>  {status_icon}\n"
-        + tg_line + "\n"
-        + "\n📌 <b>Срок</b>\n<blockquote>"
-        f"Статус: <b>{status_label}</b>  ·  выдана вручную\n"
+    text = (
+        "📄 <b>Админская подписка #" + str(sub_id) + "</b>  " + status_icon + NL
+        + tg_line + NL
+        + NL + "📌 <b>Срок</b>" + NL + "<blockquote>"
+        + "Статус: <b>" + status_label + "</b>  ·  выдана вручную" + NL
         + time_line
-        + "</blockquote>\n\n"
-        "📊 <b>Лимиты</b>\n<blockquote>"
-        f"🖥 Устройств: <b>{limit_hwid or 'без ограничения'}</b>\n"
-        f"{traffic_line}\n"
-        f"🌐 LTE-трафик в месяц: <b>{_lte_label(row)}</b>\n"
-        f"🕐 Создана: {created_at}"
-        "</blockquote>\n"
-        "\n🔧 <b>Технические данные</b>\n<blockquote expandable>"
-        f"📧 Email: <code>{email}</code>\n"
-        f"🆔 UUID: <code>{uuid_val}</code>\n"
-        f"📋 Sub ID: <code>{sub_id_str}</code>"
-        "</blockquote>\n\n"
-        f"🔗 <b>Ссылка</b>\n<code>{sub_url}</code>",
+        + "</blockquote>" + NL + NL
+        + "📊 <b>Лимиты</b>" + NL + "<blockquote>"
+        + "🖥 Устройств: <b>" + str(limit_hwid or "без ограничения") + "</b>" + NL
+        + traffic_line + NL
+        + "🌐 LTE-трафик в месяц: <b>" + _lte_label(row) + "</b>" + NL
+        + "🕐 Создана: " + str(created_at)
+        + "</blockquote>" + NL
+        + NL + "🔧 <b>Технические данные</b>" + NL + "<blockquote expandable>"
+        + "📧 Email: <code>" + email + "</code>" + NL
+        + "🆔 UUID: <code>" + uuid_val + "</code>" + NL
+        + "📋 Sub ID: <code>" + sub_id_str + "</code>"
+        + "</blockquote>" + NL + NL
+        + "🔗 <b>Ссылка</b>" + NL + "<code>" + sub_url + "</code>"
+    )
+    await query.edit_message_text(
+        text,
         parse_mode="HTML",
         reply_markup=sub_view_keyboard(sub_id, enabled),
         disable_web_page_preview=True,
@@ -315,59 +317,34 @@ async def handle_sub_view(query, sub_id: int):
 
 
 async def handle_sub_toggle(query, sub_id: int, context=None):
+    bot = context.bot if context and hasattr(context, "bot") else None
     row = await get_sub(sub_id)
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    tg_id = row[1]
-    email = row[2]
-    from services.panel import get_client_info, toggle_client
-    info = await get_client_info(email)
-    if not info.get("success"):
-        await query.answer("❌ Клиент не найден в панели", show_alert=True)
-        return
-    new_state = not info.get("enabled", True)
     await query.edit_message_text("⏳ Обновляю статус...")
-    result = await toggle_client(email, new_state)
-    if not result["success"]:
-        await query.edit_message_text(
-            f"❌ Ошибка: <code>{result['error']}</code>",
-            parse_mode="HTML",
-            reply_markup=back_admin(),
-        )
+    result = await _svc.toggle_sub(sub_id, kind="admin", bot=bot)
+    if not result.get("ok"):
+        if result.get("error") == "panel_client_not_found":
+            await query.answer("❌ Клиент не найден в панели", show_alert=True)
+        else:
+            await query.edit_message_text(
+                f"❌ Ошибка: <code>{result['error']}</code>",
+                parse_mode="HTML",
+                reply_markup=back_admin(),
+            )
         return
-
-    if context and tg_id:
-        status_text = "✅ включена" if new_state else "⏸ приостановлена"
-        await _notify_user(context.bot, tg_id,
-            f"ℹ️ Ваша админская подписка <b>{status_text}</b>."
-        )
-
     await handle_sub_view(query, sub_id)
 
 
 async def handle_sub_delete(query, sub_id: int, context=None):
+    bot = context.bot if context and hasattr(context, "bot") else None
     row = await get_sub(sub_id)
-    tg_id = row[1] if row else None
-    email = row[2] if row else None
-
-    if email:
-        from services.panel import delete_client
+    if row and row[2]:
         await query.edit_message_text("⏳ Удаляю из панели...")
-        panel_result = await delete_client(email)
-        panel_status = "✅ удалена из панели" if panel_result["success"] else f"⚠️ панель: {panel_result.get('error', '?')}"
-    else:
-        panel_status = "⚠️ email не найден, из панели не удалено"
-
-    await delete_sub(sub_id)
-
-    if context and tg_id:
-        await _notify_user(context.bot, tg_id,
-            "🗑 Ваша админская подписка была <b>удалена</b>."
-        )
-
+    result = await _svc.delete_sub(sub_id, kind="admin", bot=bot)
     await query.edit_message_text(
-        f"🗑 Подписка удалена из базы.\n{panel_status}",
+        "🗑 Подписка удалена из базы." + chr(10) + result["panel_status"],
         reply_markup=back_admin(),
     )
 
@@ -474,61 +451,10 @@ async def handle_sub_reduce(query, sub_id: int, context):
 
 
 async def shift_sub_expire(sub_id: int, seconds: int, direction: int, context) -> dict:
-    """Двигает срок админской подписки и в базе, и в панели.
-
-    Плюс — считаем от остатка, а если срок уже вышел, от сегодня: иначе
-    «добавить неделю» просроченной подписке ничего бы не дало.
-    """
-    from datetime import datetime, timedelta
-    from services.panel import update_client_expire, get_client_info, toggle_client
-    from paidsub.time_parser import fmt_duration
-
-    row = await get_sub(sub_id)
-    if not row:
-        return {"ok": False, "error": "подписка не найдена"}
-    tg_id, email, expire_str = row[1], row[2], row[6]
-
-    expire_dt = None
-    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-        try:
-            expire_dt = datetime.strptime(expire_str, fmt)
-            break
-        except ValueError:
-            continue
-    if expire_dt is None:
-        expire_dt = datetime.now()
-
-    if direction > 0:
-        base = expire_dt if expire_dt > datetime.now() else datetime.now()
-        new_expire = base + timedelta(seconds=seconds)
-    else:
-        new_expire = expire_dt - timedelta(seconds=seconds)
-    new_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-
-    await update_sub_field(sub_id, "expire_date", new_str)
-    r = await update_client_expire(email, new_str)
-    if not r.get("success"):
-        return {"ok": False, "error": r.get("error", "?"), "until": new_str}
-
-    if direction > 0:
-        # добавили срок — заодно вернём доступ, если он был закрыт
-        info = await get_client_info(email)
-        if info.get("success") and not info.get("enabled", True):
-            await toggle_client(email, True)
-
+    """Тонкая обёртка над paidsub.service.extend_sub (совместимость)."""
     bot = context.bot if hasattr(context, "bot") else None
-    if bot and tg_id:
-        if direction > 0:
-            await _notify_user(bot, tg_id,
-                "🎉 <b>Подписка продлена!</b>\n\n"
-                f"<blockquote>➕ Добавлено: <b>{fmt_duration(seconds)}</b>\n"
-                f"📅 Действует до: <b>{new_str[:16]}</b></blockquote>")
-        else:
-            await _notify_user(bot, tg_id,
-                "ℹ️ <b>Срок подписки изменён</b>\n\n"
-                f"<blockquote>➖ Убавлено: <b>{fmt_duration(seconds)}</b>\n"
-                f"📅 Действует до: <b>{new_str[:16]}</b></blockquote>")
-    return {"ok": True, "until": new_str}
+    return await _svc.extend_sub(sub_id, int(seconds) * int(direction),
+                                kind="admin", bot=bot)
 
 
 # ── Устройства и адреса ───────────────────────────────────────────────────────
@@ -561,14 +487,13 @@ async def handle_sub_devices(query, sub_id: int):
     """Устройства, которые панель запомнила по этой подписке."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from services.panel import get_client_hwids
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
     email, limit_hwid = row[2], row[8]
     await query.edit_message_text("📱 Спрашиваю панель…")
-    r = await get_client_hwids(email)
+    r = await _svc.list_devices(sub_id, kind="admin")
 
     lines = [f"📱 <b>Устройства подписки #{sub_id}</b>\n",
              f"🖥 Лимит: <b>{limit_hwid or 'без ограничения'}</b>"]
@@ -603,37 +528,30 @@ async def handle_sub_devices(query, sub_id: int):
 
 
 async def handle_sub_hwid_del(query, context, sub_id: int, ref: str):
-    from services.panel import delete_client_hwid, resolve_hwid
+    bot = context.bot if hasattr(context, "bot") else None
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    hwid_id = await resolve_hwid(row[2], ref)
-    if hwid_id is None:
+    res = await _svc.delete_device(sub_id, ref, kind="admin", bot=bot)
+    if res.get("ok"):
+        await query.answer("Устройство убрано")
+    elif res.get("error") == "gone":
         await query.answer("Устройства уже нет в панели", show_alert=True)
-        await handle_sub_devices(query, sub_id)
-        return
-    res = await delete_client_hwid(row[2], hwid_id)
-    await query.answer("Устройство убрано" if res.get("success")
-                       else f"Панель не приняла: {res.get('error', '?')}"[:190],
-                       show_alert=not res.get("success"))
+    else:
+        await query.answer(f"Панель не приняла: {res.get('error', '?')}"[:190], show_alert=True)
     await handle_sub_devices(query, sub_id)
 
 
 async def handle_sub_hwid_clear(query, context, sub_id: int):
-    from services.panel import clear_client_hwids
+    bot = context.bot if hasattr(context, "bot") else None
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    res = await clear_client_hwids(row[2])
-    if res.get("success"):
+    res = await _svc.clear_hwid(sub_id, kind="admin", bot=bot)
+    if res.get("ok"):
         await query.answer("Устройства очищены")
-        if row[1]:
-            await _notify_user(context.bot, row[1],
-                "📱 <b>Список устройств очищен</b>\n\n"
-                "<blockquote>Включите VPN на нужных устройствах — "
-                "они добавятся заново.</blockquote>")
     else:
         await query.answer(f"Панель не приняла: {res.get('error', '?')}"[:190], show_alert=True)
     await handle_sub_devices(query, sub_id)
@@ -643,13 +561,12 @@ async def handle_sub_ips(query, sub_id: int):
     """С каких адресов подключалась подписка."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from services.panel import get_client_ips
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
     await query.edit_message_text("🌐 Спрашиваю панель…")
-    r = await get_client_ips(row[2])
+    r = await _svc.list_ips(sub_id, kind="admin")
 
     lines = [f"🌐 <b>IP-адреса подписки #{sub_id}</b>\n"]
     if not r.get("ok"):
@@ -680,7 +597,6 @@ async def handle_sub_reissue(query, context, sub_id: int):
     """Меняет ссылку подписки. Старая перестаёт работать, поэтому спрашиваем."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from services.panel import reissue_subscription
     row = await get_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
@@ -688,35 +604,27 @@ async def handle_sub_reissue(query, context, sub_id: int):
     tg_id, email = row[1], row[2]
 
     await query.edit_message_text("🔁 Перевыпускаю ключ…")
-    result = await reissue_subscription(email)
-    if not result.get("success"):
+    bot = context.bot if hasattr(context, "bot") else None
+    result = await _svc.reissue_sub(sub_id, kind="admin", bot=bot)
+    if not result.get("ok"):
         await query.edit_message_text(
-            "❌ <b>Не получилось</b>\n\n"
-            f"<blockquote><code>{escape(str(result.get('error')))}</code></blockquote>\n\n"
-            "<i>Старая ссылка продолжает работать.</i>",
+            "❌ <b>Не получилось</b>" + chr(10) + chr(10)
+            + "<blockquote><code>" + escape(str(result.get("error"))) + "</code></blockquote>" + chr(10) + chr(10)
+            + "<i>Старая ссылка продолжает работать.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("◀️ К подписке", callback_data=f"sub_view:{sub_id}")]]),
         )
         return
 
-    new_url = result["sub_url"]
-    await update_sub_field(sub_id, "uuid", result.get("new_uuid", ""))
-    await update_sub_field(sub_id, "sub_id", result.get("sub_id", ""))
-    await update_sub_field(sub_id, "sub_url", new_url)
-
+    new_url = result["new_url"]
     from core.log_channel import send_log
     await send_log(context.bot,
                    f"🔁 Перевыпущен ключ админской подписки #{sub_id} "
                    f"(<code>{escape(email)}</code>)")
-    if tg_id:
-        await _notify_user(context.bot, tg_id,
-            "🔁 <b>Ключ подписки перевыпущен</b>\n\n"
-            f"<blockquote><code>{escape(new_url)}</code></blockquote>\n\n"
-            "Удалите старую подписку в приложении и вставьте эту ссылку — "
-            "старая больше не работает.")
     await query.edit_message_text(
-        f"✅ <b>Ключ перевыпущен</b>\n\n<code>{escape(new_url)}</code>\n\n"
+        "✅ <b>Ключ перевыпущен</b>" + chr(10) + chr(10)
+        + "<code>" + escape(new_url) + "</code>" + chr(10) + chr(10)
         + ("<i>Новую ссылку отправил человеку.</i>" if tg_id
            else "<i>TG у подписки не указан — ссылку передай сам.</i>"),
         parse_mode="HTML",

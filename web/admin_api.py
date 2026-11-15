@@ -82,6 +82,61 @@ _NETCHECK_KEYS = {"domains", "operators", "netcheck_days", "netcheck_last_run"}
 _application = None
 _morning_rescheduler = None
 
+# Двухшаговое подтверждение разрушительных действий (DESIGN §4.4):
+# первый POST возвращает confirm_token, второй выполняет действие.
+# Токены — только в памяти одного процесса, живут 10 минут, одноразовые.
+import time as _time
+
+_CONFIRMS: dict = {}
+CONFIRM_TTL_SECONDS = 600
+
+
+def issue_confirm(actor: dict, action: str, payload: dict,
+                  summary: str = "") -> str:
+    token = secrets.token_urlsafe(24)
+    _CONFIRMS[token] = {
+        "actor_kind": actor["kind"],
+        "actor_id": actor.get("tg_id") or actor.get("account_id"),
+        "action": action, "payload": payload,
+        "summary": summary, "expires": _time.time() + CONFIRM_TTL_SECONDS,
+    }
+    return token
+
+
+def take_confirm(actor: dict, token: str, action: str):
+    """Возвращает payload, если токен живой, того же актора и того же
+    действия; иначе None. Токен одноразовый — забирается всегда."""
+    rec = _CONFIRMS.pop(token, None)
+    if not rec:
+        return None
+    if rec["action"] != action or rec["actor_kind"] != actor["kind"]:
+        return None
+    if rec["actor_id"] != (actor.get("tg_id") or actor.get("account_id")):
+        return None
+    if rec["expires"] < _time.time():
+        return None
+    return rec["payload"]
+
+
+def confirm_needed_response(token: str, summary: str):
+    from aiohttp import web
+    return web.json_response(
+        {"ok": False, "need_confirm": True, "confirm_token": token,
+         "summary": summary})
+
+
+def get_bot():
+    """Telegram Bot из Application — для DM и рассылки. None в тестах
+    без Application (эндпоинты тогда отвечают 503 no_bot)."""
+    if _application is not None and hasattr(_application, "bot"):
+        return _application.bot
+    return None
+
+
+def require_mark(actor: dict):
+    """Mark-only: True — актор Mark, иначе False (Muse → 403)."""
+    return actor["kind"] == "mark"
+
 
 def set_application(application) -> None:
     """Telegram Application бота — для пересборки утренней задачи после
@@ -645,4 +700,11 @@ def build_admin_app():
     app.router.add_patch("/settings", settings_patch)
     app.router.add_post("/muse-account", muse_account_create)
     app.router.add_get("/muse-account", muse_account_list)
+    # Фаза 2: юзеры и подписки (web/admin_users.py), финансы и
+    # рассылка (web/admin_finance.py); инфраструктура регистрируется
+    # в webapi.build_app() из web/admin_infra.py.
+    from web.admin_users import register as _register_users
+    _register_users(app)
+    from web.admin_finance import register as _register_finance
+    _register_finance(app)
     return app

@@ -501,15 +501,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         note = ""
         if sub_id:
-            from adminsub.storage import update_sub_field, get_sub
-            from services.panel import update_client_expire
-            await update_sub_field(sub_id, "expire_date", text)
-            row = await get_sub(sub_id)
-            # без этого дата менялась только в базе, а панель жила со старой
-            if row:
-                res = await update_client_expire(row[2], text)
-                if not res.get("success"):
-                    note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
+            from paidsub import service as _svc
+            res = await _svc.set_expire(sub_id, text, kind="admin")
+            if res.get("ok") and not res.get("panel_ok"):
+                note = chr(10) + "⚠️ Панель не приняла: <code>" + res.get("panel_error", "?") + "</code>"
         await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>{note}",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
@@ -522,14 +517,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         note = ""
         if sub_id:
-            from adminsub.storage import update_sub_field, get_sub
-            from services.panel import update_client_limits
-            await update_sub_field(sub_id, "limit_hwid", int(text))
-            row = await get_sub(sub_id)
-            if row:
-                res = await update_client_limits(row[2], limit_hwid=int(text))
-                if not res.get("success"):
-                    note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
+            from paidsub import service as _svc
+            res = await _svc.set_hwid_limit(sub_id, int(text), kind="admin")
+            if res.get("ok") and not res.get("panel_ok"):
+                note = chr(10) + "⚠️ Панель не приняла: <code>" + res.get("panel_error", "?") + "</code>"
         await update.message.reply_text(f"✅ Лимит устройств обновлён: <b>{text}</b>{note}",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
@@ -548,14 +539,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         note = ""
         if sub_id:
-            from adminsub.storage import update_sub_field, get_sub
-            from services.panel import update_client_traffic
-            await update_sub_field(sub_id, "total_gb", val)
-            row = await get_sub(sub_id)
-            if row:
-                res = await update_client_traffic(row[2], val)
-                if not res.get("success"):
-                    note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
+            from paidsub import service as _svc
+            res = await _svc.set_traffic_limit(sub_id, val, kind="admin")
+            if res.get("ok") and not res.get("panel_ok"):
+                note = chr(10) + "⚠️ Панель не приняла: <code>" + res.get("panel_error", "?") + "</code>"
         await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>{note}",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
@@ -571,8 +558,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
         if sub_id:
-            from adminsub.storage import update_sub_field
-            await update_sub_field(sub_id, "lte_gb", val)
+            from paidsub import service as _svc
+            await _svc.set_lte_limit(sub_id, val, kind="admin")
         await update.message.reply_text(f"✅ LTE-трафик обновлён: <b>{label}</b>",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
@@ -593,17 +580,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not sub_id:
             await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
             return
-        from adminsub.handlers import shift_sub_expire
+        from paidsub import service as _svc
         from paidsub.time_parser import fmt_duration as fmt_dur
-        res = await shift_sub_expire(sub_id, seconds, direction, context)
+        bot = context.bot if hasattr(context, "bot") else None
+        res = await _svc.extend_sub(sub_id, seconds * direction, kind="admin", bot=bot)
         if not res.get("ok"):
             await update.message.reply_text(
-                f"⚠️ <b>Панель не приняла</b>\n<code>{res.get('error', '?')}</code>",
+                "⚠️ <b>Панель не приняла</b>" + chr(10) + "<code>" + str(res.get("error", "?")) + "</code>",
                 parse_mode="HTML", reply_markup=back_admin())
             return
         sign = "➕ Добавлено" if direction > 0 else "➖ Убавлено"
         await update.message.reply_text(
-            f"✅ {sign}: <b>{fmt_dur(seconds)}</b>\n📅 Новая дата: <b>{res['until']}</b>",
+            f"✅ {sign}: <b>{fmt_dur(seconds)}</b>" + chr(10) + f"📅 Новая дата: <b>{res['until']}</b>",
             parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -827,65 +815,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
-        if sub_id:
-            from paidsub.storage import get_paid_sub, update_paid_sub_field
-            row = await get_paid_sub(sub_id)
-            if row:
-                expire_str = row[6]
-                for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-                    try:
-                        expire_dt = datetime.strptime(expire_str, fmt)
-                        break
-                    except ValueError:
-                        continue
-                else:
-                    expire_dt = datetime.now()
-                if expire_dt < datetime.now():
-                    expire_dt = datetime.now()
-                new_expire = expire_dt + timedelta(seconds=seconds)
-                new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-                from paidsub.storage import set_expire_date
-                await set_expire_date(sub_id, new_expire_str)
-                await update_paid_sub_field(sub_id, "status", "active")
-                from services.panel import update_client_expire, toggle_client, get_client_info
-                pushed = await update_client_expire(row[2], new_expire_str)
-                if not pushed.get("success"):
-                    await update.message.reply_text(
-                        "⚠️ <b>Панель не приняла новый срок</b>\n"
-                        f"<code>{pushed.get('error', '?')}</code>\n\n"
-                        "<i>В базе срок изменён — поправь его в панели руками.</i>",
-                        parse_mode="HTML", reply_markup=back_admin())
-                info = await get_client_info(row[2])
-                if info.get("success") and not info.get("enabled", True):
-                    await toggle_client(row[2], True)
-                from paidsub.time_parser import fmt_duration as fmt_dur
-                await update.message.reply_text(
-                    f"✅ Срок продлён на <b>{fmt_dur(seconds)}</b>\n"
-                    f"📅 Новая дата: <b>{new_expire_str}</b>",
-                    parse_mode="HTML", reply_markup=back_admin(),
-                )
-                tg_id = row[1]
-                from paidsub.storage import add_history
-                await add_history(
-                    tg_id, "sub_extended",
-                    f"Подписка #{sub_id} ({row[2]})\n"
-                    f"Добавлено: {fmt_dur(seconds)}\nНовая дата: {new_expire_str}",
-                )
-                if tg_id:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=tg_id,
-                            text=(
-                                f"🎉 <b>Ваша подписка продлена!</b>\n\n"
-                                f"➕ Добавлено: <b>{fmt_dur(seconds)}</b>\n"
-                                f"📅 Действует до: <b>{new_expire_str}</b>"
-                            ),
-                            parse_mode="HTML",
-                        )
-                    except Exception:
-                        pass
-                return
-        await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        if not sub_id:
+            await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+            return
+        from paidsub import service as _svc
+        from paidsub.time_parser import fmt_duration as fmt_dur
+        bot = context.bot if hasattr(context, "bot") else None
+        res = await _svc.extend_sub(sub_id, seconds, kind="paid", bot=bot)
+        if not res.get("ok"):
+            await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+            return
+        if not res.get("panel_ok"):
+            await update.message.reply_text(
+                "⚠️ <b>Панель не приняла новый срок</b>" + chr(10)
+                + "<code>" + res.get("panel_error", "?") + "</code>" + chr(10) + chr(10)
+                + "<i>В базе срок изменён — поправь его в панели руками.</i>",
+                parse_mode="HTML", reply_markup=back_admin())
+        await update.message.reply_text(
+            f"✅ Срок продлён на <b>{fmt_dur(seconds)}</b>" + chr(10)
+            + f"📅 Новая дата: <b>{res['until']}</b>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
         return
 
     # ── Платные подписки: убавить срок ───────────────────────────────────────────
@@ -899,53 +849,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
-        if sub_id:
-            from paidsub.storage import get_paid_sub, update_paid_sub_field
-            row = await get_paid_sub(sub_id)
-            if row:
-                expire_str = row[6]
-                for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-                    try:
-                        expire_dt = datetime.strptime(expire_str, fmt)
-                        break
-                    except ValueError:
-                        continue
-                else:
-                    expire_dt = datetime.now()
-                new_expire = expire_dt - timedelta(seconds=seconds)
-                new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-                from paidsub.storage import set_expire_date
-                await set_expire_date(sub_id, new_expire_str)
-                from services.panel import update_client_expire
-                await update_client_expire(row[2], new_expire_str)
-                from paidsub.time_parser import fmt_duration as fmt_dur
-                await update.message.reply_text(
-                    f"✅ Срок убавлен на <b>{fmt_dur(seconds)}</b>\n"
-                    f"📅 Новая дата: <b>{new_expire_str}</b>",
-                    parse_mode="HTML", reply_markup=back_admin(),
-                )
-                tg_id = row[1]
-                from paidsub.storage import add_history
-                await add_history(
-                    tg_id, "sub_reduced",
-                    f"Подписка #{sub_id} ({row[2]})\n"
-                    f"Убавлено: {fmt_dur(seconds)}\nНовая дата: {new_expire_str}",
-                )
-                if tg_id:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=tg_id,
-                            text=(
-                                f"ℹ️ <b>Срок вашей подписки изменён.</b>\n\n"
-                                f"➖ Убавлено: <b>{fmt_dur(seconds)}</b>\n"
-                                f"📅 Действует до: <b>{new_expire_str}</b>"
-                            ),
-                            parse_mode="HTML",
-                        )
-                    except Exception:
-                        pass
-                return
-        await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        if not sub_id:
+            await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+            return
+        from paidsub import service as _svc
+        from paidsub.time_parser import fmt_duration as fmt_dur
+        bot = context.bot if hasattr(context, "bot") else None
+        res = await _svc.extend_sub(sub_id, -seconds, kind="paid", bot=bot)
+        if not res.get("ok"):
+            await update.message.reply_text("❌ Подписка не найдена.", reply_markup=back_admin())
+            return
+        await update.message.reply_text(
+            f"✅ Срок убавлен на <b>{fmt_dur(seconds)}</b>" + chr(10)
+            + f"📅 Новая дата: <b>{res['until']}</b>",
+            parse_mode="HTML", reply_markup=back_admin(),
+        )
         return
 
     # ── Починка окна оплаты ──────────────────────────────────────────────────
@@ -1002,15 +920,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
         if sub_id:
-            from paidsub.storage import update_paid_sub_field, get_paid_sub, set_expire_date
-            await set_expire_date(sub_id, text)
-            await update_paid_sub_field(sub_id, "status", "active")
-            r = await get_paid_sub(sub_id)
-            if r:
-                from services.panel import update_client_expire
-                await update_client_expire(r[2], text)
-                from paidsub.storage import add_history
-                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: дата окончания → {text}")
+            from paidsub import service as _svc
+            await _svc.set_expire(sub_id, text, kind="paid", mark_active=True)
         await update.message.reply_text(f"✅ Дата окончания обновлена: <b>{text}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
 
@@ -1064,25 +975,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         panel_note = ""
         if sub_id:
-            from paidsub.storage import (update_paid_sub_field, get_paid_sub,
-                                         add_history, get_paid_sub_by_tg_id)
-            from services.panel import update_client_limits
-            r = await get_paid_sub(sub_id)
-            # оплаченные устройства идут сверх лимита, который ставит админ
-            extra = 0
-            if r and r[1]:
-                by_tg = await get_paid_sub_by_tg_id(r[1])
-                extra = int(by_tg[18] or 0) if by_tg and len(by_tg) > 18 else 0
-            target = int(text) + extra if int(text) else 0
-            await update_paid_sub_field(sub_id, "limit_hwid", target)
-            if r:
-                res = await update_client_limits(r[2], limit_hwid=target)
-                if not res.get("success"):
-                    panel_note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
-                if extra and target:
-                    panel_note = f"\n📱 Плюс оплаченные устройства: <b>+{extra}</b>" + panel_note
-                await add_history(r[1], "settings_changed",
-                                  f"Подписка #{sub_id}: лимит HWID → {target}")
+            from paidsub import service as _svc
+            res = await _svc.set_hwid_limit(sub_id, int(text), kind="paid")
+            if res.get("ok"):
+                if res.get("extra") and res.get("target"):
+                    panel_note = chr(10) + "📱 Плюс оплаченные устройства: <b>+" + str(res["extra"]) + "</b>"
+                if not res.get("panel_ok"):
+                    panel_note += chr(10) + "⚠️ Панель не приняла: <code>" + res.get("panel_error", "?") + "</code>"
         await update.message.reply_text(f"✅ Лимит HWID обновлён: <b>{text}</b>{panel_note}",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
@@ -1101,15 +1000,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         panel_note = ""
         if sub_id:
-            from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
-            from services.panel import update_client_traffic
-            await update_paid_sub_field(sub_id, "total_gb", val)
-            r = await get_paid_sub(sub_id)
-            if r:
-                res = await update_client_traffic(r[2], val)
-                if not res.get("success"):
-                    panel_note = f"\n⚠️ Панель не приняла: <code>{res.get('error', '?')}</code>"
-                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: трафик → {label}")
+            from paidsub import service as _svc
+            res = await _svc.set_traffic_limit(sub_id, val, kind="paid")
+            if res.get("ok") and not res.get("panel_ok"):
+                panel_note = chr(10) + "⚠️ Панель не приняла: <code>" + res.get("panel_error", "?") + "</code>"
         await update.message.reply_text(f"✅ Трафик обновлён: <b>{label}</b>{panel_note}",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
@@ -1125,14 +1019,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
         if sub_id:
-            from paidsub.storage import update_paid_sub_field, get_paid_sub, add_history
-            await update_paid_sub_field(sub_id, "lte_gb", val)
-            r = await get_paid_sub(sub_id)
-            if r:
-                await add_history(r[1], "settings_changed", f"Подписка #{sub_id}: LTE-трафик → {label}")
+            from paidsub import service as _svc
+            await _svc.set_lte_limit(sub_id, val, kind="paid")
         await update.message.reply_text(f"✅ LTE-трафик обновлён: <b>{label}</b>",
                                         parse_mode="HTML", reply_markup=back_admin())
         return
+
 
     # ── Платные подписки: индивидуальные время-настройки ─────────────────────────
     if state == AWAITING_PAID_SUB_EDIT_TRIAL:
@@ -1146,11 +1038,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_id = context.user_data.pop("edit_sub_id", None)
         context.user_data.pop("state", None)
         if sub_id:
-            from paidsub.storage import update_paid_sub_field
-            await update_paid_sub_field(sub_id, "ind_trial_period", seconds)
+            from paidsub import service as _svc
+            await _svc.set_trial(sub_id, seconds, kind="paid")
         from paidsub.time_parser import fmt_duration as fmt_dur
         await update.message.reply_text(f"✅ Пробный период: <b>{fmt_dur(seconds)}</b>", parse_mode="HTML", reply_markup=back_admin())
         return
+
 
     # ── Реферальный бонус ───────────────────────────────────────────────────────
     if state == AWAITING_REFERRAL_BONUS:

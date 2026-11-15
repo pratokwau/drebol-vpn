@@ -23,6 +23,7 @@ from config import load_config, save_config
 API_ROOT = "/api"
 USERS = f"{API_ROOT}/users"
 SQUADS = f"{API_ROOT}/internal-squads"
+CONFIG_PROFILES = f"{API_ROOT}/config-profiles"
 
 
 def settings() -> dict:
@@ -111,6 +112,48 @@ async def list_squads() -> dict:
                     "members": info.get("membersCount", 0),
                     "inbounds": info.get("inboundsCount", 0)})
     return {"ok": True, "squads": out}
+
+
+async def list_config_profiles() -> dict:
+    """Профили конфигурации панели (инбаунды и хосты) — только чтение.
+
+    Используется веб-админкой для страницы «Панель Remnawave».
+    Редактирование профилей/инбаундов здесь не делается и не будет:
+    для этого нет API-клиента, правки — только через браузер в панели.
+    """
+    r = await _request("GET", CONFIG_PROFILES)
+    if not r["ok"]:
+        return r
+    data = r["data"]
+    profiles = data if isinstance(data, list) else (data or {}).get("configProfiles") or []
+    out = []
+    for p in profiles:
+        if not isinstance(p, dict):
+            continue
+        inbounds = []
+        for ib in p.get("inbounds") or []:
+            if not isinstance(ib, dict):
+                continue
+            hosts = []
+            for h in ib.get("hosts") or []:
+                if not isinstance(h, dict):
+                    continue
+                hosts.append({
+                    "remark": h.get("remark") or "",
+                    "address": h.get("address") or "",
+                    "port": h.get("port"),
+                    "sni": h.get("sni") or "",
+                    "is_disabled": bool(h.get("isDisabled")),
+                })
+            inbounds.append({
+                "tag": ib.get("tag") or "",
+                "type": ib.get("type") or "",
+                "port": (ib.get("port") or (ib.get("config") or {}).get("port")),
+                "hosts": hosts,
+            })
+        out.append({"uuid": p.get("uuid") or "", "name": p.get("name") or "",
+                    "inbounds": inbounds})
+    return {"ok": True, "profiles": out}
 
 
 async def get_user(username: str) -> dict:
@@ -521,11 +564,70 @@ def _fmt_gb(nbytes: int) -> str:
 
 
 def _panel_tg_id(panel_username: str):
-    """TG ID, зашитый в имя панели: paid_<tg_id>_<username> или
-    <tg_id>_<username> у админских подписок. None, если имя не по
-    этому шаблону (например, заведено в панели вручную)."""
-    m = re.match(r"^(?:paid_)?(\d+)_", panel_username or "")
+    """TG ID, зашитый в имя панели: paid_<tg_id> (новый формат, без юза)
+    или paid_<tg_id>_<username> / <tg_id>_<username> (старый формат).
+    None, если имя не по этому шаблону (например, заведено в панели вручную).
+    """
+    m = re.match(r"^(?:paid_)?(\d+)(?:_|$)", panel_username or "")
     return int(m.group(1)) if m else None
+
+
+def _strip_username(panel_username: str) -> str | None:
+    """Новое имя клиента без юзернейма: paid_<tg_id> / <tg_id>.
+
+    None — имя уже в новом формате или не по шаблону (не трогаем).
+    """
+    m = re.match(r"^(paid_)?(\d+)_(.+)$", panel_username or "")
+    if not m:
+        return None
+    return f"{m.group(1) or ''}{m.group(2)}"
+
+
+async def rename_clients_strip_username() -> dict:
+    """Переименовать клиентов панели: убрать юзернейм с конца имени.
+
+    Старый формат paid_<tg_id>_<username> / <tg_id>_<username> →
+    новый paid_<tg_id> / <tg_id>. Переименовывает в панели (PATCH
+    по uuid) и правит email в базе бота (paid_subs, admin_subs),
+    чтобы бот и панель снова говорили об одном и том же клиенте.
+    Возвращает {renamed, failed, skipped, errors}.
+    """
+    users = await all_users()
+    renamed, failed, skipped = 0, 0, 0
+    errors = []
+    import core.database as db
+    for u in users:
+        old = (u.get("username") or "").strip()
+        new = _strip_username(old)
+        if new is None:
+            skipped += 1
+            continue
+        uid = u.get("uuid")
+        if not uid:
+            failed += 1
+            errors.append(f"{old}: нет uuid")
+            continue
+        r = await update_user({"uuid": uid, "username": new})
+        if not r.get("ok"):
+            failed += 1
+            errors.append(f"{old}: {r.get('error') or 'ошибка панели'}")
+            continue
+        # панель переименовала — правим email в базе бота
+        try:
+            async with db.aiosqlite.connect(db.DB_PATH) as conn:
+                for table in ("paid_subs", "admin_subs"):
+                    await conn.execute(
+                        f"UPDATE {table} SET email = ? WHERE email = ?",
+                        (new, old))
+                await conn.commit()
+        except Exception as e:
+            failed += 1
+            errors.append(f"{old}: панель ок, база — {e}")
+            continue
+        forget(old)
+        renamed += 1
+    return {"renamed": renamed, "failed": failed, "skipped": skipped,
+            "errors": errors[:10]}
 
 
 async def _resolve_usage_labels(panel_usernames: list) -> dict:
@@ -1433,6 +1535,8 @@ async def handle_panel_sync_menu(query, context=None):
                                   callback_data="panel_sync_schedule")],
             [InlineKeyboardButton("👤 Актуализация юзернеймов и ников",
                                   callback_data="panel_names_sync")],
+            [InlineKeyboardButton("✏️ Убрать юз из имён клиентов",
+                                  callback_data="panel_rename_strip")],
             [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
 
 
@@ -1487,6 +1591,42 @@ async def handle_panel_names_sync(query, context=None):
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("👤 Ещё раз", callback_data="panel_names_sync"),
              InlineKeyboardButton("🔄 К синхронизации",
+                                  callback_data="panel_sync_menu")],
+            [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
+
+
+async def handle_panel_rename_strip(query, context=None):
+    """Переименовать клиентов панели: убрать юзернейм с конца имени.
+
+    paid_<tg_id>_<username> → paid_<tg_id>. Новые клиенты уже
+    создаются без юза (build_email), эта кнопка — для старых.
+    Переименовывает в панели и правит email в базе бота.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if not is_configured():
+        await query.answer("Сначала задай адрес панели и токен", show_alert=True)
+        return
+    await query.edit_message_text(
+        "✏️ <b>Убираю юз из имён клиентов…</b>",
+        parse_mode="HTML")
+    res = await rename_clients_strip_username()
+    lines = [
+        "✏️ <b>Переименование клиентов панели</b>", "",
+        f"Переименовано: <b>{res['renamed']}</b>",
+        f"Уже без юза / не по шаблону: <b>{res['skipped']}</b>",
+    ]
+    if res["failed"]:
+        lines.append(f"Не удалось: <b>{res['failed']}</b>")
+        for err in res["errors"]:
+            lines.append(f"• <code>{err}</code>")
+    lines.append("")
+    lines.append(
+        "<i>Новые клиенты создаются как paid_&lt;TG ID&gt; без юза. "
+        "Описания клиентов (с юзернеймом и ником) не меняются.</i>")
+    await query.edit_message_text(
+        "\n".join(lines), parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 К синхронизации",
                                   callback_data="panel_sync_menu")],
             [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
 

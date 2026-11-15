@@ -17,6 +17,7 @@ from paidsub.keyboards import (
     paid_subs_list_keyboard, paid_presets_keyboard, paid_sub_view_keyboard,
     approve_keyboard, paid_sub_settings_keyboard,
 )
+from paidsub import service as _svc
 from paidsub.time_parser import fmt_duration, fmt_duration_precise
 
 
@@ -683,79 +684,29 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
                              notify: bool = True):
     """Создаёт платную подписку. trial=True — пробный период.
 
+    Работа — в paidsub.service.create_paid_sub, здесь только тексты.
     notify=False — не шлёт клиенту «Подписка готова!»: текст уведомления
     формирует вызывающий (например, подарок со своим текстом).
     """
-    cfg = load_config()
     await reply_func("⏳ Создаю подписку…")
-
-    from services.panel import create_client, build_email
-    from core.database import get_user_info
-    user_row = await get_user_info(tg_id)
-    username = user_row[2] if user_row else None
-    email = build_email(tg_id, username, prefix="paid_")
-
-    # срок платной подписки приходит из тарифа, пробной — из настроек
-    if trial:
-        period_seconds = int(cfg.get("paid_trial_period", 86400))
-    else:
-        period_seconds = int(period_override or cfg.get("paid_trial_period", 86400))
-
-    period_end_dt = datetime.now() + timedelta(seconds=period_seconds)
-    expire_date = period_end_dt.strftime("%d.%m.%Y %H:%M:%S")
-    period_end_str = expire_date
-
-    result = await create_client(
-        expire_date=expire_date,
-        limit_ip=0,
-        limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
-        total_gb=int(cfg.get("paid_preset_traffic", 0)),
-        email=email,
-        tg_id=tg_id,
-        note=f"@{username}" if username else "",
-    )
-
-    if not result["success"]:
+    bot = context.bot if hasattr(context, "bot") else None
+    result = await _svc.create_paid_sub(
+        tg_id, trial=trial, period_seconds=period_override, bot=bot)
+    if not result.get("ok"):
         await reply_func(
-            f"❌ <b>Ошибка создания подписки</b>\n\n<code>{result['error']}</code>",
+            "❌ <b>Ошибка создания подписки</b>" + NL + NL +
+            "<code>" + str(result["error"]) + "</code>",
             parse_mode="HTML",
         )
         return
 
-    new_sub_id = await add_paid_sub(
-        tg_id=tg_id,
-        email=result["email"],
-        uuid_val=result["uuid"],
-        sub_id=result["sub_id"],
-        sub_url=result["sub_url"],
-        expire_date=result["expire"],
-        limit_ip=0,
-        limit_hwid=int(cfg.get("paid_preset_hwid", 0)),
-        total_gb=int(cfg.get("paid_preset_traffic", 0)),
-    )
-
-    # Фиксируем действующие условия за подпиской: последующая правка общих
-    # настроек не должна менять условия уже выданной подписки
-    from paidsub.storage import snapshot_sub_settings
-    await snapshot_sub_settings(new_sub_id)
-    await update_paid_sub_field(new_sub_id, "period_end", period_end_str)
-
-    if not trial:
-        await update_paid_sub_field(new_sub_id, "times_renewed", 1)
-
-    traffic_str = f"{cfg.get('paid_preset_traffic', 0)} ГБ" if int(cfg.get("paid_preset_traffic", 0)) > 0 else "безлимит"
-    period_label = "пробный период" if trial else "оплаченный период"
-
-    await add_history(
-        tg_id, "sub_created",
-        f"Подписка #{new_sub_id} ({period_label})\nEmail: {result['email']}\nДо: {result['expire']}",
-    )
-
+    traffic_str = result["traffic_str"]
+    period_label = result["period_label"]
     user_text = (
-        "🎉 <b>Подписка готова!</b>\n\n"
-        f"<blockquote>📅 Действует до: <b>{result['expire'][:16]}</b></blockquote>\n\n"
-        "🔑 <b>Ссылка для подключения</b>\n"
-        f"<code>{result['sub_url']}</code>\n\n"
+        "🎉 <b>Подписка готова!</b>" + NL + NL +
+        "<blockquote>📅 Действует до: <b>" + result["expire"][:16] + "</b></blockquote>" + NL + NL +
+        "🔑 <b>Ссылка для подключения</b>" + NL +
+        "<code>" + result["sub_url"] + "</code>" + NL + NL +
         "<i>Нажмите на ссылку — она скопируется — и вставьте её в INCY.</i>"
     )
 
@@ -766,16 +717,15 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
         return
 
     await reply_func(
-        f"✅ <b>Подписка создана ({period_label})!</b>\n\n"
-        f"👤 TG ID: <code>{tg_id}</code>\n"
-        f"📧 Email: <code>{result['email']}</code>\n"
-        f"📅 До: <b>{result['expire']}</b>\n"
-        f"📶 Трафик: <b>{traffic_str}</b>\n\n"
-        f"🔗 Ссылка:\n<code>{result['sub_url']}</code>",
+        "✅ <b>Подписка создана (" + period_label + ")!</b>" + NL + NL +
+        "👤 TG ID: <code>" + str(tg_id) + "</code>" + NL +
+        "📧 Email: <code>" + result["email"] + "</code>" + NL +
+        "📅 До: <b>" + result["expire"] + "</b>" + NL +
+        "📶 Трафик: <b>" + traffic_str + "</b>" + NL + NL +
+        "🔗 Ссылка:" + NL + "<code>" + result["sub_url"] + "</code>",
         parse_mode="HTML",
     )
 
-    bot = context.bot if hasattr(context, 'bot') else None
     if bot and notify:
         await _notify_user(bot, tg_id, user_text)
 
@@ -1071,32 +1021,31 @@ async def _lte_view_line(row) -> str:
 
 
 async def handle_paid_sub_view(query, sub_id: int):
-    row = await get_paid_sub(sub_id)
-    if not row:
+    card = await _svc.get_sub_card(sub_id, kind="paid")
+    if not card.get("ok"):
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
+    row = card["row"]
+    sub = card["sub"]
     # row: id(0),tg_id(1),email(2),uuid(3),sub_id(4),sub_url(5),expire(6),
     #      ip(7),hwid(8),traffic(9),created(10),status(11),payment_pending(12),
     #      ind_trial(13),ind_pay(14),ind_renew(15),ind_price(16),ind_pay_url(17)
     _, tg_id, email, uuid_val, sub_id_str, sub_url, expire, _limit_ip, limit_hwid, total_gb, created_at = row[:11]
-    status = row[11] if len(row) > 11 else "active"
-    ind_trial = row[13] if len(row) > 13 else None
+    status = sub["status"]
+    ind_trial = sub["ind_trial_period"]
 
     traffic_limit = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
-    from services.panel import get_client_traffic, get_client_info
-    t = await get_client_traffic(email)
-    if t["success"]:
-        up = t.get("up", 0)
-        down = t.get("down", 0)
+    if card["panel"]["traffic_ok"]:
+        up = card["panel"]["up"]
+        down = card["panel"]["down"]
         total_used = up + down
         traffic_line = (f"📶 Трафик: <b>{_fmt_bytes(total_used)}</b> из {traffic_limit}  "
                         f"(⬆ {_fmt_bytes(up)} · ⬇ {_fmt_bytes(down)})")
     else:
         traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>"
 
-    info = await get_client_info(email)
-    enabled = info.get("enabled", True) if info.get("success") else True
+    enabled = card["panel"]["enabled"]
     status_icon = "🟢" if enabled else "🔴"
 
     # Статус подписки
@@ -1106,16 +1055,13 @@ async def handle_paid_sub_view(query, sub_id: int):
     payment_line = ""
 
     # Количество продлений
-    from paidsub.storage import get_paid_sub_by_tg_id
-    tg_row = await get_paid_sub_by_tg_id(tg_id) if tg_id else None
-    times_renewed = tg_row[12] if tg_row and len(tg_row) > 12 else 0
+    times_renewed = card["times_renewed"]
     sub_type = "оплаченная" if times_renewed > 0 else "пробная"
 
     # Юзер инфо
-    from core.database import get_user_info
-    user_info = await get_user_info(tg_id) if tg_id else None
-    uname = user_info[2] if user_info and user_info[2] else None
-    first_name = user_info[1] if user_info and user_info[1] else None
+    user = card["user"]
+    uname = user["username"] if user else None
+    first_name = user["first_name"] if user else None
 
     # имя человек задаёт сам — без экранирования «<» в имени ломает карточку
     shown = _esc_name(first_name, tg_id)
@@ -1143,13 +1089,10 @@ async def handle_paid_sub_view(query, sub_id: int):
 
     # Реферал
     referral_line = ""
-    if tg_id:
-        referrer_id = await get_referrer(tg_id)
-        if referrer_id:
-            ref_info = await get_user_info(referrer_id)
-            ref_name = ref_info[1] if ref_info else str(referrer_id)
-            referral_line = (f"👥 Пришёл от: <b>{_esc_name(ref_name, referrer_id)}</b> "
-                             f"(<code>{referrer_id}</code>)\n")
+    if card["referrer"]:
+        ref = card["referrer"]
+        referral_line = (f"👥 Пришёл от: <b>{_esc_name(ref['first_name'], ref['tg_id'])}</b> "
+                         f"(<code>{ref['tg_id']}</code>)\n")
 
     # Оставшееся время: период и доступ кончаются в один момент — окна нет
     from paidsub.storage import parse_sub_date
@@ -1196,70 +1139,35 @@ async def handle_paid_sub_view(query, sub_id: int):
 # ── Вкл/Выкл ─────────────────────────────────────────────────────────────────
 
 async def handle_paid_sub_toggle(query, sub_id: int, context=None):
+    bot = context.bot if context and hasattr(context, "bot") else None
     row = await get_paid_sub(sub_id)
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    tg_id = row[1]
-    email = row[2]
-    from services.panel import get_client_info, toggle_client
-    info = await get_client_info(email)
-    if not info.get("success"):
-        await query.answer("❌ Клиент не найден в панели", show_alert=True)
-        return
-    new_state = not info.get("enabled", True)
     await query.edit_message_text("⏳ Обновляю статус...")
-    result = await toggle_client(email, new_state)
-    if not result["success"]:
-        await query.edit_message_text(
-            f"❌ Ошибка: <code>{result['error']}</code>",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
-        return
-
-    if context and tg_id:
-        if new_state:
-            note = "✅ <b>Подписка снова включена</b>\n\n<i>VPN работает — можно подключаться.</i>"
+    result = await _svc.toggle_sub(sub_id, kind="paid", bot=bot)
+    if not result.get("ok"):
+        if result.get("error") == "panel_client_not_found":
+            await query.answer("❌ Клиент не найден в панели", show_alert=True)
         else:
-            note = ("⏸ <b>Подписка приостановлена</b>\n\n"
-                    "<i>Вопросы — в поддержку, ответим в боте.</i>")
-        await _notify_user(context.bot, tg_id, note)
-
-    await add_history(
-        tg_id, "sub_enabled" if new_state else "sub_disabled",
-        f"Подписка #{sub_id} ({email})",
-    )
-
+            await query.edit_message_text(
+                f"❌ Ошибка: <code>{result['error']}</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+        return
     await handle_paid_sub_view(query, sub_id)
 
 
 # ── Удаление ──────────────────────────────────────────────────────────────────
 
 async def handle_paid_sub_delete(query, sub_id: int, context=None):
+    bot = context.bot if context and hasattr(context, "bot") else None
     row = await get_paid_sub(sub_id)
-    tg_id = row[1] if row else None
-    email = row[2] if row else None
-
-    if email:
-        from services.panel import delete_client
+    if row and row[2]:
         await query.edit_message_text("⏳ Удаляю из панели...")
-        panel_result = await delete_client(email)
-        panel_status = "✅ удалена из панели" if panel_result["success"] else f"⚠️ панель: {panel_result.get('error', '?')}"
-    else:
-        panel_status = "⚠️ email не найден, из панели не удалено"
-
-    await delete_paid_sub(sub_id)
-
-    if tg_id:
-        await add_history(tg_id, "sub_deleted", f"Подписка #{sub_id} ({email}) · {panel_status}")
-
-    if context and tg_id:
-        await _notify_user(context.bot, tg_id,
-            "🗑 <b>Подписка удалена</b>\n\n"
-            "<i>Чтобы оформить новую, откройте /start.</i>")
-
+    result = await _svc.delete_sub(sub_id, kind="paid", bot=bot)
     await query.edit_message_text(
-        f"🗑 Подписка удалена из базы.\n{panel_status}",
+        f"🗑 Подписка удалена из базы.\n{result['panel_status']}",
         reply_markup=back_admin(),
     )
 
@@ -1267,35 +1175,22 @@ async def handle_paid_sub_delete(query, sub_id: int, context=None):
 # ── Заморозка ─────────────────────────────────────────────────────────────────
 
 async def handle_paid_sub_freeze(query, sub_id: int, context=None):
+    bot = context.bot if context and hasattr(context, "bot") else None
     row = await get_paid_sub(sub_id)
     if not row:
         await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
         return
-    tg_id = row[1]
-    email = row[2]
-    from services.panel import get_client_info, toggle_client
-    info = await get_client_info(email)
-    enabled = info.get("enabled", True) if info.get("success") else True
-    if not enabled:
-        await query.answer("Подписка уже заморожена", show_alert=True)
-        return
     await query.edit_message_text("🧊 Замораживаю подписку...")
-    result = await toggle_client(email, False)
-    if not result["success"]:
-        await query.edit_message_text(
-            f"❌ Ошибка: <code>{result['error']}</code>",
-            parse_mode="HTML", reply_markup=back_admin(),
-        )
+    result = await _svc.freeze_sub(sub_id, kind="paid", bot=bot)
+    if not result.get("ok"):
+        if result.get("error") == "already_frozen":
+            await query.answer("Подписка уже заморожена", show_alert=True)
+        else:
+            await query.edit_message_text(
+                f"❌ Ошибка: <code>{result['error']}</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
         return
-
-    if context and tg_id:
-        await _notify_user(context.bot, tg_id,
-            "❄️ <b>Подписка заморожена</b>\n\n"
-            "<blockquote>Срок на паузе — оставшиеся дни никуда не денутся.</blockquote>"
-        )
-
-    await add_history(tg_id, "sub_frozen", f"Подписка #{sub_id} ({email})")
-
     await handle_paid_sub_view(query, sub_id)
 
 
@@ -1384,7 +1279,8 @@ async def handle_paid_bulk_apply(query, context):
         return
     seconds, direction = int(pending["seconds"]), int(pending["direction"])
     await query.edit_message_text("⏳ Применяю ко всем подпискам...")
-    result = await bulk_shift_expire(seconds, direction, context)
+    bot = context.bot if hasattr(context, "bot") else None
+    result = await _svc.bulk_extend(seconds, direction, bot=bot)
     action = "добавлен" if direction > 0 else "убавлен"
     await query.edit_message_text(
         f"✅ <b>Массовое действие завершено</b>\n\n"
@@ -1398,65 +1294,10 @@ async def handle_paid_bulk_apply(query, context):
 
 async def apply_devices_payment(tg_id: int, count: int, context, amount: int = 0,
                                 mode: str = "add") -> dict:
-    """Начисляет оплаченные слоты устройств: в базе, в панели и человеку в чат.
-
-    mode="add" — докуп среди периода: слоты прибавляются к уже оплаченным.
-    mode="set" — выбор при продлении: слотов становится ровно столько, сколько
-    человек взял на новый период. Ноль возвращает лимит к своему значению
-    подписки, и платить за устройства больше не нужно.
-    """
-    from services.panel import update_client_limits
-    from paidsub.storage import base_hwid
-    row = await get_paid_sub_by_tg_id(tg_id)
-    if not row:
-        return {"ok": False, "error": "подписка не найдена"}
-    sub_id, email = row[0], row[2]
-    extra_was = int(row[18] if len(row) > 18 and row[18] else 0)
-    base = base_hwid(row[8], extra_was)
-    count = int(count or 0)
-
-    if mode == "set":
-        extra_now = max(0, count)
-        if extra_now == extra_was:
-            return {"ok": True, "limit": int(row[8] or 0), "changed": False}
-    else:
-        if base <= 0:
-            # лимита нет — докупать нечего, но деньги уже пришли
-            return {"ok": False, "error": "у подписки нет лимита устройств"}
-        extra_now = extra_was + max(1, count)
-
-    if base <= 0:
-        # лимит без ограничения: слоты не к чему прибавлять, но и терять нечего
-        await update_paid_sub_field(sub_id, "extra_devices", extra_now)
-        return {"ok": True, "limit": 0, "changed": False}
-
-    new_limit = base + extra_now
-    await update_paid_sub_field(sub_id, "limit_hwid", new_limit)
-    await update_paid_sub_field(sub_id, "extra_devices", extra_now)
-    res = await update_client_limits(email, limit_hwid=new_limit)
-    note = "" if res.get("success") else f" (панель: {res.get('error', '?')})"
-
-    added = extra_now - extra_was
-    if added > 0:
-        action = f"Оплачено устройств: +{added} → лимит {new_limit}"
-    else:
-        action = f"Отказ от устройств: {extra_was} → {extra_now}, лимит {new_limit}"
-    await add_history(tg_id, "devices_bought",
-                      action + (f"\nСумма: {amount} ₽" if amount else "") + note)
-
+    """Тонкая обёртка над paidsub.service.apply_devices_payment (совместимость)."""
     bot = context.bot if hasattr(context, "bot") else None
-    if bot and added > 0:
-        await _notify_user(bot, tg_id,
-            "✅ <b>Устройства добавлены</b>\n\n"
-            f"<blockquote>📱 Теперь можно подключить: <b>{new_limit}</b></blockquote>"
-        )
-    elif bot and added < 0:
-        await _notify_user(bot, tg_id,
-            "📱 <b>Дополнительные устройства отключены</b>\n\n"
-            f"<blockquote>Теперь можно подключить: <b>{new_limit}</b></blockquote>"
-        )
-    return {"ok": True, "limit": new_limit, "changed": True,
-            "panel": res.get("success", False)}
+    return await _svc.apply_devices_payment(
+        tg_id, count, amount=amount, mode=mode, bot=bot)
 
 
 def _when(value) -> str:
@@ -1486,14 +1327,13 @@ async def handle_paid_devices(query, sub_id: int):
     """Устройства (HWID), которые панель запомнила по этой подписке."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from services.panel import get_client_hwids
     row = await get_paid_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
     email, limit_hwid = row[2], row[8]
     await query.edit_message_text("📱 Спрашиваю панель…")
-    r = await get_client_hwids(email)
+    r = await _svc.list_devices(sub_id, kind="paid")
 
     lines = [f"📱 <b>Устройства подписки #{sub_id}</b>\n",
              f"🔑 Лимит HWID: <b>{limit_hwid or 'без ограничения'}</b>"]
@@ -1533,14 +1373,12 @@ async def handle_paid_ips(query, sub_id: int):
     """С каких адресов подключалась подписка."""
     from html import escape
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from services.panel import get_client_ips
     row = await get_paid_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    email = row[2]
     await query.edit_message_text("🌐 Спрашиваю панель…")
-    r = await get_client_ips(email)
+    r = await _svc.list_ips(sub_id, kind="paid")
 
     lines = [f"🌐 <b>IP-адреса подписки #{sub_id}</b>\n"]
     kb = []
@@ -1568,42 +1406,30 @@ async def handle_paid_ips(query, sub_id: int):
 
 
 async def handle_paid_hwid_del(query, context, sub_id: int, ref: str):
-    from services.panel import delete_client_hwid, resolve_hwid
+    bot = context.bot if hasattr(context, "bot") else None
     row = await get_paid_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    hwid_id = await resolve_hwid(row[2], ref)
-    if hwid_id is None:
-        await query.answer("Устройства уже нет в панели", show_alert=True)
-        await handle_paid_devices(query, sub_id)
-        return
-    res = await delete_client_hwid(row[2], hwid_id)
-    if res.get("success"):
+    res = await _svc.delete_device(sub_id, ref, kind="paid", bot=bot)
+    if res.get("ok"):
         await query.answer("Устройство убрано")
-        if row[1]:
-            await add_history(row[1], "settings_changed", f"Убрано устройство #{hwid_id}")
+    elif res.get("error") == "gone":
+        await query.answer("Устройства уже нет в панели", show_alert=True)
     else:
         await query.answer(f"Панель не приняла: {res.get('error', '?')}"[:190], show_alert=True)
     await handle_paid_devices(query, sub_id)
 
 
 async def handle_paid_hwid_clear(query, context, sub_id: int):
-    from services.panel import clear_client_hwids
+    bot = context.bot if hasattr(context, "bot") else None
     row = await get_paid_sub(sub_id)
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    res = await clear_client_hwids(row[2])
-    if res.get("success"):
+    res = await _svc.clear_hwid(sub_id, kind="paid", bot=bot)
+    if res.get("ok"):
         await query.answer("Устройства очищены")
-        if row[1]:
-            await add_history(row[1], "settings_changed", "Очищены все устройства (HWID)")
-            await _notify_user(context.bot, row[1],
-                "📱 <b>Список устройств сброшен</b>\n\n"
-                "<i>Просто включите VPN на тех устройствах, которыми пользуетесь, — "
-                "они добавятся заново.</i>"
-            )
     else:
         await query.answer(f"Панель не приняла: {res.get('error', '?')}"[:190], show_alert=True)
     await handle_paid_devices(query, sub_id)
@@ -1727,7 +1553,8 @@ async def handle_paid_bulk_limits_apply(query, context):
     kind, value = plan["kind"], plan["value"]
     emoji, label, _field = LIMIT_KINDS[kind]
     await query.edit_message_text(f"{emoji} Меняю лимит {label} у всех подписок…")
-    r = await bulk_set_limits(kind, value, context)
+    bot = context.bot if hasattr(context, "bot") else None
+    r = await _svc.bulk_set_limits(kind, value, bot=bot)
     if kind == "lte":
         value_label = "по умолчанию" if value is None else f"{value} ГБ"
     else:
@@ -1744,156 +1571,15 @@ async def handle_paid_bulk_limits_apply(query, context):
 
 
 async def bulk_set_limits(kind: str, value: int | None, context) -> dict:
-    """Ставит лимит всем платным подпискам: устройства — в базе и в панели,
-    LTE — только в базе (панель о LTE-лимите не знает)."""
-    import aiosqlite
-    from features.blacklist import blacklisted_ids
-    from core.database import DB_PATH
-    from services.panel import update_client_limits
-    emoji, label, field = LIMIT_KINDS[kind]
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            f"SELECT id, tg_id, email, {field}, extra_devices FROM paid_subs"
-        ) as cur:
-            rows = await cur.fetchall()
-
-    skip_ids = await blacklisted_ids()
+    """Тонкая обёртка над paidsub.service.bulk_set_limits (совместимость)."""
     bot = context.bot if hasattr(context, "bot") else None
-    updated = panel_fail = skipped = 0
-    tightened = []
-    if kind == "lte":
-        from services.remnawave import lte_limit_gb
-        preset = load_config().get("paid_preset_lte")
-        new_eff = lte_limit_gb(None, preset) if value is None else value
-    for sub_id, tg_id, email, old, extra in rows:
-        if tg_id in skip_ids:
-            skipped += 1
-            continue
-        # человек оплатил дополнительные устройства — они идут сверх общего
-        # лимита, иначе массовая правка молча отбирала бы купленное
-        target = value + int(extra or 0) if (kind == "hwid" and value) else value
-        await update_paid_sub_field(sub_id, field, target)
-        if kind == "hwid":
-            res = await update_client_limits(
-                email, limit_hwid=target)
-            if not res.get("success"):
-                panel_fail += 1
-        updated += 1
-        if tg_id:
-            if kind == "lte":
-                hist_label = "по умолчанию" if target is None else f"{target} ГБ"
-            else:
-                hist_label = target or "без ограничения"
-            await add_history(tg_id, "settings_changed",
-                              f"Массово: лимит {label} → {hist_label}"
-                              + (f" (в т.ч. докуплено {extra})" if target != value else ""))
-            # пишем только тем, кому стало строже: остальным это не новость.
-            # old == 0 значит «было без ограничения» — любой лимит строже
-            if kind == "lte":
-                if new_eff < lte_limit_gb(old, preset):
-                    tightened.append((tg_id, new_eff))
-            elif target and (not old or target < old):
-                tightened.append((tg_id, target))
-
-    if bot:
-        for tg_id, target in tightened:
-            if kind == "lte":
-                await _notify_user(bot, tg_id,
-                    "🌐 <b>Изменён лимит LTE-трафика</b>\n\n"
-                    f"<blockquote>Теперь в месяц: <b>{target} ГБ</b></blockquote>\n\n"
-                    "<i>Остаток смотри в «Моя подписка».</i>"
-                )
-            else:
-                await _notify_user(bot, tg_id,
-                    "📱 <b>Изменён лимит устройств</b>\n\n"
-                    f"<blockquote>Теперь можно подключить: <b>{target}</b></blockquote>\n\n"
-                    "<i>Лишние устройства перестанут подключаться.</i>"
-                )
-    return {"updated": updated, "panel_fail": panel_fail,
-            "skipped": skipped, "tightened": len(tightened)}
+    return await _svc.bulk_set_limits(kind, value, bot=bot)
 
 
 async def bulk_shift_expire(seconds: int, direction: int, context) -> dict:
-    """Сдвигает дату окончания у всех платных подписок.
-    direction = +1 (добавить) или -1 (убавить). Возвращает отчёт."""
-    from services.panel import update_client_expire, get_client_info, toggle_client
-    import aiosqlite
-    from core.database import DB_PATH
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT id FROM paid_subs") as cur:
-            all_ids = [r[0] for r in await cur.fetchall()]
-
-    updated = 0
-    errors = 0
-    # подписки людей из ЧС не трогаем: добавление срока включило бы их обратно
-    from features.blacklist import blacklisted_ids
-    skip_ids = await blacklisted_ids()
-    skipped = 0
-
-    for sid in all_ids:
-        row = await get_paid_sub(sid)
-        if not row:
-            continue
-        email = row[2]
-        tg_id = row[1]
-        if tg_id in skip_ids:
-            skipped += 1
-            continue
-        expire_str = row[6]
-        for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
-            try:
-                expire_dt = datetime.strptime(expire_str, fmt)
-                break
-            except ValueError:
-                continue
-        else:
-            expire_dt = datetime.now()
-
-        if direction > 0:
-            base = expire_dt if expire_dt > datetime.now() else datetime.now()
-            new_expire = base + timedelta(seconds=seconds)
-        else:
-            new_expire = expire_dt - timedelta(seconds=seconds)
-
-        new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-        try:
-            await set_expire_date(sid, new_expire_str)
-            await update_client_expire(email, new_expire_str)
-            if direction > 0:
-                # при добавлении срока подписку возвращаем в строй
-                await update_paid_sub_field(sid, "status", "active")
-                info = await get_client_info(email)
-                if info.get("success") and not info.get("enabled", True):
-                    await toggle_client(email, True)
-            updated += 1
-
-            # уведомление пользователю
-            if tg_id:
-                bot = context.bot if hasattr(context, 'bot') else None
-                if bot:
-                    if direction > 0:
-                        await _notify_user(bot, tg_id,
-                            f"🎉 <b>Подписка продлена!</b>\n\n"
-                            f"<blockquote>➕ Добавлено: <b>{fmt_duration(seconds)}</b>\n"
-                            f"📅 Действует до: <b>{new_expire_str[:16]}</b></blockquote>"
-                        )
-                    else:
-                        await _notify_user(bot, tg_id,
-                            f"ℹ️ <b>Срок подписки изменён</b>\n\n"
-                            f"<blockquote>➖ Убавлено: <b>{fmt_duration(seconds)}</b>\n"
-                            f"📅 Действует до: <b>{new_expire_str[:16]}</b></blockquote>"
-                        )
-                # запись в историю
-                await add_history(
-                    tg_id, "bulk_extended" if direction > 0 else "bulk_reduced",
-                    f"Подписка #{sid} ({email})\n"
-                    f"{'Добавлено' if direction > 0 else 'Убавлено'}: {fmt_duration(seconds)}\n"
-                    f"Новая дата: {new_expire_str}",
-                )
-        except Exception:
-            errors += 1
-
-    return {"updated": updated, "errors": errors, "total": len(all_ids), "skipped": skipped}
+    """Тонкая обёртка над paidsub.service.bulk_extend (совместимость)."""
+    bot = context.bot if hasattr(context, "bot") else None
+    return await _svc.bulk_extend(seconds, direction, bot=bot)
 
 
 # ── Индивидуальные настройки платной подписки ─────────────────────────────────
@@ -2194,52 +1880,10 @@ async def check_expired_subs(context):
 
 async def revoke_paid_period(tg_id: int, period_seconds: int | None, context,
                              reason: str = "Возврат платежа") -> dict:
-    """Отзывает оплаченный срок — обратная операция к начислению при оплате.
-
-    Двигает дату окончания назад на оплаченный период, конец периода сдвигается
-    вместе с ней. Если срок уходит в прошлое, обычная проверка сроков
-    переведёт подписку в истёкшие.
-    """
-    if not period_seconds:
-        return {"ok": False, "error": "у платежа нет сохранённого периода"}
-    row = await get_paid_sub_by_tg_id(tg_id)
-    if not row:
-        return {"ok": False, "error": "подписка не найдена"}
-
-    from paidsub.storage import parse_sub_date
-    sub_id, email, expire_str = row[0], row[2], row[6]
-    expire_dt = parse_sub_date(expire_str)
-    if not expire_dt:
-        return {"ok": False, "error": f"не разобрал дату окончания: {expire_str}"}
-
-    new_expire = expire_dt - timedelta(seconds=int(period_seconds))
-    new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-    await set_expire_date(sub_id, new_expire_str)
-
-    # Деньги вернули — доступ должен закрыться, поэтому ответ панели проверяем,
-    # а не выбрасываем: иначе бот отчитается новой датой, а человек продолжит
-    # пользоваться VPN по старому сроку.
-    from services.panel import update_client_expire, toggle_client
-    panel_error = ""
-    r = await update_client_expire(email, new_expire_str)
-    if not r.get("success"):
-        panel_error = str(r.get("error") or "панель не приняла новый срок")
-
-    if new_expire <= datetime.now():
-        # срок ушёл в прошлое: закрываем доступ сразу, не дожидаясь, пока
-        # панель сама заметит дату — за возврат человек уже не платит
-        off = await toggle_client(email, False)
-        if not off.get("success"):
-            panel_error = ((panel_error + "; ") if panel_error else "") + \
-                str(off.get("error") or "не удалось отключить клиента")
-        await update_paid_sub_field(sub_id, "status", "expired")
-
-    await add_history(
-        tg_id, "payment_refunded",
-        f"{reason}\nОтозвано: {fmt_duration(int(period_seconds))}\nНовая дата: {new_expire_str}"
-        + (f"\n⚠️ Панель: {panel_error}" if panel_error else ""),
-    )
-    return {"ok": True, "expire": new_expire_str, "panel_error": panel_error}
+    """Тонкая обёртка над paidsub.service.revoke_period (совместимость)."""
+    bot = context.bot if hasattr(context, "bot") else None
+    return await _svc.revoke_period(
+        tg_id, period_seconds, reason=reason, bot=bot)
 
 
 def _renew_base(full_row) -> tuple:
@@ -2265,267 +1909,22 @@ async def apply_paid_payment(tg_id: int, amount: int, context,
                              source: str = "Platega",
                              period_seconds: int | None = None,
                              gift_from: int | None = None) -> dict:
-    """Засчитывает оплату, пришедшую из платёжной системы.
-
-    Делает то же, что ручное подтверждение админом, но без его участия:
-    продлевает период, включает клиента, списывает промокод и уведомляет.
-
-    period_seconds — срок из оплаченного тарифа. Он зафиксирован в счёте,
-    поэтому правка тарифа после оплаты не меняет уже купленный срок.
-    gift_from — счёт оплатил другой человек: подписка открывается у tg_id,
-    а тексты, история и промокод идут как у подарка.
-    """
-    # Человек из ЧС: деньги пришли, но срок не начисляем — иначе оплата по
-    # счёту, выставленному до внесения в ЧС, включила бы подписку обратно
-    from features.blacklist import is_blacklisted
-    if await is_blacklisted(tg_id):
-        return {"ok": False, "error": "пользователь в чёрном списке — срок не начислен: "
-                                      "верни деньги или убери из ЧС"}
-
-    row = await get_paid_sub_by_tg_id(tg_id)
-    if not row:
-        return {"ok": False, "error": "подписка не найдена"}
-
-    sub_id = row[0]
-    email = row[2]
-
-    full_row = await get_paid_sub(sub_id)
-    from paidsub.storage import sub_settings
-    settings = sub_settings(full_row)
-    pay_seconds = int(period_seconds or settings["pay_period"] or 0)
-    guessed = ""
-    if not pay_seconds:
-        # у платежа нет срока (старый счёт или сбой) — берём первый активный
-        # тариф, чтобы деньги не повисли, и говорим об этом админу
-        from core.database import list_tariffs
-        tariffs = await list_tariffs(only_active=True)
-        pay_seconds = int(tariffs[0][2]) if tariffs else 30 * 86400
-        guessed = (f"⚠️ У платежа не было срока — начислил "
-                   f"{fmt_duration(pay_seconds)} "
-                   + ("по первому тарифу" if tariffs else "по умолчанию (30 дней)"))
-    base, _carried = _renew_base(full_row)
-    # окна оплаты нет: конец периода и конец доступа — одна и та же дата
-    new_expire = base + timedelta(seconds=pay_seconds)
-    new_expire_str = new_expire.strftime("%d.%m.%Y %H:%M:%S")
-
-    await update_paid_sub_field(sub_id, "expire_date", new_expire_str)
-    await update_paid_sub_field(sub_id, "period_end", new_expire_str)
-    await update_paid_sub_field(sub_id, "status", "active")
-    await update_paid_sub_field(sub_id, "payment_pending", 0)
-    # срок сдвинулся — напоминания о скором конце начинают отсчёт заново
-    await update_paid_sub_field(sub_id, "remind_stage", 0)
-    cur_renewed = row[12] if len(row) > 12 else 0
-    await update_paid_sub_field(sub_id, "times_renewed", cur_renewed + 1)
-
-    from services.panel import get_client_info, toggle_client, update_client_expire
-    info = await get_client_info(email)
-    if info.get("success") and not info.get("enabled", True):
-        await toggle_client(email, True)
-    paid_panel = await update_client_expire(email, new_expire_str)
-    if not paid_panel.get("success"):
-        # оплата прошла, а срок в панели не сдвинулся — человек остался
-        # без доступа, и знать об этом надо немедленно
-        from core.log_channel import send_log as _log
-        await _log(context.bot,
-            f"🛑 Оплата зачтена, но панель не приняла новый срок: "
-            f"<code>{email}</code> — {paid_panel.get('error', '?')}\n"
-            f"Проставь срок <b>{new_expire_str}</b> в панели руками.")
-
-    promo_line = ""
-    pending_promo = promo_code or await get_pending_promo(tg_id)
-    if pending_promo:
-        promo = await get_promo(pending_promo)
-        # промокод ввёл даритель — использование пишем на него
-        promo_who = gift_from or tg_id
-        if promo and not await promo_used_by(pending_promo, promo_who):
-            await record_promo_use(pending_promo, promo_who)
-            await add_history(promo_who, "promo_used", f"Промокод {pending_promo} (−{promo[2]}%)")
-            promo_line = f"🎟 Промокод: <b>{pending_promo}</b> (−{promo[2]}%)\n"
-        await update_paid_sub_field(sub_id, "pending_promo", None)
-
-    giver_name = None
-    if gift_from:
-        from core.database import get_user_info as _gui
-        _gr = await _gui(gift_from)
-        giver_name = _esc_name(_gr[1] if _gr else None, gift_from)
-
-    promo_note = f" (промокод {pending_promo})" if promo_line else ""
-    if gift_from:
-        await add_history(
-            tg_id, "gift_received",
-            f"Подарок от {giver_name}: {amount} ₽{promo_note}\nЧерез: {source}\nДо: {new_expire_str}",
-        )
-    else:
-        await add_history(
-            tg_id, "payment_confirmed",
-            f"Сумма: {amount} ₽{promo_note}\nЧерез: {source}\nДо: {new_expire_str}",
-        )
-
-    from core.log_channel import send_log
-    from core.database import get_user_info
-    u = await get_user_info(tg_id)
-    u_name = _esc_name(u[1] if u else None, tg_id)
-    if gift_from:
-        await send_log(context.bot,
-            f"🎁 Подарок через {source}: {giver_name} (<code>{gift_from}</code>) → "
-            f"{u_name} (<code>{tg_id}</code>) — {amount} ₽\n"
-            f"{promo_line}📅 До: {new_expire_str}"
-            + (f"\n{guessed}" if guessed else "")
-        )
-    else:
-        await send_log(context.bot,
-            f"💰 Оплата через {source}: {u_name} (<code>{tg_id}</code>) — {amount} ₽\n"
-            f"{promo_line}📅 До: {new_expire_str}"
-            + (f"\n{guessed}" if guessed else "")
-        )
-
-    if gift_from:
-        await _notify_user(context.bot, tg_id,
-            "🎁 <b>Вам подарили подписку Drebol VPN!</b>\n\n"
-            f"<blockquote>➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
-            f"📅 Подписка до: <b>{new_expire_str[:16]}</b></blockquote>\n\n"
-            f"<i>Подарил: {giver_name}</i>"
-        )
-    else:
-        await _notify_user(context.bot, tg_id,
-            "✅ <b>Оплата прошла — спасибо!</b>\n\n"
-            f"<blockquote>➕ Добавлено: <b>{fmt_duration(pay_seconds)}</b>\n"
-            f"📅 Подписка до: <b>{new_expire_str[:16]}</b></blockquote>"
-        )
-
-    from config import ADMIN_ID
-    try:
-        if gift_from:
-            admin_text = (
-                f"🎁 <b>Подарок через {source}</b>\n\n"
-                f"🎁 От: {giver_name} (<code>{gift_from}</code>)\n"
-                f"👤 Кому: {u_name} (<code>{tg_id}</code>)\n"
-                f"💵 {amount} ₽\n"
-                f"{promo_line}"
-                f"📅 До: <b>{new_expire_str}</b>"
-            )
-        else:
-            admin_text = (
-                f"💰 <b>Оплата через {source}</b>\n\n"
-                f"👤 {u_name} (<code>{tg_id}</code>)\n"
-                f"💵 {amount} ₽\n"
-                f"{promo_line}"
-                f"📅 До: <b>{new_expire_str}</b>"
-            )
-        await context.bot.send_message(
-            chat_id=ADMIN_ID, text=admin_text, parse_mode="HTML",
-        )
-    except Exception:
-        pass
-
-    return {"ok": True, "expire": new_expire_str}
+    """Тонкая обёртка над paidsub.service.apply_paid_payment (совместимость)."""
+    bot = context.bot if hasattr(context, "bot") else None
+    return await _svc.apply_paid_payment(
+        tg_id, amount, promo_code=promo_code, source=source,
+        period_seconds=period_seconds, gift_from=gift_from, bot=bot)
 
 
 async def apply_gift_payment(gift_tg: int, giver_tg: int, amount: int, context,
                              promo_code: str | None = None,
                              source: str = "Platega",
                              period_seconds: int | None = None) -> dict:
-    """Засчитывает оплаченный подарок: подписка открывается у получателя.
-
-    У получателя уже есть подписка — продлеваем её, как обычную оплату.
-    Подписки нет — создаём с оплаченным сроком (без триала: у подарка
-    свой срок из счёта). Дарителя уведомляем, что подарок дошёл.
-    """
-    from features.blacklist import is_blacklisted
-    if await is_blacklisted(gift_tg):
-        return {"ok": False, "error": "получатель в чёрном списке — срок не начислен: "
-                                      "верни деньги или убери из ЧС"}
-
-    row = await get_paid_sub_by_tg_id(gift_tg)
-    if row:
-        res = await apply_paid_payment(
-            gift_tg, amount, context, promo_code=promo_code,
-            source=source, period_seconds=period_seconds, gift_from=giver_tg)
-        if not res.get("ok"):
-            return res
-    else:
-        # свежему получателю создаём подписку сразу с оплаченным сроком;
-        # дарителю уходит текст с деталями и ссылкой — он перешлёт её другу,
-        # если тот ещё не запускал бота
-        async def _to_giver(text, parse_mode=None):
-            try:
-                await context.bot.send_message(chat_id=giver_tg, text=text,
-                                               parse_mode=parse_mode or "HTML")
-            except Exception:
-                pass
-
-        await do_create_paid_sub(None, gift_tg, context, _to_giver,
-                                 trial=False, for_user=False,
-                                 period_override=period_seconds, notify=False)
-        row2 = await get_paid_sub_by_tg_id(gift_tg)
-        if not row2:
-            return {"ok": False, "error": "не удалось создать подписку получателя"}
-        # промокод ввёл даритель — использование пишем на него
-        if promo_code:
-            promo = await get_promo(promo_code)
-            if promo and not await promo_used_by(promo_code, giver_tg):
-                await record_promo_use(promo_code, giver_tg)
-                await add_history(giver_tg, "promo_used",
-                                  f"Промокод {promo_code} (−{promo[2]}%)")
-        from core.database import get_user_info
-        giver_row = await get_user_info(giver_tg)
-        giver_name = _esc_name(giver_row[1] if giver_row else None, giver_tg)
-        new_expire = str(row2[6])[:16]
-        sub_url = row2[5]
-        await _notify_user(context.bot, gift_tg,
-            "🎁 <b>Вам подарили подписку Drebol VPN!</b>\n\n"
-            f"<blockquote>📅 Подписка до: <b>{new_expire}</b></blockquote>\n\n"
-            "🔑 <b>Ссылка для подключения</b>\n"
-            f"<code>{sub_url}</code>\n\n"
-            f"<i>Подарил: {giver_name}</i>"
-        )
-        await add_history(gift_tg, "gift_received",
-                          f"Подарок от {giver_name}: {amount} ₽\nДо: {new_expire}")
-        from core.log_channel import send_log
-        u = await get_user_info(gift_tg)
-        u_name = _esc_name(u[1] if u else None, gift_tg)
-        await send_log(context.bot,
-            f"🎁 Подарок через {source}: {giver_name} (<code>{giver_tg}</code>) → "
-            f"{u_name} (<code>{gift_tg}</code>) — {amount} ₽\n"
-            f"📅 До: {new_expire}")
-        res = {"ok": True, "expire": str(row2[6])}
-
-    # висящий промокод дарителя потрачен на подарок — снимаем, чтобы он
-    # не применился ещё и к его собственному продлению
-    giver_row = await get_paid_sub_by_tg_id(giver_tg)
-    if giver_row:
-        await update_paid_sub_field(giver_row[0], "pending_promo", None)
-
-    # даритель: подтверждение, что подарок дошёл
-    from core.database import get_user_info
-    u = await get_user_info(gift_tg)
-    if u and u[1]:
-        recipient_name = _esc_name(u[1], gift_tg)
-    else:
-        try:
-            chat = await context.bot.get_chat(gift_tg)
-            recipient_name = _esc_name(
-                f"@{chat.username}" if getattr(chat, "username", None)
-                else (chat.first_name or f"id{gift_tg}"), gift_tg)
-        except Exception:
-            recipient_name = f"id{gift_tg}"
-    pay_seconds = int(period_seconds or 0)
-    expire = str(res.get("expire", ""))[:16]
-    lines = ["🎁 <b>Подарок оплачен и выдан!</b>", "",
-             "<blockquote>"
-             f"👤 {recipient_name}"]
-    if pay_seconds:
-        lines.append(f"➕ Срок: <b>{fmt_duration(pay_seconds)}</b>")
-    if expire:
-        lines.append(f"📅 Подписка до: <b>{expire}</b>")
-    lines.append("</blockquote>")
-    await _notify_user(context.bot, giver_tg, "\n".join(lines))
-    await add_history(giver_tg, "gift_sent",
-                      f"Подарок {recipient_name}: {amount} ₽\nДо: {expire}")
-    return res
-
-
-
+    """Тонкая обёртка над paidsub.service.gift_sub (совместимость)."""
+    bot = context.bot if hasattr(context, "bot") else None
+    return await _svc.gift_sub(
+        gift_tg, giver_tg, amount, promo_code=promo_code, source=source,
+        period_seconds=period_seconds, bot=bot)
 
 
 

@@ -87,6 +87,86 @@ td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}
       <button id="btn-muse">Создать аккаунт и ссылку</button>
       <div id="muse-out" class="mut"></div>
     </div>
+
+    <h2>Пользователи</h2>
+    <div class="card">
+      <input id="q-user" placeholder="ID, @username, имя или paid_123">
+      <button id="btn-find">Найти</button>
+      <div id="users-out"></div>
+      <div id="profile-out"></div>
+      <h2>Сообщение пользователю</h2>
+      <input id="dm-id" type="number" placeholder="tg_id">
+      <textarea id="dm-text" placeholder="текст от имени Drebol VPN"></textarea>
+      <button id="btn-dm">Отправить</button>
+      <span id="dm-msg" class="mut"></span>
+    </div>
+
+    <h2>Подписка</h2>
+    <div class="card">
+      <input id="sub-id" type="number" placeholder="ID подписки (paid_subs.id)">
+      <input id="sub-days" type="number" placeholder="дней для продления">
+      <div>
+        <button class="ghost" data-sub="toggle">Вкл/выкл</button>
+        <button class="ghost" data-sub="freeze">Заморозить</button>
+        <button class="ghost" data-sub="extend">Продлить</button>
+        <button class="ghost" data-sub="reissue">Перевыпустить</button>
+        <button class="ghost" data-sub="delete">Удалить</button>
+      </div>
+      <span id="sub-msg" class="mut"></span>
+    </div>
+
+    <h2>Финансы и оплаты</h2>
+    <div class="card">
+      <button id="btn-finance" class="ghost">Сводка</button>
+      <button id="btn-payments" class="ghost">Оплаты</button>
+      <button id="btn-reconcile" class="ghost">Сверка с Platega</button>
+      <button id="btn-tariffs" class="ghost">Тарифы</button>
+      <button id="btn-promos" class="ghost">Промокоды</button>
+      <button id="btn-servers" class="ghost">Серверы (расходы)</button>
+      <div id="finance-out"></div>
+    </div>
+
+    <h2>Рассылка</h2>
+    <div class="card">
+      <textarea id="bc-text" placeholder="текст рассылки (HTML)"></textarea>
+      <select id="bc-seg">
+        <option value="all">Все</option><option value="active">Активные</option>
+        <option value="expired">Истёкшие</option><option value="trial">Триал</option>
+        <option value="paying">Платящие</option><option value="no_sub">Без подписки</option>
+      </select>
+      <button id="btn-bc-preview" class="ghost">Предпросмотр</button>
+      <button id="btn-bc-send">Отправить</button>
+      <div id="bc-out" class="mut"></div>
+    </div>
+
+    <h2>Узлы и панель</h2>
+    <div class="card">
+      <button id="btn-nodes" class="ghost">Здоровье узлов</button>
+      <button id="btn-panel" class="ghost">Панель Remnawave</button>
+      <button id="btn-psync" class="ghost">Синхронизация с панелью</button>
+      <div id="nodes-out"></div>
+    </div>
+
+    <h2>Логи и синхронизация</h2>
+    <div class="card">
+      <button id="btn-logs" class="ghost">Журнал действий</button>
+      <button id="btn-morning" class="ghost">Утренняя сводка 09:00</button>
+      <button id="btn-morning-run" class="ghost">Запустить сводку сейчас</button>
+      <button id="btn-netcheck" class="ghost">Проверка операторов</button>
+      <button id="btn-downtime" class="ghost">Падения</button>
+      <div id="logs-out"></div>
+    </div>
+
+    <h2>Сайт, бэкап, защита</h2>
+    <div class="card">
+      <button id="btn-deploy" class="ghost">Деплой сайта</button>
+      <button id="btn-git" class="ghost">Обновиться с GitHub (только Mark)</button>
+      <a id="btn-backup" href="/api/admin/backup/export"><button type="button" class="ghost">Скачать бэкап</button></a>
+      <button id="btn-support" class="ghost">Темы поддержки</button>
+      <button id="btn-blacklist" class="ghost">Чёрный список</button>
+      <button id="btn-fraud" class="ghost">Повторные триалы</button>
+      <div id="infra-out"></div>
+    </div>
   </div>
 </div>
 <script>
@@ -167,6 +247,70 @@ document.getElementById("btn-setup").onclick = async () => {
   history.replaceState(null, "", location.pathname);
   await refreshMe(); await loadDashboard(); await loadSettings();
 };
+function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+async function postConfirm(path, body){
+  let r = await api(path, {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body || {})});
+  if (r.data && r.data.need_confirm) {
+    if (!confirm(r.data.summary || "Подтвердить действие?")) return {status: 0, data: {error: "cancelled"}};
+    r = await api(path, {method: "POST", headers: {"X-CSRF-Token": csrf()},
+      body: JSON.stringify(Object.assign({}, body || {}, {confirm_token: r.data.confirm_token}))});
+  }
+  return r;
+}
+function renderRows(el, rows){
+  document.getElementById(el).innerHTML = "<pre>" + esc(JSON.stringify(rows, null, 2)).slice(0, 8000) + "</pre>";
+}
+document.getElementById("btn-find").onclick = async () => {
+  const q = document.getElementById("q-user").value;
+  const r = await api("/users?search=" + encodeURIComponent(q));
+  if (r.status !== 200) return;
+  document.getElementById("users-out").innerHTML = (r.data.users || []).map(u =>
+    '<p><a href="#" data-tg="' + u.tg_id + '">' + esc(u.first_name || "") + " @" + esc(u.username || "") + " · " + u.tg_id + " · " + esc(u.sub_status || "") + "</a></p>").join("") || "<p class='mut'>Никого не нашёл</p>";
+  document.querySelectorAll("#users-out a").forEach(a => a.onclick = async e => {
+    e.preventDefault();
+    const p = await api("/users/" + a.dataset.tg);
+    renderRows("profile-out", p.data);
+  });
+};
+document.getElementById("btn-dm").onclick = async () => {
+  const r = await api("/users/" + document.getElementById("dm-id").value + "/dm",
+    {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({text: document.getElementById("dm-text").value})});
+  document.getElementById("dm-msg").textContent = r.status === 200 ? "Отправлено" : ("Ошибка: " + (r.data.error || r.status));
+};
+document.querySelectorAll("[data-sub]").forEach(b => b.onclick = async () => {
+  const id = document.getElementById("sub-id").value;
+  const body = b.dataset.sub === "extend" ? {days: parseInt(document.getElementById("sub-days").value || "0", 10)} : {};
+  const r = await postConfirm("/subs/" + id + "/" + b.dataset.sub, body);
+  document.getElementById("sub-msg").textContent = r.status === 200 ? "Готово" : ("Ошибка: " + (r.data.error || r.status));
+});
+document.getElementById("btn-finance").onclick = async () => { const r = await api("/finance"); renderRows("finance-out", r.data); };
+document.getElementById("btn-payments").onclick = async () => { const r = await api("/payments"); renderRows("finance-out", r.data); };
+document.getElementById("btn-reconcile").onclick = async () => { const r = await postConfirm("/reconcile/run", {}); renderRows("finance-out", r.data); };
+document.getElementById("btn-tariffs").onclick = async () => { const r = await api("/tariffs"); renderRows("finance-out", r.data); };
+document.getElementById("btn-promos").onclick = async () => { const r = await api("/promos"); renderRows("finance-out", r.data); };
+document.getElementById("btn-servers").onclick = async () => { const r = await api("/servers"); renderRows("finance-out", r.data); };
+document.getElementById("btn-bc-preview").onclick = async () => {
+  const r = await api("/broadcast/preview", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({text: document.getElementById("bc-text").value, segment: document.getElementById("bc-seg").value})});
+  document.getElementById("bc-out").textContent = r.status === 200 ? ("Получателей: " + (r.data.count || 0)) : ("Ошибка: " + (r.data.error || r.status));
+};
+document.getElementById("btn-bc-send").onclick = async () => {
+  const r = await postConfirm("/broadcast/send", {text: document.getElementById("bc-text").value, segment: document.getElementById("bc-seg").value});
+  document.getElementById("bc-out").textContent = r.status === 200 ? "Рассылка запущена" : ("Ошибка: " + (r.data.error || r.status));
+};
+document.getElementById("btn-nodes").onclick = async () => { const r = await api("/nodes"); renderRows("nodes-out", r.data); };
+document.getElementById("btn-panel").onclick = async () => { const r = await api("/panel"); renderRows("nodes-out", r.data); };
+document.getElementById("btn-psync").onclick = async () => { const r = await postConfirm("/panel-sync", {}); renderRows("nodes-out", r.data); };
+document.getElementById("btn-logs").onclick = async () => { const r = await api("/logs"); renderRows("logs-out", r.data); };
+document.getElementById("btn-morning").onclick = async () => { const r = await api("/morning"); renderRows("logs-out", r.data); };
+document.getElementById("btn-morning-run").onclick = async () => { const r = await postConfirm("/morning/run-now", {}); renderRows("logs-out", r.data); };
+document.getElementById("btn-netcheck").onclick = async () => { const r = await postConfirm("/netcheck/run", {}); renderRows("logs-out", r.data); };
+document.getElementById("btn-downtime").onclick = async () => { const r = await api("/downtime"); renderRows("logs-out", r.data); };
+document.getElementById("btn-deploy").onclick = async () => { const r = await postConfirm("/site/deploy", {}); renderRows("infra-out", r.data); };
+document.getElementById("btn-git").onclick = async () => { const r = await postConfirm("/git-update", {}); renderRows("infra-out", r.data); };
+document.getElementById("btn-support").onclick = async () => { const r = await api("/support/topics"); renderRows("infra-out", r.data); };
+document.getElementById("btn-blacklist").onclick = async () => { const r = await api("/blacklist"); renderRows("infra-out", r.data); };
+document.getElementById("btn-fraud").onclick = async () => { const r = await api("/fraud"); renderRows("infra-out", r.data); };
 (function init(){
   const params = new URLSearchParams(location.search);
   if (params.get("token")) { show("setup", true); }

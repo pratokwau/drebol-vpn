@@ -879,7 +879,12 @@ def build_app():
     # Веб-админка (фаза 1): подприложение /api/admin/* со своими
     # правилами CORS/сессий/CSRF — см. web/admin_api.py.
     from web.admin_api import build_admin_app
-    app.add_subapp("/api/admin", build_admin_app())
+    admin_app = build_admin_app()
+    # Фаза 3: узлы/панель, логи, синхронизации, сайт, бэкап, ЧС, фрод.
+    # Пути в admin_infra.register — относительные, без /api/admin.
+    from web.admin_infra import register as _register_admin_infra
+    _register_admin_infra(admin_app)
+    app.add_subapp("/api/admin", admin_app)
     app.router.add_get("/admin/", admin_page_handler)
     app.router.add_get("/admin/{tail:.*}", admin_page_handler)
     app.router.add_get("/api/health", health)
