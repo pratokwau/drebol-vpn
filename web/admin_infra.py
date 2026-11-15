@@ -1080,33 +1080,6 @@ async def connect_help_patch(request):
     return web.json_response({"ok": True})
 
 
-# ── Переименование клиентов панели ──────────────────────────────────────────
-
-async def panel_rename_clients(request):
-    actor, err = await _require_mutation(request)
-    if err is not None:
-        return err
-    body = await _json_body(request)
-    token = str(body.get("confirm_token") or "")
-    if not token:
-        return confirm_needed_response(
-            issue_confirm(actor, "panel_rename_clients", {},
-                          "Убрать юзернеймы из имён клиентов панели?"),
-            "Убрать юзернеймы из имён клиентов панели?")
-    if take_confirm(actor, token, "panel_rename_clients") is None:
-        return _json_error("bad_confirm", 403)
-    res = await rw_mod.rename_clients_strip_username()
-    await _audit(actor, "panel_rename_clients",
-                 f"renamed={res.get('renamed', 0)} "
-                 f"failed={res.get('failed', 0)} "
-                 f"skipped={res.get('skipped', 0)}")
-    return web.json_response({
-        "ok": True, "renamed": res.get("renamed", 0),
-        "failed": res.get("failed", 0), "skipped": res.get("skipped", 0),
-        "errors": res.get("errors") or [],
-    })
-
-
 # ── Панель: профили/инбаунды/хосты (Mark-only) ───────────────────────────────
 
 def _panel_error(res: dict):
@@ -1943,7 +1916,6 @@ def register(app) -> None:
     app.router.add_patch("/site/texts", site_texts_patch)
     app.router.add_get("/yandex", yandex_get)
     app.router.add_post("/jobs/run-now", jobs_run_now)
-    app.router.add_post("/panel/rename-clients", panel_rename_clients)
     app.router.add_get("/panel/profiles/{uuid}", panel_profile_get)
     app.router.add_patch("/panel/profiles/{uuid}/inbounds/{tag}",
                          panel_profile_inbound_patch)

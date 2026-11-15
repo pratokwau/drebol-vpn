@@ -413,7 +413,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo
       <!-- Панель Remnawave -->
       <section id="sec-panel" class="page hidden">
         <div class="card"><h2>Панель Remnawave</h2><p class="sub">Профили, инбаунды и хосты — живые данные из панели. Правка инбаундов и хостов — только Mark, с проверкой конфига после сохранения.</p>
-          <div class="btnrow"><button id="btn-panel" class="ghost">Показать панель</button><button id="btn-rename" class="ghost">Убрать юзернеймы из имён клиентов</button><button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button></div>
+          <div class="btnrow"><button id="btn-panel" class="ghost">Показать панель</button><button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button></div>
           <div id="panel-out"></div>
         </div>
         <div class="card"><h2>Редактор инбаунда</h2><p class="sub">Меняются только заполненные поля. Приватные ключи и shortId здесь не трогаются.</p>
@@ -1250,7 +1250,6 @@ $("btn-tf-del").onclick = async function(){
 
 /* --- Панель Remnawave и узлы --- */
 $("btn-panel").onclick = async function(){ const r = await api("/panel"); renderOut("panel-out", r.data); };
-$("btn-rename").onclick = async function(){ const r = await postConfirm("/panel/rename-clients", {}); renderOut("panel-out", r.data); };
 $("btn-yandex").onclick = async function(){ const r = await api("/yandex"); renderOut("panel-out", r.data); };
 $("btn-pf-load").onclick = async function(){
   const r = await api("/panel/profiles/" + $("pf-uuid").value);
