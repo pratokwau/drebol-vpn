@@ -67,7 +67,8 @@ def admin_keyboard() -> InlineKeyboardMarkup:
     sync_time = (load_config().get("morning_sync") or {}).get("time", "09:00")
 
     # Кнопки сгруппированы по смыслу и стоят парами — так вся админка
-    # помещается на один экран телефона без прокрутки
+    # помещается на один экран телефона без прокрутки. Все кнопки —
+    # в два столбца, одиночных рядов нет (кроме «Назад» внизу).
     return InlineKeyboardMarkup([
         # сводка и деньги
         [b("📊 Статистика", "dashboard"), b("💰 Финансы", "pay_provider_menu")],
@@ -76,18 +77,15 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [b("💳 Платные подписки", "paid_subs"), b("📋 Админские", "admin_subs")],
         # общение
         [b("📣 Рассылка", "broadcast"), b("👥 Помощники", "helpers_menu")],
-        [b("📢 Канал", "channel_menu")],
+        [b("📢 Канал", "channel_menu"), b("🌐 Проверка операторов", "netcheck_menu")],
         # удержание и защита
         [b("🎯 Возврат ушедших", "winback_settings"), b("⏰ Напоминания", "remind_settings")],
         [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
         # инфраструктура
         [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Веб-доступ", "web_menu")],
-        [b("🌐 Проверка операторов", "netcheck_menu")],
         [b("💾 Бэкап и перенос", "backup_menu"), b("📄 Документы", "documents_menu")],
-        [b("🛟 Поддержка и логи", "support_group_settings")],
-        [b(mnt_label, "mnt_menu")],
-        [b("🔄 Обновиться с GitHub", "git_update")],
-        [b(f"⏰ Синхронизация · {sync_time}", "morning_menu")],
+        [b("🛟 Поддержка и логи", "support_group_settings"), b(mnt_label, "mnt_menu")],
+        [b("🔄 Обновиться с GitHub", "git_update"), b(f"⏰ Синхронизация · {sync_time}", "morning_menu")],
         [b("◀️ Назад", "back_start")],
     ])
 

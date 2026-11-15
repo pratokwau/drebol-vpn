@@ -20,9 +20,13 @@ LAST_EXPIRE_FAIL = None
 
 
 def build_email(tg_id: int, username=None, prefix: str = "") -> str:
-    """Имя подписки: по нему бот и панель говорят об одном и том же клиенте."""
-    suffix = username.strip().lower() if username else "nousername"
-    raw = f"{prefix}{tg_id}_{suffix}"
+    """Имя подписки: по нему бот и панель говорят об одном и том же клиенте.
+
+    Имя — только prefix + TG ID (например, paid_123456789), без юзернейма:
+    юзернейм меняется, а имя в панели должно оставаться стабильным.
+    Параметр username оставлен для совместимости вызовов, но не используется.
+    """
+    raw = f"{prefix}{tg_id}"
     return "".join(c for c in raw if c.isalnum() or c in ("_", "-", "."))[:50]
 
 

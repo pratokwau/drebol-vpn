@@ -42,7 +42,7 @@ from services.remnawave import (
     handle_rw_usage_period, handle_rw_usage_set, handle_rw_usage_custom,
     handle_panel_sync, handle_panel_sync_schedule, handle_panel_sync_set,
     handle_panel_sync_off, handle_panel_sync_daily, handle_panel_sync_interval,
-    handle_panel_sync_menu, handle_panel_names_sync,
+    handle_panel_sync_menu, handle_panel_names_sync, handle_panel_rename_strip,
 )
 from features.backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
@@ -572,6 +572,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_panel_sync_menu(query, context)
     elif data == "panel_names_sync":
         await handle_panel_names_sync(query, context)
+    elif data == "panel_rename_strip":
+        await handle_panel_rename_strip(query, context)
     elif data == "panel_sync":
         await handle_panel_sync(query, context)
     elif data == "panel_sync_schedule":
