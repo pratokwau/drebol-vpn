@@ -65,6 +65,21 @@ h3{font-size:14px;font-weight:700;margin:18px 0 8px}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
 .stat b{display:block;font-size:24px;font-family:"Unbounded",sans-serif;font-weight:600}
 .stat span{color:var(--mut);font-size:13px}
+.stat small{display:block;color:var(--mut2);font-size:12px;margin-top:2px}
+.chartgrid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.chart text{font:11px "Inter",sans-serif;fill:var(--mut)}
+.chart{overflow:visible}
+.hbar{display:flex;align-items:center;gap:10px;margin:9px 0;font-size:13.5px}
+.hbar-lab{width:110px;flex:0 0 110px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hbar-track{flex:1;background:var(--card2);border:1px solid var(--line);border-radius:999px;height:12px;overflow:hidden}
+.hbar-fill{height:100%;background:var(--acc);border-radius:999px}
+.hbar b{min-width:36px;text-align:right;font-variant-numeric:tabular-nums}
+.donut-wrap{display:flex;align-items:center;gap:20px;flex-wrap:wrap}
+.legend{font-size:13.5px}
+.legend div{margin:6px 0;white-space:nowrap}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;vertical-align:-1px}
+tr[data-sub]{cursor:pointer}
+tr[data-sub]:hover td{background:var(--card2)}
 input,select,textarea{width:100%;background:var(--card2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;margin:6px 0}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:0;border-color:var(--acc)}
 textarea{min-height:84px;resize:vertical}
@@ -116,6 +131,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo
   .brand{border-bottom:0;padding-bottom:6px;margin-bottom:6px}
   .main{padding:0 16px 48px}
   .kv{grid-template-columns:1fr}
+  .chartgrid{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -179,6 +195,25 @@ pre{white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo
       <!-- Обзор -->
       <section id="sec-overview" class="page">
         <div id="stats" class="grid"></div>
+        <div class="card"><h2>Выручка и новые юзеры — 30 дней</h2><p class="sub">Выручка — нетто: оплаченные счета минус возвраты. Наведи курсор на столбец или точку — увидишь дату и значение.</p>
+          <div class="chartgrid">
+            <div><h3 style="margin-top:0">Выручка по дням</h3><div id="chart-revenue"></div></div>
+            <div><h3 style="margin-top:0">Новые юзеры по дням</h3><div id="chart-users"></div></div>
+          </div>
+        </div>
+        <div class="card"><h2>Подписки по статусу и сроку</h2><p class="sub">Живой срез базы подписок.</p>
+          <div class="chartgrid">
+            <div><h3 style="margin-top:0">По статусу</h3><div id="chart-status"></div></div>
+            <div><h3 style="margin-top:0">По сроку тарифа</h3><div id="chart-term"></div></div>
+          </div>
+        </div>
+        <div class="card"><h2>Платные подписки</h2><p class="sub">Последние оплаченные — сверху. Нажми на строку, чтобы открыть подписку.</p>
+          <div id="paid-table"></div>
+          <div class="btnrow"><button id="btn-paid-more" class="ghost">Показать ещё</button></div>
+        </div>
+        <div class="card"><h2>Истекают в ближайшие 3 дня</h2><p class="sub">Продлить — кнопкой «Открыть» рядом с подпиской.</p>
+          <div id="expiring-out"></div>
+        </div>
         <div class="card"><h2>Панель Remnawave</h2><p id="panel-line" class="mut">—</p></div>
         <div class="card"><h2>Быстрые действия</h2><p class="sub">Частые задачи — в один клик, без поиска по разделам.</p>
           <div class="btnrow">
@@ -187,7 +222,10 @@ pre{white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo
             <button class="ghost" data-goto="payments">Оплаты</button>
             <button class="ghost" data-goto="logs">Журнал действий</button>
             <button class="ghost" data-goto="nodes">Здоровье узлов</button>
+            <button class="ghost" id="btn-quick-git">Обновиться с GitHub</button>
+            <button class="ghost" id="btn-quick-deploy">Деплой сайта</button>
           </div>
+          <div id="quick-upd-msg" class="mut" style="margin-top:8px"></div>
         </div>
       </section>
 
@@ -503,7 +541,7 @@ pre{white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo
           <div class="btnrow"><button id="btn-backup-restore" class="danger">Восстановить из архива</button></div>
           <div id="backup-out"></div>
         </div>
-        <div class="card"><h2>Обновление с GitHub</h2><p class="sub">Только Mark. Подтягивает main и перезапускает бота и сап-бота.</p>
+        <div class="card"><h2>Обновление с GitHub</h2><p class="sub">Mark и Muse. Подтягивает main и перезапускает бота и сап-бота.</p>
           <button id="btn-git" class="danger">Обновиться с GitHub</button>
           <div id="git-out"></div>
         </div>
@@ -724,26 +762,172 @@ async function refreshMe(){
   show("muse-box", r.data.actor === "mark");
   return true;
 }
+/* --- Дашборд: графики рисуются руками, inline SVG, без внешних CDN --- */
+function fmtDay(s){ const m = String(s || "").match(/(\\d{4})-(\\d{2})-(\\d{2})/); return m ? m[3] + "." + m[2] : esc(s); }
+function fmtDays(n){ if (n == null) return "—"; n = Math.round(n / 86400); return n <= 0 ? "—" : fmtNum(n) + " дн."; }
+function statusRu(s){
+  const m = {active:"Активна", expired:"Истекла", frozen:"Заморожена", renewal:"Продление", trial:"Триал", blocked:"Заблокирована", banned:"Заблокирована"};
+  return m[String(s || "").toLowerCase()] || String(s || "—");
+}
+function barChart(series, fmtVal){
+  const W = 480, H = 190, PL = 46, PB = 22, PT = 8;
+  const max = Math.max.apply(null, series.map(function(p){ return p.sum; }).concat([1]));
+  const n = Math.max(series.length, 1), bw = (W - PL - 6) / n;
+  let s = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img">';
+  [0, 0.5, 1].forEach(function(f){
+    const y = PT + (1 - f) * (H - PT - PB);
+    s += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - 4) + '" y2="' + y.toFixed(1) + '" stroke="#1c2330"/>';
+    s += '<text x="' + (PL - 6) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end">' + fmtNum(Math.round(max * f)) + '</text>';
+  });
+  series.forEach(function(p, i){
+    const h = p.sum > 0 ? Math.max(2, (p.sum / max) * (H - PT - PB)) : 0;
+    const x = PL + i * bw + 1, y = H - PB - h;
+    s += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(1, bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.5" fill="#2ea8ff"><title>' + fmtDay(p.date) + ' · ' + esc(fmtVal(p.sum)) + '</title></rect>';
+    if (i % 5 === 0) s += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + fmtDay(p.date) + '</text>';
+  });
+  return s + '</svg>';
+}
+function lineChart(series){
+  const W = 480, H = 190, PL = 46, PB = 22, PT = 8;
+  const max = Math.max.apply(null, series.map(function(p){ return p.count; }).concat([1]));
+  const n = Math.max(series.length, 1), step = (W - PL - 6) / Math.max(n - 1, 1);
+  const pt = series.map(function(p, i){
+    return {x: PL + i * step, y: PT + (1 - p.count / max) * (H - PT - PB), d: p.date, v: p.count};
+  });
+  let s = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img">';
+  [0, 0.5, 1].forEach(function(f){
+    const y = PT + (1 - f) * (H - PT - PB);
+    s += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - 4) + '" y2="' + y.toFixed(1) + '" stroke="#1c2330"/>';
+    s += '<text x="' + (PL - 6) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end">' + fmtNum(Math.round(max * f)) + '</text>';
+  });
+  const line = pt.map(function(p){ return p.x.toFixed(1) + "," + p.y.toFixed(1); }).join(" ");
+  s += '<polygon points="' + PL + ',' + (H - PB) + ' ' + line + ' ' + pt[pt.length - 1].x.toFixed(1) + ',' + (H - PB) + '" fill="#2ea8ff" opacity="0.12"/>';
+  s += '<polyline points="' + line + '" fill="none" stroke="#2ea8ff" stroke-width="2" stroke-linejoin="round"/>';
+  pt.forEach(function(p, i){
+    s += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.6" fill="#2ea8ff"><title>' + fmtDay(p.d) + ' · +' + p.v + '</title></circle>';
+    if (i % 5 === 0) s += '<text x="' + p.x.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + fmtDay(p.d) + '</text>';
+  });
+  return s + '</svg>';
+}
+function donutChart(parts){
+  const colors = ["#34d399", "#f87171", "#fbbf24", "#a78bfa", "#2ea8ff", "#9aa5b5"];
+  const total = parts.reduce(function(a, p){ return a + p.count; }, 0);
+  if (!total) return '<div class="empty"><span class="big">🔍</span>Нет подписок</div>';
+  const R = 62, C = 2 * Math.PI * R;
+  let off = 0, rings = "";
+  parts.forEach(function(p, i){
+    const len = p.count / total * C;
+    rings += '<circle cx="80" cy="80" r="' + R + '" fill="none" stroke="' + colors[i % colors.length] + '" stroke-width="26" stroke-dasharray="' + len.toFixed(1) + ' ' + (C - len).toFixed(1) + '" stroke-dashoffset="' + (-off).toFixed(1) + '" transform="rotate(-90 80 80)"><title>' + esc(p.label) + ' · ' + p.count + '</title></circle>';
+    off += len;
+  });
+  const legend = parts.map(function(p, i){
+    return '<div><span class="dot" style="background:' + colors[i % colors.length] + '"></span>' + esc(p.label) + ' — <b>' + fmtNum(p.count) + '</b></div>';
+  }).join("");
+  return '<div class="donut-wrap"><svg class="chart" viewBox="0 0 160 160" width="170" role="img">' + rings +
+    '<text x="80" y="77" text-anchor="middle" style="font-size:20px;font-weight:700;fill:#f2f5f9">' + fmtNum(total) + '</text>' +
+    '<text x="80" y="95" text-anchor="middle">подписок</text></svg><div class="legend">' + legend + '</div></div>';
+}
+function hbars(parts){
+  const max = Math.max.apply(null, parts.map(function(p){ return p.count; }).concat([1]));
+  if (!parts.length) return '<div class="empty"><span class="big">🔍</span>Нет данных</div>';
+  return parts.map(function(p){
+    const w = Math.max(p.count > 0 ? 3 : 0, Math.round(p.count / max * 100));
+    return '<div class="hbar"><span class="hbar-lab">' + esc(p.label) + '</span><div class="hbar-track"><div class="hbar-fill" style="width:' + w + '%"></div></div><b>' + fmtNum(p.count) + '</b></div>';
+  }).join("");
+}
+function gotoSub(id){
+  if (!id) return;
+  showSection("subs");
+  $("sub-id").value = id;
+  $("btn-sub-load").click();
+}
+let paidPage = 0, paidTotalPages = 1;
+async function loadPaid(page){
+  const r = await api("/dashboard/paid?page=" + page);
+  if (r.status !== 200) { $("paid-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  const items = r.data.items || [];
+  paidPage = r.data.page || page; paidTotalPages = r.data.total_pages || 1;
+  if (page === 1 && !items.length) { $("paid-table").innerHTML = '<div class="empty"><span class="big">🔍</span>Оплаченных подписок пока нет</div>'; show("btn-paid-more", false); return; }
+  let h = page === 1 ? '<div class="tblwrap"><table><thead><tr><th>Пользователь</th><th>Срок</th><th>Сумма</th><th>Оплачено</th><th>Истекает</th><th>Статус</th></tr></thead><tbody id="paid-rows">' : "";
+  items.forEach(function(it){
+    const name = esc(it.name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "") + ' <span class="mono small">#' + it.tg_id + '</span>';
+    const exp = it.expire_date ? new Date(String(it.expire_date).replace(" ", "T")) : null;
+    const active = exp && exp.getTime() > Date.now();
+    h += '<tr data-sub="' + (it.sub_id || "") + '"><td>' + name + '</td><td>' + fmtDays(it.period_seconds) + '</td><td class="num">' + fmtMoney(it.amount) + '</td><td><span class="mono">' + fmtDate(it.paid_at) + '</span></td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td>' + (exp ? pill(active ? "Активна" : "Истекла") : "—") + '</td></tr>';
+  });
+  if (page === 1) {
+    $("paid-table").innerHTML = h + "</tbody></table></div>";
+  } else {
+    const tb = $("paid-rows");
+    if (tb) tb.insertAdjacentHTML("beforeend", h);
+  }
+  show("btn-paid-more", paidPage < paidTotalPages);
+}
+async function loadExpiring(){
+  const r = await api("/dashboard/expiring");
+  if (r.status !== 200) { $("expiring-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  const items = r.data.items || [];
+  const kpi = $("kpi-expiring");
+  if (kpi) kpi.textContent = fmtNum(items.length);
+  if (!items.length) { $("expiring-out").innerHTML = '<div class="empty"><span class="big">✅</span>В ближайшие 3 дня ничего не истекает</div>'; return; }
+  $("expiring-out").innerHTML = '<div class="tblwrap"><table><thead><tr><th>Пользователь</th><th>Подписка</th><th>Истекает</th><th>Статус</th><th></th></tr></thead><tbody>' +
+    items.map(function(it){
+      const name = esc(it.name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "") + ' <span class="mono small">#' + it.tg_id + '</span>';
+      return '<tr><td>' + name + '</td><td><span class="mono">#' + it.sub_id + '</span></td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td>' + pill(statusRu(it.status)) + '</td><td><button class="ghost" data-open-sub="' + it.sub_id + '">Открыть</button></td></tr>';
+    }).join("") + "</tbody></table></div>";
+}
 async function loadDashboard(){
   const r = await api("/dashboard");
   if (r.status !== 200) return;
   const s = r.data.stats || {};
+  const m = r.data.money || {};
+  const today = m.today || [0, 0], month = m.month || [0, 0];
   const cells = [
-    ["Пользователей", fmtNum(s.users_total), ""],
-    ["Новых сегодня", "+" + fmtNum(s.users_today || 0), ""],
-    ["Активных подписок", fmtNum(s.paid_active), ""],
-    ["Выручка", fmtMoney(s.revenue_total || 0), ""],
-    ["Оплат сегодня", fmtNum(s.payments_today), ""],
-    ["Триалов выдано", fmtNum(s.trials_issued), ""]
+    ["Выручка сегодня", fmtMoney(today[1]), "оплат: " + fmtNum(today[0])],
+    ["Выручка за 30 дней", fmtMoney(month[1]), "оплат: " + fmtNum(month[0])],
+    ["Активных подписок", fmtNum(s.paid_active), "платящих: " + fmtNum(s.paying_active)],
+    ["Новых сегодня", "+" + fmtNum(s.users_today || 0), "за неделю: +" + fmtNum(s.users_week || 0)],
+    ["Пользователей", fmtNum(s.users_total), "платили: " + fmtNum(m.payers || 0)],
+    ["Истекает ≤ 3 дней", '<span id="kpi-expiring">…</span>', ""]
   ];
   $("stats").innerHTML = cells.map(function(c){
-    return '<div class="stat"><b>' + c[1] + '</b><span>' + c[0] + "</span></div>";
+    return '<div class="stat"><b>' + c[1] + '</b><span>' + c[0] + "</span>" + (c[2] ? "<small>" + c[2] + "</small>" : "") + "</div>";
   }).join("");
   const p = r.data.panel || {};
   $("panel-line").textContent = p.success ?
     ("Панель: клиентов " + fmtNum(p.total) + " (платных " + fmtNum(p.paid) + ")") :
     "Панель недоступна — сверка не выполнена";
+  const rs = await api("/dashboard/series");
+  if (rs.status === 200) {
+    const d = rs.data || {};
+    $("chart-revenue").innerHTML = barChart(d.revenue || [], function(v){ return fmtMoney(v); });
+    $("chart-users").innerHTML = lineChart(d.users || []);
+    $("chart-status").innerHTML = donutChart((d.by_status || []).map(function(x){ return {label: statusRu(x.status), count: x.count}; }));
+    $("chart-term").innerHTML = hbars((d.by_term || []).map(function(x){ return {label: x.term_days ? fmtDays(x.term_days * 86400) : "Триал", count: x.count}; }));
+  }
+  paidPage = 0;
+  loadPaid(1);
+  loadExpiring();
 }
+$("paid-table").addEventListener("click", function(e){
+  const tr = e.target.closest("tr[data-sub]");
+  if (tr && tr.dataset.sub) gotoSub(tr.dataset.sub);
+});
+$("expiring-out").addEventListener("click", function(e){
+  const b = e.target.closest("[data-open-sub]");
+  if (b) gotoSub(b.dataset.openSub);
+});
+$("btn-paid-more").onclick = withSpin($("btn-paid-more"), async function(){ if (paidPage < paidTotalPages) await loadPaid(paidPage + 1); });
+$("btn-quick-git").onclick = withSpin($("btn-quick-git"), async function(){
+  const r = await postConfirm("/git-update", {});
+  $("quick-upd-msg").textContent = r.status === 200 ? "Обновление запущено: бот перезапускается, страница обновится сама." : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) toast("Обновление с GitHub запущено", "ok");
+});
+$("btn-quick-deploy").onclick = withSpin($("btn-quick-deploy"), async function(){
+  const r = await postConfirm("/site/deploy", {});
+  $("quick-upd-msg").textContent = r.status === 200 ? "Сайт развёрнут." : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) toast("Сайт развёрнут", "ok");
+});
 const EDITABLE = ["channel_url","force_subscribe","paid_trial_period","paid_preset_hwid","paid_preset_traffic","paid_preset_lte","referral_bonus","referral_invited_bonus","maintenance_enabled","maintenance_text","device_price","device_max_extra"];
 async function loadSettings(){
   const r = await api("/settings");

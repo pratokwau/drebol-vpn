@@ -539,14 +539,77 @@ async def dashboard(request):
         await _require_actor(request)
     except Exception:
         return web.json_response({"error": "no_session"}, status=401)
-    from core.database import get_dashboard_stats
+    from core.database import get_dashboard_stats, payments_summary
     from services.panel import count_panel_clients
     stats = await get_dashboard_stats()
     try:
         panel = await count_panel_clients()
     except Exception as ex:
         panel = {"success": False, "error": f"{type(ex).__name__}: {ex}"}
-    return web.json_response({"stats": stats, "panel": panel})
+    # Деньги — нетто, как в сверке с Platega: только оплаченные счета,
+    # частичные возвраты вычтены, полные возвраты не считаются.
+    money = await payments_summary()
+    return web.json_response({"stats": stats, "panel": panel,
+                              "money": money})
+
+
+async def dashboard_series(request):
+    """Ряды для графиков: выручка и новые юзеры по дням (≤30 дней),
+    подписки по статусу и по сроку тарифа."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from core.database import dashboard_series as _series
+    try:
+        days = int(request.query.get("days") or 30)
+    except ValueError:
+        return web.json_response({"error": "bad_days"}, status=400)
+    return web.json_response(await _series(days))
+
+
+async def dashboard_paid(request):
+    """Платные подписки для дашборда: последние оплаченные счета
+    первыми, 25 на страницу."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from core.database import dashboard_paid_subs
+    try:
+        page = int(request.query.get("page") or 1)
+    except ValueError:
+        return web.json_response({"error": "bad_page"}, status=400)
+    rows, total_pages = await dashboard_paid_subs(page)
+    return web.json_response({
+        "items": [{
+            "payment_id": r[0], "tg_id": r[1],
+            "name": (r[2] or "").strip() or None,
+            "username": r[3] or None,
+            "amount": int(r[4]), "period_seconds": r[5],
+            "paid_at": r[6], "expire_date": r[7], "sub_id": r[8],
+        } for r in rows],
+        "page": max(1, page), "total_pages": total_pages})
+
+
+async def dashboard_expiring(request):
+    """Активные подписки, истекающие в ближайшие 3 дня."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from core.database import dashboard_expiring as _expiring
+    rows = await _expiring()
+    return web.json_response({
+        "items": [{
+            "sub_id": r[0], "tg_id": r[1],
+            "name": (r[2] or "").strip() or None,
+            "username": r[3] or None,
+            "expire_date": r[4], "status": r[5],
+        } for r in rows]})
 
 
 def _settings_snapshot() -> dict:
@@ -641,7 +704,11 @@ async def muse_account_create(request):
     return web.json_response({
         "ok": True, "account_id": account_id, "email": email,
         "setup_token": token,
-        "setup_url": f"{ADMIN_ORIGIN}/admin/setup?token={token}",
+        # Путь — /admin/?token=, а НЕ /admin/setup?token=: страница
+        # /admin/ статическая (deploy заливает index.html), маршрута
+        # /admin/setup у nginx нет — такая ссылка отдавала 404
+        # (2026-11-15, первая ссылка для аккаунта Muse).
+        "setup_url": f"{ADMIN_ORIGIN}/admin/?token={token}",
         "expires_minutes": SETUP_TOKEN_MINUTES,
     })
 
@@ -749,6 +816,9 @@ def build_admin_app():
     app.router.add_post("/logout", logout)
     app.router.add_get("/me", me)
     app.router.add_get("/dashboard", dashboard)
+    app.router.add_get("/dashboard/series", dashboard_series)
+    app.router.add_get("/dashboard/paid", dashboard_paid)
+    app.router.add_get("/dashboard/expiring", dashboard_expiring)
     app.router.add_get("/settings", settings_get)
     app.router.add_patch("/settings", settings_patch)
     app.router.add_post("/muse-account", muse_account_create)

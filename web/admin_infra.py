@@ -543,7 +543,10 @@ async def site_deploy(request):
     return web.json_response({"ok": True, "site": _site_snapshot()})
 
 
-# ── Git update (Mark-only) ───────────────────────────────────────────────────
+# ── Git update (Mark и Muse) ───────────────────────────────────────────────
+# Mark разрешил Muse жать кнопку обновления самому после пуша
+# (2026-11-15): _mark_only здесь НЕТ — двухшаговое подтверждение и
+# аудит остаются, остальные _mark_only не тронуты.
 
 def run_git_update() -> dict:
     """Тот же путь, что handlers/admin.py handle_git_update: git pull,
@@ -597,9 +600,6 @@ async def git_update(request):
     actor, err = await _require_mutation(request)
     if err is not None:
         return err
-    mark_err = _mark_only(actor)
-    if mark_err is not None:
-        return mark_err
     body = await _json_body(request)
     token = str(body.get("confirm_token") or "")
     if not token:

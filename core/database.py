@@ -1626,6 +1626,98 @@ async def payments_summary() -> dict:
     }
 
 
+async def dashboard_series(days: int = 30) -> dict:
+    """Ряды для графиков дашборда за последние N дней (N ≤ 30).
+
+    Выручка — нетто, как в payments_summary(): только оплаченные счета,
+    частичные возвраты вычтены, полные возвраты не считаются вовсе.
+    Пустые дни добиваются нулями, чтобы график не рвался."""
+    import datetime as _dt
+
+    days = max(1, min(int(days), 30))
+    today = _dt.date.today()
+    labels = [(today - _dt.timedelta(days=i)).isoformat()
+              for i in range(days - 1, -1, -1)]
+    start = labels[0]
+    _net = "amount - COALESCE(partial_refunded, 0)"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT date(COALESCE(paid_at, created_at), 'localtime'), "
+            f"COALESCE(SUM({_net}), 0) FROM payments WHERE status = 'paid' "
+            "AND date(COALESCE(paid_at, created_at), 'localtime') >= ? "
+            "GROUP BY 1", (start,)) as cur:
+            revenue = {d: int(v) for d, v in await cur.fetchall()}
+        async with db.execute(
+            "SELECT date(created_at, 'localtime'), COUNT(*) FROM users "
+            "WHERE date(created_at, 'localtime') >= ? GROUP BY 1",
+            (start,)) as cur:
+            users = {d: int(v) for d, v in await cur.fetchall()}
+        async with db.execute(
+            "SELECT status, COUNT(*) FROM paid_subs GROUP BY status"
+        ) as cur:
+            by_status = [(s, int(c)) for s, c in await cur.fetchall()]
+        async with db.execute(
+            "SELECT COALESCE(ind_pay_period, 0), COUNT(*) FROM paid_subs "
+            "GROUP BY 1"
+        ) as cur:
+            by_term = [(int(p) // 86400, int(c))
+                       for p, c in await cur.fetchall()]
+    return {
+        "days": days,
+        "revenue": [{"date": d, "sum": revenue.get(d, 0)} for d in labels],
+        "users": [{"date": d, "count": users.get(d, 0)} for d in labels],
+        "by_status": [{"status": s, "count": c} for s, c in by_status],
+        "by_term": [{"term_days": t, "count": c} for t, c in by_term],
+    }
+
+
+async def dashboard_paid_subs(page: int = 1, per_page: int = 25) -> tuple[list, int]:
+    """Платные подписки для дашборда: последние оплаченные счета первыми.
+
+    Строка: id счёта, tg_id, имя, сумма нетто, срок (секунды), дата оплаты,
+    дата истечения подписки (самая поздняя у юзера) и id подписки."""
+    page = max(1, int(page))
+    per_page = max(1, min(int(per_page), 25))
+    offset = (page - 1) * per_page
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM payments WHERE status = 'paid'"
+        ) as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute(
+            "SELECT p.id, p.tg_id, u.first_name, u.username, "
+            "p.amount - COALESCE(p.partial_refunded, 0), p.period_seconds, "
+            "datetime(COALESCE(p.paid_at, p.created_at), 'localtime'), "
+            "(SELECT s.expire_date FROM paid_subs s WHERE s.tg_id = p.tg_id "
+            " ORDER BY s.expire_date DESC LIMIT 1), "
+            "(SELECT s.id FROM paid_subs s WHERE s.tg_id = p.tg_id "
+            " ORDER BY s.expire_date DESC LIMIT 1) "
+            "FROM payments p LEFT JOIN users u ON u.id = p.tg_id "
+            "WHERE p.status = 'paid' "
+            "ORDER BY COALESCE(p.paid_at, p.created_at) DESC, p.id DESC "
+            "LIMIT ? OFFSET ?", (per_page, offset)) as cur:
+            rows = await cur.fetchall()
+    return rows, max(1, (total + per_page - 1) // per_page)
+
+
+async def dashboard_expiring(days: int = 3, limit: int = 50) -> list:
+    """Активные подписки, истекающие в ближайшие N дней. Сортировка —
+    по дате истечения, самые скорые первыми."""
+    days = max(1, min(int(days), 30))
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT s.id, s.tg_id, u.first_name, u.username, "
+            "s.expire_date, s.status FROM paid_subs s "
+            "LEFT JOIN users u ON u.id = s.tg_id "
+            "WHERE s.status IN ('active', 'renewal') "
+            "AND datetime(s.expire_date) > datetime('now', 'localtime') "
+            "AND datetime(s.expire_date) <= "
+            "datetime('now', 'localtime', ?) "
+            "ORDER BY s.expire_date ASC LIMIT ?",
+            (f"+{days} days", limit)) as cur:
+            return await cur.fetchall()
+
+
 # ── Серверы (расходы) ────────────────────────────────────────────────────────
 
 async def add_server(name: str, price_rub: int, pay_day: int) -> int:
