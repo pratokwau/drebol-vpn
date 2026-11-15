@@ -295,13 +295,21 @@ def _set_session_cookies(response, request, token: str) -> None:
     response.set_cookie(
         SESSION_COOKIE, token, max_age=SESSION_DAYS * 86400,
         path="/api/admin/", httponly=True, secure=secure, samesite="Strict")
+    # CSRF-кука ДОЛЖНА быть видна странице /admin/ (JS читает её из
+    # document.cookie и шлёт в X-CSRF-Token). Path=/api/admin/ страницу
+    # /admin/ не покрывает — браузер такую куку на /admin/ не отдаёт,
+    # и все мутации падали с bad_csrf (2026-11-15, создание аккаунта Muse).
+    # Поэтому CSRF — Path=/, а старую куку с /api/admin/ гасим, чтобы
+    # браузер не слал две одноимённые куки с разными значениями.
+    response.del_cookie(CSRF_COOKIE, path="/api/admin/")
     response.set_cookie(
         CSRF_COOKIE, secrets.token_urlsafe(32), max_age=SESSION_DAYS * 86400,
-        path="/api/admin/", httponly=False, secure=secure, samesite="Strict")
+        path="/", httponly=False, secure=secure, samesite="Strict")
 
 
 def _clear_session_cookies(response) -> None:
     response.del_cookie(SESSION_COOKIE, path="/api/admin/")
+    response.del_cookie(CSRF_COOKIE, path="/")
     response.del_cookie(CSRF_COOKIE, path="/api/admin/")
 
 
