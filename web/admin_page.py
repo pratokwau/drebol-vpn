@@ -1,6 +1,9 @@
 """Статическая страница веб-админки Drebol VPN.
 
-Тот же midnight-дизайн, что у сайта: #020202, #2ea8ff, Unbounded + Inter.
+Midnight-дизайн сайта: #020202, #2ea8ff, Unbounded + Inter. Левая
+боковая навигация с разделами, верхняя панель с актором и выходом,
+карточки с заголовками, читаемые таблицы (числа — справа, ID и даты —
+моноширинным, статусы — плашками), пустые состояния, тосты и спиннеры.
 API — same-origin /api/admin/, токен сессии — только в HttpOnly-куке,
 CSRF — из куки в заголовок X-CSRF-Token. Никаких токенов в localStorage
 и в URL, кроме одноразовой ссылки на установку пароля (?token= — живёт
@@ -17,352 +20,676 @@ ADMIN_PAGE = """<!DOCTYPE html>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#020202;--card:#0b0e13;--line:#1c2330;--txt:#f2f5f9;--mut:#8b95a7;--acc:#2ea8ff;--ok:#34d399;--bad:#f87171}
+:root{
+  --bg:#020202; --card:#0b0e13; --card2:#0e1218; --line:#1c2330; --line2:#263042;
+  --txt:#f2f5f9; --mut:#9aa5b5; --mut2:#6b7686; --acc:#2ea8ff; --acc-dim:#12314a;
+  --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --violet:#a78bfa;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--txt);font:15px/1.55 "Inter",-apple-system,"Segoe UI",sans-serif;min-height:100vh}
-a{color:var(--acc)}
-.wrap{max-width:960px;margin:0 auto;padding:28px 18px 60px}
+html{scrollbar-color:#263042 #020202}
+body{background:var(--bg);color:var(--txt);font:15px/1.6 "Inter",-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+a{color:var(--acc);text-decoration:none}
+a:hover{text-decoration:underline}
 h1{font-family:"Unbounded",sans-serif;font-size:22px;letter-spacing:-.02em}
-h2{font-family:"Unbounded",sans-serif;font-size:15px;margin:26px 0 10px}
-.mut{color:var(--mut);font-size:13px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:14px}
-input,select,textarea{width:100%;background:#0e1218;border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;margin:6px 0}
-button{background:var(--acc);color:#02131f;border:0;border-radius:10px;padding:10px 18px;font:600 14px "Inter",sans-serif;cursor:pointer;margin-top:8px}
-button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
-button:disabled{opacity:.5;cursor:default}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
-.stat b{display:block;font-size:22px;font-family:"Unbounded",sans-serif}
-.stat span{color:var(--mut);font-size:12px}
+h2{font-family:"Unbounded",sans-serif;font-size:16px;margin:0 0 4px}
+h3{font-size:14px;font-weight:700;margin:18px 0 8px}
+.mut{color:var(--mut);font-size:13.5px;line-height:1.55}
+.small{font-size:12.5px;color:var(--mut2)}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:13px}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.hidden{display:none !important}
+
+/* --- Каркас: боковая панель + контент --- */
+.layout{display:flex;min-height:100vh}
+.sidebar{width:264px;flex:0 0 264px;background:#05070a;border-right:1px solid var(--line);padding:20px 14px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{font-family:"Unbounded",sans-serif;font-size:17px;padding:2px 10px 16px;border-bottom:1px solid var(--line);margin-bottom:14px}
+.brand span{color:var(--acc)}
+.brand small{display:block;font-family:"Inter",sans-serif;font-size:12px;color:var(--mut);margin-top:4px}
+.nav-group{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--mut2);padding:16px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-radius:10px;color:var(--mut);font:500 14.5px "Inter",sans-serif;padding:9px 10px;cursor:pointer;margin:1px 0}
+.nav-item .ic{width:22px;text-align:center;font-size:15px}
+.nav-item:hover{background:var(--card2);color:var(--txt)}
+.nav-item.active{background:var(--acc-dim);color:#fff}
+.nav-item.active .ic{color:var(--acc)}
+.main{flex:1;min-width:0;padding:0 28px 64px}
+.topbar{position:sticky;top:0;z-index:20;background:rgba(2,2,2,.92);backdrop-filter:blur(8px);display:flex;align-items:center;gap:16px;padding:16px 0;border-bottom:1px solid var(--line);margin-bottom:22px}
+.topbar h1{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who{color:var(--mut);font-size:13.5px;white-space:nowrap}
+.wrap{max-width:1020px}
+
+/* --- Карточки, таблицы, формы --- */
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;margin-top:16px}
+.card > p.sub{color:var(--mut);font-size:13.5px;margin-bottom:12px}
+.card h2 + p.sub{margin-top:2px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.stat b{display:block;font-size:24px;font-family:"Unbounded",sans-serif;font-weight:600}
+.stat span{color:var(--mut);font-size:13px}
+input,select,textarea{width:100%;background:var(--card2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;margin:6px 0}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:0;border-color:var(--acc)}
+textarea{min-height:84px;resize:vertical}
+label{font-size:13px;color:var(--mut);display:block;margin-top:8px}
+label input[type=checkbox]{width:auto;margin-right:6px}
+button{background:var(--acc);color:#02131f;border:0;border-radius:10px;padding:10px 18px;font:600 14px "Inter",sans-serif;cursor:pointer;margin:6px 6px 0 0}
+button.ghost{background:transparent;color:var(--acc);border:1px solid var(--line2)}
+button.ghost:hover{border-color:var(--acc)}
+button.danger{background:transparent;color:var(--bad);border:1px solid #4c1d1d}
+button.danger:hover{border-color:var(--bad)}
+button:disabled{opacity:.55;cursor:default}
+.btnrow{display:flex;flex-wrap:wrap;gap:0}
+.btnrow button{margin-right:8px}
 .err{color:var(--bad);margin-top:8px;min-height:18px}
 .ok{color:var(--ok)}
-label{font-size:13px;color:var(--mut)}
-.row{display:flex;gap:10px;align-items:center;justify-content:space-between}
-.hidden{display:none}
 table{width:100%;border-collapse:collapse;font-size:14px}
-td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--mut);font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.tblwrap{overflow-x:auto;margin:8px -4px 0}
+.tblwrap table{min-width:560px}
+td.trunc{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.pill.ok{background:rgba(52,211,153,.14);color:var(--ok)}
+.pill.bad{background:rgba(248,113,113,.14);color:var(--bad)}
+.pill.warn{background:rgba(251,191,36,.14);color:var(--warn)}
+.pill.info{background:rgba(46,168,255,.14);color:var(--acc)}
+.pill.grey{background:rgba(154,165,181,.14);color:var(--mut)}
+.kv{display:grid;grid-template-columns:180px 1fr;gap:6px 14px;font-size:14px}
+.kv dt{color:var(--mut)}
+.kv dd{word-break:break-word}
+.empty{text-align:center;color:var(--mut);padding:26px 10px}
+.empty .big{font-size:26px;display:block;margin-bottom:6px}
+pre{white-space:pre-wrap;word-break:break-word;font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;background:var(--card2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px}
+#toast{position:fixed;right:20px;bottom:20px;z-index:50;display:flex;flex-direction:column;gap:8px;max-width:360px}
+.toast{background:#10161f;border:1px solid var(--line2);border-left:4px solid var(--acc);border-radius:12px;padding:12px 16px;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.toast.err{border-left-color:var(--bad)}
+.toast.ok{border-left-color:var(--ok)}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line2);border-top-color:var(--acc);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.loginwrap{max-width:460px;margin:80px auto 0;padding:0 18px}
+.loginwrap .card{padding:26px}
+@media (max-width:900px){
+  .layout{display:block}
+  .sidebar{position:static;width:100%;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:12px}
+  .sidebar nav{display:flex;overflow-x:auto;gap:4px;padding-bottom:4px}
+  .nav-group{display:none}
+  .nav-item{width:auto;white-space:nowrap;padding:8px 10px}
+  .brand{border-bottom:0;padding-bottom:6px;margin-bottom:6px}
+  .main{padding:0 16px 48px}
+  .kv{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Drebol VPN · Админка</h1>
-  <p class="mut">Веб-версия админки бота. Вход — через Telegram или по почте с паролем.</p>
+<div id="toast"></div>
 
-  <div id="login" class="card">
-    <h2 style="margin-top:0">Вход</h2>
-    <div id="tg-widget"></div>
-    <p class="mut">или по почте с паролем:</p>
+<div id="login-view" class="loginwrap hidden">
+  <div class="card">
+    <h1>Drebol VPN · <span style="color:var(--acc)">Админка</span></h1>
+    <p class="mut" style="margin-top:6px">Веб-версия админки бота. Вход — через Telegram (Mark) или по почте с паролем (Muse).</p>
+    <div id="tg-widget" style="margin-top:14px"></div>
+    <p class="mut" style="margin-top:14px">или по почте с паролем:</p>
     <input id="email" type="email" placeholder="почта" autocomplete="username">
     <input id="pw" type="password" placeholder="пароль" autocomplete="current-password">
     <button id="btn-login">Войти</button>
     <div id="login-err" class="err"></div>
   </div>
-
   <div id="setup" class="card hidden">
-    <h2 style="margin-top:0">Установка пароля</h2>
+    <h2>Установка пароля</h2>
     <p class="mut">Ссылка одноразовая, живёт 15 минут. Пароль — от 8 до 128 символов.</p>
     <input id="pw2" type="password" placeholder="новый пароль" autocomplete="new-password">
     <button id="btn-setup">Задать пароль и войти</button>
     <div id="setup-err" class="err"></div>
   </div>
+</div>
 
-  <div id="app" class="hidden">
-    <div class="row">
-      <p id="who" class="mut"></p>
-      <button id="btn-logout" class="ghost">Выйти</button>
+<div id="app-view" class="layout hidden">
+  <aside class="sidebar">
+    <div class="brand">Drebol VPN <span>· Админка</span><small>веб-версия админки бота</small></div>
+    <nav id="nav">
+      <div class="nav-group">Основное</div>
+      <button class="nav-item" data-nav="overview"><span class="ic">📊</span>Обзор</button>
+      <button class="nav-item" data-nav="users"><span class="ic">👤</span>Пользователи</button>
+      <button class="nav-item" data-nav="subs"><span class="ic">💳</span>Подписки</button>
+      <div class="nav-group">Деньги</div>
+      <button class="nav-item" data-nav="finance"><span class="ic">💰</span>Финансы</button>
+      <button class="nav-item" data-nav="payments"><span class="ic">🧾</span>Оплаты</button>
+      <button class="nav-item" data-nav="broadcast"><span class="ic">📣</span>Рассылка</button>
+      <button class="nav-item" data-nav="promos"><span class="ic">🏷️</span>Промокоды</button>
+      <button class="nav-item" data-nav="tariffs"><span class="ic">💲</span>Тарифы</button>
+      <div class="nav-group">Инфраструктура</div>
+      <button class="nav-item" data-nav="panel"><span class="ic">🖥️</span>Панель Remnawave</button>
+      <button class="nav-item" data-nav="nodes"><span class="ic">🌐</span>Узлы</button>
+      <button class="nav-item" data-nav="logs"><span class="ic">📜</span>Логи</button>
+      <button class="nav-item" data-nav="sync"><span class="ic">⏰</span>Синхронизация</button>
+      <button class="nav-item" data-nav="netcheck"><span class="ic">📡</span>Проверка операторов</button>
+      <button class="nav-item" data-nav="site"><span class="ic">🌍</span>Сайт</button>
+      <button class="nav-item" data-nav="backup"><span class="ic">💾</span>Бэкап</button>
+      <div class="nav-group">Люди</div>
+      <button class="nav-item" data-nav="support"><span class="ic">🛟</span>Поддержка</button>
+      <button class="nav-item" data-nav="settings"><span class="ic">⚙️</span>Настройки</button>
+    </nav>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <h1 id="sec-title">Обзор</h1>
+      <span id="who" class="who"></span>
+      <button id="btn-logout" class="ghost" style="margin:0">Выйти</button>
     </div>
-    <h2>Статистика</h2>
-    <div id="stats" class="grid"></div>
-    <div id="panel-line" class="mut"></div>
-    <h2>Настройки</h2>
-    <div class="card">
-      <p class="mut">Фаза 1 — только безопасные настройки. Секреты здесь не показываются и не меняются.</p>
-      <div id="settings"></div>
-      <button id="btn-save">Сохранить настройки</button>
-      <span id="save-msg" class="mut"></span>
-    </div>
-    <div id="muse-box" class="card hidden">
-      <h2 style="margin-top:0">Аккаунт Muse</h2>
-      <p class="mut">Только для входа через Telegram. Введите почту — аккаунт создастся отключённым, а одноразовая ссылка на установку пароля покажется один раз.</p>
-      <input id="muse-email" type="email" placeholder="почта для Muse">
-      <button id="btn-muse">Создать аккаунт и ссылку</button>
-      <div id="muse-out" class="mut"></div>
-    </div>
+    <div class="wrap">
+      <!-- Обзор -->
+      <section id="sec-overview" class="page">
+        <div id="stats" class="grid"></div>
+        <div class="card"><h2>Панель Remnawave</h2><p id="panel-line" class="mut">—</p></div>
+        <div class="card"><h2>Быстрые действия</h2><p class="sub">Частые задачи — в один клик, без поиска по разделам.</p>
+          <div class="btnrow">
+            <button class="ghost" data-goto="users">Найти юзера</button>
+            <button class="ghost" data-goto="broadcast">Новая рассылка</button>
+            <button class="ghost" data-goto="payments">Оплаты</button>
+            <button class="ghost" data-goto="logs">Журнал действий</button>
+            <button class="ghost" data-goto="nodes">Здоровье узлов</button>
+          </div>
+        </div>
+      </section>
 
-    <h2>Пользователи</h2>
-    <div class="card">
-      <input id="q-user" placeholder="ID, @username, имя или paid_123">
-      <button id="btn-find">Найти</button>
-      <div id="users-out"></div>
-      <div id="profile-out"></div>
-      <h2>Сообщение пользователю</h2>
-      <input id="dm-id" type="number" placeholder="tg_id">
-      <textarea id="dm-text" placeholder="текст от имени Drebol VPN"></textarea>
-      <button id="btn-dm">Отправить</button>
-      <span id="dm-msg" class="mut"></span>
-    </div>
+      <!-- Пользователи -->
+      <section id="sec-users" class="page hidden">
+        <div class="card"><h2>Найти пользователя</h2><p class="sub">Поиск по ID, @username, имени или paid_&lt;tg_id&gt;.</p>
+          <input id="q-user" placeholder="ID, @username, имя или paid_123">
+          <div class="btnrow"><button id="btn-find">Найти</button><button id="btn-recent" class="ghost">Недавние</button></div>
+          <div id="users-out"></div>
+          <div id="profile-out"></div>
+        </div>
+        <div class="card"><h2>Сообщение пользователю</h2><p class="sub">Отправляется от имени бота Drebol VPN.</p>
+          <input id="dm-id" type="number" placeholder="tg_id">
+          <textarea id="dm-text" placeholder="текст сообщения"></textarea>
+          <button id="btn-dm">Отправить</button>
+          <span id="dm-msg" class="mut"></span>
+        </div>
+        <div class="card"><h2>Подарок подписки</h2><p class="sub">Начислить подписку другому пользователю. Сумма — в рублях, срок — в секундах.</p>
+          <input id="gift-tg" type="number" placeholder="tg_id получателя">
+          <input id="gift-amount" type="number" placeholder="сумма, ₽">
+          <input id="gift-seconds" type="number" placeholder="срок, секунды (напр. 2592000 = 30 дней)">
+          <input id="gift-promo" placeholder="промокод (необязательно)">
+          <button id="btn-gift">Подарить подписку</button>
+          <div id="gift-out"></div>
+        </div>
+        <div class="card"><h2>Чёрный список</h2><p class="sub">Остановка подписок мошенников и нарушителей. Действие «Остановить» — с подтверждением.</p>
+          <div class="btnrow"><button id="btn-blacklist" class="ghost">Показать список</button></div>
+          <input id="bl-tg" type="number" placeholder="tg_id">
+          <input id="bl-reason" placeholder="причина">
+          <select id="bl-term"><option value="">Срок: навсегда</option><option value="day">1 день</option><option value="week">Неделя</option><option value="month">Месяц</option></select>
+          <div class="btnrow"><button id="btn-bl-add" class="ghost">Добавить в ЧС</button><button id="btn-bl-stop" class="ghost">Остановить подписку</button><button id="btn-bl-readd" class="ghost">Вернуть из ЧС</button></div>
+          <div id="bl-out"></div>
+        </div>
+        <div class="card"><h2>Повторные триалы</h2><p class="sub">Пары аккаунтов, которые, возможно, берут триал повторно.</p>
+          <div class="btnrow"><button id="btn-fraud" class="ghost">Показать пары</button><button id="btn-fraud-scan" class="ghost">Запустить скан</button></div>
+          <input id="fraud-a" type="number" placeholder="tg_id первого аккаунта пары">
+          <input id="fraud-b" type="number" placeholder="tg_id второго аккаунта пары (other_tg)">
+          <button id="btn-fraud-stop" class="ghost">Остановить пару</button>
+          <div id="fraud-out"></div>
+        </div>
+      </section>
 
-    <h2>Подписка</h2>
-    <div class="card">
-      <input id="sub-id" type="number" placeholder="ID подписки (paid_subs.id)">
-      <input id="sub-days" type="number" placeholder="дней для продления">
-      <div>
-        <button class="ghost" data-sub="toggle">Вкл/выкл</button>
-        <button class="ghost" data-sub="freeze">Заморозить</button>
-        <button class="ghost" data-sub="extend">Продлить</button>
-        <button class="ghost" data-sub="reissue">Перевыпустить</button>
-        <button class="ghost" data-sub="delete">Удалить</button>
-      </div>
-      <span id="sub-msg" class="mut"></span>
-    </div>
+      <!-- Подписки -->
+      <section id="sec-subs" class="page hidden">
+        <div class="card"><h2>Подписка</h2><p class="sub">Действия применяются сразу к базе бота и к панели Remnawave. Удаление и перевыпуск — с подтверждением.</p>
+          <input id="sub-id" type="number" placeholder="ID подписки (paid_subs.id)">
+          <div class="btnrow"><button id="btn-sub-load" class="ghost">Показать подписку</button><button id="btn-sub-devices" class="ghost">Устройства</button></div>
+          <div id="sub-card-out"></div>
+          <h3>Действия</h3>
+          <div class="btnrow">
+            <button class="ghost" data-sub="toggle">Вкл / выкл</button>
+            <button class="ghost" data-sub="freeze">Заморозить</button>
+            <button class="ghost" data-sub="reissue">Перевыпустить</button>
+            <button class="danger" data-sub="delete">Удалить</button>
+          </div>
+          <h3>Продлить / изменить</h3>
+          <input id="sub-days" type="number" placeholder="дней для продления">
+          <div class="btnrow"><button class="ghost" data-sub="extend">Продлить на N дней</button></div>
+          <input id="sub-until" placeholder="новая дата истечения, напр. 2026-12-31 23:59">
+          <div class="btnrow"><button class="ghost" data-sub="expire">Установить дату истечения</button></div>
+          <input id="sub-hwid" type="number" placeholder="лимит устройств (HWID)">
+          <div class="btnrow"><button class="ghost" data-sub="hwid">Лимит устройств</button></div>
+          <input id="sub-traffic" type="number" placeholder="лимит трафика, ГБ">
+          <div class="btnrow"><button class="ghost" data-sub="traffic">Лимит трафика</button></div>
+          <input id="sub-lte" type="number" placeholder="лимит LTE, ГБ (пусто — без лимита)">
+          <div class="btnrow"><button class="ghost" data-sub="lte">Лимит LTE</button></div>
+          <input id="sub-trial" type="number" placeholder="триал, дней">
+          <div class="btnrow"><button class="ghost" data-sub="trial">Установить триал</button></div>
+          <span id="sub-msg" class="mut"></span>
+          <div id="sub-devices-out"></div>
+        </div>
+        <div class="card"><h2>Массовые действия</h2><p class="sub">Применяются ко всем активным платным подпискам.</p>
+          <select id="bulk-kind"><option value="extend">Продлить всем</option><option value="limits">Сменить лимиты всем</option><option value="lte">Сменить LTE всем</option></select>
+          <input id="bulk-days" type="number" placeholder="дней (+ продлить / − сократить)">
+          <input id="bulk-value" type="number" placeholder="значение лимита, ГБ">
+          <select id="bulk-kind-limit"><option value="">лимит: трафик</option><option value="hwid">лимит: устройства</option><option value="lte">лимит: LTE</option></select>
+          <button id="btn-bulk">Применить ко всем</button>
+          <div id="bulk-out"></div>
+        </div>
+        <div class="card"><h2>Пресеты подписок</h2><p class="sub">Значения по умолчанию для новых платных подписок.</p>
+          <div class="btnrow"><button id="btn-presets" class="ghost">Показать пресеты</button></div>
+          <div id="presets-out"></div>
+        </div>
+        <div class="card"><h2>Админские подписки</h2><p class="sub">Подписки, выданные вручную администратором.</p>
+          <input id="asub-tg" type="number" placeholder="tg_id — создать админскую подписку">
+          <div class="btnrow"><button id="btn-asub" class="ghost">Создать админскую подписку</button><button id="btn-asub-list" class="ghost">Список админских</button></div>
+          <input id="asub-id" type="number" placeholder="ID админской подписки — показать карточку">
+          <div class="btnrow"><button id="btn-asub-card" class="ghost">Показать карточку</button></div>
+          <div id="asub-out"></div>
+        </div>
+        <div class="card"><h2>Рефералка</h2><p class="sub">Кто приводит друзей и какие бонусы настроены.</p>
+          <div class="btnrow"><button id="btn-referrals" class="ghost">Показать рефералку</button><button id="btn-lte" class="ghost">Проверить LTE сейчас</button></div>
+          <div id="ref-out"></div>
+        </div>
+      </section>
 
-    <h2>Финансы и оплаты</h2>
-    <div class="card">
-      <button id="btn-finance" class="ghost">Сводка</button>
-      <button id="btn-payments" class="ghost">Оплаты</button>
-      <button id="btn-reconcile" class="ghost">Сверка с Platega</button>
-      <button id="btn-tariffs" class="ghost">Тарифы</button>
-      <button id="btn-promos" class="ghost">Промокоды</button>
-      <button id="btn-servers" class="ghost">Серверы (расходы)</button>
-      <div id="finance-out"></div>
-    </div>
+      <!-- Финансы -->
+      <section id="sec-finance" class="page hidden">
+        <div class="card"><h2>Финансовая сводка</h2><p class="sub">Доход за вычетом возвратов, расходы на серверы.</p>
+          <select id="fin-period"><option value="day">День</option><option value="week">Неделя</option><option value="month" selected>Месяц</option><option value="all">Всё время</option></select>
+          <div class="btnrow"><button id="btn-finance">Показать сводку</button><button id="btn-servers" class="ghost">Серверы (расходы)</button></div>
+          <div id="finance-out"></div>
+        </div>
+        <div class="card"><h2>Платёжная система — Platega</h2><p class="sub">Секретный ключ и Merchant ID — только для записи, в ответе они не показываются.</p>
+          <div class="btnrow"><button id="btn-platega" class="ghost">Показать состояние</button></div>
+          <input id="pl-merchant" placeholder="Merchant ID">
+          <input id="pl-secret" type="password" placeholder="API-ключ (секрет, только запись)" autocomplete="off">
+          <button id="btn-platega-save">Сохранить</button>
+          <div id="platega-out"></div>
+        </div>
+        <div class="card"><h2>Сверка с Platega</h2><p class="sub">Проверяет счета за 60 дней. «Исправить» меняет только денежные поля — сроки подписок не трогает.</p>
+          <div class="btnrow"><button id="btn-reconcile">Запустить сверку</button><button id="btn-reconcile-fix" class="ghost">Исправить расхождения</button></div>
+          <div id="reconcile-out"></div>
+        </div>
+        <div class="card"><h2>Серверы (расходы)</h2><p class="sub">Ежемесячные расходы на серверы и их оплата.</p>
+          <input id="srv-name" placeholder="название сервера">
+          <input id="srv-price" type="number" placeholder="цена, ₽/мес">
+          <input id="srv-day" type="number" placeholder="день оплаты (1–31)">
+          <div class="btnrow"><button id="btn-srv-add">Добавить сервер</button></div>
+          <input id="srv-id" type="number" placeholder="ID сервера — карточка / отметка об оплате">
+          <div class="btnrow"><button id="btn-srv-card" class="ghost">Карточка</button><button id="btn-srv-mark" class="ghost">Отметить оплаченным</button><button id="btn-srv-del" class="danger">Удалить</button></div>
+          <div id="srv-out"></div>
+        </div>
+      </section>
 
-    <h2>Рассылка</h2>
-    <div class="card">
-      <textarea id="bc-text" placeholder="текст рассылки (HTML)"></textarea>
-      <select id="bc-seg">
-        <option value="all">Все</option><option value="active">Активные</option>
-        <option value="expired">Истёкшие</option><option value="trial">Триал</option>
-        <option value="paying">Платящие</option><option value="no_sub">Без подписки</option>
-      </select>
-      <label>Фото (необязательно, до 10 МБ — загрузится в Telegram и прикрепится к рассылке)</label>
-      <input id="bc-photo" type="file" accept="image/*">
-      <button id="btn-bc-upload" class="ghost">Загрузить фото</button>
-      <span id="bc-photo-msg" class="mut"></span>
-      <button id="btn-bc-preview" class="ghost">Предпросмотр</button>
-      <button id="btn-bc-send">Отправить</button>
-      <div id="bc-out" class="mut"></div>
-    </div>
+      <!-- Оплаты -->
+      <section id="sec-payments" class="page hidden">
+        <div class="card"><h2>Оплаты</h2><p class="sub">Счета платёжной системы. Возврат — с подтверждением, повторный возврат невозможен.</p>
+          <select id="pay-status"><option value="">Все статусы</option><option value="paid">Оплаченные</option><option value="pending">Ожидают</option><option value="refunded">Возвращённые</option><option value="failed">Неудачные</option></select>
+          <div class="btnrow"><button id="btn-payments">Показать оплаты</button></div>
+          <input id="pay-id" type="number" placeholder="ID оплаты — карточка">
+          <div class="btnrow"><button id="btn-pay-card" class="ghost">Карточка оплаты</button></div>
+          <label><input id="pay-revoke" type="checkbox"> отозвать подписку при возврате</label>
+          <div class="btnrow"><button id="btn-pay-refund" class="danger">Вернуть оплату</button></div>
+          <div id="payments-out"></div>
+        </div>
+      </section>
 
-    <h2>Админские подписки, рефералка, LTE</h2>
-    <div class="card">
-      <input id="asub-tg" type="number" placeholder="tg_id — создать админскую подписку">
-      <button id="btn-asub" class="ghost">Создать админскую подписку</button>
-      <button id="btn-referrals" class="ghost">Рефералка</button>
-      <button id="btn-lte" class="ghost">Проверить LTE сейчас</button>
-      <div id="asub-out"></div>
-    </div>
+      <!-- Рассылка -->
+      <section id="sec-broadcast" class="page hidden">
+        <div class="card"><h2>Рассылка</h2><p class="sub">Сначала предпросмотр — сколько человек получит сообщение, — потом отправка с подтверждением.</p>
+          <textarea id="bc-text" placeholder="текст рассылки (HTML)"></textarea>
+          <select id="bc-seg">
+            <option value="all">Все</option><option value="active">Активные</option>
+            <option value="expired">Истёкшие</option><option value="trial">Триал</option>
+            <option value="paying">Платящие</option><option value="no_sub">Без подписки</option>
+          </select>
+          <label>Фото (необязательно, до 10 МБ — загрузится в Telegram и прикрепится к рассылке)</label>
+          <input id="bc-photo" type="file" accept="image/*">
+          <div class="btnrow"><button id="btn-bc-upload" class="ghost">Загрузить фото</button><span id="bc-photo-msg" class="mut"></span></div>
+          <div class="btnrow"><button id="btn-bc-preview" class="ghost">Предпросмотр</button><button id="btn-bc-send">Отправить</button></div>
+          <div id="bc-out" class="mut"></div>
+        </div>
+      </section>
 
-    <h2>Поддержка: ответы</h2>
-    <div class="card">
-      <input id="sup-user" type="number" placeholder="tg_id юзера">
-      <button id="btn-sup-open" class="ghost">Открыть тему</button>
-      <div id="sup-msgs"></div>
-      <textarea id="sup-text" placeholder="ответ юзеру"></textarea>
-      <label><input id="sup-close" type="checkbox" style="width:auto"> закрыть обращение после ответа</label>
-      <button id="btn-sup-reply">Ответить</button>
-      <button id="btn-sup-close" class="ghost">Закрыть обращение</button>
-      <span id="sup-msg" class="mut"></span>
-    </div>
+      <!-- Промокоды -->
+      <section id="sec-promos" class="page hidden">
+        <div class="card"><h2>Промокоды</h2><p class="sub">Скидки и бонусы для новых и действующих пользователей.</p>
+          <div class="btnrow"><button id="btn-promos">Показать промокоды</button></div>
+          <input id="pr-code" placeholder="код, напр. DREBOL10">
+          <input id="pr-exp" placeholder="истекает, напр. 2026-12-31 (пусто — без срока)">
+          <input id="pr-owner" type="number" placeholder="tg_id владельца (необязательно)">
+          <input id="pr-note" placeholder="заметка (необязательно)">
+          <div class="btnrow"><button id="btn-pr-add">Создать промокод</button><button id="btn-pr-find" class="ghost">Найти</button><button id="btn-pr-toggle" class="ghost">Вкл / выкл</button><button id="btn-pr-del" class="danger">Удалить</button></div>
+          <input id="pr-count" type="number" placeholder="сколько кодов сгенерировать пачкой">
+          <div class="btnrow"><button id="btn-pr-batch" class="ghost">Сгенерировать пачку</button></div>
+          <div id="promos-out"></div>
+        </div>
+      </section>
 
-    <h2>Панель Remnawave: редактор (только Mark)</h2>
-    <div class="card">
-      <p class="mut">Правка инбаундов и хостов — через API панели (PATCH config-profiles). После сохранения конфиг проверяется через computed-config.</p>
-      <input id="pf-uuid" placeholder="UUID профиля">
-      <button id="btn-pf-load" class="ghost">Показать профиль</button>
-      <input id="pf-tag" placeholder="тег инбаунда, напр. VTR-Germany-1">
-      <input id="pf-port" type="number" placeholder="порт (пусто — не менять)">
-      <input id="pf-sni" placeholder="SNI, через запятую (пусто — не менять)">
-      <input id="pf-dest" placeholder="target/dest, напр. www.google.com:443 (пусто — не менять)">
-      <input id="pf-fp" placeholder="fingerprint: chrome/firefox (пусто — не менять)">
-      <button id="btn-pf-save" class="ghost">Сохранить инбаунд</button>
-      <div id="pf-out"></div>
-      <h2>Хосты</h2>
-      <input id="ph-inbound" placeholder="UUID инбаунда (для нового хоста)">
-      <input id="ph-remark" placeholder="имя хоста">
-      <input id="ph-addr" placeholder="адрес">
-      <input id="ph-port" type="number" placeholder="порт">
-      <input id="ph-sni" placeholder="SNI">
-      <button id="btn-ph-create" class="ghost">Создать хост (создаётся выключенным)</button>
-      <input id="ph-uuid" placeholder="UUID хоста — правка / удаление">
-      <select id="ph-disabled"><option value="false">Включён</option><option value="true">Выключен</option></select>
-      <button id="btn-ph-toggle" class="ghost">Вкл/выкл хост</button>
-      <button id="btn-ph-del" class="ghost">Удалить хост</button>
-      <div id="ph-out"></div>
-      <button id="btn-rename" class="ghost">Убрать юзернеймы из имён клиентов панели</button>
-      <button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button>
-      <div id="panel-out"></div>
-    </div>
+      <!-- Тарифы -->
+      <section id="sec-tariffs" class="page hidden">
+        <div class="card"><h2>Тарифы</h2><p class="sub">Варианты продления, которые видит клиент. Цена и срок влияют на продление в кабинете и на сайте.</p>
+          <div class="btnrow"><button id="btn-tariffs">Показать тарифы</button></div>
+          <input id="tf-name" placeholder="название, напр. 1 месяц">
+          <input id="tf-seconds" type="number" placeholder="срок, секунды (2592000 = 30 дней)">
+          <input id="tf-price" type="number" placeholder="цена, ₽">
+          <div class="btnrow"><button id="btn-tf-add">Создать тариф</button></div>
+          <input id="tf-id" type="number" placeholder="ID тарифа — правка / удаление">
+          <input id="tf-price2" type="number" placeholder="новая цена, ₽ (пусто — не менять)">
+          <div class="btnrow"><button id="btn-tf-patch" class="ghost">Изменить цену</button><button id="btn-tf-del" class="danger">Удалить тариф</button></div>
+          <div id="tariffs-out"></div>
+        </div>
+      </section>
+      <!-- Панель Remnawave -->
+      <section id="sec-panel" class="page hidden">
+        <div class="card"><h2>Панель Remnawave</h2><p class="sub">Профили, инбаунды и хосты — живые данные из панели. Правка инбаундов и хостов — только Mark, с проверкой конфига после сохранения.</p>
+          <div class="btnrow"><button id="btn-panel" class="ghost">Показать панель</button><button id="btn-rename" class="ghost">Убрать юзернеймы из имён клиентов</button><button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button></div>
+          <div id="panel-out"></div>
+        </div>
+        <div class="card"><h2>Редактор инбаунда</h2><p class="sub">Меняются только заполненные поля. Приватные ключи и shortId здесь не трогаются.</p>
+          <input id="pf-uuid" placeholder="UUID профиля">
+          <div class="btnrow"><button id="btn-pf-load" class="ghost">Показать профиль</button></div>
+          <input id="pf-tag" placeholder="тег инбаунда, напр. VTR-Germany-1">
+          <input id="pf-port" type="number" placeholder="порт (пусто — не менять)">
+          <input id="pf-sni" placeholder="SNI, через запятую (пусто — не менять)">
+          <input id="pf-dest" placeholder="target/dest, напр. www.google.com:443 (пусто — не менять)">
+          <input id="pf-fp" placeholder="fingerprint: chrome/firefox (пусто — не менять)">
+          <div class="btnrow"><button id="btn-pf-save" class="ghost">Сохранить инбаунд</button></div>
+          <div id="pf-out"></div>
+        </div>
+        <div class="card"><h2>Хосты</h2><p class="sub">Новый хост создаётся выключенным — включите его после проверки.</p>
+          <input id="ph-inbound" placeholder="UUID инбаунда (для нового хоста)">
+          <input id="ph-remark" placeholder="имя хоста">
+          <input id="ph-addr" placeholder="адрес">
+          <input id="ph-port" type="number" placeholder="порт">
+          <input id="ph-sni" placeholder="SNI">
+          <div class="btnrow"><button id="btn-ph-create" class="ghost">Создать хост</button></div>
+          <input id="ph-uuid" placeholder="UUID хоста — правка / удаление">
+          <select id="ph-disabled"><option value="false">Включён</option><option value="true">Выключен</option></select>
+          <div class="btnrow"><button id="btn-ph-toggle" class="ghost">Вкл / выкл хост</button><button id="btn-ph-del" class="danger">Удалить хост</button></div>
+          <div id="ph-out"></div>
+        </div>
+        <div class="card"><h2>Настройки панели</h2><p class="sub">Адрес панели. Токен панели в вебе не показывается и не меняется — только из ТГ.</p>
+          <input id="ps-url" placeholder="адрес панели https://panelremna.drbl.tech">
+          <div class="btnrow"><button id="btn-ps-show" class="ghost">Показать</button><button id="btn-ps-save" class="ghost">Сохранить адрес панели</button><button id="btn-ps-test" class="ghost">Проверить связь с панелью</button></div>
+          <div id="ps-out"></div>
+        </div>
+      </section>
 
-    <h2>Задания (run-now)</h2>
-    <div class="card">
-      <select id="job-sel">
-        <option value="expiry_reminder">Напоминания об истечении</option>
-        <option value="lte_fallback">Проверка LTE</option>
-        <option value="check_expired">Проверка истёкших подписок</option>
-        <option value="winback">Возврат ушедших</option>
-        <option value="fraud">Фрод-скан</option>
-        <option value="blacklist_sync">Синхронизация ЧС</option>
-        <option value="blacklist_expire">Истечение ЧС</option>
-        <option value="connect_help">Помощь при подключении</option>
-        <option value="purge">Чистка логов</option>
-        <option value="site_sync">Синхронизация сайта</option>
-      </select>
-      <button id="btn-job" class="ghost">Запустить сейчас</button>
-      <div id="job-out"></div>
-    </div>
+      <!-- Узлы -->
+      <section id="sec-nodes" class="page hidden">
+        <div class="card"><h2>Узлы и здоровье</h2><p class="sub">Живой статус нод, панели и сайта подписки.</p>
+          <div class="btnrow"><button id="btn-nodes">Здоровье узлов</button><button id="btn-squads" class="ghost">Сквады</button></div>
+          <input id="node-id" type="number" placeholder="ID ноды — трафик пользователей">
+          <input id="node-start" placeholder="с даты, напр. 2026-11-01 (пусто — 30 дней назад)">
+          <input id="node-end" placeholder="по дату, напр. 2026-11-15 (пусто — сегодня)">
+          <div class="btnrow"><button id="btn-node-users" class="ghost">Трафик ноды</button></div>
+          <div id="nodes-out"></div>
+        </div>
+      </section>
 
-    <h2>Помощники (только Mark)</h2>
-    <div class="card">
-      <input id="helper-tg" type="number" placeholder="tg_id помощника">
-      <button id="btn-helper-add" class="ghost">Добавить</button>
-      <select id="helper-perm-sel"><option value="users">users</option><option value="dm">dm</option></select>
-      <button id="btn-helper-perm" class="ghost">Переключить право</button>
-      <button id="btn-helper-del" class="ghost">Удалить</button>
-      <button id="btn-helpers" class="ghost">Список</button>
-      <div id="helpers-out"></div>
-    </div>
+      <!-- Логи -->
+      <section id="sec-logs" class="page hidden">
+        <div class="card"><h2>Журнал действий и ошибок</h2><p class="sub">Аудит всех действий админов — и в ТГ, и в вебе — в одной ленте. Секреты в журнал не попадают.</p>
+          <select id="logs-kind"><option value="activity">Действия</option><option value="error">Ошибки</option></select>
+          <input id="logs-user" type="number" placeholder="tg_id (необязательно)">
+          <input id="logs-from" placeholder="с даты, напр. 2026-11-01">
+          <input id="logs-to" placeholder="по дату, напр. 2026-11-15">
+          <div class="btnrow"><button id="btn-logs">Показать журнал</button><a id="btn-logs-export" href="/api/admin/logs/export?kind=activity"><button type="button" class="ghost">Скачать CSV</button></a><button id="btn-logs-purge" class="danger">Очистить старые записи</button></div>
+          <div id="logs-out"></div>
+        </div>
+        <div class="card"><h2>Падения и сбои</h2><p class="sub">Когда узлы и панель были недоступны.</p>
+          <div class="btnrow"><button id="btn-downtime" class="ghost">Показать падения</button><button id="btn-online" class="ghost">Кто онлайн</button></div>
+          <div id="downtime-out"></div>
+        </div>
+      </section>
 
-    <h2>Сайт: тексты, удаление, настройки</h2>
-    <div class="card">
-      <p class="mut">Тексты применяются после «Деплой сайта». Удаление сайта — только Mark, с подтверждением.</p>
-      <input id="st-field" placeholder="поле, напр. hero_title">
-      <textarea id="st-text" placeholder="новый текст"></textarea>
-      <button id="btn-st-save" class="ghost">Сохранить текст</button>
-      <button id="btn-st-show" class="ghost">Показать тексты</button>
-      <button id="btn-site-del" class="ghost">Удалить сайт</button>
-      <div id="st-out"></div>
-    </div>
+      <!-- Синхронизация -->
+      <section id="sec-sync" class="page hidden">
+        <div class="card"><h2>Синхронизация с панелью</h2><p class="sub">Сверка пользователей бота с клиентами Remnawave.</p>
+          <div class="btnrow"><button id="btn-psync">Запустить синхронизацию</button><button id="btn-psync-set" class="ghost">Показать расписание</button></div>
+          <div id="psync-out"></div>
+        </div>
+        <div class="card"><h2>Утренняя сводка 09:00</h2><p class="sub">Что входит в ежедневную сводку и во сколько она приходит.</p>
+          <div class="btnrow"><button id="btn-morning">Показать настройки</button><button id="btn-morning-run">Запустить сводку сейчас</button></div>
+          <input id="mor-time" placeholder="время, напр. 09:00 (пусто — не менять)">
+          <label><input id="mor-enabled" type="checkbox"> сводка включена</label>
+          <div class="btnrow"><button id="btn-morning-save" class="ghost">Сохранить</button></div>
+          <div id="morning-out"></div>
+        </div>
+        <div class="card"><h2>Задания (run-now)</h2><p class="sub">Запустить любую фоновую задачу вручную, не дожидаясь расписания.</p>
+          <select id="job-sel">
+            <option value="expiry_reminder">Напоминания об истечении</option>
+            <option value="lte_fallback">Проверка LTE</option>
+            <option value="check_expired">Проверка истёкших подписок</option>
+            <option value="winback">Возврат ушедших</option>
+            <option value="fraud">Фрод-скан</option>
+            <option value="blacklist_sync">Синхронизация ЧС</option>
+            <option value="blacklist_expire">Истечение ЧС</option>
+            <option value="connect_help">Помощь при подключении</option>
+            <option value="purge">Чистка логов</option>
+            <option value="site_sync">Синхронизация сайта</option>
+          </select>
+          <button id="btn-job" class="ghost">Запустить сейчас</button>
+          <div id="job-out"></div>
+        </div>
+      </section>
 
-    <h2>Веб-доступ</h2>
-    <div class="card">
-      <p class="mut">Смена порта/bind вступает в силу только после рестарта бота. Выключить сам веб-API из веба нельзя — это убьёт и эту админку, делается только из ТГ.</p>
-      <button id="btn-webacc" class="ghost">Показать настройки</button>
-      <input id="wa-port" type="number" placeholder="порт, напр. 8088">
-      <input id="wa-bind" placeholder="bind: 127.0.0.1 или 0.0.0.0">
-      <button id="btn-wa-save" class="ghost">Сохранить порт/bind</button>
-      <div id="wa-out"></div>
-    </div>
+      <!-- Проверка операторов -->
+      <section id="sec-netcheck" class="page hidden">
+        <div class="card"><h2>Проверка операторов</h2><p class="sub">Доступность доменов у МТС, МегаФона, Билайна, Т2 и Ростелекома (Globalping, без ключа API).</p>
+          <div class="btnrow"><button id="btn-netcheck-show" class="ghost">Показать настройки</button><button id="btn-netcheck">Запустить проверку</button></div>
+          <div id="netcheck-out"></div>
+        </div>
+      </section>
 
-    <h2>Настройки панели и поддержки</h2>
-    <div class="card">
-      <input id="ps-url" placeholder="адрес панели https://panelremna.drbl.tech">
-      <button id="btn-ps-save" class="ghost">Сохранить адрес панели</button>
-      <button id="btn-ps-test" class="ghost">Проверить связь с панелью</button>
-      <input id="ss-group" type="number" placeholder="ID группы поддержки (0 — очистить)">
-      <input id="ss-log" type="number" placeholder="ID лог-канала (0 — очистить)">
-      <button id="btn-ss-save" class="ghost">Сохранить настройки поддержки</button>
-      <div id="ps-out"></div>
-    </div>
+      <!-- Сайт -->
+      <section id="sec-site" class="page hidden">
+        <div class="card"><h2>Сайт</h2><p class="sub">Деплой сайта и кабинета на сервер. Тексты применяются после деплоя.</p>
+          <div class="btnrow"><button id="btn-site-show" class="ghost">Показать состояние</button><button id="btn-deploy">Деплой сайта</button></div>
+          <div id="site-out"></div>
+        </div>
+        <div class="card"><h2>Тексты сайта</h2>
+          <input id="st-field" placeholder="поле, напр. hero_title">
+          <textarea id="st-text" placeholder="новый текст"></textarea>
+          <div class="btnrow"><button id="btn-st-save" class="ghost">Сохранить текст</button><button id="btn-st-show" class="ghost">Показать тексты</button></div>
+          <div id="st-out"></div>
+        </div>
+        <div class="card"><h2>Удаление сайта</h2><p class="sub">Только Mark, с подтверждением. Действие необратимое.</p>
+          <button id="btn-site-del" class="danger">Удалить сайт</button>
+          <div id="site-del-out"></div>
+        </div>
+      </section>
 
-    <h2>Узлы и панель</h2>
-    <div class="card">
-      <button id="btn-nodes" class="ghost">Здоровье узлов</button>
-      <button id="btn-panel" class="ghost">Панель Remnawave</button>
-      <button id="btn-psync" class="ghost">Синхронизация с панелью</button>
-      <div id="nodes-out"></div>
-    </div>
+      <!-- Бэкап -->
+      <section id="sec-backup" class="page hidden">
+        <div class="card"><h2>Бэкап и перенос</h2><p class="sub">Архив базы и настроек. Восстановление — только Mark, с подтверждением, и только после свежего бэкапа: текущие данные будут заменены, бот перезапустится.</p>
+          <div class="btnrow"><a id="btn-backup" href="/api/admin/backup/export"><button type="button" class="ghost">Скачать бэкап</button></a></div>
+          <label>Файл архива (.zip)</label>
+          <input id="bk-file" type="file" accept=".zip,application/zip">
+          <label><input id="bk-fresh" type="checkbox"> свежий бэкап сделан, я понимаю, что данные заменятся</label>
+          <div class="btnrow"><button id="btn-backup-restore" class="danger">Восстановить из архива</button></div>
+          <div id="backup-out"></div>
+        </div>
+        <div class="card"><h2>Обновление с GitHub</h2><p class="sub">Только Mark. Подтягивает main и перезапускает бота и сап-бота.</p>
+          <button id="btn-git" class="danger">Обновиться с GitHub</button>
+          <div id="git-out"></div>
+        </div>
+      </section>
 
-    <h2>Логи и синхронизация</h2>
-    <div class="card">
-      <button id="btn-logs" class="ghost">Журнал действий</button>
-      <button id="btn-morning" class="ghost">Утренняя сводка 09:00</button>
-      <button id="btn-morning-run" class="ghost">Запустить сводку сейчас</button>
-      <button id="btn-netcheck" class="ghost">Проверка операторов</button>
-      <button id="btn-downtime" class="ghost">Падения</button>
-      <div id="logs-out"></div>
-    </div>
+      <!-- Поддержка -->
+      <section id="sec-support" class="page hidden">
+        <div class="card"><h2>Открытые обращения</h2><p class="sub">Темы в группе поддержки. Ответ уходит юзеру тем же путём, что и ответ из группы.</p>
+          <div class="btnrow"><button id="btn-support">Показать открытые темы</button></div>
+          <div id="topics-out"></div>
+        </div>
+        <div class="card"><h2>Ответ пользователю</h2>
+          <input id="sup-user" type="number" placeholder="tg_id юзера">
+          <div class="btnrow"><button id="btn-sup-open" class="ghost">Открыть тему</button></div>
+          <div id="sup-msgs"></div>
+          <textarea id="sup-text" placeholder="ответ юзеру"></textarea>
+          <label><input id="sup-close" type="checkbox"> закрыть обращение после ответа</label>
+          <div class="btnrow"><button id="btn-sup-reply">Ответить</button><button id="btn-sup-close" class="ghost">Закрыть обращение</button></div>
+          <span id="sup-msg" class="mut"></span>
+        </div>
+        <div class="card"><h2>Настройки поддержки</h2>
+          <input id="ss-group" type="number" placeholder="ID группы поддержки (0 — очистить)">
+          <input id="ss-log" type="number" placeholder="ID лог-канала (0 — очистить)">
+          <button id="btn-ss-save" class="ghost">Сохранить настройки поддержки</button>
+          <div id="ss-out"></div>
+        </div>
+      </section>
 
-    <h2>Сайт, бэкап, защита</h2>
-    <div class="card">
-      <button id="btn-deploy" class="ghost">Деплой сайта</button>
-      <button id="btn-git" class="ghost">Обновиться с GitHub (только Mark)</button>
-      <a id="btn-backup" href="/api/admin/backup/export"><button type="button" class="ghost">Скачать бэкап</button></a>
-      <button id="btn-support" class="ghost">Темы поддержки</button>
-      <button id="btn-blacklist" class="ghost">Чёрный список</button>
-      <button id="btn-fraud" class="ghost">Повторные триалы</button>
-      <div id="infra-out"></div>
+      <!-- Настройки -->
+      <section id="sec-settings" class="page hidden">
+        <div class="card"><h2>Настройки</h2><p class="sub">Только безопасные настройки. Секреты здесь не показываются и не меняются.</p>
+          <div id="settings"></div>
+          <button id="btn-save">Сохранить настройки</button>
+          <span id="save-msg" class="mut"></span>
+        </div>
+        <div id="muse-box" class="card hidden"><h2>Аккаунт Muse</h2><p class="sub">Только для входа через Telegram. Два способа создать аккаунт Muse — выберите один:</p>
+          <h3>Способ 1 — одноразовая ссылка</h3>
+          <p class="mut">Введите почту — аккаунт создастся отключённым, а одноразовая ссылка на установку пароля покажется один раз. Muse сам задаст пароль по этой ссылке.</p>
+          <input id="muse-email" type="email" placeholder="почта для Muse">
+          <button id="btn-muse">Создать аккаунт и ссылку</button>
+          <div id="muse-out" class="mut"></div>
+          <h3>Способ 2 — пароль задаёте вы</h3>
+          <p class="mut">Введите почту и пароль сами — аккаунт сразу включится с этим паролем. Пароль передайте Muse отдельно, он нигде здесь не сохраняется в открытом виде.</p>
+          <input id="md-email" type="email" placeholder="почта для Muse">
+          <input id="md-pw" type="password" placeholder="пароль (8–128 символов)" autocomplete="new-password">
+          <input id="md-pw2" type="password" placeholder="пароль ещё раз" autocomplete="new-password">
+          <button id="btn-muse-direct">Создать аккаунт с паролем</button>
+          <div id="md-out" class="mut"></div>
+          <h3>Аккаунты</h3>
+          <div class="btnrow"><button id="btn-muse-list" class="ghost">Показать аккаунты</button></div>
+          <div id="muse-list-out"></div>
+        </div>
+        <div class="card"><h2>Помощники (только Mark)</h2><p class="sub">Помощники работают только в Telegram-боте, в вебе у них доступа нет.</p>
+          <input id="helper-tg" type="number" placeholder="tg_id помощника">
+          <select id="helper-perm-sel"><option value="users">users</option><option value="dm">dm</option></select>
+          <div class="btnrow"><button id="btn-helper-add" class="ghost">Добавить</button><button id="btn-helper-perm" class="ghost">Переключить право</button><button id="btn-helper-del" class="danger">Удалить</button><button id="btn-helpers" class="ghost">Список</button></div>
+          <div id="helpers-out"></div>
+        </div>
+        <div class="card"><h2>Веб-доступ</h2><p class="sub">Смена порта/bind вступает в силу только после рестарта бота. Выключить сам веб-API из веба нельзя — это убьёт и эту админку, делается только из ТГ.</p>
+          <div class="btnrow"><button id="btn-webacc" class="ghost">Показать настройки</button></div>
+          <input id="wa-port" type="number" placeholder="порт, напр. 8088">
+          <input id="wa-bind" placeholder="bind: 127.0.0.1 или 0.0.0.0">
+          <div class="btnrow"><button id="btn-wa-save" class="ghost">Сохранить порт/bind</button></div>
+          <div id="wa-out"></div>
+        </div>
+        <div class="card"><h2>Помощь при подключении</h2><p class="sub">Подсказки новичкам, которые не смогли подключиться.</p>
+          <div class="btnrow"><button id="btn-ch-show" class="ghost">Показать настройки</button></div>
+          <div id="ch-out"></div>
+        </div>
+      </section>
     </div>
-  </div>
+  </main>
 </div>
 <script>
 const API = "/api/admin";
+const SECTION_TITLES = {overview:"Обзор", users:"Пользователи", subs:"Подписки", finance:"Финансы", payments:"Оплаты", broadcast:"Рассылка", promos:"Промокоды", tariffs:"Тарифы", panel:"Панель Remnawave", nodes:"Узлы", logs:"Логи", sync:"Синхронизация", netcheck:"Проверка операторов", site:"Сайт", backup:"Бэкап", support:"Поддержка", settings:"Настройки"};
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function fmtNum(n){ if (n == null || n === "") return "—"; const v = Number(n); if (isNaN(v)) return esc(n); return v.toLocaleString("ru-RU"); }
+function fmtMoney(n){ if (n == null || n === "") return "—"; return fmtNum(n) + " ₽"; }
+function fmtDate(s){
+  if (!s) return "—";
+  const m = String(s).match(/(\\d{4})-(\\d{2})-(\\d{2})[T ](\\d{2}):(\\d{2})/);
+  if (m) return m[3] + "." + m[2] + "." + m[1] + " " + m[4] + ":" + m[5];
+  return esc(s);
+}
+function fmtGB(n){ if (n == null || n === "") return "—"; return fmtNum(n) + " ГБ"; }
+function pill(v){
+  const s = String(v == null ? "" : v).toLowerCase();
+  if (["active","paid","ok","success","online","enabled","true","1"].indexOf(s) >= 0) return '<span class="pill ok">' + esc(v) + "</span>";
+  if (["expired","refunded","failed","error","offline","disabled","false","0","blocked","banned"].indexOf(s) >= 0) return '<span class="pill bad">' + esc(v) + "</span>";
+  if (["pending","trial","warning","frozen","paused"].indexOf(s) >= 0) return '<span class="pill warn">' + esc(v) + "</span>";
+  if (s) return '<span class="pill info">' + esc(v) + "</span>";
+  return "—";
+}
+function toast(msg, kind){
+  const t = document.createElement("div");
+  t.className = "toast" + (kind ? " " + kind : "");
+  t.textContent = msg;
+  $("toast").appendChild(t);
+  setTimeout(function(){ t.remove(); }, 5000);
+}
+function show(id, on){ $(id).classList.toggle("hidden", !on); }
+function showSection(name){
+  document.querySelectorAll(".page").forEach(function(p){ p.classList.add("hidden"); });
+  const sec = $("sec-" + name);
+  if (sec) sec.classList.remove("hidden");
+  document.querySelectorAll(".nav-item").forEach(function(b){ b.classList.toggle("active", b.dataset.nav === name); });
+  $("sec-title").textContent = SECTION_TITLES[name] || name;
+  if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll(".nav-item").forEach(function(b){
+  b.addEventListener("click", function(){ showSection(b.dataset.nav); });
+});
+document.querySelectorAll("[data-goto]").forEach(function(b){
+  b.addEventListener("click", function(){ showSection(b.dataset.goto); });
+});
+
+/* --- Умный вывод: таблицы вместо JSON-дампов --- */
+const DATE_KEYS = ["created_at","paid_at","expires_at","last_login_at","seen_at","date","updated_at","start","end","expires","until","paid_until"];
+const MONEY_KEYS = ["amount","price","revenue","revenue_total","balance","total","price_rub"];
+const NUM_KEYS = ["count","users","paid","total","tg_id","id","sub_id","payment_id","devices","hwid","limit","gb","traffic","days","period","uses","renamed","failed","skipped","online"];
+function cellVal(k, v){
+  if (v == null) return "—";
+  if (DATE_KEYS.indexOf(k) >= 0) return '<span class="mono">' + fmtDate(v) + "</span>";
+  if (MONEY_KEYS.indexOf(k) >= 0) return '<span class="num">' + fmtMoney(v) + "</span>";
+  if (NUM_KEYS.indexOf(k) >= 0 && typeof v === "number") return '<span class="num">' + fmtNum(v) + "</span>";
+  if (typeof v === "boolean") return pill(v ? "да" : "нет");
+  if (k === "status" || k === "state" || k === "active" || k === "enabled" || k === "disabled" || k === "is_disabled") return pill(v);
+  if (typeof v === "object") return '<span class="mono">' + esc(JSON.stringify(v)).slice(0, 120) + "</span>";
+  const s = String(v);
+  if (s.length > 60) return '<span title="' + esc(s) + '">' + esc(s.slice(0, 60)) + "…</span>";
+  if (k === "id" || k === "uuid" || k === "tg_id" || k === "email" || k === "username") return '<span class="mono">' + esc(s) + "</span>";
+  return esc(s);
+}
+function renderTable(el, rows){
+  const host = $(el);
+  if (!rows || !rows.length) { host.innerHTML = '<div class="empty"><span class="big">🔍</span>Ничего не найдено</div>'; return; }
+  const cols = [];
+  rows.forEach(function(r){ Object.keys(r).forEach(function(k){ if (cols.indexOf(k) < 0 && cols.length < 9) cols.push(k); }); });
+  let h = '<div class="tblwrap"><table><thead><tr>' + cols.map(function(c){ return "<th>" + esc(c) + "</th>"; }).join("") + "</tr></thead><tbody>";
+  rows.forEach(function(r){
+    h += "<tr>" + cols.map(function(c){
+      const v = r[c];
+      const right = (typeof v === "number" || MONEY_KEYS.indexOf(c) >= 0) ? ' class="num"' : (String(v || "").length > 60 ? ' class="trunc"' : "");
+      return "<td" + right + ">" + cellVal(c, v) + "</td>";
+    }).join("") + "</tr>";
+  });
+  host.innerHTML = h + "</tbody></table></div>";
+}
+function renderKV(el, obj){
+  const host = $(el);
+  const keys = Object.keys(obj || {});
+  if (!keys.length) { host.innerHTML = '<div class="empty"><span class="big">🔍</span>Нет данных</div>'; return; }
+  host.innerHTML = '<dl class="kv">' + keys.map(function(k){
+    return "<dt>" + esc(k) + "</dt><dd>" + cellVal(k, obj[k]) + "</dd>";
+  }).join("") + "</dl>";
+}
+function renderOut(el, data){
+  const host = $(el);
+  if (data == null) { host.innerHTML = '<div class="empty"><span class="big">🔍</span>Нет данных</div>'; return; }
+  if (data.error) { host.innerHTML = '<p class="err">Ошибка: ' + esc(data.error) + (data.details ? " — " + esc(data.details) : "") + "</p>"; return; }
+  if (Array.isArray(data)) { renderTable(el, data); return; }
+  const LIST_KEYS = ["users","payments","rows","entries","topics","logs","accounts","pairs","profiles","nodes","tariffs","promos","servers","helpers","messages","devices","squads","events","reviews"];
+  for (let i = 0; i < LIST_KEYS.length; i++) {
+    const k = LIST_KEYS[i];
+    if (Array.isArray(data[k])) {
+      if (data[k].length) { renderTable(el, data[k]); }
+      else { host.innerHTML = '<div class="empty"><span class="big">🔍</span>Ничего не найдено</div>'; }
+      return;
+    }
+  }
+  if (data.subscription) { renderKV(el, data.subscription); return; }
+  if (data.profile) { renderKV(el, data.profile); return; }
+  if (data.stats) { renderKV(el, data.stats); return; }
+  renderKV(el, data);
+}
 function csrf(){ const m = document.cookie.match(/(?:^|; )drebol_admin_csrf=([^;]*)/); return m ? decodeURIComponent(m[1]) : ""; }
 async function api(path, opts){
   opts = opts || {};
   opts.headers = Object.assign({"Content-Type": "application/json"}, opts.headers || {});
   const r = await fetch(API + path, Object.assign({credentials: "same-origin"}, opts));
   let data = {}; try { data = await r.json(); } catch(e) {}
-  return {status: r.status, data};
+  return {status: r.status, data: data};
 }
-function show(id, on){ document.getElementById(id).classList.toggle("hidden", !on); }
-async function refreshMe(){
-  const r = await api("/me");
-  if (r.status !== 200) { show("login", true); show("app", false); return false; }
-  show("login", false); show("app", true);
-  document.getElementById("who").textContent = r.data.actor === "mark" ? "Вошли как Mark (Telegram)" : "Вошли как Muse · " + (r.data.email || "");
-  show("muse-box", r.data.actor === "mark");
-  return true;
-}
-async function loadDashboard(){
-  const r = await api("/dashboard");
-  if (r.status !== 200) return;
-  const s = r.data.stats || {};
-  const cells = [["Пользователей", s.users_total], ["Сегодня", "+" + (s.users_today || 0)],
-    ["Активных подписок", s.paid_active], ["Выручка", (s.revenue_total || 0) + " ₽"],
-    ["Оплат сегодня", s.payments_today], ["Триалов выдано", s.trials_issued]];
-  document.getElementById("stats").innerHTML = cells.map(c =>
-    '<div class="card stat"><b>' + c[1] + '</b><span>' + c[0] + '</span></div>').join("");
-  const p = r.data.panel || {};
-  document.getElementById("panel-line").textContent = p.success ?
-    ("Панель: клиентов " + p.total + " (платных " + p.paid + ")") :
-    "Панель недоступна — сверка не выполнена";
-}
-const EDITABLE = ["channel_url","force_subscribe","paid_trial_period","paid_preset_hwid","paid_preset_traffic","paid_preset_lte","referral_bonus","referral_invited_bonus","maintenance_enabled","maintenance_text","device_price","device_max_extra"];
-async function loadSettings(){
-  const r = await api("/settings");
-  if (r.status !== 200) return;
-  const s = r.data.settings || {};
-  document.getElementById("settings").innerHTML = EDITABLE.map(k => {
-    const v = s[k];
-    const type = typeof v === "boolean" ? "checkbox" : (typeof v === "number" ? "number" : "text");
-    const val = type === "checkbox" ? (v ? "checked" : "") : ('value="' + (v == null ? "" : String(v).replace(/"/g, "&quot;")) + '"');
-    return '<label>' + k + '<input data-k="' + k + '" type="' + type + '" ' + val + '></label>';
-  }).join("");
-}
-document.getElementById("btn-login").onclick = async () => {
-  const r = await api("/auth/password", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({email: document.getElementById("email").value, password: document.getElementById("pw").value})});
-  if (r.status !== 200) { document.getElementById("login-err").textContent = r.data.error === "too_many" ? "Слишком много попыток — подождите 15 минут" : "Неверная почта или пароль"; return; }
-  document.getElementById("login-err").textContent = "";
-  await refreshMe(); await loadDashboard(); await loadSettings();
-};
-document.getElementById("btn-logout").onclick = async () => {
-  await api("/logout", {method: "POST", headers: {"X-CSRF-Token": csrf()}});
-  location.reload();
-};
-document.getElementById("btn-save").onclick = async () => {
-  const patch = {};
-  document.querySelectorAll("#settings input").forEach(inp => {
-    patch[inp.dataset.k] = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? parseInt(inp.value || "0", 10) : inp.value);
-  });
-  const r = await api("/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({settings: patch})});
-  document.getElementById("save-msg").textContent = r.status === 200 ? "Сохранено" : ("Ошибка: " + (r.data.error || r.status));
-};
-document.getElementById("btn-muse").onclick = async () => {
-  const r = await api("/muse-account", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({email: document.getElementById("muse-email").value})});
-  document.getElementById("muse-out").textContent = r.status === 200 ?
-    ("Ссылка (показывается один раз): " + r.data.setup_url) : ("Ошибка: " + (r.data.error || r.status));
-};
-document.getElementById("btn-setup").onclick = async () => {
-  const token = new URLSearchParams(location.search).get("token") || "";
-  const r = await api("/auth/setup", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({token, password: document.getElementById("pw2").value})});
-  if (r.status !== 200) { document.getElementById("setup-err").textContent = "Ссылка недействительна или пароль короче 8 символов"; return; }
-  history.replaceState(null, "", location.pathname);
-  await refreshMe(); await loadDashboard(); await loadSettings();
-};
-function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
 async function postConfirm(path, body){
   let r = await api(path, {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body || {})});
   if (r.data && r.data.need_confirm) {
@@ -372,194 +699,551 @@ async function postConfirm(path, body){
   }
   return r;
 }
-function renderRows(el, rows){
-  document.getElementById(el).innerHTML = "<pre>" + esc(JSON.stringify(rows, null, 2)).slice(0, 8000) + "</pre>";
-}
-document.getElementById("btn-find").onclick = async () => {
-  const q = document.getElementById("q-user").value;
-  const r = await api("/users?search=" + encodeURIComponent(q));
-  if (r.status !== 200) return;
-  document.getElementById("users-out").innerHTML = (r.data.users || []).map(u =>
-    '<p><a href="#" data-tg="' + u.tg_id + '">' + esc(u.first_name || "") + " @" + esc(u.username || "") + " · " + u.tg_id + " · " + esc(u.sub_status || "") + "</a></p>").join("") || "<p class='mut'>Никого не нашёл</p>";
-  document.querySelectorAll("#users-out a").forEach(a => a.onclick = async e => {
-    e.preventDefault();
-    const p = await api("/users/" + a.dataset.tg);
-    renderRows("profile-out", p.data);
-  });
-};
-document.getElementById("btn-dm").onclick = async () => {
-  const r = await api("/users/" + document.getElementById("dm-id").value + "/dm",
-    {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({text: document.getElementById("dm-text").value})});
-  document.getElementById("dm-msg").textContent = r.status === 200 ? "Отправлено" : ("Ошибка: " + (r.data.error || r.status));
-};
-document.querySelectorAll("[data-sub]").forEach(b => b.onclick = async () => {
-  const id = document.getElementById("sub-id").value;
-  const body = b.dataset.sub === "extend" ? {days: parseInt(document.getElementById("sub-days").value || "0", 10)} : {};
-  const r = await postConfirm("/subs/" + id + "/" + b.dataset.sub, body);
-  document.getElementById("sub-msg").textContent = r.status === 200 ? "Готово" : ("Ошибка: " + (r.data.error || r.status));
-});
-document.getElementById("btn-finance").onclick = async () => { const r = await api("/finance"); renderRows("finance-out", r.data); };
-document.getElementById("btn-payments").onclick = async () => { const r = await api("/payments"); renderRows("finance-out", r.data); };
-document.getElementById("btn-reconcile").onclick = async () => { const r = await postConfirm("/reconcile/run", {}); renderRows("finance-out", r.data); };
-document.getElementById("btn-tariffs").onclick = async () => { const r = await api("/tariffs"); renderRows("finance-out", r.data); };
-document.getElementById("btn-promos").onclick = async () => { const r = await api("/promos"); renderRows("finance-out", r.data); };
-document.getElementById("btn-servers").onclick = async () => { const r = await api("/servers"); renderRows("finance-out", r.data); };
-let bcPhoto = "";
 async function postConfirmAny(path, method, body){
-  let r = await api(path, {method, headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body || {})});
+  let r = await api(path, {method: method, headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body || {})});
   if (r.data && r.data.need_confirm) {
     if (!confirm(r.data.summary || "Подтвердить действие?")) return {status: 0, data: {error: "cancelled"}};
-    r = await api(path, {method, headers: {"X-CSRF-Token": csrf()},
+    r = await api(path, {method: method, headers: {"X-CSRF-Token": csrf()},
       body: JSON.stringify(Object.assign({}, body || {}, {confirm_token: r.data.confirm_token}))});
   }
   return r;
 }
-document.getElementById("btn-bc-upload").onclick = async () => {
-  const f = document.getElementById("bc-photo").files[0];
-  if (!f) { document.getElementById("bc-photo-msg").textContent = "Выберите файл"; return; }
+function withSpin(btn, fn){
+  return async function(){
+    const old = btn.textContent;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span>Ждите…';
+    try { await fn(); } finally { btn.disabled = false; btn.textContent = old; }
+  };
+}
+async function refreshMe(){
+  const r = await api("/me");
+  if (r.status !== 200) { show("login-view", true); show("app-view", false); return false; }
+  show("login-view", false); show("app-view", true);
+  $("who").textContent = r.data.actor === "mark" ? "Вошли как Mark (Telegram)" : "Вошли как Muse · " + (r.data.email || "");
+  show("muse-box", r.data.actor === "mark");
+  return true;
+}
+async function loadDashboard(){
+  const r = await api("/dashboard");
+  if (r.status !== 200) return;
+  const s = r.data.stats || {};
+  const cells = [
+    ["Пользователей", fmtNum(s.users_total), ""],
+    ["Новых сегодня", "+" + fmtNum(s.users_today || 0), ""],
+    ["Активных подписок", fmtNum(s.paid_active), ""],
+    ["Выручка", fmtMoney(s.revenue_total || 0), ""],
+    ["Оплат сегодня", fmtNum(s.payments_today), ""],
+    ["Триалов выдано", fmtNum(s.trials_issued), ""]
+  ];
+  $("stats").innerHTML = cells.map(function(c){
+    return '<div class="stat"><b>' + c[1] + '</b><span>' + c[0] + "</span></div>";
+  }).join("");
+  const p = r.data.panel || {};
+  $("panel-line").textContent = p.success ?
+    ("Панель: клиентов " + fmtNum(p.total) + " (платных " + fmtNum(p.paid) + ")") :
+    "Панель недоступна — сверка не выполнена";
+}
+const EDITABLE = ["channel_url","force_subscribe","paid_trial_period","paid_preset_hwid","paid_preset_traffic","paid_preset_lte","referral_bonus","referral_invited_bonus","maintenance_enabled","maintenance_text","device_price","device_max_extra"];
+async function loadSettings(){
+  const r = await api("/settings");
+  if (r.status !== 200) return;
+  const s = r.data.settings || {};
+  $("settings").innerHTML = EDITABLE.map(function(k){
+    const v = s[k];
+    const type = typeof v === "boolean" ? "checkbox" : (typeof v === "number" ? "number" : "text");
+    const val = type === "checkbox" ? (v ? "checked" : "") : ('value="' + (v == null ? "" : String(v).replace(/"/g, "&quot;")) + '"');
+    return "<label>" + esc(k) + '<input data-k="' + k + '" type="' + type + '" ' + val + "></label>";
+  }).join("");
+}
+$("btn-login").onclick = withSpin($("btn-login"), async function(){
+  const r = await api("/auth/password", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({email: $("email").value, password: $("pw").value})});
+  if (r.status !== 200) { $("login-err").textContent = r.data.error === "too_many" ? "Слишком много попыток — подождите 15 минут" : "Неверная почта или пароль"; return; }
+  $("login-err").textContent = "";
+  toast("Вход выполнен", "ok");
+  await refreshMe(); await loadDashboard(); await loadSettings();
+});
+$("btn-logout").onclick = async function(){
+  await api("/logout", {method: "POST", headers: {"X-CSRF-Token": csrf()}});
+  location.reload();
+};
+$("btn-save").onclick = withSpin($("btn-save"), async function(){
+  const patch = {};
+  document.querySelectorAll("#settings input").forEach(function(inp){
+    patch[inp.dataset.k] = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? parseInt(inp.value || "0", 10) : inp.value);
+  });
+  const r = await api("/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({settings: patch})});
+  $("save-msg").textContent = r.status === 200 ? "Сохранено" : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) toast("Настройки сохранены", "ok"); else toast("Ошибка сохранения", "err");
+});
+$("btn-muse").onclick = withSpin($("btn-muse"), async function(){
+  const r = await api("/muse-account", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({email: $("muse-email").value})});
+  $("muse-out").textContent = r.status === 200 ?
+    ("Ссылка (показывается один раз): " + r.data.setup_url) : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) toast("Аккаунт создан, ссылка показана один раз", "ok");
+});
+$("btn-muse-direct").onclick = withSpin($("btn-muse-direct"), async function(){
+  const r = await api("/muse-account/direct", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({email: $("md-email").value, password: $("md-pw").value, password_confirm: $("md-pw2").value})});
+  if (r.status === 200) {
+    $("md-out").textContent = "Аккаунт " + r.data.email + " создан и включён. Пароль передайте Muse отдельно.";
+    $("md-pw").value = ""; $("md-pw2").value = "";
+    toast("Аккаунт Muse создан с паролем", "ok");
+  } else {
+    const msg = {"bad_email":"Неверная почта", "bad_password":"Пароль — от 8 до 128 символов", "password_mismatch":"Пароли не совпадают", "email_taken":"Такая почта уже занята", "mark_only":"Только для Mark"}[r.data.error] || ("Ошибка: " + (r.data.error || r.status));
+    $("md-out").textContent = msg;
+  }
+});
+$("btn-muse-list").onclick = async function(){
+  const r = await api("/muse-account");
+  renderOut("muse-list-out", r.data);
+};
+$("btn-setup").onclick = async function(){
+  const token = new URLSearchParams(location.search).get("token") || "";
+  const r = await api("/auth/setup", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({token: token, password: $("pw2").value})});
+  if (r.status !== 200) { $("setup-err").textContent = "Ссылка недействительна или пароль короче 8 символов"; return; }
+  history.replaceState(null, "", location.pathname);
+  await refreshMe(); await loadDashboard(); await loadSettings();
+};
+/* --- Пользователи --- */
+$("btn-find").onclick = withSpin($("btn-find"), async function(){
+  const q = $("q-user").value.trim();
+  const r = await api("/users?search=" + encodeURIComponent(q));
+  if (r.status !== 200) { renderOut("users-out", r.data); return; }
+  const rows = (r.data.users || []).map(function(u){
+    return {tg_id: u.tg_id, name: u.first_name || "", username: u.username || "", sub: u.sub_status || "", created: u.created_at || ""};
+  });
+  const host = $("users-out");
+  if (!rows.length) { host.innerHTML = '<div class="empty"><span class="big">🔍</span>Никого не нашёл</div>'; return; }
+  host.innerHTML = '<div class="tblwrap"><table><thead><tr><th>Имя</th><th>Username</th><th>TG ID</th><th>Подписка</th><th>Создан</th></tr></thead><tbody>' +
+    rows.map(function(u){
+      return '<tr><td><a href="#" data-tg="' + u.tg_id + '">' + esc(u.name) + '</a></td><td class="mono">@' + esc(u.username) + '</td><td class="mono">' + u.tg_id + '</td><td>' + pill(u.sub) + '</td><td class="mono">' + fmtDate(u.created) + "</td></tr>";
+    }).join("") + "</tbody></table></div>";
+  host.querySelectorAll("a[data-tg]").forEach(function(a){
+    a.onclick = async function(e){
+      e.preventDefault();
+      const p = await api("/users/" + a.dataset.tg);
+      renderOut("profile-out", p.data);
+      const act = await api("/users/" + a.dataset.tg + "/activity");
+      const div = document.createElement("div");
+      div.innerHTML = "<h3>Активность</h3>";
+      const box = document.createElement("div");
+      div.appendChild(box);
+      $("profile-out").appendChild(div);
+      renderOut(box.id = "profile-activity", act.data);
+    };
+  });
+});
+$("btn-recent").onclick = async function(){
+  const r = await api("/users/recent");
+  renderOut("users-out", r.data);
+};
+$("btn-dm").onclick = withSpin($("btn-dm"), async function(){
+  const r = await api("/users/" + $("dm-id").value + "/dm",
+    {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({text: $("dm-text").value})});
+  $("dm-msg").textContent = r.status === 200 ? "Отправлено" : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) toast("Сообщение отправлено", "ok");
+});
+$("btn-gift").onclick = withSpin($("btn-gift"), async function(){
+  const body = {amount: parseInt($("gift-amount").value || "0", 10), period_seconds: parseInt($("gift-seconds").value || "0", 10)};
+  const promo = $("gift-promo").value.trim();
+  if (promo) body.promo_code = promo;
+  const r = await api("/users/" + $("gift-tg").value + "/gift",
+    {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+  renderOut("gift-out", r.data);
+  if (r.status === 200) toast("Подписка подарена", "ok");
+});
+$("btn-blacklist").onclick = async function(){ const r = await api("/blacklist"); renderOut("bl-out", r.data); };
+$("btn-bl-add").onclick = withSpin($("btn-bl-add"), async function(){
+  const r = await api("/blacklist/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({tg_id: parseInt($("bl-tg").value || "0", 10), reason: $("bl-reason").value, term: $("bl-term").value || undefined})});
+  renderOut("bl-out", r.data);
+});
+$("btn-bl-stop").onclick = async function(){
+  const r = await postConfirm("/blacklist/" + $("bl-tg").value + "/stop", {});
+  renderOut("bl-out", r.data);
+};
+$("btn-bl-readd").onclick = async function(){
+  const r = await api("/blacklist/" + $("bl-tg").value + "/readd",
+    {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+  renderOut("bl-out", r.data);
+};
+$("btn-fraud").onclick = async function(){ const r = await api("/fraud"); renderOut("fraud-out", r.data); };
+$("btn-fraud-scan").onclick = withSpin($("btn-fraud-scan"), async function(){
+  const r = await postConfirm("/fraud/scan", {});
+  renderOut("fraud-out", r.data);
+});
+$("btn-fraud-stop").onclick = async function(){
+  const r = await postConfirm("/fraud/" + $("fraud-a").value + "/stop", {other_tg: parseInt($("fraud-b").value || "0", 10)});
+  renderOut("fraud-out", r.data);
+};
+
+/* --- Подписки --- */
+$("btn-sub-load").onclick = async function(){
+  const r = await api("/subs/" + $("sub-id").value);
+  renderOut("sub-card-out", r.data);
+};
+$("btn-sub-devices").onclick = async function(){
+  const r = await api("/subs/" + $("sub-id").value + "/devices");
+  renderOut("sub-devices-out", r.data);
+};
+document.querySelectorAll("[data-sub]").forEach(function(b){
+  b.onclick = withSpin(b, async function(){
+    const id = $("sub-id").value;
+    const a = b.dataset.sub;
+    let body = {};
+    if (a === "extend") body = {days: parseInt($("sub-days").value || "0", 10)};
+    if (a === "expire") body = {until: $("sub-until").value};
+    if (a === "hwid") body = {limit: parseInt($("sub-hwid").value || "0", 10)};
+    if (a === "traffic") body = {gb: parseInt($("sub-traffic").value || "0", 10)};
+    if (a === "lte") { const v = $("sub-lte").value.trim(); body = v === "" ? {gb: null} : {gb: parseInt(v, 10)}; }
+    if (a === "trial") body = {period_days: parseInt($("sub-trial").value || "0", 10)};
+    const r = await postConfirm("/subs/" + id + "/" + a, body);
+    $("sub-msg").textContent = r.status === 200 ? "Готово" : ("Ошибка: " + (r.data.error || r.status));
+    if (r.status === 200) { toast("Подписка обновлена", "ok"); const c = await api("/subs/" + id); renderOut("sub-card-out", c.data); }
+  });
+});
+$("btn-bulk").onclick = async function(){
+  const kind = $("bulk-kind").value;
+  const body = {};
+  if (kind === "extend") { body.days = parseInt($("bulk-days").value || "0", 10); body.direction = body.days >= 0 ? "extend" : "reduce"; }
+  else { body.value = parseInt($("bulk-value").value || "0", 10); body.kind_limit = $("bulk-kind-limit").value || "hwid"; }
+  const r = await postConfirm("/subs/bulk/" + kind, body);
+  renderOut("bulk-out", r.data);
+};
+$("btn-presets").onclick = async function(){
+  const r = await api("/subs/presets");
+  renderOut("presets-out", r.data);
+  if (r.status === 200 && r.data.presets) {
+    const p = r.data.presets;
+    const div = document.createElement("div");
+    div.innerHTML = '<h3>Изменить пресеты</h3>' +
+      '<label>Триал, дней<input id="pr-trial" type="number" value="' + (p.paid_trial_period || 0) + '"></label>' +
+      '<label>Лимит устройств<input id="pr-hwid" type="number" value="' + (p.paid_preset_hwid || 0) + '"></label>' +
+      '<label>Лимит трафика, ГБ<input id="pr-traffic" type="number" value="' + (p.paid_preset_traffic || 0) + '"></label>' +
+      '<label>Лимит LTE, ГБ<input id="pr-lte" type="number" value="' + (p.paid_preset_lte || 0) + '"></label>' +
+      '<button id="btn-pr-save" class="ghost">Сохранить пресеты</button>';
+    $("presets-out").appendChild(div);
+    $("btn-pr-save").onclick = async function(){
+      const rr = await api("/subs/presets", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({
+        paid_trial_period: parseInt($("pr-trial").value || "0", 10),
+        paid_preset_hwid: parseInt($("pr-hwid").value || "0", 10),
+        paid_preset_traffic: parseInt($("pr-traffic").value || "0", 10),
+        paid_preset_lte: parseInt($("pr-lte").value || "0", 10)})});
+      toast(rr.status === 200 ? "Пресеты сохранены" : "Ошибка: " + (rr.data.error || rr.status), rr.status === 200 ? "ok" : "err");
+    };
+  }
+};
+$("btn-asub").onclick = withSpin($("btn-asub"), async function(){
+  const r = await api("/admin-subs", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({tg_id: parseInt($("asub-tg").value || "0", 10)})});
+  renderOut("asub-out", r.data);
+});
+$("btn-asub-list").onclick = async function(){ const r = await api("/admin-subs"); renderOut("asub-out", r.data); };
+$("btn-asub-card").onclick = async function(){ const r = await api("/admin-subs/" + $("asub-id").value); renderOut("asub-out", r.data); };
+$("btn-referrals").onclick = async function(){ const r = await api("/referrals"); renderOut("ref-out", r.data); };
+$("btn-lte").onclick = async function(){ const r = await postConfirm("/subs/lte/check-now", {}); renderOut("ref-out", r.data); };
+
+/* --- Финансы и оплаты --- */
+$("btn-finance").onclick = async function(){
+  const r = await api("/finance?period=" + $("fin-period").value);
+  renderOut("finance-out", r.data);
+};
+$("btn-servers").onclick = async function(){ const r = await api("/servers"); renderOut("finance-out", r.data); };
+$("btn-platega").onclick = async function(){ const r = await api("/platega"); renderOut("platega-out", r.data); };
+$("btn-platega-save").onclick = withSpin($("btn-platega-save"), async function(){
+  const body = {};
+  const m = $("pl-merchant").value.trim();
+  const s = $("pl-secret").value;
+  if (m) body.platega_merchant_id = m;
+  if (s) body.platega_secret = s;
+  const r = await api("/platega", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+  renderOut("platega-out", r.data);
+  if (r.status === 200) { $("pl-secret").value = ""; toast("Данные Platega сохранены", "ok"); }
+});
+let lastReconcile = null;
+$("btn-reconcile").onclick = withSpin($("btn-reconcile"), async function(){
+  const r = await postConfirm("/reconcile/run", {});
+  lastReconcile = r.data;
+  renderOut("reconcile-out", r.data);
+});
+$("btn-reconcile-fix").onclick = async function(){
+  const fixes = (lastReconcile && lastReconcile.fixable) || [];
+  if (!fixes.length) { toast("Сначала запустите сверку — расхождений нет", "err"); return; }
+  const r = await postConfirm("/reconcile/fix", {fixes: fixes});
+  renderOut("reconcile-out", r.data);
+};
+$("btn-srv-add").onclick = withSpin($("btn-srv-add"), async function(){
+  const r = await api("/servers", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({name: $("srv-name").value, price_rub: parseInt($("srv-price").value || "0", 10), pay_day: parseInt($("srv-day").value || "1", 10)})});
+  renderOut("srv-out", r.data);
+});
+$("btn-srv-card").onclick = async function(){ const r = await api("/servers/" + $("srv-id").value); renderOut("srv-out", r.data); };
+$("btn-srv-mark").onclick = async function(){
+  const r = await api("/servers/" + $("srv-id").value + "/mark", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({status: "paid"})});
+  renderOut("srv-out", r.data);
+};
+$("btn-srv-del").onclick = async function(){
+  const r = await postConfirmAny("/servers/" + $("srv-id").value, "DELETE", {});
+  renderOut("srv-out", r.data);
+};
+$("btn-payments").onclick = async function(){
+  const st = $("pay-status").value;
+  const r = await api("/payments" + (st ? "?status=" + st : ""));
+  renderOut("payments-out", r.data);
+};
+$("btn-pay-card").onclick = async function(){ const r = await api("/payments/" + $("pay-id").value); renderOut("payments-out", r.data); };
+$("btn-pay-refund").onclick = async function(){
+  const r = await postConfirm("/payments/" + $("pay-id").value + "/refund", {revoke: $("pay-revoke").checked});
+  renderOut("payments-out", r.data);
+  if (r.status === 200) toast("Возврат оформлен", "ok");
+};
+
+/* --- Рассылка, промокоды, тарифы --- */
+let bcPhoto = "";
+$("btn-bc-upload").onclick = async function(){
+  const f = $("bc-photo").files[0];
+  if (!f) { $("bc-photo-msg").textContent = "Выберите файл"; return; }
   const fd = new FormData(); fd.append("photo", f);
   const r = await fetch(API + "/broadcast/upload", {method: "POST", credentials: "same-origin", headers: {"X-CSRF-Token": csrf()}, body: fd});
   let data = {}; try { data = await r.json(); } catch(e) {}
-  if (r.status === 200) { bcPhoto = data.photo_file_id || ""; document.getElementById("bc-photo-msg").textContent = "Фото загружено (" + (data.width || "?") + "×" + (data.height || "?") + ")"; }
-  else document.getElementById("bc-photo-msg").textContent = "Ошибка: " + (data.error || r.status);
+  if (r.status === 200) { bcPhoto = data.photo_file_id || ""; $("bc-photo-msg").textContent = "Фото загружено (" + (data.width || "?") + "×" + (data.height || "?") + ")"; }
+  else $("bc-photo-msg").textContent = "Ошибка: " + (data.error || r.status);
 };
-document.getElementById("btn-bc-preview").onclick = async () => {
+$("btn-bc-preview").onclick = async function(){
   const r = await api("/broadcast/preview", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({text: document.getElementById("bc-text").value, segment: document.getElementById("bc-seg").value, photo: bcPhoto || undefined})});
-  document.getElementById("bc-out").textContent = r.status === 200 ? ("Получателей: " + (r.data.count || 0)) : ("Ошибка: " + (r.data.error || r.status));
+    body: JSON.stringify({text: $("bc-text").value, segment: $("bc-seg").value, photo: bcPhoto || undefined})});
+  $("bc-out").textContent = r.status === 200 ? ("Получателей: " + (r.data.count || 0)) : ("Ошибка: " + (r.data.error || r.status));
 };
-document.getElementById("btn-bc-send").onclick = async () => {
-  const r = await postConfirm("/broadcast/send", {text: document.getElementById("bc-text").value, segment: document.getElementById("bc-seg").value, photo: bcPhoto || undefined});
-  document.getElementById("bc-out").textContent = r.status === 200 ? "Рассылка запущена" : ("Ошибка: " + (r.data.error || r.status));
-  if (r.status === 200) bcPhoto = "";
+$("btn-bc-send").onclick = async function(){
+  const r = await postConfirm("/broadcast/send", {text: $("bc-text").value, segment: $("bc-seg").value, photo: bcPhoto || undefined});
+  $("bc-out").textContent = r.status === 200 ? "Рассылка запущена" : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) { bcPhoto = ""; toast("Рассылка запущена", "ok"); }
 };
-document.getElementById("btn-asub").onclick = async () => {
-  const r = await api("/admin-subs", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({tg_id: parseInt(document.getElementById("asub-tg").value || "0", 10)})});
-  renderRows("asub-out", r.data);
+$("btn-promos").onclick = async function(){ const r = await api("/promos"); renderOut("promos-out", r.data); };
+$("btn-pr-add").onclick = withSpin($("btn-pr-add"), async function(){
+  const body = {code: $("pr-code").value.trim()};
+  const exp = $("pr-exp").value.trim(); if (exp) body.expires_at = exp;
+  const owner = $("pr-owner").value.trim(); if (owner) body.owner_tg_id = parseInt(owner, 10);
+  const note = $("pr-note").value.trim(); if (note) body.note = note;
+  const r = await api("/promos", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+  renderOut("promos-out", r.data);
+});
+$("btn-pr-find").onclick = async function(){ const r = await api("/promos/find?q=" + encodeURIComponent($("pr-code").value)); renderOut("promos-out", r.data); };
+$("btn-pr-toggle").onclick = async function(){
+  const r = await api("/promos/" + $("pr-code").value + "/toggle", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+  renderOut("promos-out", r.data);
 };
-document.getElementById("btn-referrals").onclick = async () => { const r = await api("/referrals"); renderRows("asub-out", r.data); };
-document.getElementById("btn-lte").onclick = async () => { const r = await postConfirm("/subs/lte/check-now", {}); renderRows("asub-out", r.data); };
-document.getElementById("btn-sup-open").onclick = async () => {
-  const id = document.getElementById("sup-user").value;
-  const r = await api("/support/topics/" + id);
-  if (r.status !== 200) { document.getElementById("sup-msgs").textContent = "Ошибка: " + (r.data.error || r.status); return; }
-  document.getElementById("sup-msgs").innerHTML = (r.data.messages || []).map(m =>
-    "<p><b>" + (m.from_admin ? "Админ" : "Юзер") + ":</b> " + esc(m.text) + " <span class='mut'>" + esc(m.created_at || "") + "</span></p>").join("") || "<p class='mut'>Сообщений нет</p>";
+$("btn-pr-del").onclick = async function(){
+  const r = await postConfirm("/promos/" + $("pr-code").value + "/delete", {});
+  renderOut("promos-out", r.data);
 };
-document.getElementById("btn-sup-reply").onclick = async () => {
-  const id = document.getElementById("sup-user").value;
-  const r = await api("/support/topics/" + id + "/reply", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({text: document.getElementById("sup-text").value, close: document.getElementById("sup-close").checked})});
-  document.getElementById("sup-msg").textContent = r.status === 200 ? ("Отправлено (" + (r.data.delivered_via || "?") + ")") : ("Ошибка: " + (r.data.error || r.status));
-};
-document.getElementById("btn-sup-close").onclick = async () => {
-  const id = document.getElementById("sup-user").value;
-  const r = await api("/support/topics/" + id + "/close", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
-  document.getElementById("sup-msg").textContent = r.status === 200 ? "Обращение закрыто" : ("Ошибка: " + (r.data.error || r.status));
-};
-document.getElementById("btn-pf-load").onclick = async () => {
-  const r = await api("/panel/profiles/" + document.getElementById("pf-uuid").value);
-  renderRows("pf-out", r.data);
-};
-document.getElementById("btn-pf-save").onclick = async () => {
-  const uuid = document.getElementById("pf-uuid").value, tag = document.getElementById("pf-tag").value;
+$("btn-pr-batch").onclick = withSpin($("btn-pr-batch"), async function(){
+  const r = await api("/promos/batch", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({count: parseInt($("pr-count").value || "10", 10)})});
+  renderOut("promos-out", r.data);
+});
+$("btn-tariffs").onclick = async function(){ const r = await api("/tariffs"); renderOut("tariffs-out", r.data); };
+$("btn-tf-add").onclick = withSpin($("btn-tf-add"), async function(){
+  const r = await api("/tariffs", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({name: $("tf-name").value, period_seconds: parseInt($("tf-seconds").value || "0", 10), price: parseInt($("tf-price").value || "0", 10)})});
+  renderOut("tariffs-out", r.data);
+});
+$("btn-tf-patch").onclick = async function(){
   const body = {};
-  const port = document.getElementById("pf-port").value;
+  const p = $("tf-price2").value.trim();
+  if (p) body.price = parseInt(p, 10);
+  const r = await api("/tariffs/" + $("tf-id").value, {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+  renderOut("tariffs-out", r.data);
+};
+$("btn-tf-del").onclick = async function(){
+  const r = await postConfirmAny("/tariffs/" + $("tf-id").value, "DELETE", {});
+  renderOut("tariffs-out", r.data);
+};
+
+/* --- Панель Remnawave и узлы --- */
+$("btn-panel").onclick = async function(){ const r = await api("/panel"); renderOut("panel-out", r.data); };
+$("btn-rename").onclick = async function(){ const r = await postConfirm("/panel/rename-clients", {}); renderOut("panel-out", r.data); };
+$("btn-yandex").onclick = async function(){ const r = await api("/yandex"); renderOut("panel-out", r.data); };
+$("btn-pf-load").onclick = async function(){
+  const r = await api("/panel/profiles/" + $("pf-uuid").value);
+  renderOut("pf-out", r.data);
+};
+$("btn-pf-save").onclick = async function(){
+  const uuid = $("pf-uuid").value, tag = $("pf-tag").value;
+  const body = {};
+  const port = $("pf-port").value;
   if (port) body.port = parseInt(port, 10);
-  const sni = document.getElementById("pf-sni").value.trim();
-  if (sni) body.serverNames = sni.split(",").map(s => s.trim()).filter(Boolean);
-  const dest = document.getElementById("pf-dest").value.trim();
+  const sni = $("pf-sni").value.trim();
+  if (sni) body.serverNames = sni.split(",").map(function(s){ return s.trim(); }).filter(Boolean);
+  const dest = $("pf-dest").value.trim();
   if (dest) body.dest = dest;
-  const fp = document.getElementById("pf-fp").value.trim();
+  const fp = $("pf-fp").value.trim();
   if (fp) body.fingerprint = fp;
   const r = await postConfirmAny("/panel/profiles/" + uuid + "/inbounds/" + encodeURIComponent(tag), "PATCH", body);
-  renderRows("pf-out", r.data);
+  renderOut("pf-out", r.data);
 };
-document.getElementById("btn-ph-create").onclick = async () => {
-  const r = await postConfirm("/panel/hosts", {inboundUuid: document.getElementById("ph-inbound").value,
-    remark: document.getElementById("ph-remark").value, address: document.getElementById("ph-addr").value,
-    port: parseInt(document.getElementById("ph-port").value || "0", 10), sni: document.getElementById("ph-sni").value});
-  renderRows("ph-out", r.data);
+$("btn-ph-create").onclick = async function(){
+  const r = await postConfirm("/panel/hosts", {inboundUuid: $("ph-inbound").value,
+    remark: $("ph-remark").value, address: $("ph-addr").value,
+    port: parseInt($("ph-port").value || "0", 10), sni: $("ph-sni").value});
+  renderOut("ph-out", r.data);
 };
-document.getElementById("btn-ph-toggle").onclick = async () => {
-  const uuid = document.getElementById("ph-uuid").value;
-  const r = await postConfirmAny("/panel/hosts/" + uuid, "PATCH", {isDisabled: document.getElementById("ph-disabled").value === "true"});
-  renderRows("ph-out", r.data);
+$("btn-ph-toggle").onclick = async function(){
+  const uuid = $("ph-uuid").value;
+  const r = await postConfirmAny("/panel/hosts/" + uuid, "PATCH", {isDisabled: $("ph-disabled").value === "true"});
+  renderOut("ph-out", r.data);
 };
-document.getElementById("btn-ph-del").onclick = async () => {
-  const uuid = document.getElementById("ph-uuid").value;
+$("btn-ph-del").onclick = async function(){
+  const uuid = $("ph-uuid").value;
   const r = await postConfirmAny("/panel/hosts/" + uuid, "DELETE", {});
-  renderRows("ph-out", r.data);
+  renderOut("ph-out", r.data);
 };
-document.getElementById("btn-rename").onclick = async () => { const r = await postConfirm("/panel/rename-clients", {}); renderRows("panel-out", r.data); };
-document.getElementById("btn-yandex").onclick = async () => { const r = await api("/yandex"); renderRows("panel-out", r.data); };
-document.getElementById("btn-job").onclick = async () => {
-  const r = await postConfirm("/jobs/run-now", {job: document.getElementById("job-sel").value});
-  renderRows("job-out", r.data);
+$("btn-ps-show").onclick = async function(){ const r = await api("/panel/settings"); renderOut("ps-out", r.data); };
+$("btn-ps-save").onclick = async function(){
+  const r = await api("/panel/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({rw_url: $("ps-url").value})});
+  renderOut("ps-out", r.data);
 };
-document.getElementById("btn-helper-add").onclick = async () => {
-  const r = await api("/helpers/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({tg_id: parseInt(document.getElementById("helper-tg").value || "0", 10)})});
-  renderRows("helpers-out", r.data);
+$("btn-ps-test").onclick = async function(){
+  const r = await api("/panel/settings/test", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+  renderOut("ps-out", r.data);
 };
-document.getElementById("btn-helper-perm").onclick = async () => {
-  const id = document.getElementById("helper-tg").value;
-  const r = await api("/helpers/" + id + "/perm", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({perm: document.getElementById("helper-perm-sel").value})});
-  renderRows("helpers-out", r.data);
+$("btn-nodes").onclick = async function(){ const r = await api("/nodes"); renderOut("nodes-out", r.data); };
+$("btn-squads").onclick = async function(){ const r = await api("/squads"); renderOut("nodes-out", r.data); };
+$("btn-node-users").onclick = async function(){
+  let q = "";
+  const s = $("node-start").value.trim(), e = $("node-end").value.trim();
+  if (s) q += (q ? "&" : "?") + "start=" + encodeURIComponent(s);
+  if (e) q += (q ? "&" : "?") + "end=" + encodeURIComponent(e);
+  const r = await api("/nodes/" + $("node-id").value + "/users" + q);
+  renderOut("nodes-out", r.data);
 };
-document.getElementById("btn-helper-del").onclick = async () => {
-  const id = document.getElementById("helper-tg").value;
-  const r = await postConfirm("/helpers/" + id + "/delete", {});
-  renderRows("helpers-out", r.data);
+
+/* --- Логи, синхронизация, операторы, сайт, бэкап --- */
+$("btn-logs").onclick = async function(){
+  let q = "?kind=" + $("logs-kind").value;
+  const u = $("logs-user").value.trim(); if (u) q += "&user_id=" + u;
+  const f = $("logs-from").value.trim(); if (f) q += "&date_from=" + encodeURIComponent(f);
+  const t = $("logs-to").value.trim(); if (t) q += "&date_to=" + encodeURIComponent(t);
+  const r = await api("/logs" + q);
+  renderOut("logs-out", r.data);
 };
-document.getElementById("btn-helpers").onclick = async () => { const r = await api("/helpers"); renderRows("helpers-out", r.data); };
-document.getElementById("btn-st-save").onclick = async () => {
+$("btn-logs-export").onclick = function(){
+  $("btn-logs-export").href = "/api/admin/logs/export?kind=" + $("logs-kind").value;
+};
+$("btn-logs-purge").onclick = async function(){
+  const r = await postConfirm("/logs/purge", {});
+  renderOut("logs-out", r.data);
+};
+$("btn-downtime").onclick = async function(){ const r = await api("/downtime"); renderOut("downtime-out", r.data); };
+$("btn-online").onclick = async function(){ const r = await api("/online"); renderOut("downtime-out", r.data); };
+$("btn-psync").onclick = async function(){ const r = await postConfirm("/panel-sync", {}); renderOut("psync-out", r.data); };
+$("btn-psync-set").onclick = async function(){ const r = await api("/panel-sync/settings"); renderOut("psync-out", r.data); };
+$("btn-morning").onclick = async function(){ const r = await api("/morning"); renderOut("morning-out", r.data); };
+$("btn-morning-run").onclick = async function(){ const r = await postConfirm("/morning/run-now", {}); renderOut("morning-out", r.data); };
+$("btn-morning-save").onclick = async function(){
+  const body = {morning_sync: {}};
+  const t = $("mor-time").value.trim();
+  if (t) body.morning_sync.time = t;
+  body.morning_sync.enabled = $("mor-enabled").checked;
+  const r = await api("/morning", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+  renderOut("morning-out", r.data);
+};
+$("btn-job").onclick = async function(){
+  const r = await postConfirm("/jobs/run-now", {job: $("job-sel").value});
+  renderOut("job-out", r.data);
+};
+$("btn-netcheck-show").onclick = async function(){ const r = await api("/netcheck"); renderOut("netcheck-out", r.data); };
+$("btn-netcheck").onclick = withSpin($("btn-netcheck"), async function(){
+  const r = await postConfirm("/netcheck/run", {});
+  renderOut("netcheck-out", r.data);
+});
+$("btn-site-show").onclick = async function(){ const r = await api("/site"); renderOut("site-out", r.data); };
+$("btn-deploy").onclick = async function(){ const r = await postConfirm("/site/deploy", {}); renderOut("site-out", r.data); };
+$("btn-st-save").onclick = async function(){
   const r = await api("/site/texts", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({field: document.getElementById("st-field").value, text: document.getElementById("st-text").value})});
-  renderRows("st-out", r.data);
+    body: JSON.stringify({field: $("st-field").value, text: $("st-text").value})});
+  renderOut("st-out", r.data);
 };
-document.getElementById("btn-st-show").onclick = async () => { const r = await api("/site/texts"); renderRows("st-out", r.data); };
-document.getElementById("btn-site-del").onclick = async () => { const r = await postConfirm("/site/delete", {}); renderRows("st-out", r.data); };
-document.getElementById("btn-webacc").onclick = async () => { const r = await api("/web-access"); renderRows("wa-out", r.data); };
-document.getElementById("btn-wa-save").onclick = async () => {
+$("btn-st-show").onclick = async function(){ const r = await api("/site/texts"); renderOut("st-out", r.data); };
+$("btn-site-del").onclick = async function(){ const r = await postConfirm("/site/delete", {}); renderOut("site-del-out", r.data); };
+$("btn-backup-restore").onclick = async function(){
+  const f = $("bk-file").files[0];
+  if (!f) { toast("Выберите файл архива", "err"); return; }
+  if (!$("bk-fresh").checked) { toast("Подтвердите, что свежий бэкап сделан", "err"); return; }
+  const b64 = await new Promise(function(res, rej){
+    const rd = new FileReader();
+    rd.onload = function(){ res(String(rd.result).split(",")[1] || ""); };
+    rd.onerror = rej;
+    rd.readAsDataURL(f);
+  });
+  const r = await postConfirm("/backup/restore", {fresh_backup: true, archive: b64});
+  renderOut("backup-out", r.data);
+  if (r.status === 200) toast("Бэкап восстановлен, бот перезапускается", "ok");
+};
+$("btn-git").onclick = async function(){ const r = await postConfirm("/git-update", {}); renderOut("git-out", r.data); };
+
+/* --- Поддержка и настройки --- */
+$("btn-support").onclick = async function(){ const r = await api("/support/topics"); renderOut("topics-out", r.data); };
+$("btn-sup-open").onclick = async function(){
+  const id = $("sup-user").value;
+  const r = await api("/support/topics/" + id);
+  if (r.status !== 200) { $("sup-msgs").textContent = "Ошибка: " + (r.data.error || r.status); return; }
+  $("sup-msgs").innerHTML = (r.data.messages || []).map(function(m){
+    return "<p><b>" + (m.from_admin ? "Админ" : "Юзер") + ":</b> " + esc(m.text) + ' <span class="mut">' + fmtDate(m.created_at) + "</span></p>";
+  }).join("") || '<div class="empty"><span class="big">💬</span>Сообщений нет</div>';
+};
+$("btn-sup-reply").onclick = withSpin($("btn-sup-reply"), async function(){
+  const id = $("sup-user").value;
+  const r = await api("/support/topics/" + id + "/reply", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({text: $("sup-text").value, close: $("sup-close").checked})});
+  $("sup-msg").textContent = r.status === 200 ? ("Отправлено (" + (r.data.delivered_via || "?") + ")") : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) { $("sup-text").value = ""; toast("Ответ отправлен", "ok"); }
+});
+$("btn-sup-close").onclick = async function(){
+  const id = $("sup-user").value;
+  const r = await api("/support/topics/" + id + "/close", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+  $("sup-msg").textContent = r.status === 200 ? "Обращение закрыто" : ("Ошибка: " + (r.data.error || r.status));
+};
+$("btn-ss-save").onclick = async function(){
+  const r = await api("/support/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({support_group_id: parseInt($("ss-group").value || "0", 10),
+      log_channel_id: parseInt($("ss-log").value || "0", 10)})});
+  renderOut("ss-out", r.data);
+};
+$("btn-helper-add").onclick = async function(){
+  const r = await api("/helpers/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({tg_id: parseInt($("helper-tg").value || "0", 10)})});
+  renderOut("helpers-out", r.data);
+};
+$("btn-helper-perm").onclick = async function(){
+  const id = $("helper-tg").value;
+  const r = await api("/helpers/" + id + "/perm", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({perm: $("helper-perm-sel").value})});
+  renderOut("helpers-out", r.data);
+};
+$("btn-helper-del").onclick = async function(){
+  const id = $("helper-tg").value;
+  const r = await postConfirm("/helpers/" + id + "/delete", {});
+  renderOut("helpers-out", r.data);
+};
+$("btn-helpers").onclick = async function(){ const r = await api("/helpers"); renderOut("helpers-out", r.data); };
+$("btn-webacc").onclick = async function(){ const r = await api("/web-access"); renderOut("wa-out", r.data); };
+$("btn-wa-save").onclick = async function(){
   const body = {};
-  const port = document.getElementById("wa-port").value;
+  const port = $("wa-port").value;
   if (port) body.webapi_port = parseInt(port, 10);
-  const bind = document.getElementById("wa-bind").value.trim();
+  const bind = $("wa-bind").value.trim();
   if (bind) body.webapi_bind = bind;
   const r = await api("/web-access", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
-  renderRows("wa-out", r.data);
+  renderOut("wa-out", r.data);
 };
-document.getElementById("btn-ps-save").onclick = async () => {
-  const r = await api("/panel/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({rw_url: document.getElementById("ps-url").value})});
-  renderRows("ps-out", r.data);
-};
-document.getElementById("btn-ps-test").onclick = async () => {
-  const r = await api("/panel/settings/test", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
-  renderRows("ps-out", r.data);
-};
-document.getElementById("btn-ss-save").onclick = async () => {
-  const r = await api("/support/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({support_group_id: parseInt(document.getElementById("ss-group").value || "0", 10),
-      log_channel_id: parseInt(document.getElementById("ss-log").value || "0", 10)})});
-  renderRows("ps-out", r.data);
-};
-document.getElementById("btn-nodes").onclick = async () => { const r = await api("/nodes"); renderRows("nodes-out", r.data); };
-document.getElementById("btn-panel").onclick = async () => { const r = await api("/panel"); renderRows("nodes-out", r.data); };
-document.getElementById("btn-psync").onclick = async () => { const r = await postConfirm("/panel-sync", {}); renderRows("nodes-out", r.data); };
-document.getElementById("btn-logs").onclick = async () => { const r = await api("/logs"); renderRows("logs-out", r.data); };
-document.getElementById("btn-morning").onclick = async () => { const r = await api("/morning"); renderRows("logs-out", r.data); };
-document.getElementById("btn-morning-run").onclick = async () => { const r = await postConfirm("/morning/run-now", {}); renderRows("logs-out", r.data); };
-document.getElementById("btn-netcheck").onclick = async () => { const r = await postConfirm("/netcheck/run", {}); renderRows("logs-out", r.data); };
-document.getElementById("btn-downtime").onclick = async () => { const r = await api("/downtime"); renderRows("logs-out", r.data); };
-document.getElementById("btn-deploy").onclick = async () => { const r = await postConfirm("/site/deploy", {}); renderRows("infra-out", r.data); };
-document.getElementById("btn-git").onclick = async () => { const r = await postConfirm("/git-update", {}); renderRows("infra-out", r.data); };
-document.getElementById("btn-support").onclick = async () => { const r = await api("/support/topics"); renderRows("infra-out", r.data); };
-document.getElementById("btn-blacklist").onclick = async () => { const r = await api("/blacklist"); renderRows("infra-out", r.data); };
-document.getElementById("btn-fraud").onclick = async () => { const r = await api("/fraud"); renderRows("infra-out", r.data); };
+$("btn-ch-show").onclick = async function(){ const r = await api("/connect-help"); renderOut("ch-out", r.data); };
+
 (function init(){
   const params = new URLSearchParams(location.search);
   if (params.get("token")) { show("setup", true); }
@@ -569,14 +1253,16 @@ document.getElementById("btn-fraud").onclick = async () => { const r = await api
   s.setAttribute("data-telegram-login", "__BOT__");
   s.setAttribute("data-size", "large");
   s.setAttribute("data-auth-url", location.origin + "/admin/?tg=1");
-  document.getElementById("tg-widget").appendChild(s);
+  $("tg-widget").appendChild(s);
+  const start = (location.hash || "#overview").slice(1);
+  if (SECTION_TITLES[start]) showSection(start); else showSection("overview");
   if (params.get("tg") === "1") {
     const user = {};
-    params.forEach((v, k) => { if (k !== "tg") user[k] = v; });
+    params.forEach(function(v, k){ if (k !== "tg") user[k] = v; });
     api("/auth/telegram", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({user})})
-      .then(async r => { history.replaceState(null, "", location.pathname); if (r.status === 200) { await refreshMe(); await loadDashboard(); await loadSettings(); } });
+      .then(async function(r){ history.replaceState(null, "", location.pathname); if (r.status === 200) { await refreshMe(); await loadDashboard(); await loadSettings(); } });
   } else {
-    refreshMe().then(ok => { if (ok) { loadDashboard(); loadSettings(); } });
+    refreshMe().then(function(ok){ if (ok) { loadDashboard(); loadSettings(); } });
   }
 })();
 </script>

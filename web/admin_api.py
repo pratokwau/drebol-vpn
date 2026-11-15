@@ -638,6 +638,51 @@ async def muse_account_create(request):
     })
 
 
+async def muse_account_create_direct(request):
+    """Mark задаёт аккаунт Muse напрямую: почта + пароль.
+
+    Второй вариант рядом с одноразовой ссылкой: Mark сам придумывает
+    пароль на сайте и передаёт его Muse после создания. Пароль и его
+    хеш никогда не возвращаются в ответе и не пишутся в журнал.
+    Создаёт новый аккаунт или обновляет пароль существующего."""
+    from aiohttp import web
+    from core.database import (
+        admin_account_by_email, admin_account_create,
+        admin_account_set_password, admin_sessions_drop_account,
+    )
+    from web.webapi import _valid_email, hash_secret
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    if actor["kind"] != "mark":
+        return web.json_response({"error": "mark_only"}, status=403)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = _valid_email(body.get("email"))
+    password = str(body.get("password") or "")
+    confirm = str(body.get("password_confirm") or "")
+    if not email:
+        return web.json_response({"error": "bad_email"}, status=400)
+    if len(password) < 8 or len(password) > 128:
+        return web.json_response({"error": "bad_password"}, status=400)
+    if password != confirm:
+        return web.json_response({"error": "password_mismatch"}, status=400)
+    existing = await admin_account_by_email(email)
+    if existing:
+        account_id = int(existing[0])
+    else:
+        account_id = await admin_account_create(email, actor["tg_id"])
+        if not account_id:
+            return web.json_response({"error": "email_taken"}, status=409)
+    await admin_account_set_password(account_id, hash_secret(password))
+    await admin_sessions_drop_account(account_id)
+    await _audit(actor, "muse_account_direct", f"email: {email}")
+    return web.json_response({"ok": True, "account_id": account_id,
+                              "email": email})
+
+
 async def muse_account_list(request):
     from aiohttp import web
     from core.database import admin_account_list
@@ -699,6 +744,7 @@ def build_admin_app():
     app.router.add_get("/settings", settings_get)
     app.router.add_patch("/settings", settings_patch)
     app.router.add_post("/muse-account", muse_account_create)
+    app.router.add_post("/muse-account/direct", muse_account_create_direct)
     app.router.add_get("/muse-account", muse_account_list)
     # Фаза 2: юзеры и подписки (web/admin_users.py), финансы и
     # рассылка (web/admin_finance.py); инфраструктура регистрируется
