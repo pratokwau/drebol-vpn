@@ -141,13 +141,18 @@ async def on_group_message(update: Update, context) -> None:
     """Сообщение в группе (в теме) → переслать юзеру в бота поддержки.
 
     Сюда попадают и ответы Марка/помощников, и служебные сообщения
-    бота (карточка темы) — свои сообщения бота не пересылаем.
+    бота (карточка темы), и ответы основного бота из веб-админки.
+    Не пересылаем только свои сообщения (карточка темы и т.п.):
+    сообщения других ботов — в первую очередь основного бота —
+    пересылаем, иначе ответ из веб-админки остался бы в теме
+    и не дошёл бы до юзера.
     """
     msg = update.message
     if not msg or not msg.message_thread_id:
         return
     if msg.from_user and msg.from_user.is_bot:
-        return
+        if msg.from_user.id == context.bot.id:
+            return
     cfg = load_config()
     group_id = cfg.get("support_group_id")
     if not group_id or msg.chat_id != int(group_id):

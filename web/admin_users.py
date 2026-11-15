@@ -407,13 +407,17 @@ async def subs_bulk(request):
         return err
     body = await _json_body(request)
     kind = str(request.match_info.get("kind") or "")
-    if kind not in ("extend", "limits"):
+    if kind not in ("extend", "limits", "lte"):
         return web.json_response({"error": "bad_action"}, status=400)
     token = str(body.get("confirm_token") or "")
     if not token:
+        summary = {"extend": "Массовый сдвиг сроков",
+                   "limits": "Массовая смена лимитов",
+                   "lte": "Массовая смена LTE-лимита"}.get(
+                       kind, "Массовое действие по подпискам")
         tok = issue_confirm(actor, f"sub_bulk_{kind}", {"body": body},
-                            "Массовое действие по подпискам")
-        return confirm_needed_response(tok, "Массовое действие по подпискам")
+                            summary)
+        return confirm_needed_response(tok, summary)
     payload = take_confirm(actor, token, f"sub_bulk_{kind}")
     if payload is None:
         return web.json_response({"error": "bad_confirm"}, status=403)
@@ -421,7 +425,8 @@ async def subs_bulk(request):
     svc = _service()
     # Массовые действия в paidsub/service.py — глобальные, по всем
     # платным подпискам: bulk_extend(seconds, direction),
-    # bulk_set_limits(kind_limit, value).
+    # bulk_set_limits(kind_limit, value). LTE — тот же bulk_set_limits,
+    # что и в ТГ (handle_paid_bulk_limits_apply), только в базе бота.
     try:
         if kind == "extend":
             seconds = body.get("seconds")
@@ -429,6 +434,8 @@ async def subs_bulk(request):
                 seconds = int(body.get("days") or 0) * 86400
             res = await svc.bulk_extend(int(seconds),
                                         str(body.get("direction") or "extend"))
+        elif kind == "lte":
+            res = await svc.bulk_set_limits("lte", body.get("value"))
         else:
             res = await svc.bulk_set_limits(
                 str(body.get("kind_limit") or "hwid"),
@@ -439,6 +446,37 @@ async def subs_bulk(request):
     await _audit(actor, f"subs_bulk_{kind}",
                  f"updated: {res.get('updated')}")
     return web.json_response({"ok": True, "result": res})
+
+
+async def lte_check_now(request):
+    """Проверка LTE сейчас: тот же lte_fallback_tick(), что и кнопка
+    «🔍 Проверить LTE сейчас» в ТГ (handle_paid_lte_check_now)."""
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    bot = get_bot()
+    if bot is None:
+        return web.json_response({"error": "no_bot"}, status=503)
+    from types import SimpleNamespace
+    from paidsub.handlers import lte_fallback_tick
+    context = SimpleNamespace(bot=bot)
+    try:
+        r = await lte_fallback_tick(context)
+    except Exception as ex:
+        logging.error("админка: lte check-now: %s", ex)
+        return web.json_response({"error": "lte_check_failed"}, status=502)
+    if not r.get("ok"):
+        return web.json_response(
+            {"error": "lte_check_failed",
+             "details": str(r.get("error") or "")}, status=502)
+    await _audit(actor, "lte_check_now",
+                 f"checked: {r['checked']}, switched: {r['switched']}, "
+                 f"restored: {r['restored']}, panel_fail: {r['panel_fail']}")
+    return web.json_response({"ok": True, "checked": r["checked"],
+                              "switched": r["switched"],
+                              "restored": r["restored"],
+                              "panel_fail": r["panel_fail"]})
 
 
 # ── Админские подписки ─────────────────────────────────────────────────────
@@ -482,6 +520,74 @@ async def admin_sub_card(request):
         "limit_ip": row[7], "limit_hwid": row[8], "total_gb": row[9],
         "created_at": str(row[10] or ""), "lte_gb": row[11] if len(row) > 11 else None,
         "kind": "admin"}})
+
+
+async def admin_sub_create(request):
+    """Создаёт админскую подписку: то же create_admin_sub(), что и
+    do_create_sub() в ТГ — панель + база + уведомление юзеру."""
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    try:
+        tg_id = int(body.get("tg_id") or 0)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "bad_tg_id"}, status=400)
+    if tg_id <= 0:
+        return web.json_response({"error": "bad_tg_id"}, status=400)
+    svc = _service()
+    bot = get_bot()
+    try:
+        res = await svc.create_admin_sub(tg_id, bot=bot)
+    except Exception as ex:
+        logging.error("админка: admin-sub create %s: %s", tg_id, ex)
+        return web.json_response({"error": "create_failed"}, status=502)
+    if not res.get("ok"):
+        if res.get("error") == "presets_not_ready":
+            return web.json_response({"error": "presets_not_ready"},
+                                     status=400)
+        if res.get("error") == "user_not_found":
+            return web.json_response({"error": "user_not_found"}, status=404)
+        return web.json_response(
+            {"error": "panel_failed",
+             "details": str(res.get("error") or "")}, status=400)
+    await _audit(actor, "admin_sub_create",
+                 f"tg_id: {tg_id}, sub_id: {res['sub_id']}")
+    return web.json_response({"ok": True, "subscription": {
+        "id": res["sub_id"], "tg_id": tg_id, "email": res["email"],
+        "expire": res["expire"], "sub_url": res["sub_url"]}})
+
+
+# ── Рефералка ───────────────────────────────────────────────────────────────
+
+async def referrals_get(request):
+    """Экран рефералки: итоги и топ пригласивших
+    (get_all_referral_stats + имена из users)."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from config import load_config
+    from core.database import get_user_info
+    from paidsub.storage import get_all_referral_stats
+    cfg = load_config()
+    stats = await get_all_referral_stats()
+    top = []
+    for ref_id, count in stats.get("top_referrers") or []:
+        info = await get_user_info(ref_id)
+        top.append({"tg_id": ref_id,
+                    "first_name": info[1] if info else None,
+                    "username": info[2] if info else None,
+                    "count": int(count)})
+    return web.json_response({
+        "bonus": {"referral_bonus": cfg.get("referral_bonus"),
+                  "referral_invited_bonus": cfg.get("referral_invited_bonus")},
+        "total": int(stats.get("total") or 0),
+        "rewarded": int(stats.get("rewarded") or 0),
+        "total_bonus": int(stats.get("total_bonus") or 0),
+        "top_referrers": top})
 
 
 # ── Пресеты подписок ───────────────────────────────────────────────────────
@@ -555,8 +661,11 @@ def register(app) -> None:
     app.router.add_get("/subs/presets", subs_presets_get)
     app.router.add_patch("/subs/presets", subs_presets_patch)
     app.router.add_post("/subs/bulk/{kind}", subs_bulk)
+    app.router.add_post("/subs/lte/check-now", lte_check_now)
     app.router.add_get("/admin-subs", admin_subs_list)
+    app.router.add_post("/admin-subs", admin_sub_create)
     app.router.add_get("/admin-subs/{sub_id}", admin_sub_card)
+    app.router.add_get("/referrals", referrals_get)
     app.router.add_get("/subs/{sub_id}", sub_card)
     for action in ("toggle", "freeze", "delete", "reissue", "extend",
                    "expire", "hwid", "traffic", "lte", "trial"):

@@ -13,8 +13,11 @@ register(app) добавляет маршруты в переданное адм
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import copy
 import logging
+import os
 import subprocess
 from datetime import datetime
 from types import SimpleNamespace
@@ -42,6 +45,30 @@ SECRET_CONFIG_KEYS = (
     "rw_token", "platega_secret", "support_bot_token", "site_pass",
     "turnstile_secret_key",
 )
+
+
+def _real_schedule_restart() -> None:
+    """Тот же рестарт, что features/backup.py _schedule_restart: выйти
+    через 2 с, systemd поднимет бота заново."""
+    async def _bye():
+        await asyncio.sleep(2)
+        os._exit(0)
+
+    try:
+        asyncio.get_running_loop().create_task(_bye())
+    except RuntimeError:
+        asyncio.get_event_loop().create_task(_bye())
+
+
+# Хук планировщика рестарта: тесты подменяют его стабом, чтобы не убить
+# тестовый процесс (см. set_restart_scheduler).
+_schedule_restart_fn = _real_schedule_restart
+
+
+def set_restart_scheduler(fn) -> None:
+    """Подменить планировщик рестарта (тесты) или вернуть настоящий."""
+    global _schedule_restart_fn
+    _schedule_restart_fn = fn or _real_schedule_restart
 
 
 def _scrub(text: str) -> str:
@@ -653,9 +680,16 @@ async def backup_restore(request):
         return _json_error("restore_failed", 502)
     await _audit(actor, "backup_restore",
                  f"counts={res.get('counts') or {}}")
-    # Рестарт здесь не вызываем: apply заменил файлы, а перезапуск
-    # делает systemd/админ — возвращаем флаг, как в ТГ-экране.
-    return web.json_response({"ok": True, "restart_required": True,
+    # Как в ТГ (features/backup.py _schedule_restart): выходим через 2 с,
+    # systemd поднимает бота заново уже с новой базой. Планировщик —
+    # через хук _schedule_restart_fn, чтобы тесты могли его подменить.
+    try:
+        _schedule_restart_fn()
+    except Exception as ex:
+        logging.error("админка: schedule restart: %s", ex)
+        return web.json_response({"ok": True, "restart": "failed",
+                                  "counts": res.get("counts") or {}})
+    return web.json_response({"ok": True, "restart": "scheduled",
                               "counts": res.get("counts") or {}})
 
 
@@ -1046,6 +1080,842 @@ async def connect_help_patch(request):
     return web.json_response({"ok": True})
 
 
+# ── Переименование клиентов панели ──────────────────────────────────────────
+
+async def panel_rename_clients(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        return confirm_needed_response(
+            issue_confirm(actor, "panel_rename_clients", {},
+                          "Убрать юзернеймы из имён клиентов панели?"),
+            "Убрать юзернеймы из имён клиентов панели?")
+    if take_confirm(actor, token, "panel_rename_clients") is None:
+        return _json_error("bad_confirm", 403)
+    res = await rw_mod.rename_clients_strip_username()
+    await _audit(actor, "panel_rename_clients",
+                 f"renamed={res.get('renamed', 0)} "
+                 f"failed={res.get('failed', 0)} "
+                 f"skipped={res.get('skipped', 0)}")
+    return web.json_response({
+        "ok": True, "renamed": res.get("renamed", 0),
+        "failed": res.get("failed", 0), "skipped": res.get("skipped", 0),
+        "errors": res.get("errors") or [],
+    })
+
+
+# ── Панель: профили/инбаунды/хосты (Mark-only) ───────────────────────────────
+
+def _panel_error(res: dict):
+    """Ошибка панели наружу — только её текст, без внутренностей."""
+    return _json_error(_scrub(str(res.get("error") or "panel_failed")), 502)
+
+
+def _profile_config(profile: dict) -> dict | None:
+    """Xray-JSON профиля: поле config, либо сам профиль, если он и есть
+    конфиг. None — если конфига нет вообще."""
+    cfg = profile.get("config")
+    if isinstance(cfg, dict):
+        return cfg
+    return profile if isinstance(profile, dict) else None
+
+
+def _find_inbound(config: dict, tag: str) -> dict | None:
+    for ib in config.get("inbounds") or []:
+        if isinstance(ib, dict) and ib.get("tag") == tag:
+            return ib
+    return None
+
+
+async def panel_profile_get(request):
+    try:
+        actor = await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    uuid = request.match_info.get("uuid") or ""
+    res = await rw_mod.get_config_profile(uuid)
+    if not res.get("ok"):
+        return _panel_error(res)
+    return web.json_response({"ok": True, "profile": res.get("data")})
+
+
+_INBOUND_EDIT_FIELDS = ("port", "serverNames", "dest", "target", "fingerprint")
+
+
+def _clean_inbound_patch(body: dict):
+    """Проверяет PATCH тела инбаунда. Возвращает (fields, error)."""
+    fields = {}
+    for key in body:
+        if key not in _INBOUND_EDIT_FIELDS:
+            return None, "bad_field"
+    if "port" in body:
+        port = body["port"]
+        if isinstance(port, bool) or not isinstance(port, int) \
+                or not 1 <= port <= 65535:
+            return None, "bad_port"
+        fields["port"] = port
+    if "serverNames" in body:
+        names = body["serverNames"]
+        if not isinstance(names, list) \
+                or any(not isinstance(n, str) for n in names):
+            return None, "bad_server_names"
+        fields["serverNames"] = list(names)
+    for key in ("dest", "target"):
+        if key in body:
+            val = body[key]
+            if not isinstance(val, str) or not val.strip():
+                return None, "bad_dest"
+            fields["dest"] = val.strip()
+    if "fingerprint" in body:
+        fp = body["fingerprint"]
+        if not isinstance(fp, str) or not fp.strip():
+            return None, "bad_fingerprint"
+        fields["fingerprint"] = fp.strip()
+    if not fields:
+        return None, "bad_request"
+    return fields, None
+
+
+async def panel_profile_inbound_patch(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    uuid = request.match_info.get("uuid") or ""
+    tag = request.match_info.get("tag") or ""
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        fields, bad = _clean_inbound_patch(body)
+        if bad:
+            return _json_error(bad)
+        return confirm_needed_response(
+            issue_confirm(actor, "panel_profile_inbound_patch",
+                          {"uuid": uuid, "tag": tag, "fields": fields},
+                          f"Изменить инбаунд {tag} в профиле?"),
+            f"Изменить инбаунд {tag} в профиле?")
+    payload = take_confirm(actor, token, "panel_profile_inbound_patch")
+    if payload is None or payload.get("uuid") != uuid \
+            or payload.get("tag") != tag:
+        return _json_error("bad_confirm", 403)
+    fields = payload.get("fields") or {}
+    # 1. GET профиля, правим копию конфига — только whitelisted-поля.
+    res = await rw_mod.get_config_profile(uuid)
+    if not res.get("ok"):
+        return _panel_error(res)
+    config = _profile_config(res.get("data") or {})
+    if config is None:
+        return _json_error("panel_failed", 502)
+    config = copy.deepcopy(config)
+    inbound = _find_inbound(config, tag)
+    if inbound is None:
+        return _json_error("inbound_not_found", 404)
+    reality_fields = {"serverNames", "dest", "fingerprint"} & set(fields)
+    if reality_fields:
+        ss = inbound.get("streamSettings")
+        if not isinstance(ss, dict):
+            return _json_error("not_reality_inbound", 400)
+        rs = ss.get("realitySettings")
+        if rs is None:
+            if ss.get("security") != "reality":
+                return _json_error("not_reality_inbound", 400)
+            rs = {}
+            ss["realitySettings"] = rs
+        if not isinstance(rs, dict):
+            return _json_error("not_reality_inbound", 400)
+        if "serverNames" in fields:
+            rs["serverNames"] = fields["serverNames"]
+        if "dest" in fields:
+            rs["dest"] = fields["dest"]
+        if "fingerprint" in fields:
+            rs["fingerprint"] = fields["fingerprint"]
+    if "port" in fields:
+        inbound["port"] = fields["port"]
+    # settings.clients / privateKey / shortIds не трогаем вообще: мы не
+    # пишем в settings, только в port и streamSettings.realitySettings.
+    # 2. PATCH {uuid, config} обратно в панель.
+    res = await rw_mod.update_config_profile(uuid, config)
+    if not res.get("ok"):
+        return _panel_error(res)
+    # 3. Валидация: computed-config, затем свежий профиль.
+    comp = await rw_mod.get_computed_config(uuid)
+    if not comp.get("ok"):
+        return _panel_error(comp)
+    fresh = await rw_mod.get_config_profile(uuid)
+    if not fresh.get("ok"):
+        return _panel_error(fresh)
+    fresh_config = _profile_config(fresh.get("data") or {})
+    fresh_inbound = _find_inbound(fresh_config, tag) \
+        if fresh_config is not None else None
+    if fresh_inbound is None:
+        return _json_error("inbound_not_found", 404)
+    await _audit(actor, "panel_profile_inbound_edit",
+                 f"profile={uuid} tag={tag} "
+                 f"fields={','.join(sorted(fields))}")
+    return web.json_response({"ok": True, "inbound": fresh_inbound})
+
+
+_HOST_EDIT_FIELDS = ("remark", "address", "port", "sni", "isDisabled")
+
+
+def _clean_host_patch(body: dict):
+    """Проверяет PATCH тела хоста. Возвращает (fields, error)."""
+    fields = {}
+    for key in body:
+        if key not in _HOST_EDIT_FIELDS:
+            return None, "bad_field"
+    for key in ("remark", "address", "sni"):
+        if key in body:
+            val = body[key]
+            if not isinstance(val, str):
+                return None, "bad_value"
+            fields[key] = val
+    if "port" in body:
+        port = body["port"]
+        if isinstance(port, bool) or not isinstance(port, int) \
+                or not 1 <= port <= 65535:
+            return None, "bad_port"
+        fields["port"] = port
+    if "isDisabled" in body:
+        if not isinstance(body["isDisabled"], bool):
+            return None, "bad_value"
+        fields["isDisabled"] = body["isDisabled"]
+    if not fields:
+        return None, "bad_request"
+    return fields, None
+
+
+async def _read_back_host(uuid: str):
+    """Хост из панели после правки (валидация read-back)."""
+    res = await rw_mod.list_hosts()
+    if not res.get("ok"):
+        return None
+    for h in res.get("hosts") or []:
+        if h.get("uuid") == uuid:
+            return h
+    return None
+
+
+async def panel_host_patch(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    uuid = request.match_info.get("uuid") or ""
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        fields, bad = _clean_host_patch(body)
+        if bad:
+            return _json_error(bad)
+        return confirm_needed_response(
+            issue_confirm(actor, "panel_host_patch",
+                          {"uuid": uuid, "fields": fields},
+                          "Изменить хост в панели?"),
+            "Изменить хост в панели?")
+    payload = take_confirm(actor, token, "panel_host_patch")
+    if payload is None or payload.get("uuid") != uuid:
+        return _json_error("bad_confirm", 403)
+    fields = payload.get("fields") or {}
+    # Хосты — тот же collection-паттерн, что /api/users и
+    # /api/config-profiles: PATCH {uuid, ...fields}, валидация read-back.
+    res = await rw_mod.patch_host(uuid, fields)
+    if not res.get("ok"):
+        return _panel_error(res)
+    host = await _read_back_host(uuid)
+    await _audit(actor, "panel_host_edit",
+                 f"host={uuid} fields={','.join(sorted(fields))}")
+    return web.json_response({"ok": True, "host": host or fields})
+
+
+async def panel_host_create(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        inbound_uuid = str(body.get("inboundUuid") or "")
+        address = str(body.get("address") or "")
+        port = body.get("port")
+        if not inbound_uuid or not address \
+                or isinstance(port, bool) or not isinstance(port, int) \
+                or not 1 <= port <= 65535:
+            return _json_error("bad_request")
+        fields = {
+            "inboundUuid": inbound_uuid,
+            "remark": str(body.get("remark") or ""),
+            "address": address,
+            "port": port,
+            "sni": str(body.get("sni") or ""),
+            # Как в UI панели: новый хост по умолчанию выключен.
+            "isDisabled": True,
+        }
+        return confirm_needed_response(
+            issue_confirm(actor, "panel_host_create", {"fields": fields},
+                          "Создать хост в панели?"),
+            "Создать хост в панели?")
+    payload = take_confirm(actor, token, "panel_host_create")
+    if payload is None:
+        return _json_error("bad_confirm", 403)
+    fields = payload.get("fields") or {}
+    res = await rw_mod.create_host(fields)
+    if not res.get("ok"):
+        return _panel_error(res)
+    data = res.get("data") or {}
+    host = None
+    if isinstance(data, dict) and data.get("uuid"):
+        host = await _read_back_host(str(data["uuid"]))
+    await _audit(actor, "panel_host_create",
+                 f"inbound={fields.get('inboundUuid')} "
+                 f"address={fields.get('address')}")
+    return web.json_response({"ok": True, "host": host or data or fields})
+
+
+async def panel_host_delete(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    uuid = request.match_info.get("uuid") or ""
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        return confirm_needed_response(
+            issue_confirm(actor, "panel_host_delete", {"uuid": uuid},
+                          "Удалить хост из панели?"),
+            "Удалить хост из панели?")
+    payload = take_confirm(actor, token, "panel_host_delete")
+    if payload is None or payload.get("uuid") != uuid:
+        return _json_error("bad_confirm", 403)
+    res = await rw_mod.delete_host(uuid)
+    if not res.get("ok"):
+        return _panel_error(res)
+    await _audit(actor, "panel_host_delete", f"host={uuid}")
+    return web.json_response({"ok": True})
+
+
+# ── Настройки панели ─────────────────────────────────────────────────────────
+
+async def panel_settings_get(request):
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    from config import load_config
+    cfg = load_config()
+    # rw_token — секрет, только из ТГ; здесь его нет и не будет.
+    return web.json_response({"rw_url": cfg.get("rw_url") or ""})
+
+
+async def panel_settings_patch(request):
+    from config import atomic_update
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    if "rw_url" not in body:
+        return _json_error("bad_request")
+    url = body["rw_url"]
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return _json_error("bad_url")
+    url = url.strip().rstrip("/")
+    if len(url) <= len("https://"):
+        return _json_error("bad_url")
+
+    def _apply(cfg):
+        cfg["rw_url"] = url
+    atomic_update(_apply)
+    await _audit(actor, "panel_settings", "rw_url updated")
+    return web.json_response({"ok": True, "rw_url": url})
+
+
+async def panel_settings_test(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    res = await rw_mod.test_connection()
+    await _audit(actor, "panel_settings_test",
+                 f"ok={bool(res.get('ok'))}")
+    if not res.get("ok"):
+        return _panel_error(res)
+    return web.json_response({"ok": True, "squads": res.get("squads", 0)})
+
+
+# ── Поддержка: тема, ответ, закрытие ─────────────────────────────────────────
+
+async def support_topic_get(request):
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    try:
+        user_id = int(request.match_info.get("user_id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if not user_id:
+        return _json_error("bad_request")
+    from core.database import (
+        get_support_messages, get_support_topic,
+        mark_ticket_read as mark_support_read,
+    )
+    topic = await get_support_topic(user_id)
+    if not topic:
+        return _json_error("no_topic", 404)
+    msgs, pages = await get_support_messages(user_id)
+    # mark_support_read — в core/database.py функция называется
+    # mark_ticket_read: помечает сообщения юзера прочитанными.
+    await mark_support_read(user_id)
+    return web.json_response({
+        "topic": {"user_id": user_id, "topic_id": topic[0],
+                  "group_id": topic[1], "status": topic[2]},
+        "messages": [{"text": m[0] or "", "from_admin": bool(m[1]),
+                      "created_at": str(m[2] or ""),
+                      "file_id": m[3], "file_type": m[4]} for m in msgs],
+        "pages": pages,
+    })
+
+
+async def support_topic_reply(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    try:
+        user_id = int(request.match_info.get("user_id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if not user_id:
+        return _json_error("bad_request")
+    body = await _json_body(request)
+    text = str(body.get("text") or "").strip()
+    if not text:
+        return _json_error("bad_request")
+    close = bool(body.get("close"))
+    from core.database import (
+        add_support_message, get_support_topic, set_support_topic_status,
+        touch_support_topic,
+    )
+    topic = await get_support_topic(user_id)
+    if not topic:
+        return _json_error("no_topic", 404)
+    topic_id, group_id = int(topic[0]), int(topic[1])
+    bot = get_bot()
+    if bot is None:
+        return _json_error("no_bot", 503)
+    delivered_via = None
+    # Тот же путь, что support_bot.py on_group_message: ответ — в тему
+    # юзера в группе поддержки, а бот поддержки копирует его юзеру.
+    # Если основного бота нет в группе (отправка в тему падает) — шлём
+    # ответ юзеру напрямую в личку основного бота.
+    if group_id:
+        try:
+            await bot.send_message(chat_id=group_id,
+                                   message_thread_id=topic_id, text=text)
+            delivered_via = "topic"
+        except Exception as ex:
+            logging.error("админка: support reply to topic: %s", ex)
+    if delivered_via is None:
+        try:
+            await bot.send_message(chat_id=user_id, text=text)
+            delivered_via = "dm"
+        except Exception as ex:
+            logging.error("админка: support reply DM: %s", ex)
+            return _json_error("delivery_failed", 502)
+    await add_support_message(user_id, text, from_admin=True)
+    await touch_support_topic(user_id)
+    if close:
+        await set_support_topic_status(user_id, "closed")
+    await _audit(actor, "support_reply",
+                 f"user_id={user_id} via={delivered_via}"
+                 + (" closed" if close else ""))
+    return web.json_response({"ok": True, "delivered_via": delivered_via})
+
+
+async def support_topic_close(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    try:
+        user_id = int(request.match_info.get("user_id") or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+    if not user_id:
+        return _json_error("bad_request")
+    from core.database import get_support_topic, set_support_topic_status
+    topic = await get_support_topic(user_id)
+    if not topic:
+        return _json_error("no_topic", 404)
+    await set_support_topic_status(user_id, "closed")
+    bot = get_bot()
+    if bot is not None:
+        # Тот же текст, что support_bot.py cmd_close.
+        try:
+            await bot.send_message(
+                chat_id=user_id,
+                text="✅ <b>Обращение закрыто.</b>\n\n"
+                     "<i>Если появится новый вопрос — просто напишите сюда.</i>",
+                parse_mode="HTML")
+        except Exception:
+            pass
+    await _audit(actor, "support_close", f"user_id={user_id}")
+    return web.json_response({"ok": True})
+
+
+# ── Настройки поддержки ──────────────────────────────────────────────────────
+
+def _support_settings_snapshot() -> dict:
+    from config import load_config
+    cfg = load_config()
+    return {
+        "support_group_id": int(cfg.get("support_group_id") or 0),
+        "log_channel_id": int(cfg.get("log_channel_id") or 0),
+    }
+
+
+async def support_settings_get(request):
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    return web.json_response({"settings": _support_settings_snapshot()})
+
+
+async def support_settings_patch(request):
+    from config import atomic_update
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    clean = {}
+    for key in ("support_group_id", "log_channel_id"):
+        if key in body:
+            val = body[key]
+            if isinstance(val, bool) or not isinstance(val, int):
+                return _json_error("bad_value")
+            clean[key] = val
+    if not clean:
+        return _json_error("bad_request")
+
+    def _apply(cfg):
+        # 0 — очистить, как в ТГ (cfg.pop); иначе — записать.
+        for key, val in clean.items():
+            if val == 0:
+                cfg.pop(key, None)
+            else:
+                cfg[key] = val
+    atomic_update(_apply)
+    await _audit(actor, "support_settings",
+                 "keys: " + ", ".join(sorted(clean)))
+    return web.json_response({"ok": True,
+                              "settings": _support_settings_snapshot()})
+
+
+# ── Помощники: добавление, права, удаление (Mark-only) ───────────────────────
+
+async def helpers_add(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    body = await _json_body(request)
+    try:
+        tg_id = int(body.get("tg_id") or 0)
+    except (TypeError, ValueError):
+        tg_id = 0
+    if not tg_id:
+        return _json_error("bad_request")
+    from config import ADMIN_ID
+    if tg_id == ADMIN_ID:
+        return _json_error("is_admin")
+    from core.database import get_user_info
+    u = await get_user_info(tg_id)
+    if not u:
+        return _json_error("user_not_found", 404)
+    if tg_id in staff_mod.helper_ids():
+        await _audit(actor, "helpers_add", f"tg_id={tg_id} already")
+        return web.json_response({"ok": True, "already": True, "tg_id": tg_id,
+                                  "perms": sorted(staff_mod.helper_perms(tg_id))})
+    # Тот же путь, что features/staff.py handle_helper_input: в список
+    # + права по умолчанию (карточки людей, сообщения людям).
+    staff_mod._save_ids(staff_mod.helper_ids() + [tg_id])
+    staff_mod.set_helper_perms(tg_id, staff_mod.DEFAULT_PERMS)
+    await _audit(actor, "helpers_add", f"tg_id={tg_id}")
+    return web.json_response({"ok": True, "tg_id": tg_id,
+                              "perms": sorted(staff_mod.helper_perms(tg_id))})
+
+
+async def helpers_perm(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    try:
+        tg_id = int(request.match_info.get("tg_id") or 0)
+    except (TypeError, ValueError):
+        tg_id = 0
+    if not tg_id:
+        return _json_error("bad_request")
+    body = await _json_body(request)
+    perm = str(body.get("perm") or "")
+    if perm not in staff_mod.PERMS:
+        return _json_error("bad_perm")
+    if tg_id not in staff_mod.helper_ids():
+        return _json_error("not_helper", 404)
+    perms = staff_mod.toggle_helper_perm(tg_id, perm)
+    await _audit(actor, "helpers_perm",
+                 f"tg_id={tg_id} perm={perm} on={perm in perms}")
+    return web.json_response({"ok": True, "tg_id": tg_id, "perm": perm,
+                              "perms": sorted(perms),
+                              "enabled": perm in perms})
+
+
+async def helpers_delete(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    try:
+        tg_id = int(request.match_info.get("tg_id") or 0)
+    except (TypeError, ValueError):
+        tg_id = 0
+    if not tg_id:
+        return _json_error("bad_request")
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        if tg_id not in staff_mod.helper_ids():
+            return _json_error("not_helper", 404)
+        return confirm_needed_response(
+            issue_confirm(actor, "helpers_delete", {"tg_id": tg_id},
+                          f"Убрать помощника {tg_id}?"),
+            f"Убрать помощника {tg_id}?")
+    payload = take_confirm(actor, token, "helpers_delete")
+    if payload is None or int(payload.get("tg_id") or 0) != tg_id:
+        return _json_error("bad_confirm", 403)
+    # Тот же путь, что features/staff.py handle_helper_del: из списка
+    # и права вместе с ним.
+    staff_mod._forget(tg_id)
+    await _audit(actor, "helpers_delete", f"tg_id={tg_id}")
+    return web.json_response({"ok": True})
+
+
+# ── Сайт: удаление и тексты ──────────────────────────────────────────────────
+
+async def site_delete(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        return confirm_needed_response(
+            issue_confirm(actor, "site_delete", {},
+                          "Удалить сайт с сервера?"),
+            "Удалить сайт с сервера?")
+    if take_confirm(actor, token, "site_delete") is None:
+        return _json_error("bad_confirm", 403)
+    try:
+        res = await site_mod.remove_site()
+    except Exception as ex:
+        logging.error("админка: site delete: %s", ex)
+        return _json_error("delete_failed", 502)
+    if not res.get("ok"):
+        await _audit(actor, "site_delete_failed", "")
+        return _json_error("delete_failed", 502)
+    await _audit(actor, "site_delete", "")
+    return web.json_response({"ok": True, "site": _site_snapshot()})
+
+
+def _site_texts_snapshot() -> dict:
+    from config import load_config
+    cfg = load_config()
+    return {
+        "texts": cfg.get("site_texts") or {},
+        "sections": {
+            sec_id: {"title": title,
+                     "fields": [f for f, _ in items]}
+            for sec_id, (title, items) in site_mod.SITE_SECTIONS.items()
+        },
+    }
+
+
+async def site_texts_get(request):
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    return web.json_response(_site_texts_snapshot())
+
+
+async def site_texts_patch(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    field = str(body.get("field") or "")
+    text = body.get("text")
+    allowed = {f for _, items in site_mod.SITE_SECTIONS.values()
+               for f, _ in items}
+    if field not in allowed or not isinstance(text, str):
+        return _json_error("bad_field")
+    site_mod.save_site_text(field, text)
+    await _audit(actor, "site_texts", f"field={field}")
+    snap = _site_texts_snapshot()
+    snap["note"] = ("Тексты применятся при следующем деплое сайта — "
+                    "деплой делается отдельно.")
+    return web.json_response({"ok": True, **snap})
+
+
+# ── Яндекс Клауд (только чтение) ─────────────────────────────────────────────
+
+# Тот же текст, что services/remnawave.py handle_rw_yandex_sub: зеркало
+# подписки sub.drbl.tech через CDN Яндекса, основная ссылка — key.drbl.tech.
+YANDEX_MIRROR_LINES = [
+    "Страница подписки — зеркало через CDN",
+    "",
+    "sub.drbl.tech — только зеркало ссылки подписки (кнопка «🪞 Зеркало подписки»",
+    "в «Моей подписке»), основная ссылка остаётся key.drbl.tech.",
+    "Кэш полностью ВЫКЛЮЧЕН — иначе один юзер получит чужой конфиг.",
+    "",
+    "1. Сертификат (Certificate Manager)",
+    "В Яндексе нужен только один сертификат — для sub.drbl.tech.",
+    "Остальные домены проекта (key, vpn, panel) — на Let's Encrypt на сервере, их не трогаем.",
+    "Certificate Manager → «Создать сертификат»:",
+    "Имя: sub-drbl-tech",
+    "Домены: sub.drbl.tech",
+    "Тип проверки: DNS.",
+    "Нажми «Создать» — Яндекс покажет TXT-запись.",
+    "В DNS добавь TXT _acme-challenge.sub.drbl.tech со значением от Яндекса.",
+    "Дождись статуса Issued.",
+    "",
+    "2. Ресурс CDN — шаг 1 «Основные параметры»",
+    "Cloud CDN → «Создать ресурс»:",
+    "Источник: key.drbl.tech",
+    "Протокол для источника: HTTPS.",
+    "Заголовок Host: «Свое значение» = key.drbl.tech.",
+    "(«Основное доменное имя» — это домен самого ресурса, не источника.)",
+    "SNI вручную: выкл.",
+    "Доменное имя: sub.drbl.tech",
+    "Тип сертификата: «Из Certificate Manager» → sub-drbl-tech.",
+    "Нажми «Далее».",
+    "",
+    "3. Ресурс CDN — шаг 2 «Кэширование»",
+    "Кэширование в CDN: ВЫКЛЮЧИТЬ (тумблер).",
+    "Кэш браузера: выкл.",
+    "(В ссылке токен юзера — кэш даст чужой конфиг.)",
+    "Нажми «Далее».",
+    "",
+    "4. Ресурс CDN — шаг 3 «Заголовки»",
+    "Заголовки: ничего не добавлять (x-hwid проходит сам).",
+    "Скрытие заголовков: «Не скрывать».",
+    "CORS: «Не добавлять».",
+    "Методы: GET, HEAD.",
+    "Кастомный HTTP-ответ: выкл.",
+    "Нажми «Далее», проверь сводку и «Создать ресурс».",
+    "",
+    "5. DNS",
+    "На вкладке «Обзор» ресурса → «Настройки DNS»: скопируй домен вида",
+    "xxx.topology.gslb.yccdn.ru.",
+    "В DNS: CNAME sub.drbl.tech → этот домен.",
+    "Подожди пару минут, пока edge подхватит сертификат",
+    "(сразу может дать ERR_CONNECTION_CLOSED — это нормально).",
+    "",
+    "6. Проверка",
+    "curl https://sub.drbl.tech/<uuid> → 200.",
+    "Решающий тест: INCY на МТС без VPN обновляет подписку по зеркальной ссылке",
+    "(кнопка «🪞 Зеркало подписки» в «Моей подписке»).",
+    "",
+    "Цена: 150 ₽/мес за ресурс (150 ГБ + 100 млн запросов), сверх — ~1,05 ₽/ГБ.",
+    "Основная ссылка остаётся key.drbl.tech, sub.drbl.tech — только зеркало.",
+]
+
+
+async def yandex_get(request):
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    return web.json_response({
+        "mirror": "sub.drbl.tech",
+        "main": "key.drbl.tech",
+        "cache": "disabled",
+        "text": "\n".join(YANDEX_MIRROR_LINES),
+    })
+
+
+# ── Jobs run-now ─────────────────────────────────────────────────────────────
+
+_JOB_TICKS = {
+    # job: (модуль, функция). morning/panel-sync/netcheck/fraud-scan
+    # здесь нет — у них свои эндпоинты, не дублируем.
+    "expiry_reminder": ("paidsub.handlers", "expiry_reminder_tick"),
+    "lte_fallback": ("paidsub.handlers", "lte_fallback_tick"),
+    "check_expired": ("paidsub.handlers", "check_expired_subs"),
+    "winback": ("features.winback", "winback_tick"),
+    "fraud": ("features.fraud", "fraud_tick"),
+    "blacklist_sync": ("features.blacklist", "blacklist_sync_tick"),
+    "blacklist_expire": ("features.blacklist", "blacklist_expire_tick"),
+    "connect_help": ("handlers.control", "connect_help_tick"),
+    "purge": ("handlers.control", "purge_tick"),
+    "site_sync": ("web.site_deploy", "site_sync_tick"),
+}
+
+
+async def jobs_run_now(request):
+    import importlib
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    job = str(body.get("job") or "")
+    if job not in _JOB_TICKS:
+        return _json_error("unknown_job", 400)
+    bot = get_bot()
+    if bot is None:
+        return _json_error("no_bot", 503)
+    mod_name, func_name = _JOB_TICKS[job]
+    context = SimpleNamespace(bot=bot, application=_admin_application)
+    try:
+        tick = getattr(importlib.import_module(mod_name), func_name)
+        res = await tick(context)
+    except Exception as ex:
+        logging.error("админка: jobs run-now %s: %s", job, ex)
+        await _audit(actor, "jobs_run_now_failed", f"job={job}")
+        return _json_error("job_failed", 502)
+    if res is None:
+        result = None
+    elif isinstance(res, str):
+        result = _scrub(res)
+    else:
+        result = _scrub(str(res))
+    await _audit(actor, "jobs_run_now", f"job={job}")
+    return web.json_response({"ok": True, "job": job, "result": result})
+
+
 # ── Регистрация ──────────────────────────────────────────────────────────────
 
 def register(app) -> None:
@@ -1068,10 +1938,30 @@ def register(app) -> None:
     app.router.add_post("/netcheck/run", netcheck_run)
     app.router.add_get("/site", site_get)
     app.router.add_post("/site/deploy", site_deploy)
+    app.router.add_post("/site/delete", site_delete)
+    app.router.add_get("/site/texts", site_texts_get)
+    app.router.add_patch("/site/texts", site_texts_patch)
+    app.router.add_get("/yandex", yandex_get)
+    app.router.add_post("/jobs/run-now", jobs_run_now)
+    app.router.add_post("/panel/rename-clients", panel_rename_clients)
+    app.router.add_get("/panel/profiles/{uuid}", panel_profile_get)
+    app.router.add_patch("/panel/profiles/{uuid}/inbounds/{tag}",
+                         panel_profile_inbound_patch)
+    app.router.add_patch("/panel/hosts/{uuid}", panel_host_patch)
+    app.router.add_post("/panel/hosts", panel_host_create)
+    app.router.add_delete("/panel/hosts/{uuid}", panel_host_delete)
+    app.router.add_get("/panel/settings", panel_settings_get)
+    app.router.add_patch("/panel/settings", panel_settings_patch)
+    app.router.add_post("/panel/settings/test", panel_settings_test)
+    app.router.add_get("/support/settings", support_settings_get)
+    app.router.add_patch("/support/settings", support_settings_patch)
     app.router.add_post("/git-update", git_update)
     app.router.add_get("/backup/export", backup_export)
     app.router.add_post("/backup/restore", backup_restore)
     app.router.add_get("/helpers", helpers_get)
+    app.router.add_post("/helpers/add", helpers_add)
+    app.router.add_post("/helpers/{tg_id}/perm", helpers_perm)
+    app.router.add_post("/helpers/{tg_id}/delete", helpers_delete)
     app.router.add_get("/blacklist", blacklist_get)
     app.router.add_post("/blacklist/add", blacklist_add)
     app.router.add_post("/blacklist/{tg_id}/stop", blacklist_stop)
@@ -1080,6 +1970,9 @@ def register(app) -> None:
     app.router.add_post("/fraud/scan", fraud_scan)
     app.router.add_post("/fraud/{tg_id}/stop", fraud_stop)
     app.router.add_get("/support/topics", support_topics)
+    app.router.add_get("/support/topics/{user_id}", support_topic_get)
+    app.router.add_post("/support/topics/{user_id}/reply", support_topic_reply)
+    app.router.add_post("/support/topics/{user_id}/close", support_topic_close)
     app.router.add_get("/downtime", downtime_get)
     app.router.add_get("/online", online_get)
     app.router.add_get("/web-access", web_access_get)

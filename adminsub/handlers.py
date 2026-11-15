@@ -1,21 +1,12 @@
 from html import escape
 
-from telegram import Bot
 from telegram.ext import ContextTypes
 
 from config import load_config
 from core.keyboards import back_admin
 
 
-async def _notify_user(bot: Bot, tg_id: int | None, text: str):
-    """Отправляет уведомление юзеру. Молча пропускает если не удалось."""
-    if not tg_id:
-        return
-    try:
-        await bot.send_message(chat_id=tg_id, text=text, parse_mode="HTML")
-    except Exception:
-        pass
-from adminsub.storage import list_subs, add_sub, get_sub, delete_sub, update_sub_field
+from adminsub.storage import list_subs, get_sub, delete_sub, update_sub_field
 from paidsub import service as _svc
 from adminsub.keyboards import (subs_list_keyboard, presets_keyboard, sub_view_keyboard,
                                sub_settings_keyboard)
@@ -165,65 +156,39 @@ async def handle_create_sub(query, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def do_create_sub(query_or_msg, tg_id: int, context: ContextTypes.DEFAULT_TYPE, reply_func):
-    cfg = load_config()
+    """Тонкая обёртка над paidsub.service.create_admin_sub (та же работа,
+    те же тексты); создание и уведомление живут в сервисе."""
     await reply_func("⏳ Создаю подписку…")
-
-    from services.panel import create_client, build_email
-    from core.database import get_user_info
-    user_row = await get_user_info(tg_id)
-    username = user_row[2] if user_row else None
-    email = build_email(tg_id, username)
-
-    result = await create_client(
-        expire_date=cfg["preset_expire"],
-        limit_ip=0,                      # лимита по IP в панели нет, только по устройствам
-        limit_hwid=int(cfg["preset_hwid"]),
-        total_gb=int(cfg["preset_traffic"]),
-        email=email,
-        tg_id=tg_id,
-        note=f"@{username}" if username else "",
-    )
-
-    if not result["success"]:
+    bot = context.bot if hasattr(context, 'bot') else None
+    result = await _svc.create_admin_sub(tg_id, bot=bot)
+    if not result.get("ok"):
+        if result["error"] == "presets_not_ready":
+            await reply_func(
+                "⚠️ Сначала задай все настройки (кнопка ⚙️ Настройки).",
+                parse_mode="HTML",
+            )
+            return
+        if result["error"] == "user_not_found":
+            await reply_func(
+                "❌ <b>Пользователь не найден</b>\n\n"
+                "<i>Он должен написать боту хотя бы раз.</i>",
+                parse_mode="HTML",
+            )
+            return
         await reply_func(
             f"❌ <b>Ошибка создания подписки</b>\n\n<code>{result['error']}</code>",
             parse_mode="HTML",
         )
         return
-
-    await add_sub(
-        email=result["email"],
-        uuid_val=result["uuid"],
-        sub_id=result["sub_id"],
-        sub_url=result["sub_url"],
-        expire_date=result["expire"],
-        limit_ip=0,
-        limit_hwid=int(cfg["preset_hwid"]),
-        total_gb=int(cfg["preset_traffic"]),
-        tg_id=tg_id,
-    )
-
-    traffic_str = f"{cfg['preset_traffic']} ГБ" if int(cfg["preset_traffic"]) > 0 else "безлимит"
     await reply_func(
         "✅ <b>Подписка создана!</b>\n\n"
         f"👤 TG ID: <code>{tg_id}</code>\n"
         f"📧 Email: <code>{result['email']}</code>\n"
         f"📅 До: <b>{result['expire']}</b>\n"
-        f"📶 Трафик: <b>{traffic_str}</b>\n\n"
+        f"📶 Трафик: <b>{result['traffic_str']}</b>\n\n"
         f"🔗 Ссылка:\n<code>{result['sub_url']}</code>",
         parse_mode="HTML",
     )
-
-    # Уведомление юзеру
-    bot = context.bot if hasattr(context, 'bot') else None
-    if bot:
-        await _notify_user(bot, tg_id,
-            "🎉 <b>Вам выдана админская подписка!</b>\n\n"
-            f"📅 Действует до: <b>{result['expire']}</b>\n"
-            f"📶 Трафик: <b>{traffic_str}</b>\n\n"
-            f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
-            "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)"
-        )
 
 
 def _fmt_bytes(b: int) -> str:

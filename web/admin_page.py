@@ -134,9 +134,124 @@ td,th{padding:8px 6px;border-bottom:1px solid var(--line);text-align:left}
         <option value="expired">Истёкшие</option><option value="trial">Триал</option>
         <option value="paying">Платящие</option><option value="no_sub">Без подписки</option>
       </select>
+      <label>Фото (необязательно, до 10 МБ — загрузится в Telegram и прикрепится к рассылке)</label>
+      <input id="bc-photo" type="file" accept="image/*">
+      <button id="btn-bc-upload" class="ghost">Загрузить фото</button>
+      <span id="bc-photo-msg" class="mut"></span>
       <button id="btn-bc-preview" class="ghost">Предпросмотр</button>
       <button id="btn-bc-send">Отправить</button>
       <div id="bc-out" class="mut"></div>
+    </div>
+
+    <h2>Админские подписки, рефералка, LTE</h2>
+    <div class="card">
+      <input id="asub-tg" type="number" placeholder="tg_id — создать админскую подписку">
+      <button id="btn-asub" class="ghost">Создать админскую подписку</button>
+      <button id="btn-referrals" class="ghost">Рефералка</button>
+      <button id="btn-lte" class="ghost">Проверить LTE сейчас</button>
+      <div id="asub-out"></div>
+    </div>
+
+    <h2>Поддержка: ответы</h2>
+    <div class="card">
+      <input id="sup-user" type="number" placeholder="tg_id юзера">
+      <button id="btn-sup-open" class="ghost">Открыть тему</button>
+      <div id="sup-msgs"></div>
+      <textarea id="sup-text" placeholder="ответ юзеру"></textarea>
+      <label><input id="sup-close" type="checkbox" style="width:auto"> закрыть обращение после ответа</label>
+      <button id="btn-sup-reply">Ответить</button>
+      <button id="btn-sup-close" class="ghost">Закрыть обращение</button>
+      <span id="sup-msg" class="mut"></span>
+    </div>
+
+    <h2>Панель Remnawave: редактор (только Mark)</h2>
+    <div class="card">
+      <p class="mut">Правка инбаундов и хостов — через API панели (PATCH config-profiles). После сохранения конфиг проверяется через computed-config.</p>
+      <input id="pf-uuid" placeholder="UUID профиля">
+      <button id="btn-pf-load" class="ghost">Показать профиль</button>
+      <input id="pf-tag" placeholder="тег инбаунда, напр. VTR-Germany-1">
+      <input id="pf-port" type="number" placeholder="порт (пусто — не менять)">
+      <input id="pf-sni" placeholder="SNI, через запятую (пусто — не менять)">
+      <input id="pf-dest" placeholder="target/dest, напр. www.google.com:443 (пусто — не менять)">
+      <input id="pf-fp" placeholder="fingerprint: chrome/firefox (пусто — не менять)">
+      <button id="btn-pf-save" class="ghost">Сохранить инбаунд</button>
+      <div id="pf-out"></div>
+      <h2>Хосты</h2>
+      <input id="ph-inbound" placeholder="UUID инбаунда (для нового хоста)">
+      <input id="ph-remark" placeholder="имя хоста">
+      <input id="ph-addr" placeholder="адрес">
+      <input id="ph-port" type="number" placeholder="порт">
+      <input id="ph-sni" placeholder="SNI">
+      <button id="btn-ph-create" class="ghost">Создать хост (создаётся выключенным)</button>
+      <input id="ph-uuid" placeholder="UUID хоста — правка / удаление">
+      <select id="ph-disabled"><option value="false">Включён</option><option value="true">Выключен</option></select>
+      <button id="btn-ph-toggle" class="ghost">Вкл/выкл хост</button>
+      <button id="btn-ph-del" class="ghost">Удалить хост</button>
+      <div id="ph-out"></div>
+      <button id="btn-rename" class="ghost">Убрать юзернеймы из имён клиентов панели</button>
+      <button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button>
+      <div id="panel-out"></div>
+    </div>
+
+    <h2>Задания (run-now)</h2>
+    <div class="card">
+      <select id="job-sel">
+        <option value="expiry_reminder">Напоминания об истечении</option>
+        <option value="lte_fallback">Проверка LTE</option>
+        <option value="check_expired">Проверка истёкших подписок</option>
+        <option value="winback">Возврат ушедших</option>
+        <option value="fraud">Фрод-скан</option>
+        <option value="blacklist_sync">Синхронизация ЧС</option>
+        <option value="blacklist_expire">Истечение ЧС</option>
+        <option value="connect_help">Помощь при подключении</option>
+        <option value="purge">Чистка логов</option>
+        <option value="site_sync">Синхронизация сайта</option>
+      </select>
+      <button id="btn-job" class="ghost">Запустить сейчас</button>
+      <div id="job-out"></div>
+    </div>
+
+    <h2>Помощники (только Mark)</h2>
+    <div class="card">
+      <input id="helper-tg" type="number" placeholder="tg_id помощника">
+      <button id="btn-helper-add" class="ghost">Добавить</button>
+      <select id="helper-perm-sel"><option value="users">users</option><option value="dm">dm</option></select>
+      <button id="btn-helper-perm" class="ghost">Переключить право</button>
+      <button id="btn-helper-del" class="ghost">Удалить</button>
+      <button id="btn-helpers" class="ghost">Список</button>
+      <div id="helpers-out"></div>
+    </div>
+
+    <h2>Сайт: тексты, удаление, настройки</h2>
+    <div class="card">
+      <p class="mut">Тексты применяются после «Деплой сайта». Удаление сайта — только Mark, с подтверждением.</p>
+      <input id="st-field" placeholder="поле, напр. hero_title">
+      <textarea id="st-text" placeholder="новый текст"></textarea>
+      <button id="btn-st-save" class="ghost">Сохранить текст</button>
+      <button id="btn-st-show" class="ghost">Показать тексты</button>
+      <button id="btn-site-del" class="ghost">Удалить сайт</button>
+      <div id="st-out"></div>
+    </div>
+
+    <h2>Веб-доступ</h2>
+    <div class="card">
+      <p class="mut">Смена порта/bind вступает в силу только после рестарта бота. Выключить сам веб-API из веба нельзя — это убьёт и эту админку, делается только из ТГ.</p>
+      <button id="btn-webacc" class="ghost">Показать настройки</button>
+      <input id="wa-port" type="number" placeholder="порт, напр. 8088">
+      <input id="wa-bind" placeholder="bind: 127.0.0.1 или 0.0.0.0">
+      <button id="btn-wa-save" class="ghost">Сохранить порт/bind</button>
+      <div id="wa-out"></div>
+    </div>
+
+    <h2>Настройки панели и поддержки</h2>
+    <div class="card">
+      <input id="ps-url" placeholder="адрес панели https://panelremna.drbl.tech">
+      <button id="btn-ps-save" class="ghost">Сохранить адрес панели</button>
+      <button id="btn-ps-test" class="ghost">Проверить связь с панелью</button>
+      <input id="ss-group" type="number" placeholder="ID группы поддержки (0 — очистить)">
+      <input id="ss-log" type="number" placeholder="ID лог-канала (0 — очистить)">
+      <button id="btn-ss-save" class="ghost">Сохранить настройки поддержки</button>
+      <div id="ps-out"></div>
     </div>
 
     <h2>Узлы и панель</h2>
@@ -289,14 +404,148 @@ document.getElementById("btn-reconcile").onclick = async () => { const r = await
 document.getElementById("btn-tariffs").onclick = async () => { const r = await api("/tariffs"); renderRows("finance-out", r.data); };
 document.getElementById("btn-promos").onclick = async () => { const r = await api("/promos"); renderRows("finance-out", r.data); };
 document.getElementById("btn-servers").onclick = async () => { const r = await api("/servers"); renderRows("finance-out", r.data); };
+let bcPhoto = "";
+async function postConfirmAny(path, method, body){
+  let r = await api(path, {method, headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body || {})});
+  if (r.data && r.data.need_confirm) {
+    if (!confirm(r.data.summary || "Подтвердить действие?")) return {status: 0, data: {error: "cancelled"}};
+    r = await api(path, {method, headers: {"X-CSRF-Token": csrf()},
+      body: JSON.stringify(Object.assign({}, body || {}, {confirm_token: r.data.confirm_token}))});
+  }
+  return r;
+}
+document.getElementById("btn-bc-upload").onclick = async () => {
+  const f = document.getElementById("bc-photo").files[0];
+  if (!f) { document.getElementById("bc-photo-msg").textContent = "Выберите файл"; return; }
+  const fd = new FormData(); fd.append("photo", f);
+  const r = await fetch(API + "/broadcast/upload", {method: "POST", credentials: "same-origin", headers: {"X-CSRF-Token": csrf()}, body: fd});
+  let data = {}; try { data = await r.json(); } catch(e) {}
+  if (r.status === 200) { bcPhoto = data.photo_file_id || ""; document.getElementById("bc-photo-msg").textContent = "Фото загружено (" + (data.width || "?") + "×" + (data.height || "?") + ")"; }
+  else document.getElementById("bc-photo-msg").textContent = "Ошибка: " + (data.error || r.status);
+};
 document.getElementById("btn-bc-preview").onclick = async () => {
   const r = await api("/broadcast/preview", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({text: document.getElementById("bc-text").value, segment: document.getElementById("bc-seg").value})});
+    body: JSON.stringify({text: document.getElementById("bc-text").value, segment: document.getElementById("bc-seg").value, photo: bcPhoto || undefined})});
   document.getElementById("bc-out").textContent = r.status === 200 ? ("Получателей: " + (r.data.count || 0)) : ("Ошибка: " + (r.data.error || r.status));
 };
 document.getElementById("btn-bc-send").onclick = async () => {
-  const r = await postConfirm("/broadcast/send", {text: document.getElementById("bc-text").value, segment: document.getElementById("bc-seg").value});
+  const r = await postConfirm("/broadcast/send", {text: document.getElementById("bc-text").value, segment: document.getElementById("bc-seg").value, photo: bcPhoto || undefined});
   document.getElementById("bc-out").textContent = r.status === 200 ? "Рассылка запущена" : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) bcPhoto = "";
+};
+document.getElementById("btn-asub").onclick = async () => {
+  const r = await api("/admin-subs", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({tg_id: parseInt(document.getElementById("asub-tg").value || "0", 10)})});
+  renderRows("asub-out", r.data);
+};
+document.getElementById("btn-referrals").onclick = async () => { const r = await api("/referrals"); renderRows("asub-out", r.data); };
+document.getElementById("btn-lte").onclick = async () => { const r = await postConfirm("/subs/lte/check-now", {}); renderRows("asub-out", r.data); };
+document.getElementById("btn-sup-open").onclick = async () => {
+  const id = document.getElementById("sup-user").value;
+  const r = await api("/support/topics/" + id);
+  if (r.status !== 200) { document.getElementById("sup-msgs").textContent = "Ошибка: " + (r.data.error || r.status); return; }
+  document.getElementById("sup-msgs").innerHTML = (r.data.messages || []).map(m =>
+    "<p><b>" + (m.from_admin ? "Админ" : "Юзер") + ":</b> " + esc(m.text) + " <span class='mut'>" + esc(m.created_at || "") + "</span></p>").join("") || "<p class='mut'>Сообщений нет</p>";
+};
+document.getElementById("btn-sup-reply").onclick = async () => {
+  const id = document.getElementById("sup-user").value;
+  const r = await api("/support/topics/" + id + "/reply", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({text: document.getElementById("sup-text").value, close: document.getElementById("sup-close").checked})});
+  document.getElementById("sup-msg").textContent = r.status === 200 ? ("Отправлено (" + (r.data.delivered_via || "?") + ")") : ("Ошибка: " + (r.data.error || r.status));
+};
+document.getElementById("btn-sup-close").onclick = async () => {
+  const id = document.getElementById("sup-user").value;
+  const r = await api("/support/topics/" + id + "/close", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+  document.getElementById("sup-msg").textContent = r.status === 200 ? "Обращение закрыто" : ("Ошибка: " + (r.data.error || r.status));
+};
+document.getElementById("btn-pf-load").onclick = async () => {
+  const r = await api("/panel/profiles/" + document.getElementById("pf-uuid").value);
+  renderRows("pf-out", r.data);
+};
+document.getElementById("btn-pf-save").onclick = async () => {
+  const uuid = document.getElementById("pf-uuid").value, tag = document.getElementById("pf-tag").value;
+  const body = {};
+  const port = document.getElementById("pf-port").value;
+  if (port) body.port = parseInt(port, 10);
+  const sni = document.getElementById("pf-sni").value.trim();
+  if (sni) body.serverNames = sni.split(",").map(s => s.trim()).filter(Boolean);
+  const dest = document.getElementById("pf-dest").value.trim();
+  if (dest) body.dest = dest;
+  const fp = document.getElementById("pf-fp").value.trim();
+  if (fp) body.fingerprint = fp;
+  const r = await postConfirmAny("/panel/profiles/" + uuid + "/inbounds/" + encodeURIComponent(tag), "PATCH", body);
+  renderRows("pf-out", r.data);
+};
+document.getElementById("btn-ph-create").onclick = async () => {
+  const r = await postConfirm("/panel/hosts", {inboundUuid: document.getElementById("ph-inbound").value,
+    remark: document.getElementById("ph-remark").value, address: document.getElementById("ph-addr").value,
+    port: parseInt(document.getElementById("ph-port").value || "0", 10), sni: document.getElementById("ph-sni").value});
+  renderRows("ph-out", r.data);
+};
+document.getElementById("btn-ph-toggle").onclick = async () => {
+  const uuid = document.getElementById("ph-uuid").value;
+  const r = await postConfirmAny("/panel/hosts/" + uuid, "PATCH", {isDisabled: document.getElementById("ph-disabled").value === "true"});
+  renderRows("ph-out", r.data);
+};
+document.getElementById("btn-ph-del").onclick = async () => {
+  const uuid = document.getElementById("ph-uuid").value;
+  const r = await postConfirmAny("/panel/hosts/" + uuid, "DELETE", {});
+  renderRows("ph-out", r.data);
+};
+document.getElementById("btn-rename").onclick = async () => { const r = await postConfirm("/panel/rename-clients", {}); renderRows("panel-out", r.data); };
+document.getElementById("btn-yandex").onclick = async () => { const r = await api("/yandex"); renderRows("panel-out", r.data); };
+document.getElementById("btn-job").onclick = async () => {
+  const r = await postConfirm("/jobs/run-now", {job: document.getElementById("job-sel").value});
+  renderRows("job-out", r.data);
+};
+document.getElementById("btn-helper-add").onclick = async () => {
+  const r = await api("/helpers/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({tg_id: parseInt(document.getElementById("helper-tg").value || "0", 10)})});
+  renderRows("helpers-out", r.data);
+};
+document.getElementById("btn-helper-perm").onclick = async () => {
+  const id = document.getElementById("helper-tg").value;
+  const r = await api("/helpers/" + id + "/perm", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({perm: document.getElementById("helper-perm-sel").value})});
+  renderRows("helpers-out", r.data);
+};
+document.getElementById("btn-helper-del").onclick = async () => {
+  const id = document.getElementById("helper-tg").value;
+  const r = await postConfirm("/helpers/" + id + "/delete", {});
+  renderRows("helpers-out", r.data);
+};
+document.getElementById("btn-helpers").onclick = async () => { const r = await api("/helpers"); renderRows("helpers-out", r.data); };
+document.getElementById("btn-st-save").onclick = async () => {
+  const r = await api("/site/texts", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({field: document.getElementById("st-field").value, text: document.getElementById("st-text").value})});
+  renderRows("st-out", r.data);
+};
+document.getElementById("btn-st-show").onclick = async () => { const r = await api("/site/texts"); renderRows("st-out", r.data); };
+document.getElementById("btn-site-del").onclick = async () => { const r = await postConfirm("/site/delete", {}); renderRows("st-out", r.data); };
+document.getElementById("btn-webacc").onclick = async () => { const r = await api("/web-access"); renderRows("wa-out", r.data); };
+document.getElementById("btn-wa-save").onclick = async () => {
+  const body = {};
+  const port = document.getElementById("wa-port").value;
+  if (port) body.webapi_port = parseInt(port, 10);
+  const bind = document.getElementById("wa-bind").value.trim();
+  if (bind) body.webapi_bind = bind;
+  const r = await api("/web-access", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+  renderRows("wa-out", r.data);
+};
+document.getElementById("btn-ps-save").onclick = async () => {
+  const r = await api("/panel/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({rw_url: document.getElementById("ps-url").value})});
+  renderRows("ps-out", r.data);
+};
+document.getElementById("btn-ps-test").onclick = async () => {
+  const r = await api("/panel/settings/test", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+  renderRows("ps-out", r.data);
+};
+document.getElementById("btn-ss-save").onclick = async () => {
+  const r = await api("/support/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({support_group_id: parseInt(document.getElementById("ss-group").value || "0", 10),
+      log_channel_id: parseInt(document.getElementById("ss-log").value || "0", 10)})});
+  renderRows("ps-out", r.data);
 };
 document.getElementById("btn-nodes").onclick = async () => { const r = await api("/nodes"); renderRows("nodes-out", r.data); };
 document.getElementById("btn-panel").onclick = async () => { const r = await api("/panel"); renderRows("nodes-out", r.data); };

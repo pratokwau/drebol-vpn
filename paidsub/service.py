@@ -820,6 +820,58 @@ async def create_paid_sub(tg_id: int, *, trial: bool = False,
             "traffic_str": traffic_str}
 
 
+async def create_admin_sub(tg_id: int, *, bot=None, panel=None) -> dict:
+    """Создаёт админскую подписку: панель + база + уведомление.
+
+    Чистое ядро do_create_sub() из adminsub/handlers.py: пресеты
+    (preset_expire/preset_hwid/preset_traffic) — условия выдачи,
+    email — build_email(tg_id) без префикса. Панель — первая:
+    uuid/sub_id/sub_url приходят от неё, и при её ошибке в базе
+    ничего не появляется. Без импортов Telegram.
+    Возвращает {"ok": True, "sub_id": int, "email": str, "uuid": str,
+    "sub_url": str, "expire": str, "traffic_str": str}
+    или {"ok": False, "error": "presets_not_ready" | "user_not_found" |
+    <текст панели>}.
+    """
+    cfg = load_config()
+    if not all(cfg.get(k) is not None
+               for k in ("preset_expire", "preset_hwid", "preset_traffic")):
+        return {"ok": False, "error": "presets_not_ready"}
+    from core.database import get_user_info
+    user_row = await get_user_info(tg_id)
+    if not user_row:
+        return {"ok": False, "error": "user_not_found"}
+    username = user_row[2]
+    from services.panel import build_email
+    email = build_email(tg_id, username)
+    panel_mod = _panel(panel)
+    result = await panel_mod.create_client(
+        expire_date=cfg["preset_expire"], limit_ip=0,
+        limit_hwid=int(cfg["preset_hwid"]),
+        total_gb=int(cfg["preset_traffic"]),
+        email=email, tg_id=tg_id, note=f"@{username}" if username else "")
+    if not result.get("success"):
+        return {"ok": False, "error": str(result.get("error") or "?")}
+    from adminsub.storage import add_sub
+    new_sub_id = await add_sub(
+        email=result["email"], uuid_val=result["uuid"],
+        sub_id=result["sub_id"], sub_url=result["sub_url"],
+        expire_date=result["expire"], limit_ip=0,
+        limit_hwid=int(cfg["preset_hwid"]),
+        total_gb=int(cfg["preset_traffic"]), tg_id=tg_id)
+    traffic = int(cfg["preset_traffic"])
+    traffic_str = f"{traffic} ГБ" if traffic > 0 else "безлимит"
+    await _notify(bot, tg_id,
+                  "🎉 <b>Вам выдана админская подписка!</b>\n\n"
+                  f"📅 Действует до: <b>{result['expire']}</b>\n"
+                  f"📶 Трафик: <b>{traffic_str}</b>\n\n"
+                  f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
+                  "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)")
+    return {"ok": True, "sub_id": new_sub_id, "email": result["email"],
+            "uuid": result["uuid"], "sub_url": result["sub_url"],
+            "expire": result["expire"], "traffic_str": traffic_str}
+
+
 # ── Оплата, устройства, подарок, возврат ──────────────────────────────────────
 
 async def apply_devices_payment(tg_id: int, count: int, *, amount: int = 0,
