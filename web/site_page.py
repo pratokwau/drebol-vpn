@@ -6868,7 +6868,28 @@ _TG = ('<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">'
 
 TIKTOK_URL = "https://www.tiktok.com/@drebolvpn"
 INSTAGRAM_URL = "https://www.instagram.com/drebolvpn"
-SUPPORT_URL = "https://t.me/drebolvpn_sup"
+
+
+def support_bot_username() -> str:
+    """Юзернейм бота поддержки из настроек главного бота (config.json).
+
+    Тот же источник, что у кнопки «🛟 Поддержка» в боте
+    (handlers/support.py). Пусто — поддержка не настроена.
+    """
+    try:
+        from config import load_config
+        raw = str(load_config().get("support_bot_username") or "").strip()
+    except Exception:
+        return ""
+    for prefix in ("https://", "http://", "t.me/", "telegram.me/", "@"):
+        raw = raw.replace(prefix, "")
+    return raw.strip("/ ").split("?")[0].split()[0] if raw.strip() else ""
+
+
+def support_bot_url() -> str:
+    """Ссылка на бота поддержки из настроек. Пусто — не настроена."""
+    name = support_bot_username()
+    return f"https://t.me/{name}" if name else ""
 
 
 def _icon(paths: str) -> str:
@@ -7707,7 +7728,9 @@ def build_page(bot_username: str, title: str = "Drebol VPN",
         foot_links.append(f'<a href="{escape(channel_url)}" target="_blank" rel="noopener">Наш TG канал</a>')
     if handle:
         foot_links.append(f'<a href="{bot_url}" target="_blank" rel="noopener">Telegram-бот</a>')
-    foot_links.append(f'<a href="{SUPPORT_URL}" target="_blank" rel="noopener">Поддержка</a>')
+    support_url = support_bot_url()
+    if support_url:
+        foot_links.append(f'<a href="{escape(support_url)}" target="_blank" rel="noopener">Поддержка</a>')
     foot_links.append(f'<a href="{TIKTOK_URL}" target="_blank" rel="noopener">Наш TikTok канал</a>')
     foot_links.append(f'<a href="{INSTAGRAM_URL}" target="_blank" rel="noopener">Наш Instagram</a>')
     foot_links_html = f'<nav aria-label="Ссылки">{"".join(foot_links)}</nav>'
@@ -8469,6 +8492,13 @@ _DOC_DATE = "Дата вступления в силу: 12 ноября 2026 г.
 def _doc_page(kind: str) -> str:
     """Одна страница документа: политика, соглашение, возврат, правила, согласие."""
     p = _DOC_PAGES[kind]
+    body = p["body"]
+    # Контакт поддержки — из настроек главного бота, как у кнопки
+    # «🛟 Поддержка» в боте. Не задан — остаётся текст шаблона.
+    sup = support_bot_username()
+    if sup:
+        body = body.replace("@drebolvpn_sup", "@" + sup).replace(
+            "https://t.me/drebolvpn_sup", "https://t.me/" + sup)
     nav_docs = "".join(
         f'<a href="/{k}/">{label}</a>' for k, label in _DOC_NAV if k != kind
     )
@@ -8491,7 +8521,7 @@ def _doc_page(kind: str) -> str:
   <div class="logo"><img src="{LOGO_URL}" alt="Drebol VPN"></div>
   <h1>{p["h1"]}</h1>
   <p class="date">{_DOC_DATE}</p>
-  {p["body"]}
+  {body}
   <div class="nav">
     <a href="/">← На главную</a>
     <a href="/cabinet/">Кабинет</a>
