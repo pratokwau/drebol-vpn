@@ -717,12 +717,19 @@ async def rename_one_client(old: str) -> dict:
     if new is None:
         return {"ok": False, "old": old, "new": None,
                 "error": "уже без юза / не по шаблону"}
-    detail = await user_by_name(old)
-    if not detail.get("ok") or not isinstance(detail.get("data"), dict):
-        return {"ok": False, "old": old, "new": None,
-                "error": detail.get("error") or "не найден в панели"}
-    uid = (detail["data"].get("vlessUuid")
-           or detail["data"].get("uuid"))
+    # UUID — из списка панели (он же источник кандидатов): by-username
+    # для этого клиента отдаёт 404, хотя клиент в списке есть
+    # (проверено 2026-11-15 на paid_5185332965_pratokwau).
+    uid = None
+    for u in await all_users():
+        if (u.get("username") or "").strip() == old:
+            uid = u.get("vlessUuid") or u.get("uuid")
+            break
+    if not uid:
+        detail = await user_by_name(old)
+        if detail.get("ok") and isinstance(detail.get("data"), dict):
+            uid = (detail["data"].get("vlessUuid")
+                   or detail["data"].get("uuid"))
     if not uid:
         return {"ok": False, "old": old, "new": None, "error": "нет uuid"}
     ok, renamed_new, err = await _rename_one(old, uid)
