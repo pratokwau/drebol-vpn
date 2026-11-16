@@ -18,6 +18,9 @@ from handlers.admin import (
     handle_set_privacy_url, handle_set_terms_url, handle_documents_menu,
     handle_set_refund_url, handle_set_rules_url, handle_set_consent_url,
     handle_channel_menu, handle_dashboard, handle_healthcheck,
+    handle_welcome_photo_menu, handle_set_welcome_photo,
+    handle_toggle_welcome_photo, handle_welcome_photo_del,
+    handle_welcome_photo_test,
     handle_find_user, handle_user_profile,
     handle_set_log_channel, handle_clear_log_channel,
     handle_support_group_settings, handle_set_support_group, handle_clear_support_group,
@@ -240,8 +243,24 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user, context,
             on_start=lambda: query.edit_message_text("⏳ Готовлю ваш доступ…"))
         text, markup = await start_screen(user, fresh=fresh)
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
-                                      disable_web_page_preview=True)
+        # картинка приветствия: edit не умеет добавить фото — старое сообщение
+        # убираем и шлём экран заново с картинкой; не вышло удалить — правим как раньше
+        from handlers.welcome_photo import get_welcome_photo, send_with_welcome_photo
+        file_id, photo_on = get_welcome_photo()
+        deleted = False
+        if photo_on and file_id:
+            try:
+                await query.message.delete()
+                deleted = True
+            except Exception:
+                deleted = False
+        if deleted:
+            await query.answer()
+            await send_with_welcome_photo(context.bot, user.id, text, reply_markup=markup,
+                                          disable_web_page_preview=True)
+        else:
+            await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
+                                          disable_web_page_preview=True)
         return
 
     # ── Юзер ─────────────────────────────────────────────────────────────────
@@ -346,6 +365,16 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "channel_menu":
         await handle_channel_menu(query)
 
+    elif data == "welcome_photo_menu":
+        await handle_welcome_photo_menu(query)
+    elif data == "set_welcome_photo":
+        await handle_set_welcome_photo(query, context)
+    elif data == "toggle_welcome_photo":
+        await handle_toggle_welcome_photo(query)
+    elif data == "welcome_photo_del":
+        await handle_welcome_photo_del(query)
+    elif data == "welcome_photo_test":
+        await handle_welcome_photo_test(query, context)
     elif data == "toggle_force_sub":
         cfg = load_config()
         cfg["force_subscribe"] = not cfg.get("force_subscribe", False)

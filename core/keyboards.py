@@ -98,6 +98,7 @@ def channel_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(channel_label, callback_data="set_channel")],
         [InlineKeyboardButton(sub_label, callback_data="toggle_force_sub")],
+        [InlineKeyboardButton("🖼 Картинка приветствия", callback_data="welcome_photo_menu")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
 

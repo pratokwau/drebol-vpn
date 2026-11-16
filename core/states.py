@@ -3,6 +3,8 @@ AWAITING_CHANNEL = "awaiting_channel"
 AWAITING_BROADCAST = "awaiting_broadcast"
 AWAITING_BROADCAST_BUTTONS = "awaiting_broadcast_buttons"
 AWAITING_BROADCAST_PHOTO = "awaiting_broadcast_photo"
+# Картинка приветствия 16:9 (админка → Канал → Картинка приветствия)
+AWAITING_WELCOME_PHOTO = "awaiting_welcome_photo"
 AWAITING_PRIVACY_URL = "awaiting_privacy_url"
 AWAITING_TERMS_URL = "awaiting_terms_url"
 AWAITING_REFUND_URL = "awaiting_refund_url"
