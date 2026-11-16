@@ -56,9 +56,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     if not helper and not await is_subscribed(context.bot, user.id):
-        from handlers.welcome_photo import reply_with_welcome_photo
-        await reply_with_welcome_photo(
-            update.message,
+        from handlers.welcome_photo import reply_with_menu_photo
+        await reply_with_menu_photo(
+            update.message, "start",
             subscribe_text(user.first_name),
             reply_markup=subscribe_keyboard(),
         )
@@ -67,7 +67,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Канал пройден — пробный период выдаём сразу, без лишних нажатий.
     # Пока панель создаёт клиента, человек видит «⏳», а не тишину
     from handlers.user import ensure_trial, start_screen
-    from handlers.welcome_photo import get_welcome_photo, reply_with_welcome_photo
+    from handlers.welcome_photo import get_menu_photo, reply_with_menu_photo
     waiting = []
 
     async def _show_progress():
@@ -78,7 +78,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if waiting:
         # «⏳» нельзя превратить в фото — убираем его и шлём экран заново
         # с картинкой; не вышло удалить — правим как раньше
-        file_id, photo_on = get_welcome_photo()
+        file_id, photo_on = get_menu_photo("start")
         deleted = False
         if photo_on and file_id:
             try:
@@ -87,11 +87,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 deleted = False
         if deleted:
-            await reply_with_welcome_photo(update.message, text, reply_markup=markup,
-                                           disable_web_page_preview=True)
+            await reply_with_menu_photo(update.message, "start", text,
+                                        reply_markup=markup,
+                                        disable_web_page_preview=True)
         else:
             await waiting[0].edit_text(text, parse_mode="HTML", reply_markup=markup,
                                        disable_web_page_preview=True)
     else:
-        await reply_with_welcome_photo(update.message, text, reply_markup=markup,
-                                       disable_web_page_preview=True)
+        await reply_with_menu_photo(update.message, "start", text,
+                                    reply_markup=markup,
+                                    disable_web_page_preview=True)
