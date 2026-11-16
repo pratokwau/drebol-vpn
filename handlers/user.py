@@ -38,6 +38,7 @@ async def handle_my_sub(query):
         )
         return
     _, tg_id, email, uuid_val, sub_id, sub_url, expire, limit_ip, limit_hwid, total_gb, created_at = row[:11]
+    sub_url = primary_sub_url(sub_url)
     traffic = f"{total_gb} ГБ" if total_gb > 0 else "безлимит"
 
     from services.panel import get_client_info
@@ -201,7 +202,7 @@ async def handle_my_paid_sub(query):
             reply_markup=back_main(),
         )
         return
-    email, sub_url, limit_hwid = row[2], row[5], row[8]
+    email, sub_url, limit_hwid = row[2], primary_sub_url(row[5]), row[8]
     status = row[11] if len(row) > 11 else "active"
     renewed = row[12] if len(row) > 12 else 0
 
@@ -276,6 +277,25 @@ MAIN_SUB_DOMAIN = "key.drbl.tech"
 MIRROR_SUB_DOMAIN = "sub.drbl.tech"
 
 
+def primary_sub_url(sub_url: str) -> str:
+    """Основная ссылка подписки, которую даём пользователю: sub.drbl.tech.
+
+    В базе и в панели ссылка хранится с key.drbl.tech, но DPI режет TLS
+    до key — поэтому везде, где ссылка показывается пользователю (экран,
+    копирование, QR, диплинки в приложения, сообщение о создании), домен
+    меняем на sub.drbl.tech: тот же токен, тот же origin через Yandex CDN.
+    """
+    if not sub_url:
+        return ""
+    if MAIN_SUB_DOMAIN in sub_url:
+        return sub_url.replace(MAIN_SUB_DOMAIN, MIRROR_SUB_DOMAIN, 1)
+    if MIRROR_SUB_DOMAIN in sub_url:
+        return sub_url
+    from urllib.parse import urlparse
+    path = urlparse(sub_url).path.strip("/")
+    return f"https://{MIRROR_SUB_DOMAIN}/{path}" if path else ""
+
+
 def mirror_sub_url(sub_url: str) -> str:
     """Зеркало ссылки подписки: меняет домен key <-> sub, токен тот же."""
     if not sub_url:
@@ -292,9 +312,9 @@ def mirror_sub_url(sub_url: str) -> str:
 async def handle_mirror_sub(query):
     """Зеркало подписки: та же подписка через другой домен.
 
-    Основная ссылка идёт через key.drbl.tech, зеркало — через CDN
-    sub.drbl.tech (и наоборот). Нужно, когда основная ссылка не
-    обновляется в приложении из-за блокировки оператором (ошибка TLS).
+    Основная ссылка теперь идёт через sub.drbl.tech (CDN), а здесь —
+    запасной адрес через key.drbl.tech. Нужно, если sub вдруг
+    не обновляется в приложении (ошибка TLS).
     """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import get_paid_sub_by_tg_id
@@ -302,7 +322,9 @@ async def handle_mirror_sub(query):
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    mirror = mirror_sub_url(row[5])
+    # основная ссылка теперь sub.drbl.tech — здесь отдаём запасной адрес
+    # через key.drbl.tech, если sub вдруг не откроется
+    mirror = mirror_sub_url(primary_sub_url(row[5]))
     if not mirror:
         await query.answer("Зеркало недоступно", show_alert=True)
         return
@@ -318,8 +340,9 @@ async def handle_mirror_sub(query):
     await query.edit_message_text(
         "🪞 <b>Зеркало подписки</b>\n\n"
         f"<code>{mirror}</code>\n\n"
-        "<blockquote>Та же подписка, просто другой адрес. "
-        "Если основная ссылка не обновляется в приложении "
+        "<blockquote>Та же подписка, просто другой адрес — запасной, "
+        "через key.drbl.tech. Основная ссылка (sub.drbl.tech) обычно "
+        "работает лучше. Если она не обновляется в приложении "
         "(ошибка «Не удалось установить безопасное подключение») — "
         "замените ссылку подписки в приложении на эту.</blockquote>",
         parse_mode="HTML",
@@ -392,7 +415,7 @@ async def handle_app_add(query, app_key: str):
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    link = site.deeplink(app_key, row[5])
+    link = site.deeplink(app_key, primary_sub_url(row[5]))
     await query.edit_message_text(
         f"📲 <b>Добавить подписку в {app['name']}</b>\n\n"
         f"<blockquote>1. Установите {app['name']}, если ещё не стоит\n"
@@ -1205,7 +1228,7 @@ async def handle_copy_sub(query, context):
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    sub_url = row[5]
+    sub_url = primary_sub_url(row[5])
     await context.bot.send_message(
         chat_id=user_id,
         text=f"<code>{sub_url}</code>",
@@ -1221,7 +1244,7 @@ async def handle_qr_code(query, context):
     if not row:
         await query.answer("Подписка не найдена", show_alert=True)
         return
-    sub_url = row[5]
+    sub_url = primary_sub_url(row[5])
     try:
         import qrcode
         from io import BytesIO
@@ -1853,6 +1876,7 @@ async def _sub_facts(row) -> list:
 
 def _link_block(sub_url) -> str:
     """Ссылка подписки отдельным блоком: нажатие по <code> копирует её."""
+    sub_url = primary_sub_url(sub_url)
     return ("🔗 <b>Ссылка для подключения</b>\n"
             f"<code>{escape(str(sub_url))}</code>\n"
             "<i>Нажмите на ссылку — она скопируется.</i>")

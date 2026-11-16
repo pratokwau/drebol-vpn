@@ -702,11 +702,14 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
 
     traffic_str = result["traffic_str"]
     period_label = result["period_label"]
+    # ссылку даём через sub.drbl.tech (CDN), а не key: DPI режет TLS до key
+    from handlers.user import primary_sub_url
+    sub_link = primary_sub_url(result["sub_url"])
     user_text = (
         "🎉 <b>Подписка готова!</b>" + NL + NL +
         "<blockquote>📅 Действует до: <b>" + result["expire"][:16] + "</b></blockquote>" + NL + NL +
         "🔑 <b>Ссылка для подключения</b>" + NL +
-        "<code>" + result["sub_url"] + "</code>" + NL + NL +
+        "<code>" + sub_link + "</code>" + NL + NL +
         "<i>Нажмите на ссылку — она скопируется — и вставьте её в INCY.</i>"
     )
 
@@ -722,7 +725,7 @@ async def do_create_paid_sub(query_or_msg, tg_id: int, context, reply_func,
         "📧 Email: <code>" + result["email"] + "</code>" + NL +
         "📅 До: <b>" + result["expire"] + "</b>" + NL +
         "📶 Трафик: <b>" + traffic_str + "</b>" + NL + NL +
-        "🔗 Ссылка:" + NL + "<code>" + result["sub_url"] + "</code>",
+        "🔗 Ссылка:" + NL + "<code>" + sub_link + "</code>",
         parse_mode="HTML",
     )
 
