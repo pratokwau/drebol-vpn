@@ -277,9 +277,9 @@ details p,details ul{margin-top:8px}
 
       <!-- Пользователи -->
       <section id="sec-users" class="page hidden">
-        <div class="card"><h2>Найти пользователя</h2><p class="sub">Поиск по ID, @username, имени или paid_&lt;tg_id&gt;.</p>
-          <input id="q-user" placeholder="ID, @username, имя или paid_123">
-          <div class="btnrow"><button id="btn-find">Найти</button><button id="btn-recent" class="ghost">Недавние</button></div>
+        <div class="card"><h2>Пользователи</h2><p class="sub">Все пользователи. Нажми на строку, чтобы открыть карточку. Поиск — по ID, @username, имени или email.</p>
+          <input id="q-user" placeholder="Поиск: имя, @username, email, tg_id" style="flex:1;min-width:200px">
+          <div class="btnrow"><button id="btn-find">Найти</button><button id="btn-recent" class="ghost">Недавние</button><button id="btn-users-prev" class="ghost">← Назад</button><button id="btn-users-next" class="ghost">Вперёд →</button><span id="users-page-label" class="mut"></span></div>
           <div id="users-out"></div>
         </div>
         <div class="card"><h2>Сообщение пользователю</h2><p class="sub">Отправляется от имени бота Drebol VPN.</p>
@@ -438,11 +438,15 @@ details p,details ul{margin-top:8px}
       </section>
       <!-- Панель Remnawave -->
       <section id="sec-panel" class="page hidden">
-        <div class="card"><h2>Панель Remnawave</h2><p class="sub">Профили, инбаунды и хосты — живые данные из панели. Правка инбаундов и хостов — только Mark, с проверкой конфига после сохранения.</p>
-          <div class="btnrow"><button id="btn-panel" class="ghost">Показать панель</button><button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button></div>
+        <div class="card"><h2>Панель Remnawave</h2><p class="sub">Профили, инбаунды и хосты — живые данные из панели. Нажми на строку, чтобы открыть профиль или хост в редакторе ниже. Правка инбаундов и хостов — только Mark, с проверкой конфига после сохранения.</p>
+          <div class="btnrow"><button id="btn-panel" class="ghost">Обновить списки</button><button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button></div>
           <div id="panel-out"></div>
+          <h3>Профили</h3>
+          <div id="profiles-table"></div>
+          <h3>Хосты</h3>
+          <div id="hosts-table"></div>
         </div>
-        <div class="card"><h2>Редактор инбаунда</h2><p class="sub">Меняются только заполненные поля. Приватные ключи и shortId здесь не трогаются.</p>
+        <div class="card" id="panel-profile-card"><h2>Редактор инбаунда</h2><p class="sub">Меняются только заполненные поля. Приватные ключи и shortId здесь не трогаются.</p>
           <input id="pf-uuid" placeholder="UUID профиля">
           <div class="btnrow"><button id="btn-pf-load" class="ghost">Показать профиль</button></div>
           <input id="pf-tag" placeholder="тег инбаунда, напр. VTR-Germany-1">
@@ -453,7 +457,7 @@ details p,details ul{margin-top:8px}
           <div class="btnrow"><button id="btn-pf-save" class="ghost">Сохранить инбаунд</button></div>
           <div id="pf-out"></div>
         </div>
-        <div class="card"><h2>Хосты</h2><p class="sub">Новый хост создаётся выключенным — включите его после проверки.</p>
+        <div class="card" id="panel-hosts-card"><h2>Хосты</h2><p class="sub">Новый хост создаётся выключенным — включите его после проверки.</p>
           <input id="ph-inbound" placeholder="UUID инбаунда (для нового хоста)">
           <input id="ph-remark" placeholder="имя хоста">
           <input id="ph-addr" placeholder="адрес">
@@ -474,9 +478,10 @@ details p,details ul{margin-top:8px}
 
       <!-- Узлы -->
       <section id="sec-nodes" class="page hidden">
-        <div class="card"><h2>Узлы и здоровье</h2><p class="sub">Живой статус нод, панели и сайта подписки.</p>
+        <div class="card"><h2>Узлы и здоровье</h2><p class="sub">Живой статус нод, панели и сайта подписки. Нажми на строку ноды, чтобы посмотреть её трафик.</p>
           <div class="btnrow"><button id="btn-nodes">Здоровье узлов</button><button id="btn-squads" class="ghost">Сквады</button></div>
-          <input id="node-id" type="number" placeholder="ID ноды — трафик пользователей">
+          <div id="nodes-table"></div>
+          <input id="node-id" placeholder="UUID ноды — или клик по строке таблицы">
           <input id="node-start" placeholder="с даты, напр. 2026-11-01 (пусто — 30 дней назад)">
           <input id="node-end" placeholder="по дату, напр. 2026-11-15 (пусто — сегодня)">
           <div class="btnrow"><button id="btn-node-users" class="ghost">Трафик ноды</button></div>
@@ -1102,22 +1107,35 @@ function renderUsersTable(host, rows, dateLabel){
     tr.onclick = function(){ openUserEditor(parseInt(tr.dataset.tg, 10)); };
   });
 }
-$("btn-find").onclick = withSpin($("btn-find"), async function(){
+let usersPage = 1, usersTotalPages = 1, usersLoaded = false;
+async function loadUsers(page){
+  usersPage = page;
   const q = $("q-user").value.trim();
+  $("users-out").innerHTML = '<div class="skel" style="height:18px;width:90%;margin-bottom:8px"></div><div class="skel" style="height:18px;width:70%;margin-bottom:8px"></div><div class="skel" style="height:120px"></div>';
   let r;
-  try { r = await api("/users?search=" + encodeURIComponent(q)); }
+  try { r = await api("/users/list?page=" + page + (q ? "&q=" + encodeURIComponent(q) : "")); }
   catch(e) { $("users-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("users-out", r.data); return; }
+  usersTotalPages = r.data.total_pages || 1;
+  $("users-page-label").textContent = "Стр. " + r.data.page + " из " + usersTotalPages;
   const rows = (r.data.users || []).map(function(u){
     return {tg_id: u.tg_id, name: u.first_name || "", username: u.username || "", sub: u.sub_status || "", date: u.created_at || ""};
   });
   renderUsersTable($("users-out"), rows, "Создан");
+}
+$("btn-find").onclick = withSpin($("btn-find"), async function(){ loadUsers(1); });
+$("q-user").addEventListener("keydown", function(e){ if (e.key === "Enter") loadUsers(1); });
+$("btn-users-prev").onclick = function(){ if (usersPage > 1) loadUsers(usersPage - 1); };
+$("btn-users-next").onclick = function(){ if (usersPage < usersTotalPages) loadUsers(usersPage + 1); };
+document.querySelector('[data-nav="users"]').addEventListener("click", function(){
+  if (!usersLoaded) { usersLoaded = true; loadUsers(1); }
 });
 $("btn-recent").onclick = async function(){
   let r;
   try { r = await api("/users/recent"); }
   catch(e) { $("users-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("users-out", r.data); return; }
+  $("users-page-label").textContent = "";
   const rows = (r.data.users || []).map(function(u){
     return {tg_id: u.tg_id, name: u.first_name || "", username: u.username || "", sub: "", date: u.last_seen || ""};
   });
@@ -1175,7 +1193,21 @@ $("btn-gift").onclick = withSpin($("btn-gift"), async function(){
   renderOut("gift-out", r.data);
   if (r.status === 200) toast("Подписка подарена", "ok");
 });
-$("btn-blacklist").onclick = async function(){ const r = await api("/blacklist"); renderOut("bl-out", r.data); };
+$("btn-blacklist").onclick = async function(){
+  const r = await api("/blacklist");
+  if (r.status !== 200) { renderOut("bl-out", r.data); return; }
+  const rows = r.data.entries || [];
+  if (!rows.length) { $("bl-out").innerHTML = '<div class="empty">Чёрный список пуст</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Имя</th><th>Username</th><th>TG ID</th><th>Причина</th></tr></thead><tbody>';
+  rows.forEach(function(e){
+    h += '<tr data-tg="' + e.tg_id + '"><td>' + esc(e.first_name || "") + '</td><td class="mono">@' + esc(e.username || "") + '</td><td class="mono">' + e.tg_id + '</td><td>' + esc(e.reason || "") + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  $("bl-out").innerHTML = h;
+  $("bl-out").querySelectorAll("tr[data-tg]").forEach(function(tr){
+    tr.onclick = function(){ $("bl-tg").value = tr.dataset.tg; };
+  });
+};
 $("btn-bl-add").onclick = withSpin($("btn-bl-add"), async function(){
   const r = await api("/blacklist/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({tg_id: parseInt($("bl-tg").value || "0", 10), reason: $("bl-reason").value, term: $("bl-term").value || undefined})});
@@ -1190,7 +1222,21 @@ $("btn-bl-readd").onclick = async function(){
     {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
   renderOut("bl-out", r.data);
 };
-$("btn-fraud").onclick = async function(){ const r = await api("/fraud"); renderOut("fraud-out", r.data); };
+$("btn-fraud").onclick = async function(){
+  const r = await api("/fraud");
+  if (r.status !== 200) { renderOut("fraud-out", r.data); return; }
+  const rows = r.data.pairs || [];
+  if (!rows.length) { $("fraud-out").innerHTML = '<div class="empty">Подозрительных пар нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Аккаунт A</th><th>Аккаунт B</th><th>Совпадение</th><th>Статус</th></tr></thead><tbody>';
+  rows.forEach(function(p){
+    h += '<tr data-a="' + p.tg_a + '" data-b="' + p.tg_b + '"><td class="mono">' + p.tg_a + '</td><td class="mono">' + p.tg_b + '</td><td>' + esc(p.kind + ": " + p.value) + '</td><td>' + statusPill(p.status, p.status) + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  $("fraud-out").innerHTML = h;
+  $("fraud-out").querySelectorAll("tr[data-a]").forEach(function(tr){
+    tr.onclick = function(){ $("fraud-a").value = tr.dataset.a; $("fraud-b").value = tr.dataset.b; };
+  });
+};
 $("btn-fraud-scan").onclick = withSpin($("btn-fraud-scan"), async function(){
   const r = await postConfirm("/fraud/scan", {});
   renderOut("fraud-out", r.data);
@@ -1752,12 +1798,53 @@ async function openTariffEditor(tid){
 }
 
 /* --- Панель Remnawave и узлы --- */
-$("btn-panel").onclick = async function(){ const r = await api("/panel"); renderOut("panel-out", r.data); };
+let panelLoaded = false;
+async function loadPanel(){
+  let r;
+  try { r = await api("/panel"); }
+  catch(e) { $("profiles-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("profiles-table", r.data); return; }
+  const profiles = r.data.profiles || [];
+  if (!profiles.length) { $("profiles-table").innerHTML = '<div class="empty">Профилей нет</div>'; }
+  else {
+    let h = '<div class="tblwrap"><table><thead><tr><th>Профиль</th><th>UUID</th><th>Инбаунды</th></tr></thead><tbody>';
+    profiles.forEach(function(p){
+      h += '<tr data-uuid="' + esc(p.uuid) + '"><td>' + esc(p.name || "") + '</td><td class="mono">' + esc(String(p.uuid).slice(0, 8)) + '…</td><td>' + (p.inbounds || []).map(function(ib){ return esc(ib.tag || ""); }).join(", ") + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    $("profiles-table").innerHTML = h;
+    $("profiles-table").querySelectorAll("tr[data-uuid]").forEach(function(tr){
+      tr.onclick = function(){ $("pf-uuid").value = tr.dataset.uuid; loadProfile(); $("panel-profile-card").scrollIntoView(); };
+    });
+  }
+  let rh;
+  try { rh = await api("/panel/hosts"); }
+  catch(e) { $("hosts-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (rh.status !== 200) { renderOut("hosts-table", rh.data); return; }
+  const hosts = rh.data.hosts || [];
+  if (!hosts.length) { $("hosts-table").innerHTML = '<div class="empty">Хостов нет</div>'; }
+  else {
+    let h2 = '<div class="tblwrap"><table><thead><tr><th>Хост</th><th>Адрес</th><th>Порт</th><th>Вкл</th></tr></thead><tbody>';
+    hosts.forEach(function(x){
+      h2 += '<tr data-uuid="' + esc(x.uuid) + '" data-disabled="' + (x.isDisabled ? "true" : "false") + '"><td>' + esc(x.remark || "") + '</td><td class="mono">' + esc(x.address || "") + '</td><td class="num">' + (x.port == null ? "—" : x.port) + '</td><td>' + statusPill(x.isDisabled ? "disabled" : "enabled", x.isDisabled ? "Выключен" : "Включён") + '</td></tr>';
+    });
+    h2 += '</tbody></table></div>';
+    $("hosts-table").innerHTML = h2;
+    $("hosts-table").querySelectorAll("tr[data-uuid]").forEach(function(tr){
+      tr.onclick = function(){ $("ph-uuid").value = tr.dataset.uuid; $("ph-disabled").value = tr.dataset.disabled; $("panel-hosts-card").scrollIntoView(); };
+    });
+  }
+}
+$("btn-panel").onclick = loadPanel;
+document.querySelector('[data-nav="panel"]').addEventListener("click", function(){
+  if (!panelLoaded) { panelLoaded = true; loadPanel(); }
+});
 $("btn-yandex").onclick = async function(){ const r = await api("/yandex"); renderOut("panel-out", r.data); };
-$("btn-pf-load").onclick = async function(){
+async function loadProfile(){
   const r = await api("/panel/profiles/" + $("pf-uuid").value);
   renderOut("pf-out", r.data);
-};
+}
+$("btn-pf-load").onclick = loadProfile;
 $("btn-pf-save").onclick = async function(){
   const uuid = $("pf-uuid").value, tag = $("pf-tag").value;
   const body = {};
@@ -1777,16 +1864,19 @@ $("btn-ph-create").onclick = async function(){
     remark: $("ph-remark").value, address: $("ph-addr").value,
     port: parseInt($("ph-port").value || "0", 10), sni: $("ph-sni").value});
   renderOut("ph-out", r.data);
+  if (r.status === 200) loadPanel();
 };
 $("btn-ph-toggle").onclick = async function(){
   const uuid = $("ph-uuid").value;
   const r = await postConfirmAny("/panel/hosts/" + uuid, "PATCH", {isDisabled: $("ph-disabled").value === "true"});
   renderOut("ph-out", r.data);
+  if (r.status === 200) loadPanel();
 };
 $("btn-ph-del").onclick = async function(){
   const uuid = $("ph-uuid").value;
   const r = await postConfirmAny("/panel/hosts/" + uuid, "DELETE", {});
   renderOut("ph-out", r.data);
+  if (r.status === 200) loadPanel();
 };
 $("btn-ps-show").onclick = async function(){ const r = await api("/panel/settings"); renderOut("ps-out", r.data); };
 $("btn-ps-save").onclick = async function(){
@@ -1798,18 +1888,47 @@ $("btn-ps-test").onclick = async function(){
   const r = await api("/panel/settings/test", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
   renderOut("ps-out", r.data);
 };
+let nodesLoaded = false;
+async function loadNodes(){
+  let r;
+  try { r = await api("/panel"); }
+  catch(e) { $("nodes-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("nodes-table", r.data); return; }
+  let nodes = r.data.nodes || [];
+  if (nodes && !Array.isArray(nodes)) nodes = nodes.nodes || nodes.response || [];
+  if (!nodes.length) { $("nodes-table").innerHTML = '<div class="empty">Нод нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Нода</th><th>Адрес</th><th>Статус</th><th>Онлайн</th></tr></thead><tbody>';
+  nodes.forEach(function(n){
+    const alive = n.isConnected && n.isXrayRunning !== false;
+    const st = n.isDisabled ? "Выключена" : alive ? "Онлайн" : "Офлайн";
+    h += '<tr data-uuid="' + esc(n.uuid || "") + '"><td>' + esc(n.name || n.address || "") + '</td><td class="mono">' + esc(n.address || "") + '</td><td>' + statusPill(n.isDisabled ? "disabled" : alive ? "online" : "offline", st) + '</td><td class="num">' + (n.usersOnline == null ? "—" : n.usersOnline) + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  $("nodes-table").innerHTML = h;
+  $("nodes-table").querySelectorAll("tr[data-uuid]").forEach(function(tr){
+    tr.onclick = function(){ $("node-id").value = tr.dataset.uuid; loadNodeUsers(); };
+  });
+}
+document.querySelector('[data-nav="nodes"]').addEventListener("click", function(){
+  if (!nodesLoaded) { nodesLoaded = true; loadNodes(); $("btn-nodes").click(); }
+});
 $("btn-nodes").onclick = async function(){ const r = await api("/nodes"); renderOut("nodes-out", r.data); };
 $("btn-squads").onclick = async function(){ const r = await api("/squads"); renderOut("nodes-out", r.data); };
-$("btn-node-users").onclick = async function(){
+async function loadNodeUsers(){
   let q = "";
   const s = $("node-start").value.trim(), e = $("node-end").value.trim();
   if (s) q += (q ? "&" : "?") + "start=" + encodeURIComponent(s);
   if (e) q += (q ? "&" : "?") + "end=" + encodeURIComponent(e);
   const r = await api("/nodes/" + $("node-id").value + "/users" + q);
   renderOut("nodes-out", r.data);
-};
+}
+$("btn-node-users").onclick = loadNodeUsers;
 
 /* --- Логи, синхронизация, операторы, сайт, бэкап --- */
+let logsLoaded = false;
+document.querySelector('[data-nav="logs"]').addEventListener("click", function(){
+  if (!logsLoaded) { logsLoaded = true; $("btn-logs").click(); }
+});
 $("btn-logs").onclick = async function(){
   let q = "?kind=" + $("logs-kind").value;
   const u = $("logs-user").value.trim(); if (u) q += "&user_id=" + u;
@@ -1855,7 +1974,26 @@ $("btn-st-save").onclick = async function(){
     body: JSON.stringify({field: $("st-field").value, text: $("st-text").value})});
   renderOut("st-out", r.data);
 };
-$("btn-st-show").onclick = async function(){ const r = await api("/site/texts"); renderOut("st-out", r.data); };
+$("btn-st-show").onclick = async function(){
+  const r = await api("/site/texts");
+  if (r.status !== 200) { renderOut("st-out", r.data); return; }
+  const texts = r.data.texts || {};
+  const keys = Object.keys(texts);
+  if (!keys.length) { $("st-out").innerHTML = '<div class="empty">Текстов нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Поле</th><th>Текст</th></tr></thead><tbody>';
+  keys.forEach(function(k){
+    h += '<tr data-field="' + esc(k) + '"><td class="mono">' + esc(k) + '</td><td>' + esc(String(texts[k]).slice(0, 80)) + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  $("st-out").innerHTML = h;
+  $("st-out").querySelectorAll("tr[data-field]").forEach(function(tr){
+    tr.onclick = function(){
+      $("st-field").value = tr.dataset.field;
+      $("st-text").value = texts[tr.dataset.field] || "";
+      $("st-text").focus();
+    };
+  });
+};
 $("btn-site-del").onclick = async function(){ const r = await postConfirm("/site/delete", {}); renderOut("site-del-out", r.data); };
 $("btn-backup-restore").onclick = async function(){
   const f = $("bk-file").files[0];
@@ -1874,15 +2012,37 @@ $("btn-backup-restore").onclick = async function(){
 $("btn-git").onclick = async function(){ const r = await postConfirm("/git-update", {}); renderOut("git-out", r.data); };
 
 /* --- Поддержка и настройки --- */
-$("btn-support").onclick = async function(){ const r = await api("/support/topics"); renderOut("topics-out", r.data); };
-$("btn-sup-open").onclick = async function(){
+let supportLoaded = false;
+async function loadTopics(){
+  let r;
+  try { r = await api("/support/topics"); }
+  catch(e) { $("topics-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("topics-out", r.data); return; }
+  const topics = r.data.topics || [];
+  if (!topics.length) { $("topics-out").innerHTML = '<div class="empty"><span class="big">🛟</span>Открытых обращений нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Тема</th><th>Юзер</th></tr></thead><tbody>';
+  topics.forEach(function(t){
+    h += '<tr data-user="' + t.user_id + '"><td>' + esc(t.topic_name || "") + '</td><td class="mono">' + t.user_id + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  $("topics-out").innerHTML = h;
+  $("topics-out").querySelectorAll("tr[data-user]").forEach(function(tr){
+    tr.onclick = function(){ $("sup-user").value = tr.dataset.user; openTopic(); };
+  });
+}
+document.querySelector('[data-nav="support"]').addEventListener("click", function(){
+  if (!supportLoaded) { supportLoaded = true; loadTopics(); }
+});
+$("btn-support").onclick = loadTopics;
+async function openTopic(){
   const id = $("sup-user").value;
   const r = await api("/support/topics/" + id);
   if (r.status !== 200) { $("sup-msgs").textContent = "Ошибка: " + (r.data.error || r.status); return; }
   $("sup-msgs").innerHTML = (r.data.messages || []).map(function(m){
     return "<p><b>" + (m.from_admin ? "Админ" : "Юзер") + ":</b> " + esc(m.text) + ' <span class="mut">' + fmtDate(m.created_at) + "</span></p>";
   }).join("") || '<div class="empty"><span class="big">💬</span>Сообщений нет</div>';
-};
+}
+$("btn-sup-open").onclick = openTopic;
 $("btn-sup-reply").onclick = withSpin($("btn-sup-reply"), async function(){
   const id = $("sup-user").value;
   const r = await api("/support/topics/" + id + "/reply", {method: "POST", headers: {"X-CSRF-Token": csrf()},

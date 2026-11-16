@@ -79,6 +79,27 @@ async def users_recent(request):
          "last_seen": str(r[3] or "")} for r in rows]})
 
 
+async def users_list(request):
+    """Все пользователи: список с поиском, страницы. Клик по строке —
+    карточка юзера (openUserEditor)."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from core.database import admin_list_users
+    try:
+        page = int(request.query.get("page") or 1)
+    except ValueError:
+        return web.json_response({"error": "bad_page"}, status=400)
+    q = (request.query.get("q") or "").strip()
+    rows, total_pages = await admin_list_users(page, 25, q)
+    return web.json_response({"users": [
+        {"tg_id": r[0], "first_name": r[1], "username": r[2],
+         "sub_status": r[3], "created_at": str(r[4] or "")} for r in rows],
+        "page": max(1, page), "total_pages": total_pages})
+
+
 async def user_profile(request):
     from aiohttp import web
     try:
@@ -629,6 +650,7 @@ def register(app) -> None:
     """Маршруты монтируются относительно /api/admin (см. build_admin_app)."""
     app.router.add_get("/users", users_search)
     app.router.add_get("/users/recent", users_recent)
+    app.router.add_get("/users/list", users_list)
     app.router.add_get("/users/{tg_id}", user_profile)
     app.router.add_get("/users/{tg_id}/activity", user_activity)
     app.router.add_post("/users/{tg_id}/dm", user_dm)

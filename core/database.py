@@ -1723,6 +1723,43 @@ async def admin_list_paid_subs(page: int = 1, per_page: int = 25,
     return rows, max(1, (total + per_page - 1) // per_page)
 
 
+async def admin_list_users(page: int = 1, per_page: int = 25,
+                           q: str = "") -> tuple[list, int]:
+    """Все пользователи для админки: поиск + страницы.
+
+    Строка: tg_id, имя, username, статус последней подписки, created_at.
+    Поиск — как search_users: цифры — по tg_id, иначе — по имени, username
+    или email подписки. Сортировка — новые сверху.
+    """
+    page = max(1, int(page))
+    per_page = max(1, min(int(per_page), 25))
+    offset = (page - 1) * per_page
+    q = (q or "").strip()
+    where = ""
+    params: list = []
+    if q:
+        like = f"%{q.lower()}%"
+        where = """WHERE CAST(u.id AS TEXT) LIKE ?
+               OR lower(u.username) LIKE ?
+               OR lower(u.first_name) LIKE ?
+               OR EXISTS (SELECT 1 FROM paid_subs p
+                          WHERE p.tg_id = u.id AND lower(p.email) LIKE ?)"""
+        params = [like, like, like, like]
+    cols = """u.id, u.first_name, u.username,
+              (SELECT status FROM paid_subs p WHERE p.tg_id = u.id
+               ORDER BY p.id DESC LIMIT 1), u.created_at"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+                f"SELECT COUNT(*) FROM users u {where}", params) as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute(f"""SELECT {cols} FROM users u
+                {where}
+                ORDER BY u.created_at DESC, u.id DESC
+                LIMIT ? OFFSET ?""", (*params, per_page, offset)) as cur:
+            rows = await cur.fetchall()
+    return rows, max(1, (total + per_page - 1) // per_page)
+
+
 async def dashboard_paid_subs(page: int = 1, per_page: int = 25) -> tuple[list, int]:
     """Платные подписки для дашборда: последние оплаченные счета первыми.
 

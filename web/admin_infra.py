@@ -1103,6 +1103,17 @@ def _find_inbound(config: dict, tag: str) -> dict | None:
     return None
 
 
+async def panel_hosts_list(request):
+    """Все хосты панели — для кликабельного списка в админке.
+    Только чтение."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    res = await rw_mod.list_hosts()
+    return web.json_response(res)
+
+
 async def panel_profile_get(request):
     try:
         actor = await _require_actor(request)
@@ -1917,6 +1928,7 @@ def register(app) -> None:
     app.router.add_get("/yandex", yandex_get)
     app.router.add_post("/jobs/run-now", jobs_run_now)
     app.router.add_get("/panel/profiles/{uuid}", panel_profile_get)
+    app.router.add_get("/panel/hosts", panel_hosts_list)
     app.router.add_patch("/panel/profiles/{uuid}/inbounds/{tag}",
                          panel_profile_inbound_patch)
     app.router.add_patch("/panel/hosts/{uuid}", panel_host_patch)
