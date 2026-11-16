@@ -119,6 +119,8 @@ async def paid_counts() -> dict:
 #   get_paid_sub_by_tg_id: 12 times_renewed   … 18 extra_devices, 19 lte_gb,
 #                            20 lte_fallback_month (добавлен в конец — старые индексы не трогаем)
 # Общее у них — ind_*-поля с 13 по 17, на них и опирается sub_settings().
+# Админка (_paid_sub_dict) ждёт порядок get_paid_sub_by_tg_id — для неё
+# есть get_paid_sub_admin() ниже, get_paid_sub сюда передавать НЕЛЬЗЯ.
 
 async def get_paid_sub(sub_id: int) -> tuple | None:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -126,6 +128,24 @@ async def get_paid_sub(sub_id: int) -> tuple | None:
             SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at,
                    status, payment_pending, ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url,
                    period_end, lte_gb
+            FROM paid_subs WHERE id = ?
+        """, (sub_id,)) as cur:
+            return await cur.fetchone()
+
+
+async def get_paid_sub_admin(sub_id: int) -> tuple | None:
+    """Строка подписки по id — в порядке get_paid_sub_by_tg_id.
+
+    Нужна админке: web.admin_users._paid_sub_dict читает позиции этого
+    порядка, а get_paid_sub возвращает другой (12 payment_pending,
+    18 period_end) — карточка подписки тогда врёт в times_renewed
+    и extra_devices.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, limit_ip, limit_hwid, total_gb, created_at, status, times_renewed,
+                   ind_trial_period, ind_pay_period, ind_renew_time, ind_price, ind_pay_url,
+                   extra_devices, lte_gb, lte_fallback_month
             FROM paid_subs WHERE id = ?
         """, (sub_id,)) as cur:
             return await cur.fetchone()

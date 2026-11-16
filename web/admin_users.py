@@ -229,18 +229,43 @@ def _actor_tg_id(actor: dict) -> int:
 
 # ── Подписки: действия ─────────────────────────────────────────────────────
 
+async def subs_list(request):
+    """Все платные подписки: список с поиском, фильтром по статусу, страницы."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from core.database import admin_list_paid_subs
+    try:
+        page = int(request.query.get("page") or 1)
+    except ValueError:
+        return web.json_response({"error": "bad_page"}, status=400)
+    q = (request.query.get("q") or "").strip()
+    status = (request.query.get("status") or "").strip()
+    rows, total_pages = await admin_list_paid_subs(page, 25, q, status)
+    subs = []
+    for r in rows:
+        d = _paid_sub_dict(r)
+        d["first_name"] = r[-2]
+        d["username"] = r[-1]
+        subs.append(d)
+    return web.json_response({"subs": subs, "page": max(1, page),
+                              "total_pages": total_pages})
+
+
 async def sub_card(request):
     from aiohttp import web
     try:
         await _require_actor(request)
     except Exception:
         return web.json_response({"error": "no_session"}, status=401)
-    from paidsub.storage import get_paid_sub
+    from paidsub.storage import get_paid_sub_admin
     try:
         sub_id = int(request.match_info["sub_id"])
     except (KeyError, ValueError):
         return web.json_response({"error": "bad_id"}, status=400)
-    row = await get_paid_sub(sub_id)
+    row = await get_paid_sub_admin(sub_id)
     if not row:
         return web.json_response({"error": "not_found"}, status=404)
     try:
@@ -614,6 +639,7 @@ def register(app) -> None:
     app.router.add_patch("/subs/presets", subs_presets_patch)
     app.router.add_post("/subs/bulk/{kind}", subs_bulk)
     app.router.add_post("/subs/lte/check-now", lte_check_now)
+    app.router.add_get("/subs", subs_list)
     app.router.add_get("/admin-subs", admin_subs_list)
     app.router.add_post("/admin-subs", admin_sub_create)
     app.router.add_get("/admin-subs/{sub_id}", admin_sub_card)

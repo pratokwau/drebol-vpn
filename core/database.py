@@ -1670,6 +1670,59 @@ async def dashboard_series(days: int = 30) -> dict:
     }
 
 
+async def admin_list_paid_subs(page: int = 1, per_page: int = 25,
+                               q: str = "", status: str = "") -> tuple[list, int]:
+    """Все платные подписки для админки: поиск + фильтр по статусу + страницы.
+
+    Строка: колонки в порядке web.admin_users._paid_sub_dict (как
+    paidsub.storage.get_paid_sub_by_tg_id) + имя и username юзера
+    (два последних поля). НЕ использовать SELECT * — физический порядок
+    колонок в таблице другой, и _paid_sub_dict тогда врёт.
+    Поиск: цифры — по tg_id или id подписки, иначе — по имени, username,
+    email. Сортировка — новые подписки первыми.
+    """
+    page = max(1, int(page))
+    per_page = max(1, min(int(per_page), 25))
+    offset = (page - 1) * per_page
+    q = (q or "").strip()
+    status = (status or "").strip()
+    where = []
+    params: list = []
+    if status:
+        where.append("s.status = ?")
+        params.append(status)
+    if q:
+        like = f"%{q.lower()}%"
+        if q.isdigit():
+            where.append("(s.tg_id = ? OR s.id = ? OR lower(u.username) LIKE ?"
+                         " OR lower(u.first_name) LIKE ? OR lower(s.email) LIKE ?)")
+            params.extend([int(q), int(q), like, like, like])
+        else:
+            where.append("(lower(u.username) LIKE ? OR lower(u.first_name) LIKE ?"
+                         " OR lower(s.email) LIKE ?)")
+            params.extend([like, like, like])
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    cols = ("s.id, s.tg_id, s.email, s.uuid, s.sub_id, s.sub_url, s.expire_date,"
+            " s.limit_ip, s.limit_hwid, s.total_gb, s.created_at, s.status,"
+            " s.times_renewed, s.ind_trial_period, s.ind_pay_period,"
+            " s.ind_renew_time, s.ind_price, s.ind_pay_url,"
+            " s.extra_devices, s.lte_gb, s.lte_fallback_month,"
+            " u.first_name, u.username")
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            f"SELECT COUNT(*) FROM paid_subs s LEFT JOIN users u ON u.id = s.tg_id "
+            f"{where_sql}", params) as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute(
+            f"""SELECT {cols} FROM paid_subs s
+                LEFT JOIN users u ON u.id = s.tg_id
+                {where_sql}
+                ORDER BY s.created_at DESC, s.id DESC
+                LIMIT ? OFFSET ?""", (*params, per_page, offset)) as cur:
+            rows = await cur.fetchall()
+    return rows, max(1, (total + per_page - 1) // per_page)
+
+
 async def dashboard_paid_subs(page: int = 1, per_page: int = 25) -> tuple[list, int]:
     """Платные подписки для дашборда: последние оплаченные счета первыми.
 

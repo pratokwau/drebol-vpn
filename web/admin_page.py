@@ -1,6 +1,6 @@
 """Статическая страница веб-админки Drebol VPN.
 
-Midnight-дизайн сайта: #020202, #2ea8ff, Unbounded + Inter. Левая
+Luxury-дизайн сайта: крем #F7F3EB, чернила #0E0E0E, золото #C9B896, Manrope. Левая
 боковая навигация с разделами, верхняя панель с актором и выходом,
 карточки с заголовками, читаемые таблицы (числа — справа, ID и даты —
 моноширинным, статусы — плашками), пустые состояния, тосты и спиннеры.
@@ -18,20 +18,22 @@ ADMIN_PAGE = """<!DOCTYPE html>
 <title>Админка — Drebol VPN</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Unbounded:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#020202; --card:#0b0e13; --card2:#0e1218; --line:#1c2330; --line2:#263042;
-  --txt:#f2f5f9; --mut:#9aa5b5; --mut2:#6b7686; --acc:#2ea8ff; --acc-dim:#12314a;
-  --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --violet:#a78bfa;
+  --bg:#F7F3EB; --card:#FFFFFF; --card2:#FDFAF1; --line:#E4DDCC; --line2:#D8CFB8;
+  --txt:#0E0E0E; --mut:#6E6A61; --mut2:#9A938A; --acc:#0A0A0A; --acc-dim:#EFE7D3;
+  --gold:#C9B896; --dark:#0A0A0A; --dark-2:#161513; --dark-line:#26241F; --dark-mut:#9B968A;
+  --ok:#1E7A4C; --warn:#8A5E00; --bad:#C22E2E; --violet:#6D28D9;
+  --radius:20px; --ease:cubic-bezier(.22,.61,.36,1);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html{scrollbar-color:#263042 #020202}
-body{background:var(--bg);color:var(--txt);font:15px/1.6 "Inter",-apple-system,"Segoe UI",sans-serif;min-height:100vh}
+html{scrollbar-color:#D8CFB8 #F7F3EB}
+body{background:var(--bg);color:var(--txt);font:15px/1.6 "Manrope","Inter",-apple-system,"Segoe UI",sans-serif;min-height:100vh}
 a{color:var(--acc);text-decoration:none}
 a:hover{text-decoration:underline}
-h1{font-family:"Unbounded",sans-serif;font-size:22px;letter-spacing:-.02em}
-h2{font-family:"Unbounded",sans-serif;font-size:16px;margin:0 0 4px}
+h1{font-family:"Manrope",sans-serif;font-size:22px;font-weight:800;letter-spacing:-.02em}
+h2{font-family:"Manrope",sans-serif;font-size:16px;font-weight:800;margin:0 0 4px}
 h3{font-size:14px;font-weight:700;margin:18px 0 8px}
 .mut{color:var(--mut);font-size:13.5px;line-height:1.55}
 .small{font-size:12.5px;color:var(--mut2)}
@@ -39,35 +41,50 @@ h3{font-size:14px;font-weight:700;margin:18px 0 8px}
 .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .hidden{display:none !important}
 
+/* --- Анимации --- */
+@keyframes pageIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes cardIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+.page:not(.hidden){animation:pageIn .3s var(--ease) backwards}
+.page .card{animation:cardIn .4s var(--ease) backwards}
+.page .card:nth-child(2){animation-delay:.05s}
+.page .card:nth-child(3){animation-delay:.1s}
+.page .card:nth-child(4){animation-delay:.15s}
+.page .card:nth-child(5){animation-delay:.2s}
+@media (prefers-reduced-motion: reduce){*{animation:none !important;transition:none !important}}
+
 /* --- Каркас: боковая панель + контент --- */
 .layout{display:flex;min-height:100vh}
-.sidebar{width:264px;flex:0 0 264px;background:#05070a;border-right:1px solid var(--line);padding:20px 14px;position:sticky;top:0;height:100vh;overflow-y:auto}
-.brand{font-family:"Unbounded",sans-serif;font-size:17px;padding:2px 10px 16px;border-bottom:1px solid var(--line);margin-bottom:14px}
-.brand span{color:var(--acc)}
-.brand small{display:block;font-family:"Inter",sans-serif;font-size:12px;color:var(--mut);margin-top:4px}
-.nav-group{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--mut2);padding:16px 10px 6px}
-.nav-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-radius:10px;color:var(--mut);font:500 14.5px "Inter",sans-serif;padding:9px 10px;cursor:pointer;margin:1px 0}
+.sidebar{width:264px;flex:0 0 264px;background:var(--dark);border-right:1px solid var(--dark-line);padding:20px 14px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{font-family:"Manrope",sans-serif;font-size:17px;font-weight:800;color:#F7F3EB;padding:2px 10px 16px;border-bottom:1px solid var(--dark-line);margin-bottom:14px}
+.brand span{color:var(--gold)}
+.brand small{display:block;font-family:"Manrope",sans-serif;font-size:12px;color:var(--dark-mut);margin-top:4px}
+.nav-group{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--dark-mut);padding:16px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-radius:12px;color:var(--dark-mut);font:600 14.5px "Manrope",sans-serif;padding:9px 10px;cursor:pointer;margin:1px 0;transition:background .25s var(--ease),color .25s var(--ease)}
 .nav-item .ic{width:22px;text-align:center;font-size:15px}
-.nav-item:hover{background:var(--card2);color:var(--txt)}
-.nav-item.active{background:var(--acc-dim);color:#fff}
-.nav-item.active .ic{color:var(--acc)}
+.nav-item:hover{background:rgba(255,255,255,.07);color:#F7F3EB}
+.nav-item.active{background:rgba(201,184,150,.18);color:#F7F3EB}
+.nav-item.active .ic{color:var(--gold)}
 .main{flex:1;min-width:0;padding:0 28px 64px}
-.topbar{position:sticky;top:0;z-index:20;background:rgba(2,2,2,.92);backdrop-filter:blur(8px);display:flex;align-items:center;gap:16px;padding:16px 0;border-bottom:1px solid var(--line);margin-bottom:22px}
+.topbar{position:sticky;top:0;z-index:20;background:rgba(247,243,235,.92);backdrop-filter:blur(8px);display:flex;align-items:center;gap:16px;padding:16px 0;border-bottom:1px solid var(--line);margin-bottom:22px}
 .topbar h1{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .who{color:var(--mut);font-size:13.5px;white-space:nowrap}
 .wrap{max-width:1020px}
 
 /* --- Карточки, таблицы, формы --- */
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:20px 22px;margin-top:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin-top:16px;box-shadow:0 1px 2px rgba(14,14,14,.04),0 10px 30px rgba(14,14,14,.05);transition:transform .35s var(--ease),box-shadow .35s var(--ease)}
+.card:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(14,14,14,.05),0 16px 40px rgba(14,14,14,.08)}
 .card > p.sub{color:var(--mut);font-size:13.5px;margin-bottom:12px}
 .card h2 + p.sub{margin-top:2px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
-.stat b{display:block;font-size:24px;font-family:"Unbounded",sans-serif;font-weight:600}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 2px rgba(14,14,14,.04),0 10px 30px rgba(14,14,14,.05);transition:transform .35s var(--ease),box-shadow .35s var(--ease)}
+.stat:hover{transform:translateY(-3px);box-shadow:0 2px 4px rgba(14,14,14,.05),0 16px 40px rgba(14,14,14,.08)}
+.stat b{display:block;font-size:24px;font-family:"Manrope",sans-serif;font-weight:800}
 .stat span{color:var(--mut);font-size:13px}
 .stat small{display:block;color:var(--mut2);font-size:12px;margin-top:2px}
 .chartgrid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
-.chart text{font:11px "Inter",sans-serif;fill:var(--mut)}
+.chart text{font:11px "Manrope",sans-serif;fill:var(--mut)}
 .chart{overflow:visible}
 .hbar{display:flex;align-items:center;gap:10px;margin:9px 0;font-size:13.5px}
 .hbar-lab{width:110px;flex:0 0 110px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -80,34 +97,36 @@ h3{font-size:14px;font-weight:700;margin:18px 0 8px}
 .dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;vertical-align:-1px}
 tr[data-sub]{cursor:pointer}
 tr[data-sub]:hover td{background:var(--card2)}
-input,select,textarea{width:100%;background:var(--card2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;margin:6px 0}
-input:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:0;border-color:var(--acc)}
+input,select,textarea{width:100%;background:var(--card2);border:1px solid var(--line);border-radius:12px;color:var(--txt);padding:10px 12px;font:inherit;margin:6px 0;transition:border-color .2s,box-shadow .2s}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--gold);outline-offset:0;border-color:var(--gold)}
 textarea{min-height:84px;resize:vertical}
 label{font-size:13px;color:var(--mut);display:block;margin-top:8px}
 label input[type=checkbox]{width:auto;margin-right:6px}
-button{background:var(--acc);color:#02131f;border:0;border-radius:10px;padding:10px 18px;font:600 14px "Inter",sans-serif;cursor:pointer;margin:6px 6px 0 0}
-button.ghost{background:transparent;color:var(--acc);border:1px solid var(--line2)}
-button.ghost:hover{border-color:var(--acc)}
-button.danger{background:transparent;color:var(--bad);border:1px solid #4c1d1d}
+button{background:var(--acc);color:#F7F3EB;border:0;border-radius:999px;padding:10px 18px;font:700 14px "Manrope",sans-serif;cursor:pointer;margin:6px 6px 0 0;box-shadow:0 8px 20px rgba(14,14,14,.16);transition:transform .3s var(--ease),box-shadow .3s var(--ease),background .2s}
+button:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(14,14,14,.22)}
+button.ghost{background:transparent;color:var(--txt);border:1px solid var(--line2);box-shadow:none}
+button.ghost:hover{border-color:var(--txt)}
+button.danger{background:transparent;color:var(--bad);border:1px solid rgba(194,46,46,.4);box-shadow:none}
 button.danger:hover{border-color:var(--bad)}
-button:disabled{opacity:.55;cursor:default}
+button:disabled{opacity:.55;cursor:default;transform:none}
 .btnrow{display:flex;flex-wrap:wrap;gap:0}
 .btnrow button{margin-right:8px}
 .err{color:var(--bad);margin-top:8px;min-height:18px}
 .ok{color:var(--ok)}
 table{width:100%;border-collapse:collapse;font-size:14px}
-th{color:var(--mut);font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
+th{color:var(--mut);font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;text-align:left;padding:8px 10px;border-bottom:1px solid var(--line2);white-space:nowrap}
 td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
 tr:last-child td{border-bottom:0}
+tbody tr{transition:background .2s}
 .tblwrap{overflow-x:auto;margin:8px -4px 0}
 .tblwrap table{min-width:560px}
 td.trunc{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap}
-.pill.ok{background:rgba(52,211,153,.14);color:var(--ok)}
-.pill.bad{background:rgba(248,113,113,.14);color:var(--bad)}
-.pill.warn{background:rgba(251,191,36,.14);color:var(--warn)}
-.pill.info{background:rgba(46,168,255,.14);color:var(--acc)}
-.pill.grey{background:rgba(154,165,181,.14);color:var(--mut)}
+.pill{display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap}
+.pill.ok{background:rgba(30,122,76,.12);color:var(--ok)}
+.pill.bad{background:rgba(194,46,46,.10);color:var(--bad)}
+.pill.warn{background:rgba(138,94,0,.12);color:var(--warn)}
+.pill.info{background:rgba(14,14,14,.08);color:var(--acc)}
+.pill.grey{background:rgba(110,106,97,.12);color:var(--mut)}
 .kv{display:grid;grid-template-columns:180px 1fr;gap:6px 14px;font-size:14px}
 .kv dt{color:var(--mut)}
 .kv dd{word-break:break-word}
@@ -119,16 +138,32 @@ details{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin
 details summary{cursor:pointer;font-weight:700;font-size:14px}
 details p,details ul{margin-top:8px}
 #toast{position:fixed;right:20px;bottom:20px;z-index:50;display:flex;flex-direction:column;gap:8px;max-width:360px}
-.toast{background:#10161f;border:1px solid var(--line2);border-left:4px solid var(--acc);border-radius:12px;padding:12px 16px;font-size:14px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.toast{background:var(--dark);color:#F7F3EB;border:1px solid var(--dark-line);border-left:4px solid var(--gold);border-radius:12px;padding:12px 16px;font-size:14px;box-shadow:0 12px 30px rgba(14,14,14,.3);animation:toastIn .3s var(--ease) backwards}
 .toast.err{border-left-color:var(--bad)}
 .toast.ok{border-left-color:var(--ok)}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line2);border-top-color:var(--acc);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px;margin-right:6px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .loginwrap{max-width:460px;margin:80px auto 0;padding:0 18px}
 .loginwrap .card{padding:26px}
+
+/* --- Редактор записи: выезжающая панель --- */
+.drawer-overlay{position:fixed;inset:0;z-index:60;background:rgba(14,14,14,.45);backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:opacity .3s var(--ease)}
+.drawer-overlay.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:0;bottom:0;z-index:61;width:min(560px,100%);background:var(--card2);box-shadow:-20px 0 60px rgba(14,14,14,.25);transform:translateX(100%);transition:transform .35s var(--ease);display:flex;flex-direction:column}
+.drawer.open{transform:none}
+.drawer-head{background:var(--dark);color:#F7F3EB;padding:18px 22px;display:flex;align-items:flex-start;gap:12px}
+.drawer-head h2{color:#F7F3EB;font-size:17px}
+.drawer-head .sub{color:var(--dark-mut);font-size:13px}
+.drawer-close{margin-left:auto;background:transparent;border:1px solid var(--dark-line);color:#F7F3EB;border-radius:999px;width:34px;height:34px;padding:0;box-shadow:none;flex:0 0 auto;font-size:16px;line-height:1}
+.drawer-close:hover{border-color:var(--gold);transform:none}
+.drawer-body{padding:18px 22px 28px;overflow-y:auto}
+.drawer-foot{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;background:var(--card)}
+
+/* --- Скелетоны загрузки --- */
+.skel{border-radius:8px;background:linear-gradient(90deg,#EFE7D3 25%,#F7F3EB 50%,#EFE7D3 75%);background-size:200% 100%;animation:shimmer 1.2s linear infinite}
 @media (max-width:900px){
   .layout{display:block}
-  .sidebar{position:static;width:100%;height:auto;border-right:0;border-bottom:1px solid var(--line);padding:12px}
+  .sidebar{position:static;width:100%;height:auto;border-right:0;border-bottom:1px solid var(--dark-line);padding:12px}
   .sidebar nav{display:flex;overflow-x:auto;gap:4px;padding-bottom:4px}
   .nav-group{display:none}
   .nav-item{width:auto;white-space:nowrap;padding:8px 10px}
@@ -141,6 +176,13 @@ details p,details ul{margin-top:8px}
 </head>
 <body>
 <div id="toast"></div>
+
+<div id="drawer-overlay" class="drawer-overlay"></div>
+<aside id="drawer" class="drawer" aria-hidden="true">
+  <div class="drawer-head"><div><h2 id="drawer-title">Подписка</h2><div class="sub" id="drawer-sub"></div></div><button class="drawer-close" id="drawer-close" aria-label="Закрыть">✕</button></div>
+  <div class="drawer-body" id="drawer-body"></div>
+  <div class="drawer-foot" id="drawer-foot"></div>
+</aside>
 
 <div id="login-view" class="loginwrap hidden">
   <div class="card">
@@ -239,7 +281,6 @@ details p,details ul{margin-top:8px}
           <input id="q-user" placeholder="ID, @username, имя или paid_123">
           <div class="btnrow"><button id="btn-find">Найти</button><button id="btn-recent" class="ghost">Недавние</button></div>
           <div id="users-out"></div>
-          <div id="profile-out"></div>
         </div>
         <div class="card"><h2>Сообщение пользователю</h2><p class="sub">Отправляется от имени бота Drebol VPN.</p>
           <input id="dm-id" type="number" placeholder="tg_id">
@@ -274,32 +315,24 @@ details p,details ul{margin-top:8px}
 
       <!-- Подписки -->
       <section id="sec-subs" class="page hidden">
-        <div class="card"><h2>Подписка</h2><p class="sub">Действия применяются сразу к базе бота и к панели Remnawave. Удаление и перевыпуск — с подтверждением.</p>
-          <input id="sub-id" type="number" placeholder="ID подписки (paid_subs.id)">
-          <div class="btnrow"><button id="btn-sub-load" class="ghost">Показать подписку</button><button id="btn-sub-devices" class="ghost">Устройства</button></div>
-          <div id="sub-card-out"></div>
-          <h3>Действия</h3>
-          <div class="btnrow">
-            <button class="ghost" data-sub="toggle">Вкл / выкл</button>
-            <button class="ghost" data-sub="freeze">Заморозить</button>
-            <button class="ghost" data-sub="reissue">Перевыпустить</button>
-            <button class="danger" data-sub="delete">Удалить</button>
+        <div class="card"><h2>Платные подписки</h2><p class="sub">Все платные подписки. Нажми на строку, чтобы открыть и поменять параметры — изменения сразу уходят в базу бота и в панель Remnawave. Удаление и перевыпуск — с подтверждением.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input id="subs-q" placeholder="Поиск: имя, @username, email, tg_id" style="flex:1;min-width:200px">
+            <select id="subs-status" style="width:auto;min-width:150px">
+              <option value="">Все статусы</option>
+              <option value="active">Активна</option>
+              <option value="expired">Истекла</option>
+              <option value="frozen">Заморожена</option>
+            </select>
+            <button id="btn-subs-search">Найти</button>
+            <button id="btn-subs-refresh" class="ghost">Обновить</button>
           </div>
-          <h3>Продлить / изменить</h3>
-          <input id="sub-days" type="number" placeholder="дней для продления">
-          <div class="btnrow"><button class="ghost" data-sub="extend">Продлить на N дней</button></div>
-          <input id="sub-until" placeholder="новая дата истечения, напр. 2026-12-31 23:59">
-          <div class="btnrow"><button class="ghost" data-sub="expire">Установить дату истечения</button></div>
-          <input id="sub-hwid" type="number" placeholder="лимит устройств (HWID)">
-          <div class="btnrow"><button class="ghost" data-sub="hwid">Лимит устройств</button></div>
-          <input id="sub-traffic" type="number" placeholder="лимит трафика, ГБ">
-          <div class="btnrow"><button class="ghost" data-sub="traffic">Лимит трафика</button></div>
-          <input id="sub-lte" type="number" placeholder="лимит LTE, ГБ (пусто — без лимита)">
-          <div class="btnrow"><button class="ghost" data-sub="lte">Лимит LTE</button></div>
-          <input id="sub-trial" type="number" placeholder="триал, дней">
-          <div class="btnrow"><button class="ghost" data-sub="trial">Установить триал</button></div>
-          <span id="sub-msg" class="mut"></span>
-          <div id="sub-devices-out"></div>
+          <div id="subs-table"></div>
+          <div class="btnrow" style="margin-top:10px;align-items:center">
+            <button id="btn-subs-prev" class="ghost">← Назад</button>
+            <span class="mut" id="subs-page-label"></span>
+            <button id="btn-subs-next" class="ghost">Вперёд →</button>
+          </div>
         </div>
         <div class="card"><h2>Массовые действия</h2><p class="sub">Применяются ко всем активным платным подпискам.</p>
           <select id="bulk-kind"><option value="extend">Продлить всем</option><option value="limits">Сменить лимиты всем</option><option value="lte">Сменить LTE всем</option></select>
@@ -344,26 +377,22 @@ details p,details ul{margin-top:8px}
           <div class="btnrow"><button id="btn-reconcile">Запустить сверку</button><button id="btn-reconcile-fix" class="ghost">Исправить расхождения</button></div>
           <div id="reconcile-out"></div>
         </div>
-        <div class="card"><h2>Серверы (расходы)</h2><p class="sub">Ежемесячные расходы на серверы и их оплата.</p>
+        <div class="card"><h2>Серверы (расходы)</h2><p class="sub">Ежемесячные расходы на серверы и их оплата. Нажми на строку, чтобы изменить сервер или отметить оплату.</p>
           <input id="srv-name" placeholder="название сервера">
           <input id="srv-price" type="number" placeholder="цена, ₽/мес">
           <input id="srv-day" type="number" placeholder="день оплаты (1–31)">
-          <div class="btnrow"><button id="btn-srv-add">Добавить сервер</button></div>
-          <input id="srv-id" type="number" placeholder="ID сервера — карточка / отметка об оплате">
-          <div class="btnrow"><button id="btn-srv-card" class="ghost">Карточка</button><button id="btn-srv-mark" class="ghost">Отметить оплаченным</button><button id="btn-srv-del" class="danger">Удалить</button></div>
+          <div class="btnrow"><button id="btn-srv-add">Добавить сервер</button><button id="btn-servers-list" class="ghost">Обновить список</button></div>
           <div id="srv-out"></div>
         </div>
       </section>
 
       <!-- Оплаты -->
       <section id="sec-payments" class="page hidden">
-        <div class="card"><h2>Оплаты</h2><p class="sub">Счета платёжной системы. Возврат — с подтверждением, повторный возврат невозможен.</p>
-          <select id="pay-status"><option value="">Все статусы</option><option value="paid">Оплаченные</option><option value="pending">Ожидают</option><option value="refunded">Возвращённые</option><option value="failed">Неудачные</option></select>
-          <div class="btnrow"><button id="btn-payments">Показать оплаты</button></div>
-          <input id="pay-id" type="number" placeholder="ID оплаты — карточка">
-          <div class="btnrow"><button id="btn-pay-card" class="ghost">Карточка оплаты</button></div>
-          <label><input id="pay-revoke" type="checkbox"> отозвать подписку при возврате</label>
-          <div class="btnrow"><button id="btn-pay-refund" class="danger">Вернуть оплату</button></div>
+        <div class="card"><h2>Оплаты</h2><p class="sub">Счета платёжной системы. Нажми на строку, чтобы открыть карточку. Возврат — с подтверждением, повторный возврат невозможен.</p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <select id="pay-status" style="width:auto;min-width:170px"><option value="">Все статусы</option><option value="paid">Оплаченные</option><option value="pending">Ожидают</option><option value="refunded">Возвращённые</option><option value="failed">Неудачные</option></select>
+            <button id="btn-payments">Показать оплаты</button>
+          </div>
           <div id="payments-out"></div>
         </div>
       </section>
@@ -387,13 +416,13 @@ details p,details ul{margin-top:8px}
 
       <!-- Промокоды -->
       <section id="sec-promos" class="page hidden">
-        <div class="card"><h2>Промокоды</h2><p class="sub">Скидки и бонусы для новых и действующих пользователей.</p>
+        <div class="card"><h2>Промокоды</h2><p class="sub">Скидки и бонусы для новых и действующих пользователей. Нажми на строку, чтобы изменить промокод, выключить его или удалить.</p>
           <div class="btnrow"><button id="btn-promos">Показать промокоды</button></div>
           <input id="pr-code" placeholder="код, напр. DREBOL10">
           <input id="pr-exp" placeholder="истекает, напр. 2026-12-31 (пусто — без срока)">
           <input id="pr-owner" type="number" placeholder="tg_id владельца (необязательно)">
           <input id="pr-note" placeholder="заметка (необязательно)">
-          <div class="btnrow"><button id="btn-pr-add">Создать промокод</button><button id="btn-pr-find" class="ghost">Найти</button><button id="btn-pr-toggle" class="ghost">Вкл / выкл</button><button id="btn-pr-del" class="danger">Удалить</button></div>
+          <div class="btnrow"><button id="btn-pr-add">Создать промокод</button><button id="btn-pr-find" class="ghost">Найти по коду</button></div>
           <input id="pr-count" type="number" placeholder="сколько кодов сгенерировать пачкой">
           <div class="btnrow"><button id="btn-pr-batch" class="ghost">Сгенерировать пачку</button></div>
           <div id="promos-out"></div>
@@ -402,15 +431,8 @@ details p,details ul{margin-top:8px}
 
       <!-- Тарифы -->
       <section id="sec-tariffs" class="page hidden">
-        <div class="card"><h2>Тарифы</h2><p class="sub">Варианты продления, которые видит клиент. Цена и срок влияют на продление в кабинете и на сайте.</p>
-          <div class="btnrow"><button id="btn-tariffs">Показать тарифы</button></div>
-          <input id="tf-name" placeholder="название, напр. 1 месяц">
-          <input id="tf-seconds" type="number" placeholder="срок, секунды (2592000 = 30 дней)">
-          <input id="tf-price" type="number" placeholder="цена, ₽">
-          <div class="btnrow"><button id="btn-tf-add">Создать тариф</button></div>
-          <input id="tf-id" type="number" placeholder="ID тарифа — правка / удаление">
-          <input id="tf-price2" type="number" placeholder="новая цена, ₽ (пусто — не менять)">
-          <div class="btnrow"><button id="btn-tf-patch" class="ghost">Изменить цену</button><button id="btn-tf-del" class="danger">Удалить тариф</button></div>
+        <div class="card"><h2>Тарифы</h2><p class="sub">Варианты продления, которые видит клиент. Цена и срок влияют на продление в кабинете и на сайте. Нажми на строку, чтобы изменить тариф.</p>
+          <div class="btnrow"><button id="btn-tariff-add">Новый тариф</button><button id="btn-tariffs" class="ghost">Обновить</button></div>
           <div id="tariffs-out"></div>
         </div>
       </section>
@@ -854,13 +876,13 @@ function barChart(series, fmtVal){
   let s = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img">';
   [0, 0.5, 1].forEach(function(f){
     const y = PT + (1 - f) * (H - PT - PB);
-    s += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - 4) + '" y2="' + y.toFixed(1) + '" stroke="#1c2330"/>';
+    s += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - 4) + '" y2="' + y.toFixed(1) + '" stroke="#E4DDCC"/>';
     s += '<text x="' + (PL - 6) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end">' + fmtNum(Math.round(max * f)) + '</text>';
   });
   series.forEach(function(p, i){
     const h = p.sum > 0 ? Math.max(2, (p.sum / max) * (H - PT - PB)) : 0;
     const x = PL + i * bw + 1, y = H - PB - h;
-    s += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(1, bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.5" fill="#2ea8ff"><title>' + fmtDay(p.date) + ' · ' + esc(fmtVal(p.sum)) + '</title></rect>';
+    s += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + Math.max(1, bw - 2).toFixed(1) + '" height="' + h.toFixed(1) + '" rx="1.5" fill="#0E0E0E"><title>' + fmtDay(p.date) + ' · ' + esc(fmtVal(p.sum)) + '</title></rect>';
     if (i % 5 === 0) s += '<text x="' + (x + bw / 2).toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + fmtDay(p.date) + '</text>';
   });
   return s + '</svg>';
@@ -875,20 +897,20 @@ function lineChart(series){
   let s = '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img">';
   [0, 0.5, 1].forEach(function(f){
     const y = PT + (1 - f) * (H - PT - PB);
-    s += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - 4) + '" y2="' + y.toFixed(1) + '" stroke="#1c2330"/>';
+    s += '<line x1="' + PL + '" y1="' + y.toFixed(1) + '" x2="' + (W - 4) + '" y2="' + y.toFixed(1) + '" stroke="#E4DDCC"/>';
     s += '<text x="' + (PL - 6) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="end">' + fmtNum(Math.round(max * f)) + '</text>';
   });
   const line = pt.map(function(p){ return p.x.toFixed(1) + "," + p.y.toFixed(1); }).join(" ");
-  s += '<polygon points="' + PL + ',' + (H - PB) + ' ' + line + ' ' + pt[pt.length - 1].x.toFixed(1) + ',' + (H - PB) + '" fill="#2ea8ff" opacity="0.12"/>';
-  s += '<polyline points="' + line + '" fill="none" stroke="#2ea8ff" stroke-width="2" stroke-linejoin="round"/>';
+  s += '<polygon points="' + PL + ',' + (H - PB) + ' ' + line + ' ' + pt[pt.length - 1].x.toFixed(1) + ',' + (H - PB) + '" fill="#C9B896" opacity="0.25"/>';
+  s += '<polyline points="' + line + '" fill="none" stroke="#0E0E0E" stroke-width="2" stroke-linejoin="round"/>';
   pt.forEach(function(p, i){
-    s += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.6" fill="#2ea8ff"><title>' + fmtDay(p.d) + ' · +' + p.v + '</title></circle>';
+    s += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="2.6" fill="#0E0E0E"><title>' + fmtDay(p.d) + ' · +' + p.v + '</title></circle>';
     if (i % 5 === 0) s += '<text x="' + p.x.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle">' + fmtDay(p.d) + '</text>';
   });
   return s + '</svg>';
 }
 function donutChart(parts){
-  const colors = ["#34d399", "#f87171", "#fbbf24", "#a78bfa", "#2ea8ff", "#9aa5b5"];
+  const colors = ["#0E0E0E", "#C9B896", "#1E7A4C", "#C22E2E", "#8A5E00", "#9A938A"];
   const total = parts.reduce(function(a, p){ return a + p.count; }, 0);
   if (!total) return '<div class="empty"><span class="big">🔍</span>Нет подписок</div>';
   const R = 62, C = 2 * Math.PI * R;
@@ -915,9 +937,7 @@ function hbars(parts){
 }
 function gotoSub(id){
   if (!id) return;
-  showSection("subs");
-  $("sub-id").value = id;
-  $("btn-sub-load").click();
+  openSubEditor(parseInt(id, 10));
 }
 let paidPage = 0, paidTotalPages = 1;
 async function loadPaid(page){
@@ -1071,38 +1091,75 @@ $("btn-setup").onclick = async function(){
   await refreshMe(); await loadDashboard(); await loadSettings();
 };
 /* --- Пользователи --- */
+/* --- Пользователи: список + карточка в редакторе --- */
+function renderUsersTable(host, rows, dateLabel){
+  if (!rows.length) { host.innerHTML = '<div class="empty"><span class="big">🔍</span>Никого не нашёл</div>'; return; }
+  host.innerHTML = '<div class="tblwrap"><table><thead><tr><th>Имя</th><th>Username</th><th>TG ID</th><th>Подписка</th><th>' + dateLabel + '</th></tr></thead><tbody>' +
+    rows.map(function(u){
+      return '<tr data-tg="' + u.tg_id + '"><td>' + esc(u.name) + '</td><td class="mono">@' + esc(u.username) + '</td><td class="mono">' + u.tg_id + '</td><td>' + (u.sub ? pill(u.sub) : "—") + '</td><td class="mono">' + fmtDate(u.date) + "</td></tr>";
+    }).join("") + "</tbody></table></div>";
+  host.querySelectorAll("tr[data-tg]").forEach(function(tr){
+    tr.onclick = function(){ openUserEditor(parseInt(tr.dataset.tg, 10)); };
+  });
+}
 $("btn-find").onclick = withSpin($("btn-find"), async function(){
   const q = $("q-user").value.trim();
-  const r = await api("/users?search=" + encodeURIComponent(q));
+  let r;
+  try { r = await api("/users?search=" + encodeURIComponent(q)); }
+  catch(e) { $("users-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("users-out", r.data); return; }
   const rows = (r.data.users || []).map(function(u){
-    return {tg_id: u.tg_id, name: u.first_name || "", username: u.username || "", sub: u.sub_status || "", created: u.created_at || ""};
+    return {tg_id: u.tg_id, name: u.first_name || "", username: u.username || "", sub: u.sub_status || "", date: u.created_at || ""};
   });
-  const host = $("users-out");
-  if (!rows.length) { host.innerHTML = '<div class="empty"><span class="big">🔍</span>Никого не нашёл</div>'; return; }
-  host.innerHTML = '<div class="tblwrap"><table><thead><tr><th>Имя</th><th>Username</th><th>TG ID</th><th>Подписка</th><th>Создан</th></tr></thead><tbody>' +
-    rows.map(function(u){
-      return '<tr><td><a href="#" data-tg="' + u.tg_id + '">' + esc(u.name) + '</a></td><td class="mono">@' + esc(u.username) + '</td><td class="mono">' + u.tg_id + '</td><td>' + pill(u.sub) + '</td><td class="mono">' + fmtDate(u.created) + "</td></tr>";
-    }).join("") + "</tbody></table></div>";
-  host.querySelectorAll("a[data-tg]").forEach(function(a){
-    a.onclick = async function(e){
-      e.preventDefault();
-      const p = await api("/users/" + a.dataset.tg);
-      renderOut("profile-out", p.data);
-      const act = await api("/users/" + a.dataset.tg + "/activity");
-      const div = document.createElement("div");
-      div.innerHTML = "<h3>Активность</h3>";
-      const box = document.createElement("div");
-      div.appendChild(box);
-      $("profile-out").appendChild(div);
-      renderOut(box.id = "profile-activity", act.data);
-    };
-  });
+  renderUsersTable($("users-out"), rows, "Создан");
 });
 $("btn-recent").onclick = async function(){
-  const r = await api("/users/recent");
-  renderOut("users-out", r.data);
+  let r;
+  try { r = await api("/users/recent"); }
+  catch(e) { $("users-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("users-out", r.data); return; }
+  const rows = (r.data.users || []).map(function(u){
+    return {tg_id: u.tg_id, name: u.first_name || "", username: u.username || "", sub: "", date: u.last_seen || ""};
+  });
+  renderUsersTable($("users-out"), rows, "Последний визит");
 };
+async function openUserEditor(tgId){
+  $("drawer-title").textContent = "Пользователь #" + tgId;
+  $("drawer-sub").textContent = "Загрузка…";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:18px;width:50%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  let r;
+  try { r = await api("/users/" + tgId); }
+  catch(e) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить пользователя</p>'; return; }
+  if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить пользователя</p>'; return; }
+  const d = r.data;
+  $("drawer-sub").textContent = (d.first_name || "") + (d.username ? " @" + d.username : "");
+  let h = '<dl class="kv">';
+  h += kvRow("TG ID", '<span class="mono">' + d.tg_id + '</span>');
+  if (d.subscription) {
+    const s = d.subscription;
+    h += kvRow("Подписка", subStatusPill(s.status) + ' · <span class="mono">' + fmtDate(s.expire_date) + '</span>');
+    h += kvRow("Email подписки", '<span class="mono">' + esc(s.email || "") + '</span>');
+  } else h += kvRow("Подписка", "нет");
+  if (d.referral) h += kvRow("Рефералка", "пригласил " + (d.referral.invited || 0) + " · вознаграждено " + (d.referral.rewarded || 0));
+  if (d.payments_total) h += kvRow("Оплат", d.payments_total.count + " на " + fmtMoney(d.payments_total.sum));
+  if (d.blacklist) h += kvRow("Чёрный список", esc(d.blacklist.reason || d.blacklist.source || ""));
+  h += '</dl>';
+  if ((d.payments || []).length) {
+    h += '<h3>Последние оплаты</h3><div class="tblwrap"><table><thead><tr><th>ID</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead><tbody>';
+    d.payments.forEach(function(p){
+      h += '<tr><td class="mono">' + p.id + '</td><td class="num">' + fmtMoney(p.amount) + '</td><td>' + statusPill(p.status, PAY_LABELS[p.status] || p.status) + '</td><td><span class="mono">' + fmtDate(p.date) + '</span></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  $("drawer-body").innerHTML = h;
+  $("drawer-foot").innerHTML = '<button class="ghost" id="ed-user-dm">Написать</button><button class="ghost" id="ed-user-gift">Подарить подписку</button>' + (d.subscription ? '<button class="ghost" id="ed-user-sub">Открыть подписку</button>' : "");
+  $("ed-user-dm").onclick = function(){ closeDrawer(); showSection("users"); $("dm-id").value = tgId; $("dm-text").focus(); window.scrollTo(0, 0); };
+  $("ed-user-gift").onclick = function(){ closeDrawer(); showSection("users"); $("gift-tg").value = tgId; $("gift-amount").focus(); window.scrollTo(0, 0); };
+  const sb = $("ed-user-sub");
+  if (sb) sb.onclick = function(){ openSubEditor(d.subscription.id); };
+}
 $("btn-dm").onclick = withSpin($("btn-dm"), async function(){
   const r = await api("/users/" + $("dm-id").value + "/dm",
     {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({text: $("dm-text").value})});
@@ -1143,31 +1200,128 @@ $("btn-fraud-stop").onclick = async function(){
   renderOut("fraud-out", r.data);
 };
 
-/* --- Подписки --- */
-$("btn-sub-load").onclick = async function(){
-  const r = await api("/subs/" + $("sub-id").value);
-  renderOut("sub-card-out", r.data);
-};
-$("btn-sub-devices").onclick = async function(){
-  const r = await api("/subs/" + $("sub-id").value + "/devices");
-  renderOut("sub-devices-out", r.data);
-};
-document.querySelectorAll("[data-sub]").forEach(function(b){
-  b.onclick = withSpin(b, async function(){
-    const id = $("sub-id").value;
-    const a = b.dataset.sub;
-    let body = {};
-    if (a === "extend") body = {days: parseInt($("sub-days").value || "0", 10)};
-    if (a === "expire") body = {until: $("sub-until").value};
-    if (a === "hwid") body = {limit: parseInt($("sub-hwid").value || "0", 10)};
-    if (a === "traffic") body = {gb: parseInt($("sub-traffic").value || "0", 10)};
-    if (a === "lte") { const v = $("sub-lte").value.trim(); body = v === "" ? {gb: null} : {gb: parseInt(v, 10)}; }
-    if (a === "trial") body = {period_days: parseInt($("sub-trial").value || "0", 10)};
-    const r = await postConfirm("/subs/" + id + "/" + a, body);
-    $("sub-msg").textContent = r.status === 200 ? "Готово" : ("Ошибка: " + (r.data.error || r.status));
-    if (r.status === 200) { toast("Подписка обновлена", "ok"); const c = await api("/subs/" + id); renderOut("sub-card-out", c.data); }
+/* --- Подписки: список + редактор --- */
+let subsPage = 1, subsTotalPages = 1, subsLoaded = false, subsCurrentId = null;
+function statusPill(code, label){
+  const s = String(code == null ? "" : code).toLowerCase();
+  const cls = ["active","paid","ok","success","online","enabled","true","1"].indexOf(s) >= 0 ? "ok"
+    : ["expired","refunded","failed","error","offline","disabled","false","0","blocked","banned"].indexOf(s) >= 0 ? "bad"
+    : ["pending","trial","warning","frozen","paused"].indexOf(s) >= 0 ? "warn" : "info";
+  return '<span class="pill ' + cls + '">' + esc(label == null ? code : label) + "</span>";
+}
+function subStatusPill(s){ return statusPill(s, s === "active" ? "Активна" : s === "expired" ? "Истекла" : s === "frozen" ? "Заморожена" : (s || "—")); }
+async function loadSubs(page){
+  const q = encodeURIComponent($("subs-q").value.trim());
+  const st = $("subs-status").value;
+  let r;
+  try { r = await api("/subs?page=" + page + (q ? "&q=" + q : "") + (st ? "&status=" + st : "")); }
+  catch(e) { $("subs-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { $("subs-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  const items = r.data.subs || [];
+  subsPage = r.data.page || page; subsTotalPages = r.data.total_pages || 1;
+  $("subs-page-label").textContent = "Страница " + subsPage + " из " + subsTotalPages;
+  show("btn-subs-prev", subsPage > 1); show("btn-subs-next", subsPage < subsTotalPages);
+  if (!items.length) { $("subs-table").innerHTML = '<div class="empty"><span class="big">🔍</span>Подписок не найдено</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Пользователь</th><th>Email</th><th>Статус</th><th>Истекает</th><th>Трафик</th><th>Устройства</th></tr></thead><tbody>';
+  items.forEach(function(it){
+    const name = esc(it.first_name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "") + ' <span class="mono small">#' + it.tg_id + '</span>';
+    h += '<tr data-sub-id="' + it.id + '"><td>' + name + '</td><td class="trunc"><span class="mono">' + esc(it.email || "") + '</span></td><td>' + subStatusPill(it.status) + '</td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td class="num">' + (it.total_gb || 0) + ' ГБ</td><td class="num">' + (it.limit_hwid || 0) + '</td></tr>';
   });
+  $("subs-table").innerHTML = h + '</tbody></table></div>';
+}
+$("btn-subs-search").onclick = function(){ loadSubs(1); };
+$("btn-subs-refresh").onclick = function(){ loadSubs(subsPage); };
+$("subs-q").addEventListener("keydown", function(e){ if (e.key === "Enter") loadSubs(1); });
+$("subs-status").onchange = function(){ loadSubs(1); };
+$("btn-subs-prev").onclick = function(){ if (subsPage > 1) loadSubs(subsPage - 1); };
+$("btn-subs-next").onclick = function(){ if (subsPage < subsTotalPages) loadSubs(subsPage + 1); };
+$("subs-table").addEventListener("click", function(e){
+  const tr = e.target.closest("tr[data-sub-id]");
+  if (tr) openSubEditor(parseInt(tr.dataset.subId, 10));
 });
+document.querySelector('[data-nav="subs"]').addEventListener("click", function(){
+  if (!subsLoaded) { subsLoaded = true; loadSubs(1); }
+});
+
+/* --- Редактор записи (drawer) --- */
+function openDrawer(){ $("drawer-overlay").classList.add("open"); $("drawer").classList.add("open"); $("drawer").setAttribute("aria-hidden", "false"); }
+function closeDrawer(){ $("drawer-overlay").classList.remove("open"); $("drawer").classList.remove("open"); $("drawer").setAttribute("aria-hidden", "true"); }
+$("drawer-close").onclick = closeDrawer;
+$("drawer-overlay").onclick = closeDrawer;
+document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDrawer(); });
+function kvRow(k, v){ return "<dt>" + esc(k) + "</dt><dd>" + v + "</dd>"; }
+async function openSubEditor(id){
+  subsCurrentId = id;
+  $("drawer-title").textContent = "Подписка #" + id;
+  $("drawer-sub").textContent = "Загрузка…";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:18px;width:50%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  let r;
+  try { r = await api("/subs/" + id); }
+  catch(e) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить подписку</p>'; return; }
+  if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить подписку</p>'; return; }
+  renderSubEditor(r.data);
+}
+function renderSubEditor(data){
+  const s = data.subscription || {};
+  const p = data.panel || {};
+  $("drawer-title").textContent = "Подписка #" + s.id;
+  $("drawer-sub").textContent = (s.first_name || "") + (s.username ? " @" + s.username : "") + " · tg #" + s.tg_id;
+  let h = '<dl class="kv">';
+  h += kvRow("Email", '<span class="mono">' + esc(s.email || "") + '</span>');
+  h += kvRow("UUID", '<span class="mono">' + esc(s.uuid || "") + '</span>');
+  h += kvRow("Sub ID", '<span class="mono">' + esc(s.sub_id || "") + '</span>');
+  h += kvRow("Истекает", '<span class="mono">' + fmtDate(s.expire_date) + '</span>');
+  h += kvRow("Статус", subStatusPill(s.status));
+  h += kvRow("Продлений", s.times_renewed == null ? "—" : s.times_renewed);
+  h += kvRow("Лимит трафика", (s.total_gb || 0) + " ГБ");
+  h += kvRow("Лимит устройств", s.limit_hwid == null ? "—" : s.limit_hwid);
+  h += kvRow("LTE", s.lte_gb == null ? "без лимита" : s.lte_gb + " ГБ");
+  h += kvRow("Триал, дней", s.trial_period == null ? "—" : s.trial_period);
+  if (p && typeof p.enabled !== "undefined") h += kvRow("В панели", p.enabled ? "включена" : "выключена");
+  h += '</dl>';
+  h += '<h3>Продлить / изменить</h3>';
+  h += '<label>Продлить на дней<input id="ed-days" type="number" placeholder="дней"></label><div class="btnrow"><button class="ghost" data-ed="extend">Продлить</button></div>';
+  h += '<label>Новая дата истечения<input id="ed-until" placeholder="напр. 2026-12-31 23:59" value="' + esc(s.expire_date || "") + '"></label><div class="btnrow"><button class="ghost" data-ed="expire">Установить дату</button></div>';
+  h += '<label>Лимит устройств (HWID)<input id="ed-hwid" type="number" value="' + (s.limit_hwid || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="hwid">Сохранить лимит</button></div>';
+  h += '<label>Лимит трафика, ГБ<input id="ed-traffic" type="number" value="' + (s.total_gb || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="traffic">Сохранить лимит</button></div>';
+  h += '<label>Лимит LTE, ГБ (пусто — без лимита)<input id="ed-lte" type="number" value="' + (s.lte_gb == null ? "" : s.lte_gb) + '"></label><div class="btnrow"><button class="ghost" data-ed="lte">Сохранить LTE</button></div>';
+  h += '<label>Триал, дней<input id="ed-trial" type="number" value="' + (s.trial_period || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="trial">Установить триал</button></div>';
+  h += '<h3>Устройства</h3><div class="btnrow"><button class="ghost" id="ed-devices">Показать устройства</button></div><div id="ed-devices-out"></div>';
+  h += '<p class="mut" id="ed-msg" style="margin-top:10px"></p>';
+  $("drawer-body").innerHTML = h;
+  $("drawer-foot").innerHTML = '<button class="ghost" data-ed="toggle">Вкл / выкл</button><button class="ghost" data-ed="freeze">Заморозить</button><button class="ghost" data-ed="reissue">Перевыпустить</button><button class="danger" data-ed="delete">Удалить</button>';
+  const bind = function(root){
+    root.querySelectorAll("[data-ed]").forEach(function(b){
+      b.onclick = withSpin(b, function(){ return subEditorAction(b.dataset.ed); });
+    });
+  };
+  bind($("drawer-body")); bind($("drawer-foot"));
+  $("ed-devices").onclick = async function(){
+    const r = await api("/subs/" + subsCurrentId + "/devices");
+    renderOut("ed-devices-out", r.data);
+  };
+}
+async function subEditorAction(a){
+  const id = subsCurrentId;
+  let body = {};
+  if (a === "extend") body = {days: parseInt($("ed-days").value || "0", 10)};
+  if (a === "expire") body = {until: $("ed-until").value};
+  if (a === "hwid") body = {limit: parseInt($("ed-hwid").value || "0", 10)};
+  if (a === "traffic") body = {gb: parseInt($("ed-traffic").value || "0", 10)};
+  if (a === "lte") { const v = $("ed-lte").value.trim(); body = v === "" ? {gb: null} : {gb: parseInt(v, 10)}; }
+  if (a === "trial") body = {period_days: parseInt($("ed-trial").value || "0", 10)};
+  const r = await postConfirm("/subs/" + id + "/" + a, body);
+  const msg = $("ed-msg");
+  if (msg) msg.textContent = r.status === 200 ? "Готово" : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) {
+    toast("Подписка обновлена", "ok");
+    const c = await api("/subs/" + id);
+    if (c.status === 200) renderSubEditor(c.data);
+    loadSubs(subsPage);
+  }
+}
 $("btn-bulk").onclick = async function(){
   const kind = $("bulk-kind").value;
   const body = {};
@@ -1238,31 +1392,150 @@ $("btn-reconcile-fix").onclick = async function(){
   const r = await postConfirm("/reconcile/fix", {fixes: fixes});
   renderOut("reconcile-out", r.data);
 };
+/* --- Серверы (расходы): список + редактор --- */
+let serversLoaded = false;
+async function loadServers(){
+  let r;
+  try { r = await api("/servers"); }
+  catch(e) { $("srv-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("srv-out", r.data); return; }
+  const items = r.data.servers || [];
+  if (!items.length) { $("srv-out").innerHTML = '<div class="empty"><span class="big">🔍</span>Серверов нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Название</th><th>Цена</th><th>День оплаты</th><th>Активен</th></tr></thead><tbody>';
+  items.forEach(function(it){
+    h += '<tr data-sid="' + it.id + '"><td>' + esc(it.name) + '</td><td class="num">' + fmtMoney(it.price_rub) + '</td><td class="num">' + (it.pay_day || "—") + '</td><td>' + statusPill(it.active ? "active" : "disabled", it.active ? "Активен" : "Выключен") + '</td></tr>';
+  });
+  $("srv-out").innerHTML = h + '</tbody></table></div>';
+  $("srv-out").querySelectorAll("tr[data-sid]").forEach(function(tr){
+    tr.onclick = function(){ openServerEditor(parseInt(tr.dataset.sid, 10)); };
+  });
+}
+$("btn-servers-list").onclick = function(){ loadServers(); };
+document.querySelector('[data-nav="finance"]').addEventListener("click", function(){
+  if (!serversLoaded) { serversLoaded = true; loadServers(); }
+});
 $("btn-srv-add").onclick = withSpin($("btn-srv-add"), async function(){
   const r = await api("/servers", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({name: $("srv-name").value, price_rub: parseInt($("srv-price").value || "0", 10), pay_day: parseInt($("srv-day").value || "1", 10)})});
-  renderOut("srv-out", r.data);
+  if (r.status === 200) { toast("Сервер добавлен", "ok"); loadServers(); }
+  else renderOut("srv-out", r.data);
 });
-$("btn-srv-card").onclick = async function(){ const r = await api("/servers/" + $("srv-id").value); renderOut("srv-out", r.data); };
-$("btn-srv-mark").onclick = async function(){
-  const r = await api("/servers/" + $("srv-id").value + "/mark", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({status: "paid"})});
-  renderOut("srv-out", r.data);
-};
-$("btn-srv-del").onclick = async function(){
-  const r = await postConfirmAny("/servers/" + $("srv-id").value, "DELETE", {});
-  renderOut("srv-out", r.data);
-};
-$("btn-payments").onclick = async function(){
+async function openServerEditor(sid){
+  $("drawer-title").textContent = "Сервер #" + sid;
+  $("drawer-sub").textContent = "Загрузка…";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:18px;width:50%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  let r;
+  try { r = await api("/servers/" + sid); }
+  catch(e) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить сервер</p>'; return; }
+  if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Сервер не найден</p>'; return; }
+  const s = r.data.server || {};
+  $("drawer-sub").textContent = s.name || "";
+  let h = '<dl class="kv">';
+  h += kvRow("ID", '<span class="mono">' + s.id + '</span>');
+  h += kvRow("Активен", statusPill(s.active ? "active" : "disabled", s.active ? "Активен" : "Выключен"));
+  if (s.period) h += kvRow("Период", esc(s.period));
+  if (s.status) h += kvRow("Оплата за период", s.status === "paid" ? "Оплачено" : s.status === "unpaid" ? "Не оплачено" : esc(s.status));
+  h += '</dl>';
+  h += '<h3>Изменить</h3>';
+  h += '<label>Название<input id="ed-srv-name" value="' + esc(s.name || "") + '"></label>';
+  h += '<label>Цена, ₽/мес<input id="ed-srv-price" type="number" value="' + (s.price_rub || 0) + '"></label>';
+  h += '<label>День оплаты (1–31)<input id="ed-srv-day" type="number" value="' + (s.pay_day || 1) + '"></label>';
+  h += '<div class="btnrow"><button class="ghost" id="ed-srv-save">Сохранить</button></div>';
+  h += '<p class="mut" id="ed-srv-msg" style="margin-top:10px"></p>';
+  $("drawer-body").innerHTML = h;
+  $("drawer-foot").innerHTML = '<button class="ghost" id="ed-srv-mark">Отметить оплаченным</button><button class="danger" id="ed-srv-del">Удалить</button>';
+  $("ed-srv-save").onclick = withSpin($("ed-srv-save"), async function(){
+    const body = {
+      name: $("ed-srv-name").value,
+      price_rub: parseInt($("ed-srv-price").value || "0", 10),
+      pay_day: parseInt($("ed-srv-day").value || "1", 10),
+    };
+    const rr = await api("/servers/" + sid, {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+    const msg = $("ed-srv-msg");
+    if (msg) msg.textContent = rr.status === 200 ? "Готово" : ("Ошибка: " + (rr.data.error || rr.status));
+    if (rr.status === 200) { toast("Сервер обновлён", "ok"); openServerEditor(sid); loadServers(); }
+  });
+  $("ed-srv-mark").onclick = withSpin($("ed-srv-mark"), async function(){
+    const rr = await api("/servers/" + sid + "/mark", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({status: "paid"})});
+    const msg = $("ed-srv-msg");
+    if (msg) msg.textContent = rr.status === 200 ? "Отмечено оплаченным" : ("Ошибка: " + (rr.data.error || rr.status));
+    if (rr.status === 200) { toast("Оплата отмечена", "ok"); openServerEditor(sid); loadServers(); }
+  });
+  $("ed-srv-del").onclick = withSpin($("ed-srv-del"), async function(){
+    const rr = await postConfirmAny("/servers/" + sid, "DELETE", {});
+    if (rr.status === 200) { toast("Сервер удалён", "ok"); closeDrawer(); loadServers(); }
+    else { const msg = $("ed-srv-msg"); if (msg) msg.textContent = "Ошибка: " + (rr.data.error || rr.status); }
+  });
+}
+/* --- Оплаты: список + карточка в редакторе --- */
+let paymentsLoaded = false;
+const PAY_LABELS = {paid: "Оплачено", pending: "Ожидает", refunded: "Возвращён", failed: "Неудачный"};
+async function loadPayments(){
   const st = $("pay-status").value;
-  const r = await api("/payments" + (st ? "?status=" + st : ""));
-  renderOut("payments-out", r.data);
-};
-$("btn-pay-card").onclick = async function(){ const r = await api("/payments/" + $("pay-id").value); renderOut("payments-out", r.data); };
-$("btn-pay-refund").onclick = async function(){
-  const r = await postConfirm("/payments/" + $("pay-id").value + "/refund", {revoke: $("pay-revoke").checked});
-  renderOut("payments-out", r.data);
-  if (r.status === 200) toast("Возврат оформлен", "ok");
-};
+  let r;
+  try { r = await api("/payments" + (st ? "?status=" + st : "")); }
+  catch(e) { $("payments-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("payments-out", r.data); return; }
+  const items = r.data.payments || [];
+  if (!items.length) { $("payments-out").innerHTML = '<div class="empty"><span class="big">🔍</span>Оплат не найдено</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>ID</th><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата</th><th>Провайдер</th></tr></thead><tbody>';
+  items.forEach(function(it){
+    const name = esc(it.first_name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "") + ' <span class="mono small">#' + it.tg_id + '</span>';
+    h += '<tr data-pay-id="' + it.id + '"><td class="mono">' + it.id + '</td><td>' + name + '</td><td class="num">' + fmtMoney(it.amount) + '</td><td>' + statusPill(it.status, PAY_LABELS[it.status] || it.status) + '</td><td><span class="mono">' + fmtDate(it.date) + '</span></td><td>' + esc(it.provider || "") + '</td></tr>';
+  });
+  $("payments-out").innerHTML = h + '</tbody></table></div>';
+  $("payments-out").querySelectorAll("tr[data-pay-id]").forEach(function(tr){
+    tr.onclick = function(){ openPaymentEditor(parseInt(tr.dataset.payId, 10)); };
+  });
+}
+$("btn-payments").onclick = function(){ loadPayments(); };
+$("pay-status").onchange = function(){ loadPayments(); };
+document.querySelector('[data-nav="payments"]').addEventListener("click", function(){
+  if (!paymentsLoaded) { paymentsLoaded = true; loadPayments(); }
+});
+async function openPaymentEditor(pid){
+  $("drawer-title").textContent = "Оплата #" + pid;
+  $("drawer-sub").textContent = "Загрузка…";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:18px;width:50%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  let r;
+  try { r = await api("/payments/" + pid); }
+  catch(e) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить оплату</p>'; return; }
+  if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить оплату</p>'; return; }
+  const p = r.data.payment || {};
+  $("drawer-sub").textContent = (p.first_name || p.username ? ((p.first_name || "") + (p.username ? " @" + p.username : "")) : "") + " · tg #" + p.tg_id;
+  let h = '<dl class="kv">';
+  h += kvRow("Сумма", fmtMoney(p.amount));
+  h += kvRow("Статус", statusPill(p.status, PAY_LABELS[p.status] || p.status));
+  h += kvRow("Провайдер", esc(p.provider || ""));
+  h += kvRow("Внешний ID", '<span class="mono">' + esc(p.external_id || "") + '</span>');
+  h += kvRow("Срок", fmtDays(p.period_seconds));
+  h += kvRow("Промокод", esc(p.promo || "—"));
+  h += kvRow("Создан", '<span class="mono">' + fmtDate(p.created) + '</span>');
+  h += kvRow("Оплачен", '<span class="mono">' + fmtDate(p.paid) + '</span>');
+  if (p.refunded_at) h += kvRow("Возвращён", '<span class="mono">' + fmtDate(p.refunded_at) + '</span>');
+  if (p.partial_refunded) h += kvRow("Возвращено частично", fmtMoney(p.partial_refunded));
+  if (p.pay_url) h += kvRow("Ссылка на оплату", '<a href="' + esc(p.pay_url) + '" target="_blank" rel="noopener">открыть</a>');
+  if (p.error) h += kvRow("Ошибка", esc(p.error));
+  h += '</dl>';
+  if (p.status === "paid") {
+    h += '<label><input id="ed-pay-revoke" type="checkbox"> отозвать подписку при возврате</label>';
+    h += '<p class="mut" id="ed-pay-msg" style="margin-top:10px"></p>';
+  }
+  $("drawer-body").innerHTML = h;
+  if (p.status === "paid") {
+    $("drawer-foot").innerHTML = '<button class="danger" id="ed-pay-refund">Вернуть оплату</button>';
+    $("ed-pay-refund").onclick = withSpin($("ed-pay-refund"), async function(){
+      const rr = await postConfirm("/payments/" + pid + "/refund", {revoke: $("ed-pay-revoke").checked});
+      const msg = $("ed-pay-msg");
+      if (msg) msg.textContent = rr.status === 200 ? "Возврат оформлен" : ("Ошибка: " + (rr.data.error || rr.status));
+      if (rr.status === 200) { toast("Возврат оформлен", "ok"); openPaymentEditor(pid); loadPayments(); }
+    });
+  }
+}
 
 /* --- Рассылка, промокоды, тарифы --- */
 let bcPhoto = "";
@@ -1285,46 +1558,198 @@ $("btn-bc-send").onclick = async function(){
   $("bc-out").textContent = r.status === 200 ? "Рассылка запущена" : ("Ошибка: " + (r.data.error || r.status));
   if (r.status === 200) { bcPhoto = ""; toast("Рассылка запущена", "ok"); }
 };
-$("btn-promos").onclick = async function(){ const r = await api("/promos"); renderOut("promos-out", r.data); };
+/* --- Промокоды: список + редактор --- */
+let promosLoaded = false;
+async function loadPromos(){
+  let r;
+  try { r = await api("/promos"); }
+  catch(e) { $("promos-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("promos-out", r.data); return; }
+  const items = r.data.promos || [];
+  if (!items.length) { $("promos-out").innerHTML = '<div class="empty"><span class="big">🔍</span>Промокодов нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Код</th><th>Скидка</th><th>Использовано</th><th>Истекает</th><th>Активен</th></tr></thead><tbody>';
+  items.forEach(function(it){
+    const used = (it.uses || 0) + (it.max_uses ? " / " + it.max_uses : "");
+    h += '<tr data-promo-code="' + esc(it.code) + '"><td><span class="mono">' + esc(it.code) + '</span></td><td class="num">' + (it.percent || 0) + '%</td><td class="num">' + used + '</td><td><span class="mono">' + fmtDate(it.expires_at) + '</span></td><td>' + statusPill(it.active ? "active" : "disabled", it.active ? "Активен" : "Выключен") + '</td></tr>';
+  });
+  $("promos-out").innerHTML = h + '</tbody></table></div>';
+  $("promos-out").querySelectorAll("tr[data-promo-code]").forEach(function(tr){
+    tr.onclick = function(){ openPromoEditor(tr.dataset.promoCode); };
+  });
+}
+$("btn-promos").onclick = function(){ loadPromos(); };
+document.querySelector('[data-nav="promos"]').addEventListener("click", function(){
+  if (!promosLoaded) { promosLoaded = true; loadPromos(); }
+});
 $("btn-pr-add").onclick = withSpin($("btn-pr-add"), async function(){
   const body = {code: $("pr-code").value.trim()};
   const exp = $("pr-exp").value.trim(); if (exp) body.expires_at = exp;
   const owner = $("pr-owner").value.trim(); if (owner) body.owner_tg_id = parseInt(owner, 10);
   const note = $("pr-note").value.trim(); if (note) body.note = note;
   const r = await api("/promos", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
-  renderOut("promos-out", r.data);
+  if (r.status === 200) { toast("Промокод создан", "ok"); loadPromos(); }
+  else renderOut("promos-out", r.data);
 });
-$("btn-pr-find").onclick = async function(){ const r = await api("/promos/find?q=" + encodeURIComponent($("pr-code").value)); renderOut("promos-out", r.data); };
-$("btn-pr-toggle").onclick = async function(){
-  const r = await api("/promos/" + $("pr-code").value + "/toggle", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
-  renderOut("promos-out", r.data);
-};
-$("btn-pr-del").onclick = async function(){
-  const r = await postConfirm("/promos/" + $("pr-code").value + "/delete", {});
-  renderOut("promos-out", r.data);
+$("btn-pr-find").onclick = function(){
+  const code = $("pr-code").value.trim();
+  if (code) openPromoEditor(code);
 };
 $("btn-pr-batch").onclick = withSpin($("btn-pr-batch"), async function(){
   const r = await api("/promos/batch", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({count: parseInt($("pr-count").value || "10", 10)})});
-  renderOut("promos-out", r.data);
+  if (r.status === 200) { toast("Пачка промокодов создана", "ok"); loadPromos(); }
+  else renderOut("promos-out", r.data);
 });
-$("btn-tariffs").onclick = async function(){ const r = await api("/tariffs"); renderOut("tariffs-out", r.data); };
-$("btn-tf-add").onclick = withSpin($("btn-tf-add"), async function(){
-  const r = await api("/tariffs", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({name: $("tf-name").value, period_seconds: parseInt($("tf-seconds").value || "0", 10), price: parseInt($("tf-price").value || "0", 10)})});
-  renderOut("tariffs-out", r.data);
+async function openPromoEditor(code){
+  code = (code || "").toUpperCase();
+  $("drawer-title").textContent = "Промокод " + code;
+  $("drawer-sub").textContent = "Загрузка…";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:18px;width:50%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  let r;
+  try { r = await api("/promos/" + encodeURIComponent(code)); }
+  catch(e) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить промокод</p>'; return; }
+  if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Промокод не найден</p>'; return; }
+  const p = r.data.promo || {};
+  $("drawer-sub").textContent = "использований: " + (r.data.uses || 0) + (r.data.income ? " · доход " + fmtMoney(r.data.income) : "");
+  let h = '<dl class="kv">';
+  h += kvRow("Код", '<span class="mono">' + esc(p.code || "") + '</span>');
+  h += kvRow("Скидка", (p.percent || 0) + "%");
+  h += kvRow("Тип", esc(p.kind || ""));
+  h += kvRow("Дней подписки", p.days == null ? "—" : p.days);
+  h += kvRow("Активен", statusPill(p.active ? "active" : "disabled", p.active ? "Активен" : "Выключен"));
+  h += kvRow("Использований", (r.data.uses || 0) + (p.max_uses ? " / " + p.max_uses : ""));
+  h += kvRow("Истекает", '<span class="mono">' + fmtDate(p.expires_at) + '</span>');
+  h += kvRow("Создан", '<span class="mono">' + fmtDate(p.created_at) + '</span>');
+  h += kvRow("Владелец", p.owner_tg_id ? '<span class="mono">#' + p.owner_tg_id + '</span>' : "—");
+  h += kvRow("Только для новых", p.first_only ? "да" : "нет");
+  h += kvRow("Заметка", esc(p.note || "—"));
+  h += kvRow("Источник", esc(p.source || "—"));
+  h += '</dl>';
+  h += '<h3>Изменить</h3>';
+  h += '<label>Истекает<input id="ed-pr-exp" placeholder="напр. 2026-12-31 (пусто — без срока)" value="' + esc(p.expires_at || "") + '"></label>';
+  h += '<label>Макс. использований<input id="ed-pr-max" type="number" value="' + (p.max_uses == null ? "" : p.max_uses) + '"></label>';
+  h += '<label>Только для новых<select id="ed-pr-first"><option value="1"' + (p.first_only ? " selected" : "") + '>да</option><option value="0"' + (p.first_only ? "" : " selected") + '>нет</option></select></label>';
+  h += '<label>Заметка<input id="ed-pr-note" value="' + esc(p.note || "") + '"></label>';
+  h += '<div class="btnrow"><button class="ghost" id="ed-pr-save">Сохранить</button></div>';
+  if ((r.data.users || []).length) {
+    h += '<h3>Кто использовал</h3><div class="tblwrap"><table><thead><tr><th>Пользователь</th><th>Когда</th><th>Оплатил</th></tr></thead><tbody>';
+    r.data.users.forEach(function(u){
+      h += '<tr><td>' + esc(u.first_name || "—") + (u.username ? ' <span class="mut">@' + esc(u.username) + '</span>' : "") + ' <span class="mono small">#' + u.tg_id + '</span></td><td><span class="mono">' + fmtDate(u.used_at) + '</span></td><td class="num">' + fmtMoney(u.paid) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<p class="mut" id="ed-pr-msg" style="margin-top:10px"></p>';
+  $("drawer-body").innerHTML = h;
+  $("drawer-foot").innerHTML = '<button class="ghost" id="ed-pr-toggle">Вкл / выкл</button><button class="danger" id="ed-pr-del">Удалить</button>';
+  $("ed-pr-save").onclick = withSpin($("ed-pr-save"), async function(){
+    const body = {};
+    const exp = $("ed-pr-exp").value.trim(); body.expires_at = exp === "" ? null : exp;
+    const mx = $("ed-pr-max").value.trim(); body.max_uses = mx === "" ? null : parseInt(mx, 10);
+    body.first_only = $("ed-pr-first").value === "1";
+    body.note = $("ed-pr-note").value;
+    const rr = await api("/promos/" + encodeURIComponent(code), {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+    const msg = $("ed-pr-msg");
+    if (msg) msg.textContent = rr.status === 200 ? "Готово" : ("Ошибка: " + (rr.data.error || rr.status));
+    if (rr.status === 200) { toast("Промокод обновлён", "ok"); openPromoEditor(code); loadPromos(); }
+  });
+  $("ed-pr-toggle").onclick = withSpin($("ed-pr-toggle"), async function(){
+    const rr = await api("/promos/" + encodeURIComponent(code) + "/toggle", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+    if (rr.status === 200) { toast("Промокод переключён", "ok"); openPromoEditor(code); loadPromos(); }
+  });
+  $("ed-pr-del").onclick = withSpin($("ed-pr-del"), async function(){
+    const rr = await postConfirmAny("/promos/" + encodeURIComponent(code), "DELETE", {});
+    if (rr.status === 200) { toast("Промокод удалён", "ok"); closeDrawer(); loadPromos(); }
+    else { const msg = $("ed-pr-msg"); if (msg) msg.textContent = "Ошибка: " + (rr.data.error || rr.status); }
+  });
+}
+/* --- Тарифы: список + редактор --- */
+let tariffsLoaded = false;
+async function loadTariffs(){
+  let r;
+  try { r = await api("/tariffs"); }
+  catch(e) { $("tariffs-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("tariffs-out", r.data); return; }
+  const items = r.data.tariffs || [];
+  if (!items.length) { $("tariffs-out").innerHTML = '<div class="empty"><span class="big">🔍</span>Тарифов нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Название</th><th>Срок</th><th>Цена</th><th>Активен</th><th>Порядок</th></tr></thead><tbody>';
+  items.forEach(function(it){
+    h += '<tr data-tid="' + it.id + '"><td>' + esc(it.name) + '</td><td>' + fmtDays(it.period_seconds) + '</td><td class="num">' + fmtMoney(it.price) + '</td><td>' + statusPill(it.active ? "active" : "disabled", it.active ? "Активен" : "Выключен") + '</td><td class="num">' + (it.sort_order || 0) + '</td></tr>';
+  });
+  $("tariffs-out").innerHTML = h + '</tbody></table></div>';
+  $("tariffs-out").querySelectorAll("tr[data-tid]").forEach(function(tr){
+    tr.onclick = function(){ openTariffEditor(parseInt(tr.dataset.tid, 10)); };
+  });
+}
+$("btn-tariffs").onclick = function(){ loadTariffs(); };
+$("btn-tariff-add").onclick = function(){ openTariffEditor(null); };
+document.querySelector('[data-nav="tariffs"]').addEventListener("click", function(){
+  if (!tariffsLoaded) { tariffsLoaded = true; loadTariffs(); }
 });
-$("btn-tf-patch").onclick = async function(){
-  const body = {};
-  const p = $("tf-price2").value.trim();
-  if (p) body.price = parseInt(p, 10);
-  const r = await api("/tariffs/" + $("tf-id").value, {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
-  renderOut("tariffs-out", r.data);
-};
-$("btn-tf-del").onclick = async function(){
-  const r = await postConfirmAny("/tariffs/" + $("tf-id").value, "DELETE", {});
-  renderOut("tariffs-out", r.data);
-};
+async function openTariffEditor(tid){
+  if (tid == null) {
+    $("drawer-title").textContent = "Новый тариф";
+    $("drawer-sub").textContent = "Появится у клиентов после сохранения";
+    $("drawer-body").innerHTML = '<label>Название<input id="ed-tf-name" placeholder="напр. 1 месяц"></label>' +
+      '<label>Срок, секунды (2592000 = 30 дней)<input id="ed-tf-seconds" type="number" placeholder="2592000"></label>' +
+      '<label>Цена, ₽<input id="ed-tf-price" type="number" placeholder="299"></label>' +
+      '<p class="mut" id="ed-tf-msg" style="margin-top:10px"></p>';
+    $("drawer-foot").innerHTML = '<button id="ed-tf-create">Создать тариф</button>';
+    openDrawer();
+    $("ed-tf-create").onclick = withSpin($("ed-tf-create"), async function(){
+      const rr = await api("/tariffs", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+        body: JSON.stringify({name: $("ed-tf-name").value, period_seconds: parseInt($("ed-tf-seconds").value || "0", 10), price: parseInt($("ed-tf-price").value || "0", 10)})});
+      const msg = $("ed-tf-msg");
+      if (msg) msg.textContent = rr.status === 200 ? "Готово" : ("Ошибка: " + (rr.data.error || rr.status));
+      if (rr.status === 200) { toast("Тариф создан", "ok"); closeDrawer(); loadTariffs(); }
+    });
+    return;
+  }
+  $("drawer-title").textContent = "Тариф #" + tid;
+  $("drawer-sub").textContent = "Загрузка…";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:18px;width:50%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  let r;
+  try { r = await api("/tariffs/" + tid); }
+  catch(e) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить тариф</p>'; return; }
+  if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Тариф не найден</p>'; return; }
+  const t = r.data.tariff || {};
+  $("drawer-sub").textContent = t.name || "";
+  let h = '<dl class="kv">';
+  h += kvRow("ID", '<span class="mono">' + t.id + '</span>');
+  h += kvRow("Активен", statusPill(t.active ? "active" : "disabled", t.active ? "Активен" : "Выключен"));
+  h += '</dl>';
+  h += '<h3>Изменить</h3>';
+  h += '<label>Название<input id="ed-tf-name" value="' + esc(t.name || "") + '"></label>';
+  h += '<label>Срок, секунды<input id="ed-tf-seconds" type="number" value="' + (t.period_seconds || 0) + '"></label>';
+  h += '<label>Цена, ₽<input id="ed-tf-price" type="number" value="' + (t.price || 0) + '"></label>';
+  h += '<label>Порядок<input id="ed-tf-sort" type="number" value="' + (t.sort_order || 0) + '"></label>';
+  h += '<label>Активен<select id="ed-tf-active"><option value="1"' + (t.active ? " selected" : "") + '>да</option><option value="0"' + (t.active ? "" : " selected") + '>нет</option></select></label>';
+  h += '<div class="btnrow"><button class="ghost" id="ed-tf-save">Сохранить</button></div>';
+  h += '<p class="mut" id="ed-tf-msg" style="margin-top:10px"></p>';
+  $("drawer-body").innerHTML = h;
+  $("drawer-foot").innerHTML = '<button class="danger" id="ed-tf-del">Удалить тариф</button>';
+  $("ed-tf-save").onclick = withSpin($("ed-tf-save"), async function(){
+    const body = {
+      name: $("ed-tf-name").value,
+      period_seconds: parseInt($("ed-tf-seconds").value || "0", 10),
+      price: parseInt($("ed-tf-price").value || "0", 10),
+      sort_order: parseInt($("ed-tf-sort").value || "0", 10),
+      active: $("ed-tf-active").value === "1",
+    };
+    const rr = await api("/tariffs/" + tid, {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+    const msg = $("ed-tf-msg");
+    if (msg) msg.textContent = rr.status === 200 ? "Готово" : ("Ошибка: " + (rr.data.error || rr.status));
+    if (rr.status === 200) { toast("Тариф обновлён", "ok"); openTariffEditor(tid); loadTariffs(); }
+  });
+  $("ed-tf-del").onclick = withSpin($("ed-tf-del"), async function(){
+    const rr = await postConfirmAny("/tariffs/" + tid, "DELETE", {});
+    if (rr.status === 200) { toast("Тариф удалён", "ok"); closeDrawer(); loadTariffs(); }
+    else { const msg = $("ed-tf-msg"); if (msg) msg.textContent = "Ошибка: " + (rr.data.error || rr.status); }
+  });
+}
 
 /* --- Панель Remnawave и узлы --- */
 $("btn-panel").onclick = async function(){ const r = await api("/panel"); renderOut("panel-out", r.data); };
