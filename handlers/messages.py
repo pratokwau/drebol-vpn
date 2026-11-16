@@ -7,7 +7,6 @@ from config import ADMIN_ID, load_config, save_config
 from core.keyboards import back_admin
 from core.states import (
     AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
-    AWAITING_WELCOME_PHOTO,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_REFUND_URL, AWAITING_RULES_URL, AWAITING_CONSENT_URL,
     AWAITING_PRESET_EXPIRE,
@@ -1387,10 +1386,4 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             # фото прислали вместо текста — подпись станет текстом рассылки
             await accept_photo_with_text(msg, context)
-        return
-
-    # ── Картинка приветствия 16:9 ───────────────────────────────────────────
-    if is_admin and msg.photo and state == AWAITING_WELCOME_PHOTO:
-        from handlers.admin import handle_welcome_photo_received
-        await handle_welcome_photo_received(msg, context)
         return

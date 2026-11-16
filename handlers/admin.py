@@ -7,7 +7,7 @@ from core.states import (
     AWAITING_CHANNEL, AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_REFUND_URL, AWAITING_RULES_URL, AWAITING_CONSENT_URL,
     AWAITING_FIND_USER, AWAITING_LOG_CHANNEL, AWAITING_SUPPORT_GROUP,
-    AWAITING_SUPPORT_TOKEN, AWAITING_WELCOME_PHOTO,
+    AWAITING_SUPPORT_TOKEN,
     AWAITING_DM_USER,
 )
 
@@ -245,15 +245,9 @@ async def handle_channel_menu(query):
     sub_enabled = cfg.get("force_subscribe", False)
     channel_line = f"📢 Канал: <code>{channel_url}</code>" if channel_url else "📢 Канал: <i>не задан</i>"
     sub_line = "🔔 Обязательная подписка: <b>включена</b>" if sub_enabled else "🔕 Обязательная подписка: <b>выключена</b>"
-    from handlers.welcome_photo import get_welcome_photo
-    photo_id, photo_on = get_welcome_photo()
-    photo_line = ("🖼 Картинка приветствия: <b>включена</b>" if photo_on
-                  else "🖼 Картинка приветствия: <b>выключена</b>")
-    if not photo_id:
-        photo_line += " (не задана)"
     await query.edit_message_text(
         "📢 <b>Канал</b>\n\n"
-        f"<blockquote>{channel_line}\n{sub_line}\n{photo_line}</blockquote>\n\n"
+        f"<blockquote>{channel_line}\n{sub_line}</blockquote>\n\n"
         "<i>С обязательной подпиской бот выдаёт пробный период только "
         "после подписки на канал.</i>",
         parse_mode="HTML",
@@ -270,180 +264,6 @@ async def handle_set_channel(query, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
         reply_markup=back_admin(),
     )
-
-
-# ── Картинки 16:9 для меню ─────────────────────────────────────────────────
-
-def _menu_photo_rows(key):
-    """Кнопки подменю одной картинки меню."""
-    from handlers.welcome_photo import get_menu_photo
-    file_id, enabled = get_menu_photo(key)
-    rows = [
-        [InlineKeyboardButton("🖼 Загрузить / заменить картинку",
-                              callback_data=f"set_menu_photo:{key}")],
-        [InlineKeyboardButton("🔴 Выключить" if enabled else "🟢 Включить",
-                              callback_data=f"toggle_menu_photo:{key}"),
-         InlineKeyboardButton("👁 Предпросмотр",
-                              callback_data=f"test_menu_photo:{key}")],
-    ]
-    if file_id:
-        rows.append([InlineKeyboardButton("🗑 Убрать картинку",
-                                          callback_data=f"del_menu_photo:{key}")])
-    rows.append([InlineKeyboardButton("◀️ Назад к списку",
-                                      callback_data="welcome_photo_menu")])
-    return rows
-
-
-async def handle_welcome_photo_menu(query):
-    """Список меню с картинками: название + ✅, если картинка задана и включена."""
-    from handlers.welcome_photo import MENU_KEYS, MENU_TITLES, get_menu_photo
-    rows = []
-    lines = []
-    for key in MENU_KEYS:
-        file_id, enabled = get_menu_photo(key)
-        if file_id and enabled:
-            status = "задана ✅"
-        elif file_id:
-            status = "задана, выключена"
-        else:
-            status = "не задана"
-        lines.append(f"{MENU_TITLES[key]}: {status}")
-        rows.append([InlineKeyboardButton(
-            f"{MENU_TITLES[key]} {'✅' if (file_id and enabled) else '—'}",
-            callback_data=f"menu_photo:{key}")])
-    rows.append([InlineKeyboardButton("◀️ Назад", callback_data="channel_menu")])
-    await query.edit_message_text(
-        "🖼 <b>Картинки меню</b>\n\n"
-        "У каждого меню — своя картинка <b>16:9</b> (например 1920×1080 или "
-        "1280×720). Тапните меню, чтобы загрузить, включить, посмотреть "
-        "или убрать его картинку. У меню без картинки экран остаётся "
-        "обычным текстом.\n\n"
-        "<blockquote>" + "\n".join(lines) + "</blockquote>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(rows),
-    )
-
-
-async def handle_menu_photo_menu(query, key):
-    """Подменю одной картинки меню: статус, загрузка, вкл/выкл, предпросмотр."""
-    from handlers.welcome_photo import MENU_TITLES, get_menu_photo
-    file_id, enabled = get_menu_photo(key)
-    status = "🟢 включена" if enabled else "🔴 выключена"
-    pic = "задана ✅" if file_id else "не задана"
-    await query.edit_message_text(
-        f"🖼 <b>Картинка: {MENU_TITLES.get(key, key)}</b>\n\n"
-        f"<blockquote>Статус: <b>{status}</b>\nКартинка: <b>{pic}</b></blockquote>\n\n"
-        "Картинка <b>16:9</b> (например 1920×1080 или 1280×720) отправляется "
-        "вместе с этим меню. Если текст не влезает в подпись (длиннее 1024 "
-        "символов), картинка уходит отдельным сообщением перед текстом.\n\n"
-        "<i>Загрузите картинку — она сразу включится. Выключить можно "
-        "кнопкой ниже.</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(_menu_photo_rows(key)),
-    )
-
-
-async def handle_set_menu_photo(query, context: ContextTypes.DEFAULT_TYPE,
-                                key: str):
-    context.user_data["state"] = AWAITING_WELCOME_PHOTO
-    context.user_data["welcome_photo_menu"] = key
-    from handlers.welcome_photo import MENU_TITLES
-    await query.edit_message_text(
-        f"🖼 <b>Картинка: {MENU_TITLES.get(key, key)}</b>\n\n"
-        "Пришлите картинку <b>16:9</b> (например 1920×1080 или 1280×720).\n\n"
-        "<i>Картинка сохранится и сразу включится. Пришлите другую — заменится.</i>",
-        parse_mode="HTML",
-        reply_markup=back_admin(),
-    )
-
-
-async def handle_set_welcome_photo(query, context: ContextTypes.DEFAULT_TYPE):
-    """Старый вызов — загрузка картинки главного экрана (ключ start)."""
-    await handle_set_menu_photo(query, context, "start")
-
-
-async def handle_welcome_photo_received(msg, context: ContextTypes.DEFAULT_TYPE):
-    """Админ прислал картинку: проверяем 16:9, сохраняем file_id, включаем.
-
-    Меню берётся из context.user_data["welcome_photo_menu"] (куда админ
-    тапнул «Загрузить»); без него — главный экран (ключ start).
-    """
-    from handlers.welcome_photo import (
-        MENU_TITLES, is_16_9, ratio_label, set_menu_photo,
-    )
-    key = context.user_data.get("welcome_photo_menu", "start")
-    size = msg.photo[-1]
-    if not is_16_9(size.width, size.height):
-        await msg.reply_text(
-            "❌ <b>Не подходит</b>\n\n"
-            f"Присланная картинка — {size.width}×{size.height} "
-            f"({ratio_label(size.width, size.height)}), а нужна <b>16:9</b>, "
-            "например 1920×1080 или 1280×720.\n\n"
-            "<i>Пришлите другую картинку — жду.</i>",
-            parse_mode="HTML",
-        )
-        return  # состояние не снимаем — можно прислать ещё раз
-    set_menu_photo(key, file_id=size.file_id, enabled=True)
-    context.user_data.pop("state", None)
-    context.user_data.pop("welcome_photo_menu", None)
-    await msg.reply_text(
-        "✅ <b>Картинка сохранена и включена</b>\n\n"
-        f"<blockquote>Меню: {MENU_TITLES.get(key, key)}\n"
-        f"Размер: {size.width}×{size.height} (16:9)</blockquote>\n\n"
-        "<i>Теперь она отправляется вместе с этим меню. Выключить — в меню "
-        "«Картинка приветствия».</i>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(_menu_photo_rows(key)),
-    )
-
-
-async def handle_toggle_menu_photo(query, key: str):
-    from handlers.welcome_photo import get_menu_photo, set_menu_photo
-    _file_id, enabled = get_menu_photo(key)
-    set_menu_photo(key, enabled=not enabled)
-    await handle_menu_photo_menu(query, key)
-
-
-async def handle_toggle_welcome_photo(query):
-    """Старый вызов — тумблер картинки главного экрана (ключ start)."""
-    await handle_toggle_menu_photo(query, "start")
-
-
-async def handle_del_menu_photo(query, key: str):
-    from handlers.welcome_photo import clear_menu_photo
-    clear_menu_photo(key)
-    await handle_menu_photo_menu(query, key)
-
-
-async def handle_welcome_photo_del(query):
-    """Старый вызов — удаление картинки главного экрана (ключ start)."""
-    await handle_del_menu_photo(query, "start")
-
-
-async def handle_test_menu_photo(query, context: ContextTypes.DEFAULT_TYPE,
-                                 key: str):
-    """Предпросмотр: сама картинка меню с подписью, как её увидят в меню."""
-    from handlers.welcome_photo import MENU_TITLES, get_menu_photo
-    file_id, _enabled = get_menu_photo(key)
-    if not file_id:
-        await query.answer("Картинка не задана", show_alert=True)
-        return
-    await context.bot.send_photo(
-        chat_id=query.from_user.id, photo=file_id,
-        caption=f"🖼 {MENU_TITLES.get(key, key)}: "
-                "так картинка будет выглядеть в меню")
-    await query.answer("Предпросмотр отправлен отдельным сообщением")
-
-
-async def handle_welcome_photo_test(query, context: ContextTypes.DEFAULT_TYPE):
-    """Предпросмотр: админу — его же стартовый экран, как увидят пользователи."""
-    from handlers.user import start_screen
-    from handlers.welcome_photo import send_with_welcome_photo
-    user = query.from_user
-    text, markup = await start_screen(user, fresh=False)
-    await send_with_welcome_photo(context.bot, user.id, text, reply_markup=markup,
-                                  disable_web_page_preview=True)
-    await query.answer("Предпросмотр отправлен отдельным сообщением")
 
 
 def _doc_line(label: str, kind: str) -> str:

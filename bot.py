@@ -1,7 +1,6 @@
 import logging
 
-from telegram import CallbackQuery, Update
-from telegram.error import BadRequest
+from telegram import Update
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, MessageHandler, TypeHandler, filters,
 )
@@ -25,65 +24,6 @@ async def _on_error(update, context):
             await update.callback_query.answer("⚠️ Ошибка, смотри лог", show_alert=True)
         except Exception:
             pass
-
-
-# ── Правка экранов с картинкой приветствия ──────────────────────────────────
-# /start и главный экран теперь могут быть фото с подписью (картинка 16:9).
-# Все обработчики правят экран через query.edit_message_text — у фото-сообщения
-# текста нет, и Telegram отвечает «There is no text in the message to edit»,
-# из-за чего мёртвыми выглядели ВСЕ кнопки на этом экране (лог 2026-11-16:
-# handle_my_paid_sub падал именно на этом). Подменяем метод один раз здесь,
-# а не в 100+ местах: на текстовых сообщениях поведение не меняется вообще,
-# на фото — правим подпись, а если подпись не влезает в 1024 символа —
-# шлём экран заново текстом и убираем фото.
-_NO_TEXT_IN_MESSAGE = "no text in the message"
-
-_orig_edit_message_text = CallbackQuery.edit_message_text
-
-
-async def _edit_message_text_photo_aware(
-    self, text, parse_mode=None, reply_markup=None, entities=None,
-    link_preview_options=None, *, disable_web_page_preview=None,
-    read_timeout=None, write_timeout=None, connect_timeout=None,
-    pool_timeout=None, api_kwargs=None,
-):
-    try:
-        return await _orig_edit_message_text(
-            self, text, parse_mode=parse_mode, reply_markup=reply_markup,
-            entities=entities, link_preview_options=link_preview_options,
-            disable_web_page_preview=disable_web_page_preview,
-            read_timeout=read_timeout, write_timeout=write_timeout,
-            connect_timeout=connect_timeout, pool_timeout=pool_timeout,
-            api_kwargs=api_kwargs)
-    except BadRequest as e:
-        if _NO_TEXT_IN_MESSAGE not in str(e).lower():
-            raise
-    # Текста править нечего — это фото: правим подпись тем же текстом.
-    try:
-        return await self.edit_message_caption(
-            caption=text, reply_markup=reply_markup, parse_mode=parse_mode,
-            caption_entities=entities, read_timeout=read_timeout,
-            write_timeout=write_timeout, connect_timeout=connect_timeout,
-            pool_timeout=pool_timeout, api_kwargs=api_kwargs)
-    except BadRequest as cap_e:
-        msg = self.message
-        if msg is None:
-            raise cap_e
-        # Подпись не влезла (длиннее 1024) — шлём экран заново текстом.
-        try:
-            sent = await msg.reply_text(
-                text, parse_mode=parse_mode, reply_markup=reply_markup,
-                disable_web_page_preview=disable_web_page_preview)
-        except Exception:
-            raise cap_e
-        try:
-            await msg.delete()
-        except Exception:
-            pass
-        return sent
-
-
-CallbackQuery.edit_message_text = _edit_message_text_photo_aware
 
 
 from config import BOT_TOKEN

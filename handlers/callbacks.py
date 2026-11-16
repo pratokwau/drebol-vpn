@@ -18,12 +18,6 @@ from handlers.admin import (
     handle_set_privacy_url, handle_set_terms_url, handle_documents_menu,
     handle_set_refund_url, handle_set_rules_url, handle_set_consent_url,
     handle_channel_menu, handle_dashboard, handle_healthcheck,
-    handle_welcome_photo_menu, handle_set_welcome_photo,
-    handle_toggle_welcome_photo, handle_welcome_photo_del,
-    handle_welcome_photo_test,
-    handle_menu_photo_menu, handle_set_menu_photo,
-    handle_toggle_menu_photo, handle_del_menu_photo,
-    handle_test_menu_photo,
     handle_find_user, handle_user_profile,
     handle_set_log_channel, handle_clear_log_channel,
     handle_support_group_settings, handle_set_support_group, handle_clear_support_group,
@@ -246,28 +240,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             user, context,
             on_start=lambda: query.edit_message_text("⏳ Готовлю ваш доступ…"))
         text, markup = await start_screen(user, fresh=fresh)
-        # главный экран — с картинкой меню start (если задана): та же картинка —
-        # правим подпись, другая или текстовое сообщение — шлём заново с фото
-        from handlers.welcome_photo import show_menu_screen
-        await show_menu_screen(query, "start", text, reply_markup=markup,
-                               disable_web_page_preview=True)
-        return
-
-    # ── Картинки меню (префиксные callback_data) ─────────────────────────────
-    if data.startswith("menu_photo:"):
-        await handle_menu_photo_menu(query, data.split(":", 1)[1])
-        return
-    if data.startswith("set_menu_photo:"):
-        await handle_set_menu_photo(query, context, data.split(":", 1)[1])
-        return
-    if data.startswith("toggle_menu_photo:"):
-        await handle_toggle_menu_photo(query, data.split(":", 1)[1])
-        return
-    if data.startswith("del_menu_photo:"):
-        await handle_del_menu_photo(query, data.split(":", 1)[1])
-        return
-    if data.startswith("test_menu_photo:"):
-        await handle_test_menu_photo(query, context, data.split(":", 1)[1])
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
+                                      disable_web_page_preview=True)
         return
 
     # ── Юзер ─────────────────────────────────────────────────────────────────
@@ -372,16 +346,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "channel_menu":
         await handle_channel_menu(query)
 
-    elif data == "welcome_photo_menu":
-        await handle_welcome_photo_menu(query)
-    elif data == "set_welcome_photo":
-        await handle_set_welcome_photo(query, context)
-    elif data == "toggle_welcome_photo":
-        await handle_toggle_welcome_photo(query)
-    elif data == "welcome_photo_del":
-        await handle_welcome_photo_del(query)
-    elif data == "welcome_photo_test":
-        await handle_welcome_photo_test(query, context)
     elif data == "toggle_force_sub":
         cfg = load_config()
         cfg["force_subscribe"] = not cfg.get("force_subscribe", False)

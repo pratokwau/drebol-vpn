@@ -193,9 +193,7 @@ async def handle_my_paid_sub(query):
     from paidsub.storage import get_paid_sub_by_tg_id
     row = await get_paid_sub_by_tg_id(user_id)
     if not row:
-        from handlers.welcome_photo import show_menu_screen
-        await show_menu_screen(
-            query, "my_sub",
+        await query.edit_message_text(
             "⚙️ <b>Моя подписка</b>\n\n"
             "<blockquote>Подписки пока нет.</blockquote>",
             parse_mode="HTML",
@@ -261,9 +259,7 @@ async def handle_my_paid_sub(query):
     kb_rows.append([InlineKeyboardButton("📡 LTE-интернет", callback_data="my_lte")])
     kb_rows.append([InlineKeyboardButton("◀️ Назад", callback_data="back_start")])
 
-    from handlers.welcome_photo import show_menu_screen
-    await show_menu_screen(
-        query, "my_sub",
+    await query.edit_message_text(
         "⚙️ <b>Моя подписка</b>\n\n"
         f"<blockquote>{plan}  ·  {mark}</blockquote>\n\n"
         "<i>Скопируйте ссылку, продлите подписку или управляйте устройствами.</i>",
@@ -1091,9 +1087,7 @@ async def handle_remove_promo(query, context):
 
 async def handle_how_to(query):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from handlers.welcome_photo import show_menu_screen
-    await show_menu_screen(
-        query, "howto",
+    await query.edit_message_text(
         "❓ <b>Как подключиться</b>\n"
         "Три шага, пара минут.\n\n"
         "<b>iOS, Android, Windows, macOS — INCY</b>\n"
@@ -1211,9 +1205,7 @@ async def handle_prices(query):
     lines += ["", "✨ <b>В каждом тарифе</b>",
               "<blockquote>" + "\n".join(perks) + "</blockquote>"]
 
-    from handlers.welcome_photo import show_menu_screen
-    await show_menu_screen(
-        query, "prices",
+    await query.edit_message_text(
         "\n".join(lines),
         parse_mode="HTML",
         reply_markup=back_info(),
@@ -1405,9 +1397,7 @@ async def handle_referral(query, context):
         [InlineKeyboardButton("◀️ Назад", callback_data="back_start")],
     ])
 
-    from handlers.welcome_photo import show_menu_screen
-    await show_menu_screen(
-        query, "referral",
+    await query.edit_message_text(
         "\n\n".join(blocks),
         parse_mode="HTML",
         reply_markup=kb,
@@ -1428,9 +1418,7 @@ def _ref_date(raw) -> str:
 async def handle_info(query):
     """Раздел «Инфо»: как подключиться, цены, документы."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from handlers.welcome_photo import show_menu_screen
-    await show_menu_screen(
-        query, "info",
+    await query.edit_message_text(
         "ℹ️ <b>Информация</b>\n\n"
         "<i>Как подключиться, сколько стоит и кто мы.</i>",
         parse_mode="HTML",
@@ -1927,10 +1915,8 @@ async def start_screen(user, fresh: bool = False):
 
 
 async def handle_back_start(query, user):
-    from handlers.welcome_photo import show_menu_screen
     text, markup = await start_screen(user)
-    await show_menu_screen(query, "start", text, parse_mode="HTML",
-                           reply_markup=markup,
-                           disable_web_page_preview=True)
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
+                                  disable_web_page_preview=True)
 
 
