@@ -1446,12 +1446,56 @@ async def handle_rw_yandex(query, context=None):
 
 
 async def handle_rw_yandex_whitelist(query, context=None):
-    """Белые списки Яндекс Клауд — настройка появится позже."""
+    """Белые списки Яндекс Клауд — по образцу инструкции страницы подписки.
+
+    Два места: поле «Доступ по IP-адресам» в ресурсе CDN (у нас ВЫКЛЮЧЕНО —
+    клиенты с любого IP) и белый список edge-IP Яндекса на origin
+    (только Яндекс может дёргать XHTTP-порт дубликата ноды).
+    """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if context:
         context.user_data.pop("state", None)
-    lines = ["📋 <b>Белые списки</b>", "",
-             "<i>Настройка белых списков появится позже.</i>"]
+    lines = [
+        "📋 <b>Белые списки</b>",
+        "",
+        "В Yandex Cloud CDN белые списки — в двух местах: поле в самом ресурсе",
+        "и список IP edge-серверов для origin.",
+        "",
+        "<b>1. В ресурсе CDN — ВЫКЛЮЧЕНО</b>",
+        "Шаг 1 «Основные параметры», поля «Доступ по IP-адресам»,",
+        "«Доступ по странам», «Доступ по защищённому токену» — выкл.",
+        "для ВСЕХ наших ресурсов: sub.drbl.tech, de1cdn, fin1cdn, se1cdn, ro1cdn.",
+        "Клиенты заходят с любого IP по всей России — включишь и впишешь",
+        "свой IP, отрежешь всех остальных.",
+        "",
+        "<b>2. Белый список на origin — IP Яндекса</b>",
+        "Origin (нода) должен отвечать ТОЛЬКО edge-серверам Яндекса,",
+        "а не кому попало напрямую. Официальный список:",
+        "<code>https://tech.cdn.yandex.net/prefixes/yc.json</code>",
+        "(дока Яндекса «Диапазоны публичных IP-адресов» → Cloud CDN).",
+        "Список меняется — скачивать свежий при каждом применении.",
+        "",
+        "<b>3. Применить на ноде (дубликат [CDN], порт 8880)</b>",
+        "На сервере ноды (Швеция, Румыния, Германия, Финляндия — дубликат):",
+        "<code>ufw status</code>",
+        "Если выключен — сначала <code>ufw allow 22/tcp</code>, потом",
+        "<code>ufw enable</code>, иначе потеряешь SSH.",
+        "Затем разрешить Яндекс на 8880:",
+        "<code>curl -s https://tech.cdn.yandex.net/prefixes/yc.json | python3 -c \"import json,sys; print('\\n'.join(p for p in json.load(sys.stdin)['prefixes'] if ':' not in p))\" | while read ip; do ufw allow from $ip to any port 8880 proto tcp; done</code>",
+        "Правило для 12222 (только IP панели) и порт 22 — НЕ трогать.",
+        "Порты основной ноды (VTR, HY2) — тоже не трогать: они прямые, не через CDN.",
+        "",
+        "<b>4. body-brown (подписка) — НЕ ставится</b>",
+        "На 443 висят ещё панель и сайт — белый список на файрволе",
+        "отрежет и их. Для зеркала sub.drbl.tech он не нужен:",
+        "клиенты идут на sub.drbl.tech, а key.drbl.tech напрямую и так режет DPI.",
+        "",
+        "<b>5. Проверка</b>",
+        "Напрямую на origin-порт с обычного IP — таймаут (закрыто).",
+        "Через CDN-домен (se1cdn.drbl.tech:443) — подключается.",
+        "Это hardening, без него всё работает — делать после того,",
+        "как нода [CDN] уже зелёная в панели.",
+    ]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
