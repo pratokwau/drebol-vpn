@@ -8,7 +8,6 @@ from handlers.user import (
     handle_how_to, handle_renew_sub, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
     handle_qr_code, handle_reissue_key, handle_reissue_do, handle_prices, handle_info,
-    handle_mirror_sub,
     handle_pay_invoice, handle_tariff_pick, handle_my_devices, handle_dev_del,
     handle_dev_buy_menu, handle_dev_buy,
     handle_gift_pick, handle_gift_tariff, handle_gift_pay,
@@ -294,8 +293,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_referral(query, context)
     elif data == "copy_sub":
         await handle_copy_sub(query, context)
-    elif data == "mirror_sub":
-        await handle_mirror_sub(query)
     elif data == "info":
         await handle_info(query)
     elif data.startswith("app_add:"):

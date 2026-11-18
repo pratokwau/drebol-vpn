@@ -236,10 +236,6 @@ async def handle_my_paid_sub(query):
     if _on("subscription"):
         kb_rows += _app_rows(sub_url)
     kb_rows.append([copy_btn, InlineKeyboardButton("🔳 QR-код", callback_data="qr_code")])
-    # зеркало — та же подписка через другой домен, выручает, когда основная
-    # ссылка не обновляется из-за блокировки оператором (ошибка TLS в INCY)
-    if _on("subscription"):
-        kb_rows.append([InlineKeyboardButton("🪞 Зеркало подписки", callback_data="mirror_sub")])
     # продлевать можно в любой момент: остаток срока при оплате не сгорает
     if _on("payments"):
         kb_rows.append([InlineKeyboardButton("💳 Продлить подписку", callback_data="renew_sub")])
@@ -290,61 +286,6 @@ def primary_sub_url(sub_url: str) -> str:
     from urllib.parse import urlparse
     path = urlparse(sub_url).path.strip("/")
     return f"https://{MIRROR_SUB_DOMAIN}/{path}" if path else ""
-
-
-def mirror_sub_url(sub_url: str) -> str:
-    """Зеркало ссылки подписки: меняет домен key <-> sub, токен тот же."""
-    if not sub_url:
-        return ""
-    if MAIN_SUB_DOMAIN in sub_url:
-        return sub_url.replace(MAIN_SUB_DOMAIN, MIRROR_SUB_DOMAIN, 1)
-    if MIRROR_SUB_DOMAIN in sub_url:
-        return sub_url.replace(MIRROR_SUB_DOMAIN, MAIN_SUB_DOMAIN, 1)
-    from urllib.parse import urlparse
-    path = urlparse(sub_url).path.strip("/")
-    return f"https://{MIRROR_SUB_DOMAIN}/{path}" if path else ""
-
-
-async def handle_mirror_sub(query):
-    """Зеркало подписки: та же подписка через другой домен.
-
-    Основная ссылка теперь идёт через sub.drbl.tech (CDN), а здесь —
-    запасной адрес через key.drbl.tech. Нужно, если sub вдруг
-    не обновляется в приложении (ошибка TLS).
-    """
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from paidsub.storage import get_paid_sub_by_tg_id
-    row = await get_paid_sub_by_tg_id(query.from_user.id)
-    if not row:
-        await query.answer("Подписка не найдена", show_alert=True)
-        return
-    # основная ссылка теперь sub.drbl.tech — здесь отдаём запасной адрес
-    # через key.drbl.tech, если sub вдруг не откроется
-    mirror = mirror_sub_url(primary_sub_url(row[5]))
-    if not mirror:
-        await query.answer("Зеркало недоступно", show_alert=True)
-        return
-    try:
-        from telegram import CopyTextButton
-        copy_btn = InlineKeyboardButton("📋 Скопировать зеркало", copy_text=CopyTextButton(text=mirror))
-    except (ImportError, TypeError):
-        copy_btn = None
-    kb_rows = []
-    if copy_btn:
-        kb_rows.append([copy_btn])
-    kb_rows.append([InlineKeyboardButton("◀️ К подписке", callback_data="my_paid_sub")])
-    await query.edit_message_text(
-        "🪞 <b>Зеркало подписки</b>\n\n"
-        f"<code>{mirror}</code>\n\n"
-        "<blockquote>Та же подписка, просто другой адрес — запасной, "
-        "через key.drbl.tech. Основная ссылка (sub.drbl.tech) обычно "
-        "работает лучше. Если она не обновляется в приложении "
-        "(ошибка «Не удалось установить безопасное подключение») — "
-        "замените ссылку подписки в приложении на эту.</blockquote>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(kb_rows),
-        disable_web_page_preview=True,
-    )
 
 
 # ── Добавление подписки в приложение ─────────────────────────────────────────
