@@ -272,9 +272,83 @@ async def panel_sync_settings_patch(request):
 
 # ── Логи ─────────────────────────────────────────────────────────────────────
 
+# Человеческие подписи действий веб-админки (в журнале они admin:<имя>)
+_ADMIN_LABELS = {
+    "login": "🔐 Вход в веб-админку", "logout": "🚪 Выход из веб-админки",
+    "admin_sub_create": "🆕 Создал админскую подписку",
+    "backup_export": "📤 Выгрузка бэкапа", "backup_restore": "♻️ Восстановление из бэкапа",
+    "backup_restore_failed": "⚠️ Восстановление из бэкапа не удалось",
+    "blacklist_add": "⛔ Внёс в чёрный список", "blacklist_readd": "⛔ Вернул в чёрный список",
+    "blacklist_stop": "⛔ ЧС: стоп триала",
+    "broadcast_photo_upload": "🖼 Загрузил фото рассылки",
+    "broadcast_send": "📣 Отправил рассылку",
+    "connect_help_update": "❓ Обновил помощь при подключении",
+    "fraud_scan": "🕵 Ручная проверка антифрода", "fraud_stop": "🚫 Закрыл триал за повтор",
+    "git_update": "⬆️ Обновление с GitHub", "git_update_failed": "⚠️ Обновление с GitHub не удалось",
+    "helpers_add": "👥 Добавил помощника", "helpers_delete": "👥 Удалил помощника",
+    "helpers_perm": "👥 Сменил права помощника",
+    "jobs_run_now": "▶️ Запустил фоновую задачу", "jobs_run_now_failed": "⚠️ Фоновая задача упала",
+    "logs_purge": "🧹 Очистил старые логи", "lte_check_now": "📶 Ручная проверка LTE",
+    "morning_run_now": "🌅 Запустил утреннюю сводку", "morning_update": "🌅 Настройки утренней сводки",
+    "muse_account_create": "👤 Создал Muse-аккаунт", "muse_account_direct": "👤 Muse-аккаунт напрямую",
+    "netcheck_run": "📡 Запустил проверку операторов",
+    "panel_host_create": "➕ Создал хост в панели", "panel_host_delete": "🗑 Удалил хост в панели",
+    "panel_host_edit": "✏️ Изменил хост в панели",
+    "panel_profile_inbound_edit": "✏️ Изменил инбаунд профиля",
+    "panel_settings": "⚙️ Настройки панели", "panel_settings_test": "🔌 Проверка панели",
+    "panel_sync": "🔄 Синхронизация с панелью", "panel_sync_settings": "🔄 Настройки синхронизации",
+    "payment_refund": "💸 Оформил возврат", "platega_update": "💳 Настройки Platega",
+    "promo_batch": "🎁 Пакетная раздача промокодов", "promo_create": "🎁 Создал промокод",
+    "promo_delete": "🗑 Удалил промокод", "promo_toggle": "🎁 Вкл/выкл промокода",
+    "promo_update": "🎁 Изменил промокод",
+    "reconcile_fix": "🧾 Исправил расхождения сверки", "reconcile_run": "🧾 Запустил сверку",
+    "server_create": "➕ Добавил сервер в расходы", "server_delete": "🗑 Удалил сервер из расходов",
+    "server_mark": "✅ Отметил оплату сервера", "server_update": "✏️ Изменил сервер в расходах",
+    "settings_update": "⚙️ Изменил настройки",
+    "site_delete": "🗑 Удалил сайт", "site_delete_failed": "⚠️ Удаление сайта не удалось",
+    "site_deploy": "🚀 Развернул сайт", "site_deploy_failed": "⚠️ Деплой сайта не удался",
+    "site_texts": "📝 Тексты сайта",
+    "subs_presets_update": "⚙️ Пресеты подписок",
+    "support_close": "💬 Закрыл обращение", "support_reply": "💬 Ответил в поддержке",
+    "support_settings": "💬 Настройки поддержки",
+    "tariff_create": "🏷 Создал тариф", "tariff_delete": "🗑 Удалил тариф",
+    "tariff_update": "🏷 Изменил тариф",
+    "user_dm": "✉️ Написал пользователю", "user_gift": "🎁 Подарил подписку",
+    "web_access_update": "🌐 Настройки веб-доступа",
+    "sub_extend": "⏩ Продлил подписку", "sub_expire": "📅 Установил дату подписки",
+    "sub_delete": "🗑 Удалил подписку", "sub_reissue": "🔁 Перевыпустил ключ",
+    "sub_freeze": "❄️ Заморозил/разморозил подписку",
+    "sub_toggle": "🔀 Вкл/выкл подписки",
+    "sub_hwid": "📱 Изменил устройства подписки",
+    "sub_traffic": "📊 Изменил трафик подписки", "sub_lte": "📶 Изменил LTE подписки",
+    "sub_trial": "🎁 Изменил триал подписки",
+    "subs_bulk_extend": "📦 Массовый сдвиг сроков", "subs_bulk_limits": "📦 Массовые лимиты",
+    "subs_bulk_lte": "📦 Массовый LTE",
+}
+
+
+def _action_label_text(action: str, details: str) -> str:
+    """Подпись действия для веб-журнала: admin:* — по словарю выше,
+    остальные (cb:/cmd:/msg:/ev:) — тем же action_label, что и ТГ-журнал,
+    только без HTML-разметки."""
+    if (action or "").startswith("admin:"):
+        name = action[len("admin:"):]
+        return _ADMIN_LABELS.get(name, "⚙️ Админ: " + name.replace("_", " "))
+    try:
+        import html as _html
+        import re as _re
+        from handlers.control import action_label
+        text = action_label(action, details)
+        return _html.unescape(_re.sub(r"<[^>]+>", "", text)).strip() or action
+    except Exception:
+        return action or ""
+
+
 def _activity_row(row) -> dict:
+    details = _scrub(str(row[3] or ""))
     return {"id": row[0], "tg_id": row[1], "action": row[2],
-            "details": _scrub(str(row[3] or "")), "time": str(row[4] or ""),
+            "label": _action_label_text(row[2], details),
+            "details": details, "time": str(row[4] or ""),
             "first_name": row[5] or "", "username": row[6] or ""}
 
 
@@ -948,6 +1022,19 @@ async def downtime_get(request):
     now = int(_time.time())
     since = now - days * 86400
     events = await get_downtime_events(since)
+    from datetime import datetime, timedelta, timezone
+    msk = timezone(timedelta(hours=3))
+
+    def _fmt(ts):
+        if not ts:
+            return None
+        return datetime.fromtimestamp(int(ts), msk).strftime("%d.%m.%Y %H:%M:%S")
+
+    for ev in events:
+        ev["started_str"] = _fmt(ev.get("started_at"))
+        ev["ended_str"] = _fmt(ev.get("ended_at"))
+        end = int(ev["ended_at"]) if ev.get("ended_at") else now
+        ev["duration_sec"] = max(0, end - int(ev["started_at"]))
     return web.json_response({
         "days": days, "since": since, "now": now,
         "summary": downtime_summary(events, since, now),

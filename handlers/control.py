@@ -208,6 +208,7 @@ EVENT_LABELS = {
     "expired": "🔴 Подписка отключена",
     "trial_approved": "🆓 Выдан триал",
     "trial_rejected": "❌ Отклонён триал",
+    "key_reissued": "🔁 Перевыпустил ключ",
     "sub_created": "✨ Создана подписка",
     "payment_confirmed": "💰 Оплата",
     "payment_rejected": "❌ Отклонена оплата",

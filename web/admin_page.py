@@ -568,12 +568,13 @@ details p,details ul{margin-top:8px}
       <!-- Логи -->
       <section id="sec-logs" class="page hidden">
         <div class="card"><h2>Журнал действий и ошибок</h2><p class="sub">Аудит всех действий админов — и в ТГ, и в вебе — в одной ленте. Секреты в журнал не попадают.</p>
-          <select id="logs-kind"><option value="activity">Действия</option><option value="error">Ошибки</option></select>
+          <select id="logs-kind"><option value="activity">Действия</option><option value="errors">Ошибки</option></select>
           <input id="logs-user" type="number" placeholder="tg_id (необязательно)">
           <input id="logs-from" placeholder="с даты, напр. 2026-11-01">
           <input id="logs-to" placeholder="по дату, напр. 2026-11-15">
           <div class="btnrow"><button id="btn-logs">Показать журнал</button><a id="btn-logs-export" href="/api/admin/logs/export?kind=activity"><button type="button" class="ghost">Скачать CSV</button></a><button id="btn-logs-purge" class="danger">Очистить старые записи</button></div>
           <div id="logs-out"></div>
+          <div class="btnrow"><button id="btn-logs-prev" class="ghost">← Назад</button><span id="logs-page-label" class="mut"></span><button id="btn-logs-next" class="ghost">Вперёд →</button></div>
         </div>
         <div class="card"><h2>Падения и сбои</h2><p class="sub">Когда узлы и панель были недоступны.</p>
           <div class="btnrow"><button id="btn-downtime" class="ghost">Показать падения</button><button id="btn-online" class="ghost">Кто онлайн</button></div>
@@ -2023,14 +2024,41 @@ let logsLoaded = false;
 document.querySelector('[data-nav="logs"]').addEventListener("click", function(){
   if (!logsLoaded) { logsLoaded = true; $("btn-logs").click(); }
 });
-$("btn-logs").onclick = async function(){
-  let q = "?kind=" + $("logs-kind").value;
+let logsPage = 1, logsPages = 1;
+async function loadLogs(page){
+  logsPage = page || 1;
+  let q = "?kind=" + $("logs-kind").value + "&page=" + logsPage + "&per_page=25";
   const u = $("logs-user").value.trim(); if (u) q += "&user_id=" + u;
   const f = $("logs-from").value.trim(); if (f) q += "&date_from=" + encodeURIComponent(f);
   const t = $("logs-to").value.trim(); if (t) q += "&date_to=" + encodeURIComponent(t);
-  const r = await api("/logs" + q);
-  renderOut("logs-out", r.data);
-};
+  let r;
+  try { r = await api("/logs" + q); }
+  catch(e) { $("logs-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("logs-out", r.data); return; }
+  logsPages = r.data.pages || 1; logsPage = r.data.page || logsPage;
+  $("logs-page-label").textContent = "Стр. " + logsPage + " из " + logsPages;
+  show("btn-logs-prev", logsPage > 1); show("btn-logs-next", logsPage < logsPages);
+  const rows = r.data.rows || [];
+  if (!rows.length) { $("logs-out").innerHTML = '<div class="empty">Записей нет</div>'; return; }
+  let h;
+  if (r.data.kind === "errors") {
+    h = '<div class="tblwrap"><table><thead><tr><th>Время (МСК)</th><th>Источник</th><th>Уровень</th><th>Сообщение</th><th>Детали</th></tr></thead><tbody>';
+    rows.forEach(function(it){
+      h += '<tr><td class="mono">' + fmtDate(it.time) + '</td><td>' + esc(it.source || "") + '</td><td>' + pill(it.level || "") + '</td><td>' + esc(it.message || "") + '</td><td class="trunc">' + esc(it.details || "") + "</td></tr>";
+    });
+  } else {
+    h = '<div class="tblwrap"><table><thead><tr><th>Время (МСК)</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>';
+    rows.forEach(function(it){
+      const who = it.tg_id ? (esc(it.first_name || "") + (it.username ? ' <span class="mut">@' + esc(it.username) + "</span>" : "") + ' <span class="mono small">#' + it.tg_id + "</span>") : '<span class="mut">система</span>';
+      h += '<tr><td class="mono">' + fmtDate(it.time) + "</td><td>" + who + '</td><td>' + esc(it.label || it.action || "") + ' <span class="mono small mut">' + esc(it.action || "") + '</span></td><td class="trunc">' + esc(it.details || "") + "</td></tr>";
+    });
+  }
+  $("logs-out").innerHTML = h + "</tbody></table></div>";
+}
+$("btn-logs").onclick = function(){ loadLogs(1); };
+$("logs-kind").onchange = function(){ loadLogs(1); };
+$("btn-logs-prev").onclick = function(){ if (logsPage > 1) loadLogs(logsPage - 1); };
+$("btn-logs-next").onclick = function(){ if (logsPage < logsPages) loadLogs(logsPage + 1); };
 $("btn-logs-export").onclick = function(){
   $("btn-logs-export").href = "/api/admin/logs/export?kind=" + $("logs-kind").value;
 };
@@ -2038,8 +2066,60 @@ $("btn-logs-purge").onclick = async function(){
   const r = await postConfirm("/logs/purge", {});
   renderOut("logs-out", r.data);
 };
-$("btn-downtime").onclick = async function(){ const r = await api("/downtime"); renderOut("downtime-out", r.data); };
-$("btn-online").onclick = async function(){ const r = await api("/online"); renderOut("downtime-out", r.data); };
+function fmtDur(sec){
+  sec = Math.max(0, Math.round(sec || 0));
+  const d = Math.floor(sec / 86400), hh = Math.floor(sec % 86400 / 3600), mm = Math.floor(sec % 3600 / 60);
+  if (d) return d + " д " + hh + " ч";
+  if (hh) return hh + " ч " + mm + " мин";
+  if (mm) return mm + " мин";
+  return sec + " сек";
+}
+function fmtUnix(ts){
+  if (!ts) return "—";
+  try { return new Date(ts * 1000).toLocaleString("ru-RU", {timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"}); }
+  catch(e) { return String(ts); }
+}
+$("btn-downtime").onclick = async function(){
+  const r = await api("/downtime");
+  if (r.status !== 200) { renderOut("downtime-out", r.data); return; }
+  const sm = r.data.summary || {}, evs = r.data.events || [];
+  let h = '<p class="sub">За последние ' + (r.data.days || 30) + ' дней</p>';
+  const targets = Object.keys(sm);
+  if (targets.length) {
+    h += '<div class="tblwrap"><table><thead><tr><th>Цель</th><th>Инцидентов</th><th>Простой суммарно</th><th>Статус</th></tr></thead><tbody>';
+    targets.forEach(function(t){
+      const v = sm[t];
+      h += "<tr><td>" + esc(t) + '</td><td class="num">' + fmtNum(v.incidents) + '</td><td class="num">' + fmtDur(v.downtime_sec) + "</td><td>" + (v.open_since ? '<span class="pill bad">лежит с ' + fmtUnix(v.open_since) + "</span>" : '<span class="pill ok">работает</span>') + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  if (!evs.length) h += '<div class="empty"><span class="big">✅</span>Падений не зафиксировано</div>';
+  else {
+    h += '<h3>События</h3><div class="tblwrap"><table><thead><tr><th>Цель</th><th>Начало (МСК)</th><th>Конец (МСК)</th><th>Длительность</th><th>Детали</th></tr></thead><tbody>';
+    evs.forEach(function(ev){
+      h += "<tr><td>" + esc(ev.target || "") + '</td><td class="mono">' + esc(ev.started_str || "") + '</td><td class="mono">' + (ev.ended_str ? esc(ev.ended_str) : '<span class="pill bad">ещё лежит</span>') + '</td><td class="num">' + fmtDur(ev.duration_sec) + '</td><td class="trunc">' + esc(ev.detail || "") + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  $("downtime-out").innerHTML = h;
+};
+$("btn-online").onclick = async function(){
+  const r = await api("/online");
+  if (r.status !== 200) { renderOut("downtime-out", r.data); return; }
+  const on = (r.data.online && r.data.online.emails) || [];
+  const last = (r.data.last_online && r.data.last_online.last) || {};
+  let h = '<h3>Сейчас онлайн: ' + on.length + "</h3>";
+  h += on.length ? '<p>' + on.map(function(e){ return '<span class="pill ok">' + esc(e) + "</span>"; }).join(" ") + "</p>" : '<div class="empty">Никого</div>';
+  const keys = Object.keys(last);
+  if (keys.length) {
+    h += '<h3>Последняя активность (МСК)</h3><div class="tblwrap"><table><thead><tr><th>Клиент</th><th>Был онлайн</th></tr></thead><tbody>';
+    keys.sort(function(a, b){ return (last[b] || 0) - (last[a] || 0); }).slice(0, 50).forEach(function(k){
+      h += '<tr><td class="mono">' + esc(k) + '</td><td class="mono">' + fmtUnix(last[k]) + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  $("downtime-out").innerHTML = h;
+};
 $("btn-psync").onclick = async function(){ const r = await postConfirm("/panel-sync", {}); renderOut("psync-out", r.data); };
 $("btn-psync-set").onclick = async function(){ const r = await api("/panel-sync/settings"); renderOut("psync-out", r.data); };
 $("btn-morning").onclick = async function(){ const r = await api("/morning"); renderOut("morning-out", r.data); };

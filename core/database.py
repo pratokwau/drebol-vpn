@@ -2284,14 +2284,14 @@ async def log_error(source: str, level: str = "error", message: str = "",
 
 
 async def list_errors(page: int = 1, per_page: int = 15):
-    """Журнал ошибок с пагинацией. Время отдаём в местном поясе."""
+    """Журнал ошибок с пагинацией. Время отдаём по Москве (UTC+3)."""
     offset = (page - 1) * per_page
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT COUNT(*) FROM error_log") as cur:
             total = (await cur.fetchone())[0]
         async with db.execute("""
             SELECT id, source, level, message, details,
-                   datetime(created_at, 'localtime'), tg_id
+                   datetime(created_at, '+3 hours'), tg_id
             FROM error_log
             ORDER BY id DESC LIMIT ? OFFSET ?
         """, (per_page, offset)) as cur:
@@ -2381,7 +2381,9 @@ async def list_activity(scope: str = "all", page: int = 1, per_page: int = 15,
                         user_id: int | None = None, kind: str | None = None,
                         date_from: str | None = None,
                         date_to: str | None = None):
-    """Журнал с пагинацией. Время отдаём в местном поясе.
+    """Журнал с пагинацией. Время отдаём по Москве (UTC+3, фиксированный
+    сдвиг — у Москвы нет летнего времени). Раньше был 'localtime' сервера
+    (Берлин, UTC+1) — журнал врал владельцу на 2 часа.
 
     Фильтры (все опционально, сочетаются с областью):
     user_id — только этот человек (tg_id, индекс есть);
@@ -2397,10 +2399,10 @@ async def list_activity(scope: str = "all", page: int = 1, per_page: int = 15,
         conds.append("a.action LIKE ?")
         params = params + [f"{kind}:%"]
     if date_from:
-        conds.append("date(a.created_at, 'localtime') >= ?")
+        conds.append("date(a.created_at, '+3 hours') >= ?")
         params = params + [date_from]
     if date_to:
-        conds.append("date(a.created_at, 'localtime') <= ?")
+        conds.append("date(a.created_at, '+3 hours') <= ?")
         params = params + [date_to]
     where = " AND ".join(f"({c})" for c in conds)
     offset = (page - 1) * per_page
@@ -2408,7 +2410,7 @@ async def list_activity(scope: str = "all", page: int = 1, per_page: int = 15,
         async with db.execute(f"SELECT COUNT(*) FROM activity_log a WHERE {where}", params) as cur:
             total = (await cur.fetchone())[0]
         async with db.execute(f"""
-            SELECT a.id, a.tg_id, a.action, a.details, datetime(a.created_at, 'localtime'),
+            SELECT a.id, a.tg_id, a.action, a.details, datetime(a.created_at, '+3 hours'),
                    u.first_name, u.username
             FROM activity_log a LEFT JOIN users u ON u.id = a.tg_id
             WHERE {where}
