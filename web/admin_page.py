@@ -1099,7 +1099,7 @@ function renderUsersTable(host, rows, dateLabel){
   if (!rows.length) { host.innerHTML = '<div class="empty"><span class="big">🔍</span>Никого не нашёл</div>'; return; }
   host.innerHTML = '<div class="tblwrap"><table><thead><tr><th>Имя</th><th>Username</th><th>TG ID</th><th>Подписка</th><th>' + dateLabel + '</th></tr></thead><tbody>' +
     rows.map(function(u){
-      return '<tr data-tg="' + u.tg_id + '"><td>' + esc(u.name) + '</td><td class="mono">@' + esc(u.username) + '</td><td class="mono">' + u.tg_id + '</td><td>' + (u.sub ? pill(u.sub) : "—") + '</td><td class="mono">' + fmtDate(u.date) + "</td></tr>";
+      return '<tr data-tg="' + u.tg_id + '"><td>' + esc(u.name) + '</td><td class="mono">' + (u.username ? "@" + esc(u.username) : "—") + '</td><td class="mono">' + u.tg_id + '</td><td>' + (u.sub ? subStatusPill(u.sub) : "—") + '</td><td class="mono">' + fmtDate(u.date) + "</td></tr>";
     }).join("") + "</tbody></table></div>";
   host.querySelectorAll("tr[data-tg]").forEach(function(tr){
     tr.onclick = function(){ openUserEditor(parseInt(tr.dataset.tg, 10)); };
@@ -1156,10 +1156,10 @@ async function openUserEditor(tgId){
   if (d.subscription) {
     const s = d.subscription;
     h += kvRow("Подписка", subStatusPill(s.status) + ' · <span class="mono">' + fmtDate(s.expire_date) + '</span>');
-    h += kvRow("Email подписки", '<span class="mono">' + esc(s.email || "") + '</span>');
+    h += kvRow("Логин в панели", '<span class="mono">' + esc(s.email || "") + '</span>');
   } else h += kvRow("Подписка", "нет");
   if (d.referral) h += kvRow("Рефералка", "пригласил " + (d.referral.invited || 0) + " · вознаграждено " + (d.referral.rewarded || 0));
-  if (d.payments_total) h += kvRow("Оплат", d.payments_total.count + " на " + fmtMoney(d.payments_total.sum));
+  if (d.payments_total) h += kvRow("Оплат (успешных)", d.payments_total.count + " на " + fmtMoney(d.payments_total.sum));
   if (d.blacklist) h += kvRow("Чёрный список", esc(d.blacklist.reason || d.blacklist.source || ""));
   h += '</dl>';
   if ((d.payments || []).length) {
@@ -1198,7 +1198,7 @@ $("btn-blacklist").onclick = async function(){
   if (!rows.length) { $("bl-out").innerHTML = '<div class="empty">Чёрный список пуст</div>'; return; }
   let h = '<div class="tblwrap"><table><thead><tr><th>Имя</th><th>Username</th><th>TG ID</th><th>Причина</th></tr></thead><tbody>';
   rows.forEach(function(e){
-    h += '<tr data-tg="' + e.tg_id + '"><td>' + esc(e.first_name || "") + '</td><td class="mono">@' + esc(e.username || "") + '</td><td class="mono">' + e.tg_id + '</td><td>' + esc(e.reason || "") + '</td></tr>';
+    h += '<tr data-tg="' + e.tg_id + '"><td>' + esc(e.first_name || "") + '</td><td class="mono">' + (e.username ? "@" + esc(e.username) : "—") + '</td><td class="mono">' + e.tg_id + '</td><td>' + esc(e.reason || "") + '</td></tr>';
   });
   h += '</tbody></table></div>';
   $("bl-out").innerHTML = h;
@@ -1266,10 +1266,12 @@ async function loadSubs(page){
   $("subs-page-label").textContent = "Страница " + subsPage + " из " + subsTotalPages;
   show("btn-subs-prev", subsPage > 1); show("btn-subs-next", subsPage < subsTotalPages);
   if (!items.length) { $("subs-table").innerHTML = '<div class="empty"><span class="big">🔍</span>Подписок не найдено</div>'; return; }
-  let h = '<div class="tblwrap"><table><thead><tr><th>Пользователь</th><th>Email</th><th>Статус</th><th>Истекает</th><th>Трафик</th><th>Устройства</th></tr></thead><tbody>';
+  let h = '<div class="tblwrap"><table><thead><tr><th>Пользователь</th><th>Логин в панели</th><th>Статус</th><th>Истекает</th><th>Трафик (лимит)</th><th>Устройства (лимит)</th></tr></thead><tbody>';
   items.forEach(function(it){
     const name = esc(it.first_name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "") + ' <span class="mono small">#' + it.tg_id + '</span>';
-    h += '<tr data-sub-id="' + it.id + '"><td>' + name + '</td><td class="trunc"><span class="mono">' + esc(it.email || "") + '</span></td><td>' + subStatusPill(it.status) + '</td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td class="num">' + (it.total_gb || 0) + ' ГБ</td><td class="num">' + (it.limit_hwid || 0) + '</td></tr>';
+    const traf = it.total_gb > 0 ? "до " + it.total_gb + " ГБ" : "безлимит";
+    const devs = (it.limit_hwid || 0) + (it.extra_devices || 0);
+    h += '<tr data-sub-id="' + it.id + '"><td>' + name + '</td><td class="trunc"><span class="mono">' + esc(it.email || "") + '</span></td><td>' + subStatusPill(it.status) + '</td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td class="num">' + traf + '</td><td class="num">до ' + devs + '</td></tr>';
   });
   $("subs-table").innerHTML = h + '</tbody></table></div>';
 }
@@ -1402,8 +1404,31 @@ $("btn-asub").onclick = withSpin($("btn-asub"), async function(){
     body: JSON.stringify({tg_id: parseInt($("asub-tg").value || "0", 10)})});
   renderOut("asub-out", r.data);
 });
-$("btn-asub-list").onclick = async function(){ const r = await api("/admin-subs"); renderOut("asub-out", r.data); };
-$("btn-asub-card").onclick = async function(){ const r = await api("/admin-subs/" + $("asub-id").value); renderOut("asub-out", r.data); };
+$("btn-asub-list").onclick = async function(){
+  const r = await api("/admin-subs");
+  if (r.status !== 200) { renderOut("asub-out", r.data); return; }
+  const items = r.data.subs || [];
+  if (!items.length) { $("asub-out").innerHTML = '<div class="empty">Админских подписок нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>ID</th><th>TG ID</th><th>Логин в панели</th><th>Истекает</th><th>Трафик (лимит)</th><th>Создана</th></tr></thead><tbody>';
+  items.forEach(function(it){
+    h += '<tr><td class="mono">' + it.id + '</td><td class="mono">' + (it.tg_id || "—") + '</td><td class="trunc"><span class="mono">' + esc(it.email || "") + '</span></td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td class="num">' + (it.total_gb > 0 ? "до " + it.total_gb + " ГБ" : "безлимит") + '</td><td><span class="mono">' + fmtDate(it.created_at) + '</span></td></tr>';
+  });
+  $("asub-out").innerHTML = h + "</tbody></table></div>";
+};
+$("btn-asub-card").onclick = async function(){
+  const r = await api("/admin-subs/" + $("asub-id").value);
+  if (r.status !== 200 || !r.data.subscription) { renderOut("asub-out", r.data); return; }
+  const s = r.data.subscription;
+  let h = '<dl class="kv">';
+  h += kvRow("ID", '<span class="mono">' + s.id + '</span>');
+  h += kvRow("TG ID", '<span class="mono">' + (s.tg_id || "—") + '</span>');
+  h += kvRow("Логин в панели", '<span class="mono">' + esc(s.email || "") + '</span>');
+  h += kvRow("Истекает", '<span class="mono">' + fmtDate(s.expire_date) + '</span>');
+  h += kvRow("Трафик (лимит)", s.total_gb > 0 ? "до " + s.total_gb + " ГБ" : "безлимит");
+  h += kvRow("Устройства (лимит)", "до " + ((s.limit_hwid || 0)));
+  if (s.sub_url) h += kvRow("Ссылка подписки", '<span class="mono small">' + esc(s.sub_url) + '</span>');
+  $("asub-out").innerHTML = h + "</dl>";
+};
 $("btn-referrals").onclick = async function(){ const r = await api("/referrals"); renderOut("ref-out", r.data); };
 $("btn-lte").onclick = async function(){ const r = await postConfirm("/subs/lte/check-now", {}); renderOut("ref-out", r.data); };
 

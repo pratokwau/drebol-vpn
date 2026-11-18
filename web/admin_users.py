@@ -21,9 +21,12 @@ def _paid_sub_dict(row) -> dict | None:
         return None
     def g(i, default=None):
         return row[i] if len(row) > i else default
+    # expire_date в базе хранится «dd.mm.yyyy hh:mm:ss»; наружу отдаём ISO,
+    # иначе фронт не может её распарсить (показывал сырьём и ломал статусы)
+    from core.database import _expire_to_iso
     return {
         "id": g(0), "tg_id": g(1), "email": g(2), "uuid": g(3),
-        "sub_id": g(4), "sub_url": g(5), "expire_date": g(6),
+        "sub_id": g(4), "sub_url": g(5), "expire_date": _expire_to_iso(g(6)),
         "limit_ip": g(7), "limit_hwid": g(8), "total_gb": g(9),
         "created_at": str(g(10) or ""), "status": g(11),
         "times_renewed": g(12), "trial_period": g(13),
@@ -492,8 +495,10 @@ async def admin_subs_list(request):
         page = 1
     rows, pages = await list_subs(page)
     # list_subs: id, tg_id, email, expire_date, total_gb, created_at.
+    from core.database import _expire_to_iso
     return web.json_response({"subs": [
-        {"id": r[0], "tg_id": r[1], "email": r[2], "expire_date": r[3],
+        {"id": r[0], "tg_id": r[1], "email": r[2],
+         "expire_date": _expire_to_iso(r[3]),
          "total_gb": r[4], "created_at": str(r[5] or "")}
         for r in rows], "page": page, "pages": pages})
 
@@ -512,9 +517,10 @@ async def admin_sub_card(request):
     row = await get_sub(sub_id)
     if not row:
         return web.json_response({"error": "not_found"}, status=404)
+    from core.database import _expire_to_iso
     return web.json_response({"subscription": {
         "id": row[0], "tg_id": row[1], "email": row[2], "uuid": row[3],
-        "sub_id": row[4], "sub_url": row[5], "expire_date": row[6],
+        "sub_id": row[4], "sub_url": row[5], "expire_date": _expire_to_iso(row[6]),
         "limit_ip": row[7], "limit_hwid": row[8], "total_gb": row[9],
         "created_at": str(row[10] or ""), "lte_gb": row[11] if len(row) > 11 else None,
         "kind": "admin"}})

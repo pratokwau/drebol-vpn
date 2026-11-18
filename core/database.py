@@ -1731,7 +1731,10 @@ async def admin_list_paid_subs(page: int = 1, per_page: int = 25,
             f"""SELECT {cols} FROM paid_subs s
                 LEFT JOIN users u ON u.id = s.tg_id
                 {where_sql}
-                ORDER BY s.created_at DESC, s.id DESC
+                ORDER BY (s.status IN ('active', 'renewal')) DESC,
+                         (substr(s.expire_date, 7, 4) || substr(s.expire_date, 4, 2)
+                          || substr(s.expire_date, 1, 2) || substr(s.expire_date, 11)) ASC,
+                         s.id DESC
                 LIMIT ? OFFSET ?""", (*params, per_page, offset)) as cur:
             rows = await cur.fetchall()
     return rows, max(1, (total + per_page - 1) // per_page)
@@ -2151,8 +2154,8 @@ async def user_payments(tg_id: int, limit: int = 10) -> tuple[list, int, int]:
     """Оплаты конкретного юзера: строки, всего оплат, сумма."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments "
-            "WHERE tg_id = ? AND status = 'paid'", (tg_id,)
+            "SELECT COUNT(*), COALESCE(SUM(amount - COALESCE(partial_refunded, 0)), 0) "
+            "FROM payments WHERE tg_id = ? AND status = 'paid'", (tg_id,)
         ) as cur:
             cnt, total = await cur.fetchone()
         async with db.execute("""
