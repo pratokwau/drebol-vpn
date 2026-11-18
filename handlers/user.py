@@ -1251,7 +1251,8 @@ async def handle_reissue_do(query, context):
         )
         return
 
-    new_url = result["new_url"]
+    # человеку — только sub.drbl.tech (в базе/панели ссылка хранится с key)
+    new_url = primary_sub_url(result["new_url"])
     await send_log(context.bot,
         f"🔁 Перевыпуск ключа: <code>{user_id}</code>" + chr(10)
         + f"🔗 {escape(new_url)}"

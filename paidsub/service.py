@@ -618,9 +618,11 @@ async def reissue_sub(sub_id: int, *, kind: str = "paid", bot=None, panel=None) 
     await _write(kind, sub_id, "sub_url", new_url)
     await _history(kind, sub["tg_id"], "key_reissued", f"Новая ссылка: {new_url}")
     if kind == "admin":
+        # владельцу показываем только sub.drbl.tech, в базе хранится key
+        from handlers.user import primary_sub_url
         await _notify(bot, sub["tg_id"],
                       "🔁 <b>Ключ подписки перевыпущен</b>\n\n"
-                      f"<blockquote><code>{_esc(new_url)}</code></blockquote>\n\n"
+                      f"<blockquote><code>{_esc(primary_sub_url(new_url))}</code></blockquote>\n\n"
                       "Удалите старую подписку в приложении и вставьте эту ссылку — "
                       "старая больше не работает.")
     return {"ok": True, "new_url": new_url,
