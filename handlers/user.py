@@ -328,7 +328,7 @@ def _app_rows(sub_url: str) -> list:
         return []
     row = []
     for key, app in APPS.items():
-        label = f"{app['emoji']} Добавить в {app['name']}"
+        label = app['name'].upper()
         url = site.add_url(key, sub_url)
         if url:
             row.append(InlineKeyboardButton(label, url=url))
