@@ -1001,12 +1001,18 @@ async def support_topics(request):
         await _require_actor(request)
     except Exception:
         return _json_error("no_session", 401)
-    from core.database import get_open_support_topics, support_stats
+    from core.database import get_open_support_topics, get_user_info, support_stats
     rows = await get_open_support_topics()
+    topics = []
+    for r in rows:
+        info = await get_user_info(r[0])
+        topics.append({"user_id": r[0], "topic_id": r[1], "group_id": r[2],
+                       "topic_name": r[3] or "",
+                       "first_name": (info[1] if info else "") or "",
+                       "username": (info[2] if info else "") or ""})
     return web.json_response({
         "stats": await support_stats(),
-        "topics": [{"user_id": r[0], "topic_id": r[1], "group_id": r[2],
-                    "topic_name": r[3] or ""} for r in rows],
+        "topics": topics,
     })
 
 

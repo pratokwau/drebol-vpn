@@ -458,7 +458,7 @@ details p,details ul{margin-top:8px}
           <div class="btnrow"><button id="btn-pf-save" class="ghost">Сохранить инбаунд</button></div>
           <div id="pf-out"></div>
         </div>
-        <div class="card" id="panel-hosts-card"><h2>Хосты</h2><p class="sub">Новый хост создаётся выключенным — включите его после проверки.</p>
+        <div class="card" id="panel-hosts-card"><h2>Создание и правка хостов</h2><p class="sub">Новый хост создаётся выключенным — включите его после проверки.</p>
           <input id="ph-inbound" placeholder="UUID инбаунда (для нового хоста)">
           <input id="ph-remark" placeholder="имя хоста">
           <input id="ph-addr" placeholder="адрес">
@@ -1032,15 +1032,21 @@ $("btn-quick-deploy").onclick = withSpin($("btn-quick-deploy"), async function()
   if (r.status === 200) toast("Сайт развёрнут", "ok");
 });
 const EDITABLE = ["channel_url","force_subscribe","paid_trial_period","paid_preset_hwid","paid_preset_traffic","paid_preset_lte","referral_bonus","referral_invited_bonus","maintenance_enabled","maintenance_text","device_price","device_max_extra"];
+const SETTINGS_LABELS = {channel_url: "Ссылка на канал", force_subscribe: "Обязательная подписка на канал", paid_trial_period: "Триал, дней", paid_preset_hwid: "Лимит устройств в подписке", paid_preset_traffic: "Лимит трафика, ГБ (0 — безлимит)", paid_preset_lte: "Лимит LTE, ГБ", referral_bonus: "Бонус пригласившему, дней", referral_invited_bonus: "Бонус приглашённому, дней", maintenance_enabled: "Режим техработ включён", maintenance_text: "Текст на время техработ", device_price: "Цена доп. устройства, ₽", device_max_extra: "Максимум доп. устройств"};
+const SETTINGS_DAY_KEYS = ["paid_trial_period", "referral_bonus", "referral_invited_bonus"];
 async function loadSettings(){
   const r = await api("/settings");
   if (r.status !== 200) return;
   const s = r.data.settings || {};
   $("settings").innerHTML = EDITABLE.map(function(k){
-    const v = s[k];
-    const type = typeof v === "boolean" ? "checkbox" : (typeof v === "number" ? "number" : "text");
-    const val = type === "checkbox" ? (v ? "checked" : "") : ('value="' + (v == null ? "" : String(v).replace(/"/g, "&quot;")) + '"');
-    return "<label>" + esc(k) + '<input data-k="' + k + '" type="' + type + '" ' + val + "></label>";
+    let v = s[k];
+    // В днях показываем только значения, кратные суткам: 12-часовой бонус
+    // честнее оставить секундами, чем округлить до «1 день» и переписать.
+    const isDay = SETTINGS_DAY_KEYS.indexOf(k) >= 0 && typeof v === "number" && v % 86400 === 0;
+    if (isDay) v = Math.round(v / 86400);
+    const type = typeof s[k] === "boolean" ? "checkbox" : (typeof s[k] === "number" ? "number" : "text");
+    const val = type === "checkbox" ? (s[k] ? "checked" : "") : ('value="' + (v == null ? "" : String(v).replace(/"/g, "&quot;")) + '"');
+    return "<label>" + esc(SETTINGS_LABELS[k] || k) + '<input data-k="' + k + '"' + (isDay ? ' data-days="1"' : "") + ' type="' + type + '" ' + val + "></label>";
   }).join("");
 }
 $("btn-login").onclick = withSpin($("btn-login"), async function(){
@@ -1058,7 +1064,9 @@ $("btn-logout").onclick = async function(){
 $("btn-save").onclick = withSpin($("btn-save"), async function(){
   const patch = {};
   document.querySelectorAll("#settings input").forEach(function(inp){
-    patch[inp.dataset.k] = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? parseInt(inp.value || "0", 10) : inp.value);
+    let v = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? parseInt(inp.value || "0", 10) : inp.value);
+    if (inp.dataset.days && typeof v === "number") v = v * 86400;
+    patch[inp.dataset.k] = v;
   });
   const r = await api("/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({settings: patch})});
   $("save-msg").textContent = r.status === 200 ? "Сохранено" : ("Ошибка: " + (r.data.error || r.status));
@@ -1326,7 +1334,7 @@ function renderSubEditor(data){
   h += kvRow("Лимит трафика", (s.total_gb || 0) + " ГБ");
   h += kvRow("Лимит устройств", s.limit_hwid == null ? "—" : s.limit_hwid);
   h += kvRow("LTE", s.lte_gb == null ? "без лимита" : s.lte_gb + " ГБ");
-  h += kvRow("Триал, дней", s.trial_period == null ? "—" : s.trial_period);
+  h += kvRow("Триал", s.trial_period == null ? "—" : fmtDays(s.trial_period));
   if (p && typeof p.enabled !== "undefined") h += kvRow("В панели", p.enabled ? "включена" : "выключена");
   h += '</dl>';
   h += '<h3>Продлить / изменить</h3>';
@@ -1335,7 +1343,7 @@ function renderSubEditor(data){
   h += '<label>Лимит устройств (HWID)<input id="ed-hwid" type="number" value="' + (s.limit_hwid || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="hwid">Сохранить лимит</button></div>';
   h += '<label>Лимит трафика, ГБ<input id="ed-traffic" type="number" value="' + (s.total_gb || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="traffic">Сохранить лимит</button></div>';
   h += '<label>Лимит LTE, ГБ (пусто — без лимита)<input id="ed-lte" type="number" value="' + (s.lte_gb == null ? "" : s.lte_gb) + '"></label><div class="btnrow"><button class="ghost" data-ed="lte">Сохранить LTE</button></div>';
-  h += '<label>Триал, дней<input id="ed-trial" type="number" value="' + (s.trial_period || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="trial">Установить триал</button></div>';
+  h += '<label>Триал, дней<input id="ed-trial" type="number" value="' + Math.round((s.trial_period || 0) / 86400) + '"></label><div class="btnrow"><button class="ghost" data-ed="trial">Установить триал</button></div>';
   h += '<h3>Устройства</h3><div class="btnrow"><button class="ghost" id="ed-devices">Показать устройства</button></div><div id="ed-devices-out"></div>';
   h += '<p class="mut" id="ed-msg" style="margin-top:10px"></p>';
   $("drawer-body").innerHTML = h;
@@ -1385,7 +1393,7 @@ $("btn-presets").onclick = async function(){
     const p = r.data.presets;
     const div = document.createElement("div");
     div.innerHTML = '<h3>Изменить пресеты</h3>' +
-      '<label>Триал, дней<input id="pr-trial" type="number" value="' + (p.paid_trial_period || 0) + '"></label>' +
+      '<label>Триал, дней<input id="pr-trial" type="number" value="' + Math.round((p.paid_trial_period || 0) / 86400) + '"></label>' +
       '<label>Лимит устройств<input id="pr-hwid" type="number" value="' + (p.paid_preset_hwid || 0) + '"></label>' +
       '<label>Лимит трафика, ГБ<input id="pr-traffic" type="number" value="' + (p.paid_preset_traffic || 0) + '"></label>' +
       '<label>Лимит LTE, ГБ<input id="pr-lte" type="number" value="' + (p.paid_preset_lte || 0) + '"></label>' +
@@ -1393,7 +1401,7 @@ $("btn-presets").onclick = async function(){
     $("presets-out").appendChild(div);
     $("btn-pr-save").onclick = async function(){
       const rr = await api("/subs/presets", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({
-        paid_trial_period: parseInt($("pr-trial").value || "0", 10),
+        paid_trial_period: parseInt($("pr-trial").value || "0", 10) * 86400,
         paid_preset_hwid: parseInt($("pr-hwid").value || "0", 10),
         paid_preset_traffic: parseInt($("pr-traffic").value || "0", 10),
         paid_preset_lte: parseInt($("pr-lte").value || "0", 10)})});
@@ -1708,10 +1716,15 @@ async function loadPromos(){
   if (r.status !== 200) { renderOut("promos-out", r.data); return; }
   const items = r.data.promos || [];
   if (!items.length) { $("promos-out").innerHTML = '<div class="empty"><span class="big">🔍</span>Промокодов нет</div>'; return; }
-  let h = '<div class="tblwrap"><table><thead><tr><th>Код</th><th>Скидка</th><th>Использовано</th><th>Истекает</th><th>Активен</th></tr></thead><tbody>';
+  let h = '<div class="tblwrap"><table><thead><tr><th>Код</th><th>Скидка</th><th>Использовано</th><th>Истекает</th><th>Статус</th></tr></thead><tbody>';
   items.forEach(function(it){
     const used = (it.uses || 0) + (it.max_uses ? " / " + it.max_uses : "");
-    h += '<tr data-promo-code="' + esc(it.code) + '"><td><span class="mono">' + esc(it.code) + '</span></td><td class="num">' + (it.percent || 0) + '%</td><td class="num">' + used + '</td><td><span class="mono">' + fmtDate(it.expires_at) + '</span></td><td>' + statusPill(it.active ? "active" : "disabled", it.active ? "Активен" : "Выключен") + '</td></tr>';
+    let st;
+    if (!it.active) st = statusPill("disabled", "Выключен");
+    else if (it.max_uses && (it.uses || 0) >= it.max_uses) st = statusPill("warning", "Исчерпан");
+    else if (it.expires_at && !isNaN(new Date(it.expires_at).getTime()) && new Date(it.expires_at).getTime() < Date.now()) st = statusPill("warning", "Истёк");
+    else st = statusPill("active", "Активен");
+    h += '<tr data-promo-code="' + esc(it.code) + '"><td><span class="mono">' + esc(it.code) + '</span></td><td class="num">' + (it.percent || 0) + '%</td><td class="num">' + used + '</td><td><span class="mono">' + fmtDate(it.expires_at) + '</span></td><td>' + st + '</td></tr>';
   });
   $("promos-out").innerHTML = h + '</tbody></table></div>';
   $("promos-out").querySelectorAll("tr[data-promo-code]").forEach(function(tr){
@@ -1900,11 +1913,12 @@ async function loadPanel(){
   catch(e) { $("profiles-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("profiles-table", r.data); return; }
   const profiles = r.data.profiles || [];
-  if (!profiles.length) { $("profiles-table").innerHTML = '<div class="empty">Профилей нет</div>'; }
+  if (!profiles.length) { $("profiles-table").innerHTML = r.data.profiles_ok === false ? '<p class="err">Панель недоступна — список профилей не получен. Попробуйте «Обновить списки».</p>' : '<div class="empty">Профилей нет</div>'; }
   else {
     let h = '<div class="tblwrap"><table><thead><tr><th>Профиль</th><th>UUID</th><th>Инбаунды</th></tr></thead><tbody>';
     profiles.forEach(function(p){
-      h += '<tr data-uuid="' + esc(p.uuid) + '"><td>' + esc(p.name || "") + '</td><td class="mono">' + esc(String(p.uuid).slice(0, 8)) + '…</td><td>' + (p.inbounds || []).map(function(ib){ return esc(ib.tag || ""); }).join(", ") + '</td></tr>';
+      const stub = (p.name === "None" || p.name === "None-Bridge") ? ' <span class="pill warn">служебный</span>' : "";
+      h += '<tr data-uuid="' + esc(p.uuid) + '"><td>' + esc(p.name || "") + stub + '</td><td class="mono">' + esc(String(p.uuid).slice(0, 8)) + '…</td><td>' + (p.inbounds || []).map(function(ib){ return esc(ib.tag || ""); }).join(", ") + '</td></tr>';
     });
     h += '</tbody></table></div>';
     $("profiles-table").innerHTML = h;
@@ -1921,7 +1935,8 @@ async function loadPanel(){
   else {
     let h2 = '<div class="tblwrap"><table><thead><tr><th>Хост</th><th>Адрес</th><th>Порт</th><th>Вкл</th></tr></thead><tbody>';
     hosts.forEach(function(x){
-      h2 += '<tr data-uuid="' + esc(x.uuid) + '" data-disabled="' + (x.isDisabled ? "true" : "false") + '"><td>' + esc(x.remark || "") + '</td><td class="mono">' + esc(x.address || "") + '</td><td class="num">' + (x.port == null ? "—" : x.port) + '</td><td>' + statusPill(x.isDisabled ? "disabled" : "enabled", x.isDisabled ? "Выключен" : "Включён") + '</td></tr>';
+      const stub = (x.port === 1234 || x.address === "12345") ? ' <span class="pill warn">служебный</span>' : "";
+      h2 += '<tr data-uuid="' + esc(x.uuid) + '" data-disabled="' + (x.isDisabled ? "true" : "false") + '"><td>' + esc(x.remark || "") + stub + '</td><td class="mono">' + esc(x.address || "") + '</td><td class="num">' + (x.port == null ? "—" : x.port) + '</td><td>' + statusPill(x.isDisabled ? "disabled" : "enabled", x.isDisabled ? "Выключен" : "Включён") + '</td></tr>';
     });
     h2 += '</tbody></table></div>';
     $("hosts-table").innerHTML = h2;
@@ -2007,8 +2022,47 @@ async function loadNodes(){
 document.querySelector('[data-nav="nodes"]').addEventListener("click", function(){
   if (!nodesLoaded) { nodesLoaded = true; loadNodes(); $("btn-nodes").click(); }
 });
-$("btn-nodes").onclick = async function(){ const r = await api("/nodes"); renderOut("nodes-out", r.data); };
-$("btn-squads").onclick = async function(){ const r = await api("/squads"); renderOut("nodes-out", r.data); };
+async function loadHealth(){
+  const r = await api("/nodes");
+  if (r.status !== 200) { renderOut("nodes-out", r.data); return; }
+  const sv = r.data.servers || {}, sites = r.data.sites || {};
+  let h = '<h3>Сервисы</h3><div class="tblwrap"><table><thead><tr><th>Сервис</th><th>Статус</th><th>Отклик</th><th>Ошибка</th></tr></thead><tbody>';
+  if (sv.panel) h += '<tr><td>Панель Remnawave <span class="mono small mut">' + esc(sv.panel.host || "") + '</span></td><td>' + (sv.panel.ok ? '<span class="pill ok">Работает</span>' : '<span class="pill bad">Недоступна</span>') + '</td><td class="num">' + (sv.panel.ms != null ? sv.panel.ms + " мс" : "—") + '</td><td class="trunc">' + esc(sv.panel.error || "") + "</td></tr>";
+  if (sv.sub) h += '<tr><td>Выдача подписок <span class="mono small mut">' + esc(sv.sub.url || "") + '</span></td><td>' + (sv.sub.ok ? '<span class="pill ok">Работает</span>' : '<span class="pill bad">Недоступна</span>') + '</td><td class="num">' + (sv.sub.ms != null ? sv.sub.ms + " мс" : "—") + '</td><td class="trunc">' + esc(sv.sub.error || "") + "</td></tr>";
+  h += "</tbody></table></div>";
+  const nds = sv.nodes || [];
+  if (nds.length) {
+    h += '<h3>Ноды по данным панели</h3><div class="tblwrap"><table><thead><tr><th>Нода</th><th>Адрес</th><th>Xray</th><th>Онлайн</th><th>Статус</th></tr></thead><tbody>';
+    nds.forEach(function(n){
+      h += "<tr><td>" + esc(n.tag || "") + '</td><td class="mono">' + esc(n.host || "") + '</td><td>' + esc(n.xray || "—") + '</td><td class="num">' + (n.clients || 0) + "</td><td>" + (!n.enabled ? '<span class="pill warn">Выключена</span>' : n.reachable ? '<span class="pill ok">Доступна</span>' : '<span class="pill bad">' + esc(n.error || "Недоступна") + "</span>") + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  const siteKeys = Object.keys(sites);
+  if (siteKeys.length) {
+    const SITE_LABELS = {"site:vpn.drbl.tech": "Сайт", "site:key.drbl.tech": "Страница подписки"};
+    h += '<h3>Сайты</h3><div class="tblwrap"><table><thead><tr><th>Сайт</th><th>Статус</th><th>Код</th><th>Отклик</th></tr></thead><tbody>';
+    siteKeys.forEach(function(k){
+      const v = sites[k] || {};
+      h += "<tr><td>" + esc(SITE_LABELS[k] || k) + "</td><td>" + (v.ok ? '<span class="pill ok">Жив</span>' : '<span class="pill bad">Лежит' + (v.error ? ": " + esc(v.error) : "") + "</span>") + '</td><td class="num">' + (v.code || "—") + '</td><td class="num">' + (v.ms != null ? v.ms + " мс" : "—") + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  $("nodes-out").innerHTML = h;
+}
+$("btn-nodes").onclick = function(){ loadHealth(); };
+async function loadSquads(){
+  const r = await api("/squads");
+  if (r.status !== 200 || !r.data.ok) { $("nodes-out").innerHTML = '<p class="err">Панель недоступна — сквады не получены</p>'; return; }
+  const items = r.data.squads || [];
+  if (!items.length) { $("nodes-out").innerHTML = '<div class="empty">Сквадов нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Сквад</th><th>Участников</th><th>Инбаундов</th></tr></thead><tbody>';
+  items.forEach(function(sq){
+    h += "<tr><td>" + esc(sq.name || "") + '</td><td class="num">' + fmtNum(sq.members || 0) + '</td><td class="num">' + fmtNum(sq.inbounds || 0) + "</td></tr>";
+  });
+  $("nodes-out").innerHTML = h + "</tbody></table></div>";
+}
+$("btn-squads").onclick = function(){ loadSquads(); };
 async function loadNodeUsers(){
   let q = "";
   const s = $("node-start").value.trim(), e = $("node-end").value.trim();
@@ -2313,7 +2367,8 @@ async function loadTopics(){
   if (!topics.length) { $("topics-out").innerHTML = '<div class="empty"><span class="big">🛟</span>Открытых обращений нет</div>'; return; }
   let h = '<div class="tblwrap"><table><thead><tr><th>Тема</th><th>Юзер</th></tr></thead><tbody>';
   topics.forEach(function(t){
-    h += '<tr data-user="' + t.user_id + '"><td>' + esc(t.topic_name || "") + '</td><td class="mono">' + t.user_id + '</td></tr>';
+    const who = esc(t.first_name || "") + (t.username ? ' <span class="mut">@' + esc(t.username) + "</span>" : "") + ' <span class="mono small">#' + t.user_id + "</span>";
+    h += '<tr data-user="' + t.user_id + '"><td>' + (t.topic_name ? esc(t.topic_name) : '<span class="mut">Без названия</span>') + "</td><td>" + who + "</td></tr>";
   });
   h += '</tbody></table></div>';
   $("topics-out").innerHTML = h;
@@ -2322,7 +2377,7 @@ async function loadTopics(){
   });
 }
 document.querySelector('[data-nav="support"]').addEventListener("click", function(){
-  if (!supportLoaded) { supportLoaded = true; loadTopics(); }
+  if (!supportLoaded) { supportLoaded = true; loadTopics(); loadSupportSettings(); }
 });
 $("btn-support").onclick = loadTopics;
 async function openTopic(){
@@ -2346,30 +2401,72 @@ $("btn-sup-close").onclick = async function(){
   const r = await api("/support/topics/" + id + "/close", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
   $("sup-msg").textContent = r.status === 200 ? "Обращение закрыто" : ("Ошибка: " + (r.data.error || r.status));
 };
+async function loadSupportSettings(){
+  const r = await api("/support/settings");
+  if (r.status !== 200) return;
+  const st = r.data.settings || {};
+  $("ss-group").value = st.support_group_id || "";
+  $("ss-log").value = st.log_channel_id || "";
+}
 $("btn-ss-save").onclick = async function(){
   const r = await api("/support/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({support_group_id: parseInt($("ss-group").value || "0", 10),
       log_channel_id: parseInt($("ss-log").value || "0", 10)})});
-  renderOut("ss-out", r.data);
+  if (r.status === 200) { toast("Настройки поддержки сохранены", "ok"); $("ss-out").innerHTML = ""; loadSupportSettings(); }
+  else renderOut("ss-out", r.data);
 };
 $("btn-helper-add").onclick = async function(){
   const r = await api("/helpers/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({tg_id: parseInt($("helper-tg").value || "0", 10)})});
-  renderOut("helpers-out", r.data);
+  if (r.status === 200) { toast("Помощник добавлен", "ok"); loadHelpers(); } else renderOut("helpers-out", r.data);
 };
 $("btn-helper-perm").onclick = async function(){
   const id = $("helper-tg").value;
   const r = await api("/helpers/" + id + "/perm", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({perm: $("helper-perm-sel").value})});
-  renderOut("helpers-out", r.data);
+  if (r.status === 200) { toast("Право переключено", "ok"); loadHelpers(); } else renderOut("helpers-out", r.data);
 };
 $("btn-helper-del").onclick = async function(){
   const id = $("helper-tg").value;
   const r = await postConfirm("/helpers/" + id + "/delete", {});
-  renderOut("helpers-out", r.data);
+  if (r.status === 200) { toast("Помощник удалён", "ok"); loadHelpers(); } else renderOut("helpers-out", r.data);
 };
-$("btn-helpers").onclick = async function(){ const r = await api("/helpers"); renderOut("helpers-out", r.data); };
-$("btn-webacc").onclick = async function(){ const r = await api("/web-access"); renderOut("wa-out", r.data); };
+const PERM_LABELS = {dm: "Сообщения юзерам (DM)", users: "Пользователи"};
+async function loadHelpers(){
+  const r = await api("/helpers");
+  if (r.status !== 200) { renderOut("helpers-out", r.data); return; }
+  const items = r.data.helpers || r.data || [];
+  const list = Array.isArray(items) ? items : (items.helpers || []);
+  if (!list.length) { $("helpers-out").innerHTML = '<div class="empty">Помощников нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Помощник</th><th>TG ID</th><th>Права</th><th>Веб-доступ</th></tr></thead><tbody>';
+  list.forEach(function(x){
+    const perms = (x.perms || []).map(function(pp){ return '<span class="pill info">' + esc(PERM_LABELS[pp] || pp) + "</span>"; }).join(" ") || "—";
+    h += '<tr data-tg="' + x.tg_id + '"><td>' + esc(x.first_name || "") + (x.username ? ' <span class="mut">@' + esc(x.username) + "</span>" : "") + '</td><td class="mono">' + x.tg_id + "</td><td>" + perms + "</td><td>нет</td></tr>";
+  });
+  $("helpers-out").innerHTML = h + "</tbody></table></div>";
+  $("helpers-out").querySelectorAll("tr[data-tg]").forEach(function(tr){
+    tr.onclick = function(){ $("helper-tg").value = tr.dataset.tg; };
+  });
+}
+$("btn-helpers").onclick = function(){ loadHelpers(); };
+async function loadWebAccess(){
+  const r = await api("/web-access");
+  if (r.status !== 200) { renderOut("wa-out", r.data); return; }
+  const d = r.data, w = d.webapi || {};
+  $("wa-port").value = w.port || "";
+  $("wa-bind").value = w.bind || "";
+  const ss = d.sessions || {};
+  let h = '<dl class="kv">';
+  h += kvRow("Веб-API", w.enabled ? '<span class="pill ok">Включён</span>' : '<span class="pill bad">Выключен</span>');
+  h += kvRow("Порт", String(w.port || "—"));
+  h += kvRow("Bind", '<span class="mono">' + esc(w.bind || "—") + "</span>");
+  if (d.public) h += kvRow("Публичный адрес", '<span class="mono">' + esc(d.public) + "</span>");
+  if (d.upstream) h += kvRow("Upstream", '<span class="mono">' + esc(d.upstream) + "</span>");
+  h += kvRow("Ключ Turnstile задан", d.turnstile_site_key_set ? "да" : "нет");
+  h += kvRow("Живых сессий кабинета", fmtNum(ss.live || 0) + " · пользователей: " + fmtNum(ss.people || 0) + " · сегодня: " + fmtNum(ss.today || 0));
+  $("wa-out").innerHTML = h + "</dl>";
+}
+$("btn-webacc").onclick = function(){ loadWebAccess(); };
 $("btn-wa-save").onclick = async function(){
   const body = {};
   const port = $("wa-port").value;
@@ -2377,9 +2474,30 @@ $("btn-wa-save").onclick = async function(){
   const bind = $("wa-bind").value.trim();
   if (bind) body.webapi_bind = bind;
   const r = await api("/web-access", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
-  renderOut("wa-out", r.data);
+  if (r.status === 200) { toast("Сохранено — применится после рестарта бота", "ok"); loadWebAccess(); } else renderOut("wa-out", r.data);
 };
-$("btn-ch-show").onclick = async function(){ const r = await api("/connect-help"); renderOut("ch-out", r.data); };
+async function loadConnectHelp(){
+  const r = await api("/connect-help");
+  if (r.status !== 200) { renderOut("ch-out", r.data); return; }
+  const d = r.data, st = d.stats || {};
+  let h = '<dl class="kv">';
+  h += kvRow("Подсказки", d.enabled ? '<span class="pill ok">Включены</span>' : '<span class="pill bad">Выключены</span>');
+  h += kvRow("Отправлять через", (d.hours || "—") + " ч после регистрации без подключения");
+  h += kvRow("Отправлено всего", fmtNum(st.total || 0));
+  h += kvRow("Отправлено за 7 дней", fmtNum(st.week || 0));
+  h += "</dl>";
+  h += '<label><input id="ch-enabled" type="checkbox"' + (d.enabled ? " checked" : "") + "> подсказки включены</label>";
+  h += '<label>Через сколько часов<input id="ch-hours" type="number" min="1" value="' + (d.hours || 3) + '"></label>';
+  h += '<div class="btnrow"><button class="ghost" id="ch-save">Сохранить</button></div>';
+  $("ch-out").innerHTML = h;
+  $("ch-save").onclick = withSpin($("ch-save"), async function(){
+    const rr = await api("/connect-help", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
+      body: JSON.stringify({enabled: $("ch-enabled").checked, hours: parseInt($("ch-hours").value || "3", 10)})});
+    if (rr.status === 200) { toast("Настройки помощи сохранены", "ok"); loadConnectHelp(); }
+    else toast("Ошибка: " + ((rr.data && rr.data.error) || rr.status), "err");
+  });
+}
+$("btn-ch-show").onclick = function(){ loadConnectHelp(); };
 
 (function init(){
   const params = new URLSearchParams(location.search);
