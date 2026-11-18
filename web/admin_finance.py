@@ -180,7 +180,10 @@ async def payments_list(request):
     _, err = await _actor_or_401(request)
     if err is not None:
         return err
-    status = request.query.get("status") or "paid"
+    # Без параметра — ВСЕ статусы: фронт шлёт пустую строку для «Все
+    # статусы», а прежний дефолт "paid" молча прятал остальные счета
+    # (оплата висела в карточке юзера, но в списке её не было).
+    status = request.query.get("status") or "all"
     if status not in ("paid", "pending", "failed", "refunds", "all"):
         return web.json_response({"error": "bad_status"}, status=400)
     try:

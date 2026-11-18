@@ -362,7 +362,7 @@ details p,details ul{margin-top:8px}
       <!-- Финансы -->
       <section id="sec-finance" class="page hidden">
         <div class="card"><h2>Финансовая сводка</h2><p class="sub">Доход за вычетом возвратов, расходы на серверы.</p>
-          <select id="fin-period"><option value="day">День</option><option value="week">Неделя</option><option value="month" selected>Месяц</option><option value="all">Всё время</option></select>
+          <select id="fin-period"></select>
           <div class="btnrow"><button id="btn-finance">Показать сводку</button><button id="btn-servers" class="ghost">Серверы (расходы)</button></div>
           <div id="finance-out"></div>
         </div>
@@ -394,6 +394,7 @@ details p,details ul{margin-top:8px}
             <button id="btn-payments">Показать оплаты</button>
           </div>
           <div id="payments-out"></div>
+          <div class="btnrow"><button id="btn-payments-prev" class="ghost">← Назад</button><span id="payments-page-label" class="mut"></span><button id="btn-payments-next" class="ghost">Вперёд →</button></div>
         </div>
       </section>
 
@@ -1433,11 +1434,70 @@ $("btn-referrals").onclick = async function(){ const r = await api("/referrals")
 $("btn-lte").onclick = async function(){ const r = await postConfirm("/subs/lte/check-now", {}); renderOut("ref-out", r.data); };
 
 /* --- Финансы и оплаты --- */
-$("btn-finance").onclick = async function(){
-  const r = await api("/finance?period=" + $("fin-period").value);
-  renderOut("finance-out", r.data);
+const MONTHS_RU = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+function fillFinPeriods(){
+  const sel = $("fin-period");
+  if (!sel || sel.options.length) return;
+  const now = new Date();
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const v = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+    const o = document.createElement("option");
+    o.value = v; o.textContent = MONTHS_RU[d.getMonth()] + " " + d.getFullYear();
+    sel.appendChild(o);
+  }
+}
+function finPeriodTitle(){
+  const v = $("fin-period").value || "";
+  const m = v.match(/^(\d{4})-(\d{2})$/);
+  return m ? MONTHS_RU[parseInt(m[2], 10) - 1] + " " + m[1] : v;
+}
+async function loadFinance(){
+  fillFinPeriods();
+  let r;
+  try { r = await api("/finance?period=" + $("fin-period").value); }
+  catch(e) { $("finance-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { $("finance-out").innerHTML = '<p class="err">Ошибка: ' + esc((r.data && r.data.error) || r.status) + "</p>"; return; }
+  const sm = r.data.summary || {}, pm = r.data.payments || {}, srvs = r.data.servers || [];
+  const cells = [
+    ["Доход (нетто)", fmtMoney(sm.income), "с возвратами было: " + fmtMoney(sm.income_gross)],
+    ["Возвраты", fmtMoney(sm.refunds), ""],
+    ["Расходы на серверы", fmtMoney(sm.expenses), "оплачено: " + fmtMoney(sm.expenses_paid) + " · не оплачено: " + fmtMoney(sm.expenses_unpaid)],
+    ["Прибыль", fmtMoney(sm.profit), "доход минус все расходы месяца"],
+    ["Оплат сегодня", fmtNum((pm.today || [0])[0]), fmtMoney((pm.today || [0, 0])[1])],
+    ["Оплат за 30 дней", fmtNum((pm.month || [0])[0]), fmtMoney((pm.month || [0, 0])[1])],
+    ["Всего оплат", fmtNum(pm.total_count), fmtMoney(pm.total_sum) + " · платящих: " + fmtNum(pm.payers || 0) + " · средний чек: " + fmtMoney(pm.avg || 0)],
+    ["Ожидают оплаты", fmtNum(pm.pending_count), fmtMoney(pm.pending_sum)]
+  ];
+  let h = '<div class="grid">' + cells.map(function(c){
+    return '<div class="stat"><b>' + c[1] + '</b><span>' + c[0] + "</span>" + (c[2] ? "<small>" + c[2] + "</small>" : "") + "</div>";
+  }).join("") + "</div>";
+  if ((pm.by_provider || []).length) {
+    h += '<h3>По провайдерам (за всё время)</h3><div class="tblwrap"><table><thead><tr><th>Провайдер</th><th>Оплат</th><th>Сумма</th></tr></thead><tbody>';
+    pm.by_provider.forEach(function(bp){
+      h += '<tr><td>' + esc(PROVIDER_LABELS[bp[0]] || bp[0] || "—") + '</td><td class="num">' + fmtNum(bp[1]) + '</td><td class="num">' + fmtMoney(bp[2]) + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  h += '<h3>Серверы — оплата за ' + esc(finPeriodTitle()) + '</h3>';
+  if (!srvs.length) h += '<div class="empty">Серверов в учёте нет</div>';
+  else {
+    h += '<div class="tblwrap"><table><thead><tr><th>Сервер</th><th>Цена</th><th>День оплаты</th><th>Статус</th></tr></thead><tbody>';
+    srvs.forEach(function(sv){
+      const st = sv.status === "paid" ? statusPill("paid", "Оплачено") : sv.status === "unpaid" ? statusPill("failed", "Не оплачено") : '<span class="pill warn">Не отмечено</span>';
+      h += '<tr><td>' + esc(sv.name) + '</td><td class="num">' + fmtMoney(sv.price) + '</td><td class="num">' + (sv.day || "—") + "</td><td>" + st + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  $("finance-out").innerHTML = h;
+}
+$("btn-finance").onclick = withSpin($("btn-finance"), loadFinance);
+$("btn-servers").onclick = function(){
+  loadServers();
+  const el = $("srv-out");
+  if (el) el.scrollIntoView({behavior: "smooth", block: "start"});
 };
-$("btn-servers").onclick = async function(){ const r = await api("/servers"); renderOut("finance-out", r.data); };
+$("fin-period").addEventListener("change", function(){ loadFinance(); loadServers(); });
 $("btn-platega").onclick = async function(){ const r = await api("/platega"); renderOut("platega-out", r.data); };
 $("btn-platega-save").onclick = withSpin($("btn-platega-save"), async function(){
   const body = {};
@@ -1464,15 +1524,17 @@ $("btn-reconcile-fix").onclick = async function(){
 /* --- Серверы (расходы): список + редактор --- */
 let serversLoaded = false;
 async function loadServers(){
+  fillFinPeriods();
   let r;
-  try { r = await api("/servers"); }
+  try { r = await api("/servers?period=" + $("fin-period").value); }
   catch(e) { $("srv-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("srv-out", r.data); return; }
   const items = r.data.servers || [];
   if (!items.length) { $("srv-out").innerHTML = '<div class="empty"><span class="big">🔍</span>Серверов нет</div>'; return; }
-  let h = '<div class="tblwrap"><table><thead><tr><th>Название</th><th>Цена</th><th>День оплаты</th><th>Активен</th></tr></thead><tbody>';
+  let h = '<p class="sub">Период: ' + esc(finPeriodTitle()) + '</p><div class="tblwrap"><table><thead><tr><th>Название</th><th>Цена</th><th>День оплаты</th><th>Оплата за период</th></tr></thead><tbody>';
   items.forEach(function(it){
-    h += '<tr data-sid="' + it.id + '"><td>' + esc(it.name) + '</td><td class="num">' + fmtMoney(it.price_rub) + '</td><td class="num">' + (it.pay_day || "—") + '</td><td>' + statusPill(it.active ? "active" : "disabled", it.active ? "Активен" : "Выключен") + '</td></tr>';
+    const st = it.status === "paid" ? statusPill("paid", "Оплачено") : it.status === "unpaid" ? statusPill("failed", "Не оплачено") : '<span class="pill warn">Не отмечено</span>';
+    h += '<tr data-sid="' + it.id + '"><td>' + esc(it.name) + '</td><td class="num">' + fmtMoney(it.price) + '</td><td class="num">' + (it.day || "—") + '</td><td>' + st + '</td></tr>';
   });
   $("srv-out").innerHTML = h + '</tbody></table></div>';
   $("srv-out").querySelectorAll("tr[data-sid]").forEach(function(tr){
@@ -1481,7 +1543,7 @@ async function loadServers(){
 }
 $("btn-servers-list").onclick = function(){ loadServers(); };
 document.querySelector('[data-nav="finance"]').addEventListener("click", function(){
-  if (!serversLoaded) { serversLoaded = true; loadServers(); }
+  if (!serversLoaded) { serversLoaded = true; loadFinance(); loadServers(); }
 });
 $("btn-srv-add").onclick = withSpin($("btn-srv-add"), async function(){
   const r = await api("/servers", {method: "POST", headers: {"X-CSRF-Token": csrf()},
@@ -1541,26 +1603,35 @@ async function openServerEditor(sid){
 /* --- Оплаты: список + карточка в редакторе --- */
 let paymentsLoaded = false;
 const PAY_LABELS = {paid: "Оплачено", pending: "Ожидает", refunded: "Возвращён", failed: "Неудачный"};
-async function loadPayments(){
+const PROVIDER_LABELS = {platega: "Platega", anore: "Anore", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта", manual: "Вручную"};
+let paymentsPage = 1, paymentsTotalPages = 1;
+async function loadPayments(page){
+  paymentsPage = page || 1;
   const st = $("pay-status").value;
   let r;
-  try { r = await api("/payments" + (st ? "?status=" + st : "")); }
+  try { r = await api("/payments?status=" + (st || "all") + "&page=" + paymentsPage); }
   catch(e) { $("payments-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("payments-out", r.data); return; }
+  paymentsTotalPages = r.data.total_pages || 1;
+  paymentsPage = r.data.page || paymentsPage;
+  $("payments-page-label").textContent = "Стр. " + paymentsPage + " из " + paymentsTotalPages;
+  show("btn-payments-prev", paymentsPage > 1); show("btn-payments-next", paymentsPage < paymentsTotalPages);
   const items = r.data.payments || [];
   if (!items.length) { $("payments-out").innerHTML = '<div class="empty"><span class="big">🔍</span>Оплат не найдено</div>'; return; }
   let h = '<div class="tblwrap"><table><thead><tr><th>ID</th><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата</th><th>Провайдер</th></tr></thead><tbody>';
   items.forEach(function(it){
     const name = esc(it.first_name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "") + ' <span class="mono small">#' + it.tg_id + '</span>';
-    h += '<tr data-pay-id="' + it.id + '"><td class="mono">' + it.id + '</td><td>' + name + '</td><td class="num">' + fmtMoney(it.amount) + '</td><td>' + statusPill(it.status, PAY_LABELS[it.status] || it.status) + '</td><td><span class="mono">' + fmtDate(it.date) + '</span></td><td>' + esc(it.provider || "") + '</td></tr>';
+    h += '<tr data-pay-id="' + it.id + '"><td class="mono">' + it.id + '</td><td>' + name + '</td><td class="num">' + fmtMoney(it.amount) + '</td><td>' + statusPill(it.status, PAY_LABELS[it.status] || it.status) + '</td><td><span class="mono">' + fmtDate(it.date) + '</span></td><td>' + esc(PROVIDER_LABELS[it.provider] || it.provider || "") + '</td></tr>';
   });
   $("payments-out").innerHTML = h + '</tbody></table></div>';
   $("payments-out").querySelectorAll("tr[data-pay-id]").forEach(function(tr){
     tr.onclick = function(){ openPaymentEditor(parseInt(tr.dataset.payId, 10)); };
   });
 }
-$("btn-payments").onclick = function(){ loadPayments(); };
-$("pay-status").onchange = function(){ loadPayments(); };
+$("btn-payments").onclick = function(){ loadPayments(1); };
+$("pay-status").onchange = function(){ loadPayments(1); };
+$("btn-payments-prev").onclick = function(){ if (paymentsPage > 1) loadPayments(paymentsPage - 1); };
+$("btn-payments-next").onclick = function(){ if (paymentsPage < paymentsTotalPages) loadPayments(paymentsPage + 1); };
 document.querySelector('[data-nav="payments"]').addEventListener("click", function(){
   if (!paymentsLoaded) { paymentsLoaded = true; loadPayments(); }
 });
@@ -1579,7 +1650,7 @@ async function openPaymentEditor(pid){
   let h = '<dl class="kv">';
   h += kvRow("Сумма", fmtMoney(p.amount));
   h += kvRow("Статус", statusPill(p.status, PAY_LABELS[p.status] || p.status));
-  h += kvRow("Провайдер", esc(p.provider || ""));
+  h += kvRow("Провайдер", esc(PROVIDER_LABELS[p.provider] || p.provider || ""));
   h += kvRow("Внешний ID", '<span class="mono">' + esc(p.external_id || "") + '</span>');
   h += kvRow("Срок", fmtDays(p.period_seconds));
   h += kvRow("Промокод", esc(p.promo || "—"));
@@ -1601,7 +1672,7 @@ async function openPaymentEditor(pid){
       const rr = await postConfirm("/payments/" + pid + "/refund", {revoke: $("ed-pay-revoke").checked});
       const msg = $("ed-pay-msg");
       if (msg) msg.textContent = rr.status === 200 ? "Возврат оформлен" : ("Ошибка: " + (rr.data.error || rr.status));
-      if (rr.status === 200) { toast("Возврат оформлен", "ok"); openPaymentEditor(pid); loadPayments(); }
+      if (rr.status === 200) { toast("Возврат оформлен", "ok"); openPaymentEditor(pid); loadPayments(paymentsPage); }
     });
   }
 }

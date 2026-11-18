@@ -2107,7 +2107,7 @@ async def get_payment_money(payment_id: int) -> tuple[int, str | None]:
 
 
 async def list_payments(page: int = 1, status: str = "paid",
-                        per_page: int = 8) -> tuple[list, int]:
+                        per_page: int = 25) -> tuple[list, int]:
     """Платежи с пагинацией. status='all' — все подряд."""
     offset = (page - 1) * per_page
     where, params = "", []
