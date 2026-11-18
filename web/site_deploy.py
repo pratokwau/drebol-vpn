@@ -101,44 +101,60 @@ CABINET_PAGE = r"""<!doctype html>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-/* Drebol VPN — кабинет. Тёмный стеклянный премиум, тот же, что на лендинге
-   (web/site_page.py) и на странице подписки: фон #050505/#0A0A0A,
-   стеклянные карточки, белые и серебристые акценты, Manrope. */
+/* Drebol VPN — кабинет (Mini App и веб). Тёмный стеклянный премиум в языке
+   лендинга: фон #050505, живое серебристое свечение, стеклянные карточки
+   с градиентной кромкой, Manrope. Акцент — белый/серебро, статусы — цвет. */
 :root {
   color-scheme: dark;
   --bg: #050505; --bg-2: #0A0A0A; --ink: #FFFFFF;
-  --muted: #A8A8A8; --soft: #8A8A8A;
-  --line: rgba(255,255,255,.12); --line-strong: rgba(255,255,255,.22);
-  --card: rgba(255,255,255,.04); --card-2: rgba(255,255,255,.07);
-  --accent: #FFFFFF; --accent-soft: rgba(255,255,255,.08);
-  --silver: #C9CDD3; --silver-dark: #8A8A8A; --dark: #0A0A0A;
+  --muted: #ACACB2; --soft: #8A8A92;
+  --line: rgba(255,255,255,.10); --line-strong: rgba(255,255,255,.22);
+  --card: rgba(255,255,255,.045); --card-2: rgba(255,255,255,.075);
+  --accent: #FFFFFF; --accent-soft: rgba(255,255,255,.09);
+  --silver: #C9CDD3; --silver-dark: #8A8A92; --dark: #0A0A0A;
   --ok: #4ADE80; --ok-bg: rgba(74,222,128,.14);
   --warn: #FBBF24; --warn-bg: rgba(251,191,36,.14);
   --bad: #F87171; --bad-bg: rgba(248,113,113,.12);
+  --grad: linear-gradient(120deg, #FFFFFF 0%, #C9CDD3 45%, #8f959e 70%, #E8EAED 100%);
+  --ease: cubic-bezier(.22,.9,.28,1);
 }
 * { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); overflow-x:hidden;
        font:15px/1.55 "Manrope","Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-       -webkit-font-smoothing:antialiased; }
+       -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
 body { min-height:var(--tg-viewport-height, 100vh); }
 a { color:inherit; text-decoration:none; }
 h1, h2, p { margin:0; }
+button { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline:2px solid rgba(255,255,255,.65); outline-offset:2px; border-radius:8px; }
 
+/* Живой фон: два серебристых пятна медленно дрейфуют, поверх — тонкая сетка */
 .bg { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
 .bg .glow { position:absolute; top:-340px; right:-220px; width:820px; height:820px; border-radius:50%;
-  background:radial-gradient(circle at center, rgba(255,255,255,.08), rgba(255,255,255,0) 62%); }
+  background:radial-gradient(circle at center, rgba(255,255,255,.10), rgba(255,255,255,0) 62%);
+  animation:drift 26s ease-in-out infinite alternate; }
 .bg .glow-b { top:auto; bottom:-420px; left:-260px; right:auto;
-  background:radial-gradient(circle at center, rgba(255,255,255,.05), rgba(255,255,255,0) 62%); }
+  background:radial-gradient(circle at center, rgba(190,200,215,.07), rgba(255,255,255,0) 62%);
+  animation:drift 32s ease-in-out infinite alternate-reverse; }
+.bg .grid { position:absolute; inset:0; opacity:.5;
+  background:
+    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+  background-size:56px 56px;
+  -webkit-mask-image:radial-gradient(ellipse 90% 60% at 50% 0%, #000 30%, transparent 75%);
+          mask-image:radial-gradient(ellipse 90% 60% at 50% 0%, #000 30%, transparent 75%); }
+@keyframes drift { from { transform:translate(0,0) scale(1); } to { transform:translate(-70px,50px) scale(1.12); } }
 
 .wrap { position:relative; z-index:1; max-width:520px; margin:0 auto;
-        padding:12px 12px 36px;
+        padding:12px 12px 40px;
         padding-top:max(12px, env(safe-area-inset-top, 0px),
                          var(--tg-content-safe-area-inset-top, 0px)); }
 
 .top { display:flex; align-items:center; justify-content:space-between; gap:10px;
-       min-height:46px; margin-bottom:12px; background:rgba(10,10,10,.72);
-       border:1px solid var(--line); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
-       padding:7px 12px; border-radius:16px; }
+       min-height:46px; margin-bottom:14px; background:rgba(10,10,10,.66);
+       border:1px solid var(--line); backdrop-filter:blur(18px) saturate(1.3); -webkit-backdrop-filter:blur(18px) saturate(1.3);
+       padding:7px 12px; border-radius:18px; box-shadow:0 8px 28px rgba(0,0,0,.45); }
 body.tg-fullscreen .wrap { padding-top:116px; }
 body.tg-fullscreen .tabs { top:96px; }
 .brand { display:flex; align-items:center; gap:10px; min-height:36px; text-decoration:none; }
@@ -149,27 +165,42 @@ body.tg-fullscreen .tabs { top:96px; }
 .btn { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; position:relative;
        min-height:52px; padding:0 22px; border-radius:999px; border:1px solid transparent;
        font:inherit; font-size:15px; font-weight:800; cursor:pointer; text-align:center;
-       transition:transform .2s ease, box-shadow .2s ease, background .2s, border-color .2s; }
+       transition:transform .18s var(--ease), box-shadow .25s ease, background .2s, border-color .2s, opacity .2s; }
 .btn svg { width:19px; height:19px; flex:none; }
-.btn-main { background:#FFFFFF; color:#050505;
-            box-shadow:0 10px 26px rgba(255,255,255,.14); }
-.btn-main:hover { transform:translateY(-2px); box-shadow:0 14px 34px rgba(255,255,255,.20); }
-.btn-ghost { background:transparent; color:#FFFFFF; border-color:var(--line-strong); font-weight:700; }
-.btn-ghost:hover { background:rgba(255,255,255,.06); border-color:#FFFFFF; transform:translateY(-2px); }
+.btn:active { transform:scale(.975); }
+.btn:disabled { opacity:.55; cursor:default; }
+.btn-main { background:var(--grad); background-size:160% 100%; color:#050505;
+            box-shadow:0 10px 26px rgba(255,255,255,.16), inset 0 1px 0 rgba(255,255,255,.7); }
+.btn-main:hover { transform:translateY(-2px); background-position:90% 0;
+  box-shadow:0 16px 36px rgba(255,255,255,.22), inset 0 1px 0 rgba(255,255,255,.7); }
+.btn-ghost { background:rgba(255,255,255,.03); color:#FFFFFF; border-color:var(--line-strong); font-weight:700; }
+.btn-ghost:hover { background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.55); transform:translateY(-2px); }
 .btn-sm { width:auto; min-height:40px; padding:0 16px; font-size:13px; }
 .stack { display:flex; flex-direction:column; gap:10px; }
 .pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 
-.card { background:var(--card); border:1px solid var(--line); border-radius:20px;
-        padding:14px; margin:8px 0;
-        box-shadow:0 10px 30px rgba(0,0,0,.5); position:relative;
+/* Карточка: стекло с градиентной кромкой сверху и мягкой глубиной */
+.card { background:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.028));
+        border:1px solid var(--line); border-radius:22px;
+        padding:16px; margin:10px 0;
+        box-shadow:0 12px 34px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05); position:relative;
         backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
-.card::before { content:""; position:absolute; top:0; left:24px; right:24px; height:1px;
-  background:linear-gradient(90deg, transparent, var(--silver), transparent); pointer-events:none; }
-.card.hero { border-color:rgba(255,255,255,.16); background:var(--dark); color:#FFFFFF;
-             box-shadow:0 18px 44px rgba(0,0,0,.6);
-             animation:heroIn .5s ease both; }
-.card.hero::before { background:linear-gradient(90deg, transparent, var(--silver), transparent); }
+.card::before { content:""; position:absolute; top:0; left:26px; right:26px; height:1px;
+  background:linear-gradient(90deg, transparent, rgba(220,225,232,.55), transparent); pointer-events:none; }
+@media (hover:hover) { .card { transition:transform .25s var(--ease), border-color .25s ease, box-shadow .25s ease; }
+  .card:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.18); box-shadow:0 18px 42px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06); }
+  .card.hero:hover { transform:none; } }
+.card.hero { border-color:rgba(255,255,255,.18); color:#FFFFFF; overflow:hidden;
+             background:
+               radial-gradient(560px 300px at 85% -10%, rgba(255,255,255,.13), rgba(255,255,255,0) 60%),
+               radial-gradient(420px 260px at -10% 110%, rgba(170,182,200,.10), rgba(255,255,255,0) 55%),
+               linear-gradient(180deg, #101013, #0A0A0B);
+             box-shadow:0 22px 50px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.09);
+             animation:heroIn .55s var(--ease) both; }
+.card.hero::after { content:""; position:absolute; inset:0; border-radius:22px; padding:1px;
+  background:linear-gradient(130deg, rgba(255,255,255,.35), rgba(255,255,255,.04) 40%, rgba(255,255,255,.16));
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor; mask-composite:exclude; pointer-events:none; }
 .card.hero > * { position:relative; z-index:1; }
 .card.hero .card-sub { color:rgba(255,255,255,.72); }
 .card.hero .plan { color:#FFFFFF; }
@@ -177,34 +208,35 @@ body.tg-fullscreen .tabs { top:96px; }
 .card.hero .big-sub { color:rgba(255,255,255,.66); }
 .card.hero .card-title { color:#FFFFFF; }
 .card.hero .card-title .ico { background:rgba(255,255,255,.10); color:#FFFFFF; box-shadow:none; }
-.card.hero .btn-main { background:#FFFFFF; color:#050505; box-shadow:0 10px 26px rgba(0,0,0,.35); }
-.card.hero .btn-main:hover { box-shadow:0 14px 34px rgba(0,0,0,.45); }
-.card.hero .stat { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.12); }
+.card.hero .btn-main { box-shadow:0 10px 26px rgba(0,0,0,.4); }
+.card.hero .stat { background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.13); }
 .card.hero .stat b { color:#FFFFFF; }
-.card.hero .stat span { color:rgba(255,255,255,.60); }
+.card.hero .stat span { color:rgba(255,255,255,.62); }
 .card.hero .stat span::before { background:var(--silver); box-shadow:none; }
 .card.hero .bar { background:rgba(255,255,255,.14); }
-.card.hero .bar-fill { background:linear-gradient(90deg, #FFFFFF, var(--silver)); box-shadow:none; }
-.card.hero .bar-note { color:rgba(255,255,255,.60); }
-@keyframes heroIn { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+.card.hero .bar-note { color:rgba(255,255,255,.62); }
+@keyframes heroIn { from { opacity:0; transform:translateY(14px) scale(.99); } to { opacity:1; transform:none; } }
 .card-title { display:flex; align-items:center; gap:9px; font-size:15px; font-weight:800; margin-bottom:2px; }
-.card-title .ico { width:30px; height:30px; border-radius:9px; display:flex; align-items:center;
+.card-title .ico { width:31px; height:31px; border-radius:10px; display:flex; align-items:center;
                    justify-content:center; background:var(--accent-soft); color:var(--ink);
-                   box-shadow:none; }
-.card-title .ico svg { width:15px; height:15px; }
+                   box-shadow:inset 0 1px 0 rgba(255,255,255,.12); }
+.card-title .ico svg { width:16px; height:16px; }
 .card-sub { color:var(--muted); font-size:13px; margin-bottom:10px; }
 
-.eyebrow { font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--silver-dark); }
-.hello { font-size:clamp(26px, 7vw, 34px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:6px 0 4px; font-family:"Manrope","Inter",sans-serif; }
+.eyebrow { font-size:11px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:var(--silver-dark); }
+.hello { font-size:clamp(27px, 7vw, 35px); line-height:1.08; font-weight:800; letter-spacing:-.03em; margin:6px 0 4px; }
 .muted { color:var(--muted); font-size:14px; }
 
 .hero-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.plan { font-weight:700; color:var(--ink); }
-.big { font-size:clamp(28px, 8vw, 38px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:14px 0 2px; font-family:"Manrope",sans-serif; }
+.plan { font-weight:800; display:inline-flex; align-items:center; gap:8px; }
+.plan .gem { font-size:16px; filter:drop-shadow(0 2px 6px rgba(255,255,255,.35)); }
+.big { font-size:clamp(29px, 8vw, 40px); line-height:1.08; font-weight:800; letter-spacing:-.03em; margin:16px 0 2px;
+       background:linear-gradient(180deg, #FFFFFF 30%, #C9CDD3); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.card.hero .big { color:transparent; }
 .big-sub { color:var(--muted); font-size:14px; }
 .stats { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; margin-top:18px; }
 .stat { background:var(--card-2); border:1px solid var(--line); border-radius:16px; padding:12px; min-width:0; }
-.stat b { display:block; font-size:15px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:"Manrope",sans-serif; }
+.stat b { display:block; font-size:15px; font-weight:800; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .stat span { display:block; font-size:12px; color:var(--soft); margin-top:2px; }
 .stat span::before { content:""; display:inline-block; width:5px; height:5px; border-radius:50%;
   background:var(--silver); margin-right:6px; vertical-align:1px; }
@@ -212,17 +244,22 @@ body.tg-fullscreen .tabs { top:96px; }
 .pill { display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border-radius:999px;
         font-size:12px; font-weight:700; white-space:nowrap; }
 .pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+.pill.ok::before { animation:pulseDot 2.2s ease-in-out infinite; }
+@keyframes pulseDot { 0%,100% { box-shadow:0 0 0 0 rgba(74,222,128,.45); } 50% { box-shadow:0 0 0 5px rgba(74,222,128,0); } }
 .ok { background:var(--ok-bg); color:var(--ok); }
 .warn { background:var(--warn-bg); color:var(--warn); }
 .bad { background:var(--bad-bg); color:var(--bad); }
 
 .link { display:flex; align-items:center; gap:10px; margin-top:12px; padding:10px 10px 10px 14px;
-        background:var(--card-2); border:1px solid var(--line); border-radius:16px; }
+        background:rgba(0,0,0,.32); border:1px solid var(--line); border-radius:16px; }
 .link code { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
              color:var(--muted); font-size:13px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .copy { flex:none; min-height:40px; padding:0 14px; border-radius:999px; border:1px solid var(--line-strong);
-        background:transparent; color:var(--ink); font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
-.copy:hover { background:rgba(255,255,255,.06); border-color:#FFFFFF; }
+        background:transparent; color:var(--ink); font:inherit; font-size:13px; font-weight:700; cursor:pointer;
+        transition:background .2s, border-color .2s, transform .15s var(--ease); }
+.copy:hover { background:rgba(255,255,255,.07); border-color:#FFFFFF; }
+.copy:active { transform:scale(.95); }
+.copy.done { background:var(--ok-bg); border-color:rgba(74,222,128,.5); color:var(--ok); }
 
 .row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:11px 0;
        border-top:1px solid var(--line); font-size:14px; }
@@ -230,37 +267,46 @@ body.tg-fullscreen .tabs { top:96px; }
 .row span:first-child { color:var(--ink); min-width:0; overflow-wrap:anywhere; }
 .row span:last-child { color:var(--soft); text-align:right; }
 
-.bar { height:12px; border-radius:999px; background:rgba(255,255,255,.12); overflow:hidden; margin-top:14px; }
-.bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, #FFFFFF, #8A8A8A); }
+.bar { height:10px; border-radius:999px; background:rgba(255,255,255,.12); overflow:hidden; margin-top:14px; }
+.bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, #FFFFFF, #9aa1ab);
+            transition:width .8s var(--ease); }
+.bar-fill.mid { background:linear-gradient(90deg, #FDE68A, #FBBF24); }
 .bar-fill.full { background:linear-gradient(90deg, #FBBF24, #F87171); }
 .bar-note { display:flex; justify-content:space-between; gap:12px; margin-top:8px; font-size:13px; color:var(--soft); }
 
-.dev { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 8px;
+.dev { display:flex; align-items:center; gap:12px; padding:11px 8px;
        border-top:1px solid var(--line); border-radius:12px; transition:background .2s ease; }
 .dev:hover { background:rgba(255,255,255,.04); }
 .dev:first-of-type { border-top:0; }
+.dev .dico { flex:none; width:38px; height:38px; border-radius:12px; display:flex; align-items:center; justify-content:center;
+             background:var(--accent-soft); color:var(--silver); }
+.dev .dico svg { width:19px; height:19px; }
+.dev .dbody { flex:1; min-width:0; }
 .dev b { display:block; font-size:15px; overflow-wrap:anywhere; }
 .dev small { color:var(--soft); font-size:13px; }
 .btn-mini { flex:none; min-height:36px; padding:0 14px; border-radius:999px;
             border:1px solid rgba(248,113,113,.4); background:transparent; color:var(--bad);
-            font:inherit; font-size:13px; font-weight:700; cursor:pointer; }
+            font:inherit; font-size:13px; font-weight:700; cursor:pointer; transition:background .2s, transform .15s var(--ease); }
 .btn-mini:hover { background:var(--bad-bg); }
+.btn-mini:active { transform:scale(.95); }
 .btn-mini:disabled { opacity:.5; }
 .btn-danger { border-color:rgba(248,113,113,.45); color:var(--bad); }
 .btn-danger:hover { background:var(--bad-bg); border-color:rgba(248,113,113,.6); }
 
+/* Вкладки: сверху — пилюли, на телефоне — нижняя стеклянная навигация */
 .tabs { position:sticky; top:var(--tg-content-safe-area-inset-top, 0px); z-index:5; display:flex; gap:6px; overflow-x:auto;
         margin:0 -12px; padding:7px 12px;
-        background:rgba(5,5,5,.85); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+        background:rgba(5,5,5,.82); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
         scrollbar-width:none; }
 .tabs::-webkit-scrollbar { display:none; }
-.tab { flex:none; min-height:36px; padding:0 15px; border-radius:999px; position:relative;
+.tab { flex:none; display:inline-flex; align-items:center; gap:7px; min-height:36px; padding:0 15px; border-radius:999px; position:relative;
        border:1px solid var(--line-strong); background:rgba(255,255,255,.04); color:var(--muted);
        font:inherit; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap;
-       transition:all .22s ease; }
+       transition:all .22s var(--ease); }
+.tab svg { width:15px; height:15px; flex:none; }
 .tab:active { transform:scale(.96); }
-.tab.active { background:#FFFFFF; color:#050505; border-color:#FFFFFF;
-  box-shadow:0 3px 12px rgba(255,255,255,.15); }
+.tab.active { background:var(--grad); background-size:160% 100%; color:#050505; border-color:transparent;
+  box-shadow:0 3px 12px rgba(255,255,255,.18); }
 .tab .dot { position:absolute; top:5px; right:5px; width:8px; height:8px; border-radius:50%;
             background:#ff4d4d; box-shadow:0 0 0 0 rgba(255,77,77,.55);
             animation:dotPulse 1.6s ease-out infinite; pointer-events:none; }
@@ -269,46 +315,108 @@ body.tg-fullscreen .tabs { top:96px; }
 .breadcrumb { font-size:11px; color:var(--soft); margin:4px 0 6px; display:flex; align-items:center; gap:4px; letter-spacing:.01em; }
 .breadcrumb span { color:var(--muted); font-weight:600; }
 .breadcrumb span:last-child { color:var(--ink); }
+@media (max-width: 760px) {
+  .tabs { position:fixed; top:auto; left:10px; right:10px; bottom:calc(10px + env(safe-area-inset-bottom, 0px));
+          margin:0; padding:8px; border-radius:22px; border:1px solid var(--line);
+          background:rgba(12,12,14,.86); box-shadow:0 16px 40px rgba(0,0,0,.6);
+          justify-content:space-between; overflow:visible; }
+  .tab { flex:1; flex-direction:column; gap:3px; min-height:52px; padding:6px 2px; border:0; background:transparent;
+         font-size:10.5px; border-radius:16px; }
+  .tab svg { width:20px; height:20px; }
+  .tab.active { background:rgba(255,255,255,.12); color:#FFFFFF; box-shadow:inset 0 1px 0 rgba(255,255,255,.14); }
+  .tab .dot { top:6px; right:calc(50% - 16px); }
+  .breadcrumb { display:none; }
+  .wrap { padding-bottom:calc(96px + env(safe-area-inset-bottom, 0px)); }
+  body.tg-fullscreen .tabs { top:auto; }
+}
 
-.pay { padding:14px 0; border-top:1px solid var(--line); }
+/* Тарифы продления — карточки выбора */
+.tariffs { display:grid; gap:9px; margin-top:4px; }
+.tariff { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%;
+          padding:14px 16px; border-radius:18px; border:1px solid var(--line-strong);
+          background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+          color:var(--ink); font:inherit; cursor:pointer; text-align:left;
+          transition:transform .18s var(--ease), border-color .2s, background .2s, box-shadow .2s; }
+.tariff:hover { border-color:rgba(255,255,255,.55); transform:translateY(-2px); box-shadow:0 12px 26px rgba(0,0,0,.4); }
+.tariff:active { transform:scale(.985); }
+.tariff .t-per { font-weight:800; font-size:15px; }
+.tariff .t-sub { display:block; font-size:12px; color:var(--soft); font-weight:600; margin-top:1px; }
+.tariff .t-price { font-size:19px; font-weight:800; letter-spacing:-.01em; white-space:nowrap; }
+.tariff .t-price small { font-size:12px; color:var(--soft); font-weight:700; }
+
+/* Приложения: кнопки с фирменными значками-буквами */
+.appbtn { gap:12px; }
+.appbtn .badge { flex:none; width:34px; height:34px; border-radius:11px; display:flex; align-items:center; justify-content:center;
+                 font-size:13px; font-weight:800; letter-spacing:.02em; }
+.btn-main .badge { background:rgba(5,5,5,.85); color:#FFFFFF; }
+.btn-ghost .badge { background:rgba(255,255,255,.12); color:#FFFFFF; box-shadow:inset 0 1px 0 rgba(255,255,255,.15); }
+.steps { display:flex; gap:8px; margin-top:12px; }
+.steps span { flex:1; font-size:11.5px; line-height:1.35; color:var(--soft); background:rgba(255,255,255,.03);
+              border:1px solid var(--line); border-radius:12px; padding:8px 9px; }
+.steps b { display:block; color:var(--silver); font-size:13px; margin-bottom:2px; }
+
+.pay { padding:13px 0; border-top:1px solid var(--line); }
 .pay:first-of-type { border-top:0; }
 .pay-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.pay-amount { font-size:18px; font-weight:800; letter-spacing:-.01em; font-family:"Manrope",sans-serif; }
+.pay-amount { font-size:18px; font-weight:800; letter-spacing:-.01em; }
 .pay-date { font-size:13px; color:var(--soft); margin-top:2px; }
 .pay-meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
 .chip { padding:4px 10px; border-radius:999px; border:1px solid var(--line);
         font-size:12px; font-weight:600; color:var(--muted); background:var(--card-2); }
 
+/* Скелетоны загрузки */
+.skel { border-radius:22px; border:1px solid var(--line); padding:16px; margin:10px 0;
+        background:rgba(255,255,255,.03); overflow:hidden; position:relative; }
+.skel::after { content:""; position:absolute; inset:0;
+  background:linear-gradient(100deg, transparent 30%, rgba(255,255,255,.06) 50%, transparent 70%);
+  animation:shimmer 1.4s infinite; transform:translateX(-100%); }
+@keyframes shimmer { to { transform:translateX(100%); } }
+.skel .ln { height:14px; border-radius:7px; background:rgba(255,255,255,.09); margin:10px 0; }
+.skel .ln.big { height:30px; width:62%; }
+.skel .ln.w40 { width:40%; } .skel .ln.w70 { width:70%; }
+
+/* Тост вместо alert() */
+#toast { position:fixed; left:50%; bottom:calc(24px + env(safe-area-inset-bottom, 0px)); transform:translate(-50%, 20px);
+         z-index:50; max-width:min(92vw, 420px); padding:12px 18px; border-radius:16px;
+         background:rgba(18,18,20,.92); border:1px solid var(--line-strong); color:var(--ink);
+         font-size:14px; font-weight:700; text-align:center; box-shadow:0 18px 44px rgba(0,0,0,.6);
+         backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+         opacity:0; pointer-events:none; transition:opacity .3s ease, transform .3s var(--ease); }
+#toast.show { opacity:1; transform:translate(-50%, 0); }
+@media (max-width: 760px) { #toast { bottom:calc(88px + env(safe-area-inset-bottom, 0px)); } }
+
 @keyframes secIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
 @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 #app:not(.hide) { animation:fadeIn .35s ease both; }
-[data-sec].sec-show { animation:secIn .35s ease both; }
-@media (prefers-reduced-motion: reduce) {
-  #app:not(.hide), [data-sec].sec-show { animation:none; } }
+[data-sec].sec-show { animation:secIn .38s var(--ease) both; }
 
-#login { text-align:center; padding:6vh 0 0; }
-#login .card { padding:30px 22px; border-color:var(--line);
-  box-shadow:0 20px 60px rgba(0,0,0,.6); }
-#login h1 { font-size:clamp(28px, 7vw, 36px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:10px 0 10px; font-family:"Manrope",sans-serif; }
+#login { text-align:center; padding:4vh 0 0; animation:fadeIn .4s ease both; }
+#login .card { padding:30px 22px; box-shadow:0 24px 64px rgba(0,0,0,.65); }
+#login h1 { font-size:clamp(28px, 7vw, 36px); line-height:1.1; font-weight:800; letter-spacing:-.03em; margin:10px 0 10px; }
 #widget { display:flex; justify-content:center; min-height:48px; margin:22px 0 6px; }
 #loginerr { margin-top:10px; }
 #loginerr code { display:block; margin:8px 0; word-break:break-all; color:var(--soft); font-size:12px; }
 .perks { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:18px; }
-.perks span { padding:7px 12px; border-radius:999px; border:1px solid var(--line); font-size:13px; color:var(--muted); background:var(--card-2); }
+.perks span { display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:999px; border:1px solid var(--line); font-size:13px; color:var(--muted); background:var(--card-2); }
+.perks svg { width:13px; height:13px; color:var(--ok); }
 
 .foot { text-align:center; margin-top:28px; font-size:13px; color:var(--soft); }
 .hide { display:none !important; }
 
-.login-logo { display:flex; justify-content:center; margin:10px 0 22px; }
-.login-logo img { width:240px; max-width:70vw; height:auto; }
+.login-logo { display:flex; justify-content:center; margin:10px 0 22px; position:relative; }
+.login-logo::before { content:""; position:absolute; top:50%; left:50%; width:280px; height:160px;
+  transform:translate(-50%,-50%); border-radius:50%;
+  background:radial-gradient(circle, rgba(255,255,255,.13), transparent 65%); pointer-events:none; }
+.login-logo img { width:240px; max-width:70vw; height:auto; position:relative; }
 .renew-tariff { justify-content:center; gap:8px; }
-.renew-tariff .rt-price { color:var(--ink); font-family:"Manrope",sans-serif; font-size:16px; }
+.renew-tariff .rt-price { color:var(--ink); font-size:16px; }
 
 @media (max-width: 480px) {
   .stats { grid-template-columns:1fr 1fr; }
   .stat:first-child { grid-column:1 / -1; }
   .pair { grid-template-columns:1fr; }
-  .card { padding:12px 12px; }
+  .card { padding:14px; }
+  .steps { flex-direction:column; }
 }
 
 @media (min-width: 900px) {
@@ -318,12 +426,11 @@ body.tg-fullscreen .tabs { top:96px; }
   #body.tab-sub > .stack, #body.tab-sub > .sub-hero { grid-column:1 / -1; }
   [data-sec="sub"] > .card { margin:14px 0; }
 }
-@media (prefers-reduced-motion: reduce) { .btn { transition:none; } .tab .dot { animation:none; } .card.hero { animation:none; } }
 
 .field { display:block; text-align:left; margin:12px 0 0; font-size:13px; font-weight:700; color:var(--muted); }
 .field input { display:block; width:100%; margin-top:6px; padding:12px 14px; border-radius:14px;
   border:1px solid var(--line-strong); background:rgba(255,255,255,.06); color:var(--ink);
-  font:inherit; font-size:15px; outline:none; }
+  font:inherit; font-size:15px; outline:none; transition:border-color .2s, box-shadow .2s; }
 .field input:focus { border-color:#FFFFFF; box-shadow:0 0 0 3px rgba(255,255,255,.12); }
 .or { display:flex; align-items:center; gap:12px; margin:22px 0 4px; color:var(--soft); font-size:13px; }
 .or::before, .or::after { content:""; flex:1; height:1px; background:var(--line); }
@@ -332,11 +439,19 @@ body.tg-fullscreen .tabs { top:96px; }
 #turnstile-box:empty, #turnstile-box2:empty { display:none; }
 .form-note { font-size:13px; color:var(--soft); margin-top:10px; }
 .linklike { background:none; border:0; color:var(--ink); font:inherit; font-size:14px; cursor:pointer; padding:0; margin-top:12px; text-decoration:underline; text-underline-offset:3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn, .tab, .tariff, .card, .bar-fill { transition:none; }
+  .tab .dot, .pill.ok::before, .bg .glow, .skel::after { animation:none; }
+  .card.hero, #app:not(.hide), [data-sec].sec-show, #login { animation:none; }
+  html { scroll-behavior:auto; }
+}
 </style></head>
 <body>
 <div class="bg" aria-hidden="true">
   <div class="glow"></div>
   <div class="glow glow-b"></div>
+  <div class="grid"></div>
 </div>
 
 <div class="wrap">
@@ -391,6 +506,7 @@ body.tg-fullscreen .tabs { top:96px; }
 
  <p class="foot">Drebol VPN</p>
 </div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
  var API = "__API__";
@@ -413,15 +529,36 @@ body.tg-fullscreen .tabs { top:96px; }
  function botUrl() { return "https://t.me/" + BOT; }
  document.getElementById("botlink").href = botUrl();
 
- // Иконки обводкой — те же, что на главной
+ // Тост вместо alert(): не блокирует страницу и сам исчезает
+ var toastTimer = null;
+ function toast(msg) {
+   var t = document.getElementById("toast");
+   if (!t) { return; }
+   t.textContent = msg;
+   t.classList.add("show");
+   if (toastTimer) { clearTimeout(toastTimer); }
+   toastTimer = setTimeout(function () { t.classList.remove("show"); }, 3400);
+ }
+ function haptic(kind) {
+   try { if (tg && tg.HapticFeedback) { tg.HapticFeedback.notificationOccurred(kind || "success"); } } catch (e) {}
+ }
+
+ // Иконки обводкой — те же, что на главной, плюс разделы кабинета
  var ICON = {
    tg: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.9 4.3 18.7 19c-.2 1-.9 1.3-1.8.8l-4.9-3.6-2.4 2.3c-.3.3-.5.5-1 .5l.4-5 9.1-8.2c.4-.4-.1-.6-.6-.2L6.2 12.9l-4.8-1.5c-1-.3-1-1 .2-1.5l18.9-7.3c.9-.3 1.6.2 1.4 1.7z"/></svg>',
    key: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.7-8.7M16 7l3 3M14 9l2 2"/></svg>',
    dev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="14" height="10" rx="1.5"/><path d="M6 18h6M9 14v4"/><rect x="17" y="8" width="5" height="12" rx="1.2"/></svg>',
    card: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6.5 15h4"/></svg>',
    lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
-   user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>'
+   user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>',
+   lte: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5a10 10 0 0 1 14 0M8.1 15.7a5.5 5.5 0 0 1 7.8 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/><path d="M12 9V3M8.5 5.5 12 3l3.5 2.5"/></svg>',
+   users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.4 3.2-5 6.5-5s5.9 1.6 6.5 5"/><path d="M16 4.7a3.5 3.5 0 0 1 0 6.6M18.5 15.3c1.6.7 2.7 2.1 3 4.2"/></svg>',
+   phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
+   monitor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></svg>',
+   refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 3v4h-4"/></svg>',
+   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4.5 12.5 5 5 10-11"/></svg>'
  };
+ var SEC_ICONS = {sub: "key", lte: "lte", devices: "dev", payments: "card", friends: "users", profile: "user"};
  function title(icon, text) {
    return '<div class="card-title"><span class="ico">' + ICON[icon] + "</span>" + esc(text) + "</div>";
  }
@@ -492,6 +629,7 @@ body.tg-fullscreen .tabs { top:96px; }
  function pill(text, kind) { return '<span class="pill ' + kind + '">' + esc(text) + "</span>"; }
  function row(a, b) { return '<div class="row"><span>' + a + "</span><span>" + b + "</span></div>"; }
  function stat(value, label) { return '<div class="stat"><b>' + value + "</b><span>" + esc(label) + "</span></div>"; }
+ function barClass(pct) { return pct >= 100 ? " full" : pct >= 75 ? " mid" : ""; }
 
  // Статусы платежей — человеческим языком, а не кодами из базы
  var PAY_STATUS = {
@@ -499,17 +637,48 @@ body.tg-fullscreen .tabs { top:96px; }
    pending: {text: "Ожидает оплаты", kind: "warn"},
    failed: {text: "Не прошла", kind: "bad"},
    cancelled: {text: "Отменена", kind: "bad"},
+   canceled: {text: "Отменена", kind: "bad"},
+   expired: {text: "Истекла", kind: "bad"},
    refunded: {text: "Возврат", kind: "warn"},
-   refund_pending: {text: "Возврат в обработке", kind: "warn"}
+   refund_pending: {text: "Возврат в обработке", kind: "warn"},
+   partial_refunded: {text: "Частичный возврат", kind: "warn"}
  };
  function payProvider(raw) {
-   var map = {anore: "Anore", platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта"};
+   var map = {anore: "Anore", platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта", manual: "Вручную"};
    return map[String(raw).toLowerCase()] || String(raw);
+ }
+ function fmtMoney(n) {
+   var v = Number(n || 0);
+   return String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " ₽";
  }
  // "2026-10-20 10:00" -> "20.10.2026 · 10:00"
  function fmtDate(raw) {
    var m = String(raw || "").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
    return m ? m[3] + "." + m[2] + "." + m[1] + " · " + m[4] : String(raw || "");
+ }
+
+ // Платежи: API отдавал список всегда, а страница его не показывала —
+ // раздел обещан на экране входа, теперь он есть.
+ function paymentsCard(p) {
+   var items = p.payments || [];
+   if (!items.length) { return ""; }
+   var tot = p.payments_total || {};
+   var sub = "Всего оплат: " + esc(tot.count != null ? tot.count : items.length) +
+             (tot.sum ? " · на сумму " + esc(fmtMoney(tot.sum)) : "") +
+             ". Показаны последние " + items.length + ".";
+   var list = items.map(function (x) {
+     var st = PAY_STATUS[String(x.status || "").toLowerCase()] || {text: String(x.status || ""), kind: "warn"};
+     var meta = "";
+     if (x.provider) { meta += '<span class="chip">' + esc(payProvider(x.provider)) + "</span>"; }
+     if (x.promo) { meta += '<span class="chip">🎟 ' + esc(x.promo) + "</span>"; }
+     return '<div class="pay"><div class="pay-head"><div>' +
+       '<div class="pay-amount">' + esc(fmtMoney(x.amount)) + '</div>' +
+       '<div class="pay-date">' + esc(fmtDate(x.date)) + "</div></div>" +
+       pill(st.text, st.kind) + "</div>" +
+       (meta ? '<div class="pay-meta">' + meta + "</div>" : "") + "</div>";
+   }).join("");
+   return '<div data-sec="payments"><div class="card">' + title("card", "Платежи") +
+          '<p class="card-sub">' + sub + "</p>" + list + "</div></div>";
  }
 
  // Профиль: почта и пароль для входа из браузера. Пока что-то не задано,
@@ -538,6 +707,15 @@ body.tg-fullscreen .tabs { top:96px; }
      "</div></div>";
  }
 
+ // Скелетон на время загрузки /api/me — вместо пустого экрана
+ function showSkeleton() {
+   document.getElementById("login").className = "hide";
+   document.getElementById("app").className = "";
+   document.getElementById("body").innerHTML =
+     '<div class="skel"><div class="ln w40"></div><div class="ln big"></div><div class="ln w70"></div><div class="ln"></div></div>' +
+     '<div class="skel"><div class="ln w40"></div><div class="ln"></div><div class="ln w70"></div></div>';
+ }
+
  function render(p) {
    document.getElementById("login").className = "hide";
    document.getElementById("app").className = "";
@@ -563,6 +741,8 @@ body.tg-fullscreen .tabs { top:96px; }
               '<a class="btn btn-main" href="' + botUrl() + '">' + ICON.tg + "Оформить в боте</a></div>");
      var ref0 = referralCard(p);
      if (ref0) { out.push('<div data-sec="friends">' + ref0 + "</div>"); }
+     var pay0 = paymentsCard(p);
+     if (pay0) { out.push(pay0); }
      out.push(profileCard(p));
      document.getElementById("body").innerHTML = out.join("");
      buildTabs();
@@ -573,16 +753,19 @@ body.tg-fullscreen .tabs { top:96px; }
    var s = p.subscription;
    var mark = s.status === "expired" ? pill("закончилась", "bad")
             : !s.enabled ? pill("на паузе", "warn") : pill("активна", "ok");
-   var plan = s.plan === "paid" ? "💎 Премиум" : "🆓 Пробный период";
+   var plan = s.plan === "paid" ? '<span class="gem">💎</span> Премиум' : "🆓 Пробный период";
    var big = s.status === "expired" ? "Подписка закончилась"
            : (s.left_text ? esc(s.left_text) : "до " + esc(s.until));
    var bigSub = s.status === "expired" ? "Продлите здесь — доступ вернётся сразу."
               : (s.left_text ? "осталось · до " + esc(s.until) : "действует");
+   if (s.status !== "expired" && s.left > 0 && s.left <= 3 * 86400) {
+     bigSub += " · скоро закончится — продлите, чтобы не терять доступ";
+   }
    var traffic = esc(s.traffic_used_text) + (s.traffic_limit_gb ? " / " + esc(s.traffic_limit_gb) + " ГБ" : "");
    var trafficBar = "";
    if (s.traffic_limit_gb) {
      var pct = Math.min(100, Math.round(s.traffic_used / (s.traffic_limit_gb * 1024 * 1024 * 1024) * 100));
-     trafficBar = '<div class="bar"><div class="bar-fill' + (pct >= 100 ? " full" : "") +
+     trafficBar = '<div class="bar"><div class="bar-fill' + barClass(pct) +
                   '" style="width:' + pct + '%"></div></div>' +
                   '<div class="bar-note"><span>Использовано ' + pct + "%</span><span>" + traffic + "</span></div>";
    }
@@ -623,7 +806,7 @@ body.tg-fullscreen .tabs { top:96px; }
        lteBody = '<p class="card-sub">Использовано ' + esc(p.lte.used_text) + " из " +
                  esc(p.lte.limit_gb) + " ГБ · осталось <b style=\"color:var(--ink)\">" +
                  esc(p.lte.left_gb) + " ГБ</b></p>" +
-                 '<div class="bar"><div class="bar-fill' + (lpct >= 100 ? " full" : "") +
+                 '<div class="bar"><div class="bar-fill' + barClass(lpct) +
                  '" style="width:' + lpct + '%"></div></div>' +
                  '<div class="bar-note"><span>Лимит обновляется каждый месяц</span><span>' + lpct + "%</span></div>" +
                  (p.lte.fallback_active
@@ -631,24 +814,26 @@ body.tg-fullscreen .tabs { top:96px; }
                      "сейчас работают обычные серверы, в новом месяце LTE вернётся.</p>"
                    : "");
      }
-     out.push('<div data-sec="lte"><div class="card">' + title("lock", "LTE-интернет") + lteBody + "</div></div>");
+     out.push('<div data-sec="lte"><div class="card">' + title("lte", "LTE-интернет") + lteBody + "</div></div>");
    }
 
    // Подключение: приложение в одно нажатие и ссылка с копированием
    out.push('<div data-sec="sub"><div class="card">' + title("key", "Подключение") +
             '<p class="card-sub">Добавьте подписку в приложение одним нажатием.</p>' +
             '<div class="pair">' +
-              '<a class="btn btn-main" target="_blank" rel="noopener" href="' + esc(location.origin + "/add.html?app=happ&u=" + encodeURIComponent(s.url)) + '" onclick="return openAppLink(this)">Добавить в Happ</a>' +
-              '<a class="btn btn-ghost" target="_blank" rel="noopener" href="' + esc(location.origin + "/add.html?app=incy&u=" + encodeURIComponent(s.url)) + '" onclick="return openAppLink(this)">Добавить в INCY</a>' +
+              '<a class="btn btn-main appbtn" target="_blank" rel="noopener" href="' + esc(location.origin + "/add.html?app=happ&u=" + encodeURIComponent(s.url)) + '" onclick="return openAppLink(this)"><span class="badge">H</span>HAPP</a>' +
+              '<a class="btn btn-ghost appbtn" target="_blank" rel="noopener" href="' + esc(location.origin + "/add.html?app=incy&u=" + encodeURIComponent(s.url)) + '" onclick="return openAppLink(this)"><span class="badge">IN</span>INCY</a>' +
             "</div>" +
+            '<div class="steps"><span><b>1</b>Нажмите кнопку приложения</span><span><b>2</b>Разрешите открыть приложение</span><span><b>3</b>Подписка добавится сама</span></div>' +
             '<div class="link"><code id="suburl">' + esc(s.url) + "</code>" +
             '<button class="copy" type="button" data-copy="' + esc(s.url) + '">Скопировать</button></div>' +
             "</div></div>");
 
    // Устройства: каждое можно отключить прямо здесь
    var devList = (p.devices || []).map(function (x) {
-     return '<div class="dev"><div><b>' + esc(x.model) + "</b><small>" +
-            esc(x.seen || "был недавно") + "</small></div>" +
+     var isPhone = /iphone|android|ios|phone/i.test(x.platform || x.model || "");
+     return '<div class="dev"><span class="dico">' + (isPhone ? ICON.phone : ICON.monitor) + '</span><div class="dbody"><b>' + esc(x.model) + "</b><small>" +
+            esc(x.seen ? fmtDate(x.seen) || x.seen : "был недавно") + "</small></div>" +
             '<button class="btn-mini" type="button" data-del="' + esc(x.id) +
             '" data-name="' + esc(x.model) + '">Отключить</button></div>';
    }).join("");
@@ -667,16 +852,17 @@ body.tg-fullscreen .tabs { top:96px; }
               '<button class="btn btn-ghost btn-danger" type="button" id="reissue">🔁 Новый ключ</button></div></div>');
    }
 
-
+   var payN = paymentsCard(p);
+   if (payN) { out.push(payN); }
    var ref = referralCard(p);
    if (ref) { out.push('<div data-sec="friends">' + ref + "</div>"); }
    out.push(profileCard(p));
 
    out.push('<div class="stack" style="margin-top:6px">' +
-            '<button class="btn btn-ghost" type="button" onclick="load()">🔄 Обновить данные</button>' +
+            '<button class="btn btn-ghost" type="button" onclick="load()">' + ICON.refresh + "Обновить данные</button>" +
             '<a class="btn btn-ghost" href="' + botUrl() + '">' +
             ICON.tg + "Открыть бота</a></div>");
-   document.getElementById("body").innerHTML = '<div class="tabs" id="tabs"></div><div class="breadcrumb" id="breadcrumb"></div>' + out.join("");
+   document.getElementById("body").innerHTML = '<div class="tabs" id="tabs" role="tablist"></div><div class="breadcrumb" id="breadcrumb"></div>' + out.join("");
    buildTabs();
    bindActions();
  }
@@ -720,7 +906,9 @@ body.tg-fullscreen .tabs { top:96px; }
      var b = document.createElement("button");
      b.className = "tab" + (name === active ? " active" : "");
      b.type = "button";
-     b.textContent = SEC_LABELS[name] || name;
+     b.setAttribute("role", "tab");
+     b.setAttribute("data-tab", name);
+     b.innerHTML = (ICON[SEC_ICONS[name]] || "") + "<span>" + esc(SEC_LABELS[name] || name) + "</span>";
      if (name === "profile" && window.LOGIN && (!window.LOGIN.email || !window.LOGIN.has_password)) {
        var d = document.createElement("span");
        d.className = "dot";
@@ -738,24 +926,28 @@ body.tg-fullscreen .tabs { top:96px; }
  function showTab(name, silent) {
    var bodyEl = document.getElementById("body");
    if (bodyEl) { bodyEl.classList.toggle("tab-sub", name === "sub"); }
+   var idx = 0;
    document.querySelectorAll("#body [data-sec]").forEach(function (el) {
      var show = el.getAttribute("data-sec") === name;
      el.style.display = show ? "" : "none";
      if (show) {
-       // перезапускаем анимацию появления при каждом переключении
+       // перезапускаем анимацию появления при каждом переключении,
+       // карточки одного раздела выходят лёгкой лесенкой
        el.classList.remove("sec-show");
        void el.offsetWidth;
+       el.style.animationDelay = (idx++ * 55) + "ms";
        el.classList.add("sec-show");
      }
    });
    document.querySelectorAll("#tabs .tab").forEach(function (b) {
-     b.classList.toggle("active", b.textContent === (SEC_LABELS[name] || name));
+     b.classList.toggle("active", b.getAttribute("data-tab") === name);
    });
    var bc = document.getElementById("breadcrumb");
-   if (bc) { bc.innerHTML = '<span>Кабинет</span> <span style="opacity:.4">/</span> <span>' + (SEC_LABELS[name] || name) + '</span>'; }
+   if (bc) { bc.innerHTML = '<span>Кабинет</span> <span style="opacity:.4">/</span> <span>' + (SEC_LABELS[name] || name) + "</span>"; }
    if (!silent) {
      try { localStorage.setItem("drebol_tab", name); } catch (e) {}
      try { history.replaceState(null, "", cabinetBase() + "/" + name); } catch (e) {}
+     try { window.scrollTo({top: 0, behavior: "smooth"}); } catch (e) {}
    }
  }
 
@@ -766,7 +958,7 @@ body.tg-fullscreen .tabs { top:96px; }
    var link = "https://t.me/" + BOT + "?start=ref_" + p.user.id;
    var share = "https://t.me/share/url?url=" + encodeURIComponent(link) +
                "&text=" + encodeURIComponent("Попробуй Drebol VPN — быстрый и безопасный VPN!");
-   return '<div class="card">' + title("tg", "Приглашайте друзей") +
+   return '<div class="card">' + title("users", "Приглашайте друзей") +
      '<p class="card-sub">Приглашено: <b style="color:var(--ink)">' + esc(r.invited) + "</b>" +
      " · бонус получили: <b style=\"color:var(--ink)\">" + esc(r.rewarded) + "</b>" +
      (r.bonus_text ? " · вам начислено: <b style=\"color:var(--ink)\">+" + esc(r.bonus_text) + "</b>" : "") + "</p>" +
@@ -786,12 +978,12 @@ body.tg-fullscreen .tabs { top:96px; }
        api("/api/device/delete", {method: "POST",
            body: JSON.stringify({hwid: btn.getAttribute("data-del")})})
          .then(function (r) {
-           if (r.status === 200) { return load(); }
-           alert(r.data && r.data.error === "already_gone"
+           if (r.status === 200) { toast("Устройство отключено"); haptic(); return load(); }
+           toast(r.data && r.data.error === "already_gone"
              ? "Это устройство уже отключено." : "Не получилось — попробуйте позже.");
            load();
          })
-         .catch(function () { alert("Не получилось — попробуйте позже."); load(); });
+         .catch(function () { toast("Не получилось — попробуйте позже."); load(); });
      };
    });
    var re = document.getElementById("reissue");
@@ -802,11 +994,11 @@ body.tg-fullscreen .tabs { top:96px; }
        re.disabled = true; re.textContent = "Перевыпускаем…";
        api("/api/reissue", {method: "POST", body: "{}"})
          .then(function (r) {
-           if (r.status === 200) { alert("Готово — новая ссылка уже в карточке «Подключение»."); }
-           else { alert("Не получилось — попробуйте позже."); }
+           if (r.status === 200) { toast("Готово — новая ссылка уже в карточке «Подключение»"); haptic(); }
+           else { toast("Не получилось — попробуйте позже."); }
            load();
          })
-         .catch(function () { alert("Не получилось — попробуйте позже."); load(); });
+         .catch(function () { toast("Не получилось — попробуйте позже."); load(); });
      };
    }
    var ro = document.getElementById("renew-open");
@@ -830,7 +1022,7 @@ body.tg-fullscreen .tabs { top:96px; }
        note.textContent = "Сохраняем…";
        api("/api/profile/email", {method: "POST", body: JSON.stringify({email: v})})
          .then(function (r) {
-           if (r.status === 200) { note.textContent = "Почта сохранена."; load(); return; }
+           if (r.status === 200) { note.textContent = "Почта сохранена."; toast("Почта сохранена"); load(); return; }
            if (r.data && r.data.error === "email_taken") {
              note.textContent = "Эта почта уже привязана к другому человеку."; return;
            }
@@ -854,7 +1046,7 @@ body.tg-fullscreen .tabs { top:96px; }
        api("/api/profile/password", {method: "POST",
            body: JSON.stringify({current: cur ? cur.value : "", password: nw})})
          .then(function (r) {
-           if (r.status === 200) { note.textContent = "Пароль сохранён."; load(); return; }
+           if (r.status === 200) { note.textContent = "Пароль сохранён."; toast("Пароль сохранён"); load(); return; }
            if (r.data && r.data.error === "bad_current") {
              note.textContent = "Неверный текущий пароль."; return;
            }
@@ -911,18 +1103,21 @@ body.tg-fullscreen .tabs { top:96px; }
      if (d.pending) {
        pendingPayUrl = d.pending.url;
        html += '<p class="card-sub">⏳ У вас есть неоплаченный счёт на <b style="color:var(--ink)">' +
-               esc(d.pending.amount) + " ₽</b>.</p>" +
+               esc(fmtMoney(d.pending.amount)) + "</b>.</p>" +
                '<div class="stack"><button class="btn btn-main" type="button" ' +
                'onclick="openPay(pendingPayUrl)">Продолжить оплату</button>' +
                '<button class="btn btn-ghost" type="button" onclick="pollPayment(' +
                d.pending.id + ', 90)">Проверить оплату</button></div>';
      }
      html += '<p class="card-sub">Выберите тариф — счёт создастся здесь же, оплата через платёжную систему.</p>';
+     html += '<div class="tariffs">';
      d.tariffs.forEach(function (t) {
-       html += '<button class="btn btn-ghost renew-tariff" type="button" style="margin-top:8px" onclick="renewPay(' +
-               t.id + ')">' + esc(t.period) + ' — <b class="rt-price">' +
-               esc(t.price) + " ₽</b></button>";
+       html += '<button class="tariff" type="button" onclick="renewPay(' +
+               t.id + ')"><span><span class="t-per">' + esc(t.period) + '</span>' +
+               '<span class="t-sub">продление подписки</span></span>' +
+               '<span class="t-price">' + esc(fmtMoney(t.price)) + "</span></button>";
      });
+     html += "</div>";
      body.innerHTML = html;
    }).catch(function () {
      body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
@@ -944,7 +1139,7 @@ body.tg-fullscreen .tabs { top:96px; }
        }
        renewPayUrl = r.data.url;
        body.innerHTML = '<div id="renew-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
-         esc(r.data.amount) + " ₽</b> готов. Оплатите его — подтверждение придёт само, " +
+         esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — подтверждение придёт само, " +
          "обычно в течение минуты.</p>" +
          '<button class="btn btn-main" type="button" onclick="openPay(renewPayUrl)">Оплатить</button></div>';
        openPay(r.data.url);
@@ -966,10 +1161,11 @@ body.tg-fullscreen .tabs { top:96px; }
      var st = r.data.status;
      if (st === "paid" || st === "refund_pending") {
        if (box) { box.innerHTML = '<p class="card-sub">✅ Оплата прошла! Обновляем данные…</p>'; }
+       toast("Оплата прошла — подписка продлена"); haptic();
        load();
        return;
      }
-     if (st === "canceled" || st === "expired" || st === "error" ||
+     if (st === "canceled" || st === "cancelled" || st === "expired" || st === "error" ||
          st === "refunded" || st === "chargebacked") {
        if (box) { box.innerHTML = '<p class="card-sub">Счёт не оплачен. Создайте новый счёт.</p>' +
          '<button class="btn btn-ghost" type="button" onclick="loadRenew()">К тарифам</button>'; }
@@ -993,11 +1189,15 @@ body.tg-fullscreen .tabs { top:96px; }
    if (!btn) { return; }
    var text = btn.getAttribute("data-copy");
    function done() {
+     btn.classList.add("done");
      btn.textContent = "Скопировано ✓";
-     setTimeout(function () { btn.textContent = "Скопировать"; }, 1600);
+     toast("Ссылка скопирована");
+     haptic();
+     setTimeout(function () { btn.classList.remove("done"); btn.textContent = "Скопировать"; }, 1600);
    }
    function select() {
-     var el = document.getElementById("suburl");
+     var el = document.getElementById("suburl") || document.getElementById("reflink");
+     if (!el) { return; }
      var r = document.createRange(); r.selectNodeContents(el);
      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
    }
@@ -1008,6 +1208,7 @@ body.tg-fullscreen .tabs { top:96px; }
 
  function load() {
    stopRenewPoll();
+   showSkeleton();
    return api("/api/me").then(function (r) {
      if (r.status === 200) { say(""); return render(r.data); }
      setToken("");
