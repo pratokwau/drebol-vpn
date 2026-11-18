@@ -2121,44 +2121,155 @@ $("btn-online").onclick = async function(){
   $("downtime-out").innerHTML = h;
 };
 $("btn-psync").onclick = async function(){ const r = await postConfirm("/panel-sync", {}); renderOut("psync-out", r.data); };
-$("btn-psync-set").onclick = async function(){ const r = await api("/panel-sync/settings"); renderOut("psync-out", r.data); };
-$("btn-morning").onclick = async function(){ const r = await api("/morning"); renderOut("morning-out", r.data); };
-$("btn-morning-run").onclick = async function(){ const r = await postConfirm("/morning/run-now", {}); renderOut("morning-out", r.data); };
+const SYNC_MODE_LABELS = {off: "Выключена", interval: "По интервалу", daily: "Ежедневно в заданное время"};
+async function loadSyncSettings(){
+  const r = await api("/panel-sync/settings");
+  if (r.status !== 200) { renderOut("psync-out", r.data); return; }
+  const st = r.data.settings || {};
+  let h = '<dl class="kv">';
+  h += kvRow("Режим", esc(SYNC_MODE_LABELS[st.mode] || st.mode || "—"));
+  if (st.mode === "interval") h += kvRow("Интервал", (st.interval_hours || "—") + " ч");
+  if (st.mode === "daily") h += kvRow("Время запуска", esc(st.daily_time || "—"));
+  h += kvRow("Расписание", esc(st.schedule || "—"));
+  h += kvRow("Последний запуск", st.last_run ? fmtDate(st.last_run) : "ещё не запускалась");
+  h += "</dl>";
+  const rep = st.last_report || {};
+  const repKeys = Object.keys(rep);
+  if (repKeys.length) {
+    h += '<h3>Последний отчёт</h3><dl class="kv">';
+    repKeys.forEach(function(k){ h += kvRow(esc(k), esc(rep[k])); });
+    h += "</dl>";
+  }
+  h += '<h3>Изменить расписание</h3>';
+  h += '<label>Режим<select id="ps-mode"><option value="off">Выключена</option><option value="interval">По интервалу</option><option value="daily">Ежедневно</option></select></label>';
+  h += '<label>Интервал, часов<input id="ps-interval" type="number" min="1" max="720" value="' + (st.interval_hours || 24) + '"></label>';
+  h += '<label>Время (для «Ежедневно»)<input id="ps-daily" value="' + esc(st.daily_time || "03:00") + '"></label>';
+  h += '<div class="btnrow"><button class="ghost" id="ps-save">Сохранить расписание</button></div>';
+  $("psync-out").innerHTML = h;
+  $("ps-mode").value = st.mode || "off";
+  $("ps-save").onclick = withSpin($("ps-save"), async function(){
+    const body = {settings: {mode: $("ps-mode").value,
+      interval_hours: parseInt($("ps-interval").value || "24", 10),
+      daily_time: $("ps-daily").value.trim()}};
+    const rr = await api("/panel-sync/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+    if (rr.status === 200) { toast("Расписание сохранено", "ok"); loadSyncSettings(); }
+    else toast("Ошибка: " + ((rr.data && rr.data.error) || rr.status), "err");
+  });
+}
+$("btn-psync-set").onclick = function(){ loadSyncSettings(); };
+const MORNING_TOGGLES = {reconcile: "Сверка с Platega", netcheck: "Проверка операторов", alerts: "Алерты о проблемах", support_topics: "Темы поддержки", panel_sync: "Синхронизация с панелью", blacklist_sync: "Синхронизация ЧС", site_sync: "Синхронизация сайта", server_reminder: "Напоминания об оплате серверов", healthcheck: "Проверка здоровья"};
+async function loadMorning(){
+  const r = await api("/morning");
+  if (r.status !== 200) { renderOut("morning-out", r.data); return; }
+  const m = r.data.morning_sync || {};
+  $("mor-time").value = m.time || "";
+  $("mor-enabled").checked = !!m.enabled;
+  let h = '<dl class="kv">';
+  h += kvRow("Время сводки", esc(m.time || "—") + " (МСК)");
+  h += kvRow("Сводка", m.enabled ? '<span class="pill ok">Включена</span>' : '<span class="pill bad">Выключена</span>');
+  Object.keys(MORNING_TOGGLES).forEach(function(k){
+    if (k in m) h += kvRow(MORNING_TOGGLES[k], m[k] ? '<span class="pill ok">Вкл</span>' : '<span class="pill bad">Выкл</span>');
+  });
+  h += kvRow("Проверка операторов: раз в (дней)", String(m.netcheck_days != null ? m.netcheck_days : "—"));
+  h += kvRow("Проверка операторов: последний запуск", m.netcheck_last_run ? fmtDate(m.netcheck_last_run) : "ещё не запускалась");
+  $("morning-out").innerHTML = h + "</dl>";
+}
+$("btn-morning").onclick = function(){ loadMorning(); };
+$("btn-morning-run").onclick = async function(){
+  const r = await postConfirm("/morning/run-now", {});
+  if (r.status === 200) { toast("Сводка запущена", "ok"); $("morning-out").innerHTML = '<p class="mut">Сводка формируется и придёт в Telegram.</p>'; }
+  else renderOut("morning-out", r.data);
+};
 $("btn-morning-save").onclick = async function(){
   const body = {morning_sync: {}};
   const t = $("mor-time").value.trim();
   if (t) body.morning_sync.time = t;
   body.morning_sync.enabled = $("mor-enabled").checked;
   const r = await api("/morning", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
-  renderOut("morning-out", r.data);
+  if (r.status === 200) { toast("Настройки сводки сохранены", "ok"); loadMorning(); }
+  else renderOut("morning-out", r.data);
 };
 $("btn-job").onclick = async function(){
   const r = await postConfirm("/jobs/run-now", {job: $("job-sel").value});
   renderOut("job-out", r.data);
 };
-$("btn-netcheck-show").onclick = async function(){ const r = await api("/netcheck"); renderOut("netcheck-out", r.data); };
+async function loadNetcheck(){
+  const r = await api("/netcheck");
+  if (r.status !== 200) { renderOut("netcheck-out", r.data); return; }
+  const d = r.data;
+  let h = '<dl class="kv">';
+  h += kvRow("Автопроверка", d.netcheck_days ? "раз в " + d.netcheck_days + " дн." : "—");
+  h += kvRow("Последний запуск", d.netcheck_last_run ? fmtDate(d.netcheck_last_run) : "ещё не запускалась");
+  h += "</dl>";
+  h += '<h3>Домены</h3><div class="tblwrap"><table><thead><tr><th>Название</th><th>Домен</th></tr></thead><tbody>';
+  (d.domains || []).forEach(function(x){ h += "<tr><td>" + esc(x.label || "") + '</td><td class="mono">' + esc(x.domain || "") + "</td></tr>"; });
+  h += '</tbody></table></div><h3>Операторы</h3><div class="tblwrap"><table><thead><tr><th>Оператор</th><th>ASN</th></tr></thead><tbody>';
+  (d.operators || []).forEach(function(x){ h += "<tr><td>" + esc(x.label || "") + '</td><td class="mono">' + esc((x.asns || []).join(", ")) + "</td></tr>"; });
+  h += "</tbody></table></div>";
+  $("netcheck-out").innerHTML = h;
+}
+$("btn-netcheck-show").onclick = function(){ loadNetcheck(); };
+const NC_STATE = {ok: ["ok", "Доступен"], blocked: ["bad", "Заблокирован"], error: ["warn", "Ошибка"], no_probe: ["warn", "Нет пробы"]};
 $("btn-netcheck").onclick = withSpin($("btn-netcheck"), async function(){
   const r = await postConfirm("/netcheck/run", {});
-  renderOut("netcheck-out", r.data);
+  if (r.status !== 200) { renderOut("netcheck-out", r.data); return; }
+  const d = r.data, sm = d.summary || {};
+  let h = '<p>Итого проверок: <b>' + (sm.total || 0) + "</b> · доступно: <b>" + (sm.ok || 0) + "</b> · заблокировано: <b>" + (sm.blocked || 0) + "</b> · нет пробы: <b>" + (sm.no_probe || 0) + "</b> · ошибок: <b>" + (sm.errors || 0) + "</b></p>";
+  const bo = d.by_operator || {};
+  const boKeys = Object.keys(bo);
+  if (boKeys.length) {
+    h += '<h3>По операторам</h3><p>' + boKeys.map(function(k){ return esc(k) + " " + esc(bo[k]); }).join(" · ") + "</p>";
+  }
+  const res = d.results || [];
+  if (res.length) {
+    h += '<div class="tblwrap"><table><thead><tr><th>Домен</th><th>Оператор</th><th>Состояние</th></tr></thead><tbody>';
+    res.forEach(function(row){
+      const ops = row.operators || {};
+      Object.keys(ops).forEach(function(op){
+        const st = NC_STATE[(ops[op] || {}).state] || ["info", (ops[op] || {}).state || "—"];
+        h += '<tr><td class="mono">' + esc(row.domain || row.label || "") + "</td><td>" + esc(op) + '</td><td><span class="pill ' + st[0] + '">' + st[1] + "</span></td></tr>";
+      });
+      if (row.error) h += '<tr><td class="mono">' + esc(row.domain || "") + '</td><td colspan="2">' + esc(row.error) + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  }
+  $("netcheck-out").innerHTML = h;
 });
-$("btn-site-show").onclick = async function(){ const r = await api("/site"); renderOut("site-out", r.data); };
+async function loadSite(){
+  const r = await api("/site");
+  if (r.status !== 200) { renderOut("site-out", r.data); return; }
+  const st = r.data.site || {};
+  let h = '<dl class="kv">';
+  h += kvRow("Домен", '<span class="mono">' + esc(st.domain || "—") + "</span>");
+  if (st.url) h += kvRow("Адрес", '<a href="' + esc(st.url) + '" target="_blank" rel="noopener">' + esc(st.url) + "</a>");
+  h += kvRow("Настроен", st.configured ? '<span class="pill ok">Да</span>' : '<span class="pill bad">Нет</span>');
+  h += kvRow("HTTPS", st.https ? "да" : "нет");
+  h += kvRow("Задеплоен", st.deployed_at ? fmtDate(st.deployed_at) : "ещё не деплоился");
+  h += kvRow("Автообновление", st.auto ? "включено" : "выключено");
+  h += kvRow("Ожидает обновления", st.update_pending ? '<span class="pill warn">Да — нужен деплой</span>' : "нет");
+  if (st.host) h += kvRow("Хост", '<span class="mono">' + esc(st.host) + "</span>");
+  if (st.user) h += kvRow("Пользователь", '<span class="mono">' + esc(st.user) + "</span>");
+  $("site-out").innerHTML = h + "</dl>";
+}
+$("btn-site-show").onclick = function(){ loadSite(); };
 $("btn-deploy").onclick = async function(){ const r = await postConfirm("/site/deploy", {}); renderOut("site-out", r.data); };
-$("btn-st-save").onclick = async function(){
-  const r = await api("/site/texts", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({field: $("st-field").value, text: $("st-text").value})});
-  renderOut("st-out", r.data);
-};
 $("btn-st-show").onclick = async function(){
   const r = await api("/site/texts");
   if (r.status !== 200) { renderOut("st-out", r.data); return; }
   const texts = r.data.texts || {};
-  const keys = Object.keys(texts);
-  if (!keys.length) { $("st-out").innerHTML = '<div class="empty">Текстов нет</div>'; return; }
-  let h = '<div class="tblwrap"><table><thead><tr><th>Поле</th><th>Текст</th></tr></thead><tbody>';
-  keys.forEach(function(k){
-    h += '<tr data-field="' + esc(k) + '"><td class="mono">' + esc(k) + '</td><td>' + esc(String(texts[k]).slice(0, 80)) + '</td></tr>';
+  const sections = r.data.sections || {};
+  const secIds = Object.keys(sections);
+  if (!secIds.length) { $("st-out").innerHTML = '<div class="empty">Разделов текстов нет</div>'; return; }
+  let h = '<p class="sub">Пустое значение — на сайте работает текст по умолчанию. Нажми на строку, чтобы изменить поле; тексты применяются при следующем деплое.</p>';
+  secIds.forEach(function(secId){
+    const sec = sections[secId];
+    h += "<h3>" + esc(sec.title || secId) + '</h3><div class="tblwrap"><table><thead><tr><th>Поле</th><th>Сейчас</th></tr></thead><tbody>';
+    (sec.fields || []).forEach(function(f){
+      const val = texts[f.field];
+      h += '<tr data-field="' + esc(f.field) + '"><td>' + esc(f.label || f.field) + ' <span class="mono small mut">' + esc(f.field) + '</span></td><td>' + (val ? esc(String(val).slice(0, 100)) : '<span class="mut">по умолчанию</span>') + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
   });
-  h += '</tbody></table></div>';
   $("st-out").innerHTML = h;
   $("st-out").querySelectorAll("tr[data-field]").forEach(function(tr){
     tr.onclick = function(){
@@ -2167,6 +2278,12 @@ $("btn-st-show").onclick = async function(){
       $("st-text").focus();
     };
   });
+};
+$("btn-st-save").onclick = async function(){
+  const r = await api("/site/texts", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({field: $("st-field").value, text: $("st-text").value})});
+  if (r.status === 200) { toast("Текст сохранён — применится при деплое", "ok"); $("btn-st-show").click(); }
+  else renderOut("st-out", r.data);
 };
 $("btn-site-del").onclick = async function(){ const r = await postConfirm("/site/delete", {}); renderOut("site-del-out", r.data); };
 $("btn-backup-restore").onclick = async function(){

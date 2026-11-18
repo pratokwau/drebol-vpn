@@ -1828,7 +1828,8 @@ def _site_texts_snapshot() -> dict:
         "texts": cfg.get("site_texts") or {},
         "sections": {
             sec_id: {"title": title,
-                     "fields": [f for f, _ in items]}
+                     "fields": [{"field": f, "label": name}
+                                for f, name in items]}
             for sec_id, (title, items) in site_mod.SITE_SECTIONS.items()
         },
     }
