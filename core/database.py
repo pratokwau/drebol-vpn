@@ -1655,12 +1655,26 @@ async def dashboard_series(days: int = 30) -> dict:
             "SELECT status, COUNT(*) FROM paid_subs GROUP BY status"
         ) as cur:
             by_status = [(s, int(c)) for s, c in await cur.fetchall()]
+        # Срок тарифа: период ПОСЛЕДНЕЙ оплаты каждой подписки.
+        # Раньше группировали по ind_pay_period — индивидуальному
+        # периоду из настроек, который у всех оказался одинаковым
+        # (60 дн.), и график врал. Подписки без оплат — срок 0 (триал).
         async with db.execute(
-            "SELECT COALESCE(ind_pay_period, 0), COUNT(*) FROM paid_subs "
-            "GROUP BY 1"
+            "SELECT tg_id, period_seconds FROM payments "
+            "WHERE status = 'paid' "
+            "ORDER BY COALESCE(paid_at, created_at) DESC, id DESC"
         ) as cur:
-            by_term = [(int(p) // 86400, int(c))
-                       for p, c in await cur.fetchall()]
+            latest_period = {}
+            for tg_id, period in await cur.fetchall():
+                latest_period.setdefault(tg_id, period)
+        async with db.execute("SELECT tg_id FROM paid_subs") as cur:
+            sub_owners = [r[0] for r in await cur.fetchall()]
+    from collections import Counter
+    _terms = Counter()
+    for tg_id in sub_owners:
+        period = latest_period.get(tg_id)
+        _terms[int(period) // 86400 if period else 0] += 1
+    by_term = sorted(_terms.items())
     return {
         "days": days,
         "revenue": [{"date": d, "sum": revenue.get(d, 0)} for d in labels],
@@ -1760,49 +1774,88 @@ async def admin_list_users(page: int = 1, per_page: int = 25,
     return rows, max(1, (total + per_page - 1) // per_page)
 
 
-async def dashboard_paid_subs(page: int = 1, per_page: int = 25) -> tuple[list, int]:
-    """Платные подписки для дашборда: последние оплаченные счета первыми.
+def _expire_to_iso(expire_date) -> str | None:
+    """expire_date из paid_subs («dd.mm.yyyy hh:mm:ss») → ISO
+    «yyyy-mm-dd hh:mm:ss». Что не парсится — вернуть как есть."""
+    if not expire_date:
+        return None
+    import datetime as _dt
+    text = str(expire_date).strip()
+    for fmt in ("%d.%m.%Y %H:%M:%S", "%d.%m.%Y %H:%M", "%d.%m.%Y"):
+        try:
+            return _dt.datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    return text
 
-    Строка: id счёта, tg_id, имя, сумма нетто, срок (секунды), дата оплаты,
-    дата истечения подписки (самая поздняя у юзера) и id подписки."""
+
+async def dashboard_paid_subs(page: int = 1, per_page: int = 25) -> tuple[list, int]:
+    """Платные подписки для дашборда: ОДНА строка на подписку (не на оплату).
+
+    Раньше список строился от таблицы payments — одна строка на каждый
+    оплаченный счёт: у юзера с пятью оплатами было пять «подписок»-дублей,
+    а дата истечения подтягивалась текущей и не билась со сроком строки.
+    Теперь: подписки, у которых есть хотя бы одна оплата; сумма, срок и
+    дата — от ПОСЛЕДНЕЙ оплаты; статус и истечение — самой подписки.
+    Сортировка — по дате последней оплаты, свежие сверху.
+
+    Строка: id подписки, tg_id, имя, username, сумма нетто последней
+    оплаты, её срок (секунды), дата оплаты (ISO, локальное время),
+    дата истечения подписки (ISO), статус подписки."""
     page = max(1, int(page))
     per_page = max(1, min(int(per_page), 25))
-    offset = (page - 1) * per_page
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT COUNT(*) FROM payments WHERE status = 'paid'"
+            "SELECT tg_id, amount - COALESCE(partial_refunded, 0), "
+            "period_seconds, datetime(COALESCE(paid_at, created_at), 'localtime'), "
+            "COALESCE(paid_at, created_at) FROM payments "
+            "WHERE status = 'paid' "
+            "ORDER BY COALESCE(paid_at, created_at) DESC, id DESC"
         ) as cur:
-            total = (await cur.fetchone())[0]
+            latest_pay = {}
+            for tg_id, amount, period, paid_iso, paid_raw in await cur.fetchall():
+                latest_pay.setdefault(tg_id, (amount, period, paid_iso, paid_raw))
         async with db.execute(
-            "SELECT p.id, p.tg_id, u.first_name, u.username, "
-            "p.amount - COALESCE(p.partial_refunded, 0), p.period_seconds, "
-            "datetime(COALESCE(p.paid_at, p.created_at), 'localtime'), "
-            "(SELECT s.expire_date FROM paid_subs s WHERE s.tg_id = p.tg_id "
-            " ORDER BY s.expire_date DESC LIMIT 1), "
-            "(SELECT s.id FROM paid_subs s WHERE s.tg_id = p.tg_id "
-            " ORDER BY s.expire_date DESC LIMIT 1) "
-            "FROM payments p LEFT JOIN users u ON u.id = p.tg_id "
-            "WHERE p.status = 'paid' "
-            "ORDER BY COALESCE(p.paid_at, p.created_at) DESC, p.id DESC "
-            "LIMIT ? OFFSET ?", (per_page, offset)) as cur:
-            rows = await cur.fetchall()
-    return rows, max(1, (total + per_page - 1) // per_page)
+            "SELECT s.id, s.tg_id, u.first_name, u.username, s.expire_date, s.status "
+            "FROM paid_subs s LEFT JOIN users u ON u.id = s.tg_id"
+        ) as cur:
+            subs = await cur.fetchall()
+    rows = []
+    for sub_id, tg_id, first_name, username, expire_date, status in subs:
+        pay = latest_pay.get(tg_id)
+        if not pay:
+            continue
+        amount, period, paid_iso, paid_raw = pay
+        rows.append((sub_id, tg_id, first_name, username, amount, period,
+                     paid_iso, _expire_to_iso(expire_date), status, paid_raw))
+    rows.sort(key=lambda r: (r[9] or "",), reverse=True)
+    total_pages = max(1, (len(rows) + per_page - 1) // per_page)
+    page = min(page, total_pages)
+    offset = (page - 1) * per_page
+    return [r[:9] for r in rows[offset:offset + per_page]], total_pages
 
 
 async def dashboard_expiring(days: int = 3, limit: int = 50) -> list:
     """Активные подписки, истекающие в ближайшие N дней. Сортировка —
-    по дате истечения, самые скорые первыми."""
+    по дате истечения, самые скорые первыми.
+
+    ВНИМАНИЕ: expire_date в paid_subs хранится ТЕКСТОМ «dd.mm.yyyy
+    hh:mm:ss», поэтому datetime(expire_date) даёт NULL и сравнивать
+    напрямую нельзя (так список и пустовал). Сравниваем по переставленному
+    ключу «yyyy-mm-dd hh:mm:ss» — тот же приём, что _EXP_KEY в
+    paidsub.storage. Ключ же и возвращаем как expire_date (это ISO)."""
     days = max(1, min(int(days), 30))
+    key = ("substr(s.expire_date, 7, 4) || '-' || substr(s.expire_date, 4, 2) "
+           "|| '-' || substr(s.expire_date, 1, 2) || substr(s.expire_date, 11)")
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT s.id, s.tg_id, u.first_name, u.username, "
-            "s.expire_date, s.status FROM paid_subs s "
+            f"{key}, s.status FROM paid_subs s "
             "LEFT JOIN users u ON u.id = s.tg_id "
             "WHERE s.status IN ('active', 'renewal') "
-            "AND datetime(s.expire_date) > datetime('now', 'localtime') "
-            "AND datetime(s.expire_date) <= "
-            "datetime('now', 'localtime', ?) "
-            "ORDER BY s.expire_date ASC LIMIT ?",
+            f"AND {key} > strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime') "
+            f"AND {key} <= strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime', ?) "
+            f"ORDER BY {key} ASC LIMIT ?",
             (f"+{days} days", limit)) as cur:
             return await cur.fetchall()
 

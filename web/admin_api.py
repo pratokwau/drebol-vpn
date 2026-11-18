@@ -581,11 +581,11 @@ async def dashboard_paid(request):
     rows, total_pages = await dashboard_paid_subs(page)
     return web.json_response({
         "items": [{
-            "payment_id": r[0], "tg_id": r[1],
+            "sub_id": r[0], "tg_id": r[1],
             "name": (r[2] or "").strip() or None,
             "username": r[3] or None,
             "amount": int(r[4]), "period_seconds": r[5],
-            "paid_at": r[6], "expire_date": r[7], "sub_id": r[8],
+            "paid_at": r[6], "expire_date": r[7], "status": r[8],
         } for r in rows],
         "page": max(1, page), "total_pages": total_pages})
 
