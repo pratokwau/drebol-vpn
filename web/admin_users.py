@@ -292,13 +292,38 @@ async def sub_card(request):
     row = await get_paid_sub_admin(sub_id)
     if not row:
         return web.json_response({"error": "not_found"}, status=404)
+    # Живое состояние из панели + владелец и пригласивший: get_sub_card
+    # в paidsub/service.py (раньше здесь звался несуществующий
+    # sub_panel_state, и блок «В панели» в карточке никогда не жил).
+    panel, user, referrer = {}, None, None
     try:
         svc = _service()
-    except ImportError:
-        return web.json_response({"error": "service_not_ready"}, status=503)
-    panel = await svc.sub_panel_state(row[2]) if hasattr(svc, "sub_panel_state") else {}
-    return web.json_response({"subscription": _paid_sub_dict(row),
-                              "panel": panel})
+        card = await svc.get_sub_card(sub_id)
+        if card.get("ok"):
+            panel = card.get("panel") or {}
+            user = card.get("user")
+            referrer = card.get("referrer")
+    except Exception:
+        logging.exception("админка: sub_card #%s: панель недоступна", sub_id)
+    payments = {"items": [], "count": 0, "sum": 0}
+    try:
+        from core.database import user_payments
+        prows, pcount, psum = await user_payments(row[1], 5)
+        payments = {
+            "items": [{"id": r[0], "provider": r[1] or "", "amount": r[2],
+                       "status": r[3], "date": str(r[4] or "")[:16],
+                       "promo": r[5] or ""} for r in prows],
+            "count": pcount, "sum": psum,
+        }
+    except Exception:
+        logging.exception("админка: sub_card #%s: платежи недоступны", sub_id)
+    from config import sub_url_for_display
+    return web.json_response({
+        "subscription": _paid_sub_dict(row),
+        "panel": panel, "user": user, "referrer": referrer,
+        "payments": payments,
+        "display_url": sub_url_for_display(row[5] if len(row) > 5 else ""),
+    })
 
 
 async def _sub_action(request, action: str):
@@ -399,6 +424,79 @@ async def sub_devices(request):
                                   "details": str(res.get("error") or "")},
                                  status=400)
     return web.json_response(res)
+
+
+async def sub_ips(request):
+    """IP-адреса, с которых подписка ходит в панель (по устройствам)."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from paidsub.storage import get_paid_sub
+    try:
+        sub_id = int(request.match_info["sub_id"])
+    except (KeyError, ValueError):
+        return web.json_response({"error": "bad_id"}, status=400)
+    row = await get_paid_sub(sub_id)
+    if not row:
+        return web.json_response({"error": "not_found"}, status=404)
+    svc = _service()
+    res = await svc.list_ips(sub_id)
+    if not res.get("ok"):
+        return web.json_response({"error": "action_failed",
+                                  "details": str(res.get("error") or "")},
+                                 status=400)
+    return web.json_response(res)
+
+
+async def _sub_device_mutation(request, kind: str):
+    """Убрать одно устройство / сбросить все: с подтверждением, как
+    остальные разрушительные действия по подписке."""
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    try:
+        sub_id = int(request.match_info["sub_id"])
+    except (KeyError, ValueError):
+        return web.json_response({"error": "bad_id"}, status=400)
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        summary = (f"Убрать устройство подписки #{sub_id}"
+                   if kind == "sub_device_delete"
+                   else f"Сбросить все устройства подписки #{sub_id}")
+        tok = issue_confirm(actor, kind, {"sub_id": sub_id, "body": body},
+                            summary)
+        return confirm_needed_response(tok, summary)
+    payload = take_confirm(actor, token, kind)
+    if payload is None:
+        return web.json_response({"error": "bad_confirm"}, status=403)
+    body = payload.get("body") or {}
+    svc = _service()
+    try:
+        if kind == "sub_device_delete":
+            res = await svc.delete_device(sub_id, str(body.get("ref") or ""))
+        else:
+            res = await svc.clear_hwid(sub_id)
+    except Exception as ex:
+        logging.error("админка: %s #%s: %s", kind, sub_id, ex)
+        return web.json_response({"error": "action_failed"}, status=502)
+    if not res.get("ok"):
+        return web.json_response(
+            {"error": "action_failed",
+             "details": str(res.get("error") or "")}, status=400)
+    await _audit(actor, kind, f"sub_id: {sub_id}")
+    return web.json_response({"ok": True, "result": res})
+
+
+async def sub_device_delete(request):
+    return await _sub_device_mutation(request, "sub_device_delete")
+
+
+async def sub_devices_clear(request):
+    return await _sub_device_mutation(request, "sub_devices_clear")
 
 
 async def subs_bulk(request):
@@ -679,3 +777,6 @@ def register(app) -> None:
             f"/subs/{{sub_id}}/{action}",
             lambda req, a=action: _sub_action(req, a))
     app.router.add_get("/subs/{sub_id}/devices", sub_devices)
+    app.router.add_get("/subs/{sub_id}/ips", sub_ips)
+    app.router.add_post("/subs/{sub_id}/devices/delete", sub_device_delete)
+    app.router.add_post("/subs/{sub_id}/devices/clear", sub_devices_clear)

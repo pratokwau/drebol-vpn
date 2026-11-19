@@ -182,6 +182,11 @@ details p,details ul{margin-top:8px}
 .drawer-close:hover{border-color:var(--gold);transform:none;background:rgba(255,255,255,.06)}
 .drawer-body{padding:18px 22px 28px;overflow-y:auto}
 .drawer-foot{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;background:rgba(255,255,255,.03)}
+.tbar{display:block;height:6px;background:rgba(255,255,255,.08);border-radius:99px;margin-top:6px;overflow:hidden}
+.tbar-fill{display:block;height:100%;background:#D8DBE0;border-radius:99px}
+.tbar-fill.hi{background:#E5484D}
+.sublink{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sublink .mono{word-break:break-all;flex:1;min-width:200px}
 
 /* --- Скелетоны загрузки --- */
 .skel{border-radius:8px;background:linear-gradient(90deg,rgba(255,255,255,.05) 25%,rgba(255,255,255,.11) 50%,rgba(255,255,255,.05) 75%);background-size:200% 100%;animation:shimmer 1.2s linear infinite}
@@ -1055,14 +1060,20 @@ $("btn-quick-deploy").onclick = withSpin($("btn-quick-deploy"), async function()
   $("quick-upd-msg").textContent = r.status === 200 ? "Сайт развёрнут." : ("Ошибка: " + (r.data.error || r.status));
   if (r.status === 200) toast("Сайт развёрнут", "ok");
 });
-const EDITABLE = ["channel_url","force_subscribe","paid_trial_period","paid_preset_hwid","paid_preset_traffic","paid_preset_lte","referral_bonus","referral_invited_bonus","maintenance_enabled","maintenance_text","device_price","device_max_extra"];
-const SETTINGS_LABELS = {channel_url: "Ссылка на канал", force_subscribe: "Обязательная подписка на канал", paid_trial_period: "Триал, дней", paid_preset_hwid: "Лимит устройств в подписке", paid_preset_traffic: "Лимит трафика, ГБ (0 — безлимит)", paid_preset_lte: "Лимит LTE, ГБ", referral_bonus: "Бонус пригласившему, дней", referral_invited_bonus: "Бонус приглашённому, дней", maintenance_enabled: "Режим техработ включён", maintenance_text: "Текст на время техработ", device_price: "Цена доп. устройства, ₽", device_max_extra: "Максимум доп. устройств"};
+const EDITABLE = ["channel_url","force_subscribe","sub_link_domain","paid_trial_period","paid_preset_hwid","paid_preset_traffic","paid_preset_lte","referral_bonus","referral_invited_bonus","maintenance_enabled","maintenance_text","device_price","device_max_extra"];
+const SETTINGS_LABELS = {channel_url: "Ссылка на канал", force_subscribe: "Обязательная подписка на канал", sub_link_domain: "Домен ссылки подписки", paid_trial_period: "Триал, дней", paid_preset_hwid: "Лимит устройств в подписке", paid_preset_traffic: "Лимит трафика, ГБ (0 — безлимит)", paid_preset_lte: "Лимит LTE, ГБ", referral_bonus: "Бонус пригласившему, дней", referral_invited_bonus: "Бонус приглашённому, дней", maintenance_enabled: "Режим техработ включён", maintenance_text: "Текст на время техработ", device_price: "Цена доп. устройства, ₽", device_max_extra: "Максимум доп. устройств"};
 const SETTINGS_DAY_KEYS = ["paid_trial_period", "referral_bonus", "referral_invited_bonus"];
 async function loadSettings(){
   const r = await api("/settings");
   if (r.status !== 200) return;
   const s = r.data.settings || {};
   $("settings").innerHTML = EDITABLE.map(function(k){
+    if (k === "sub_link_domain") {
+      const cur = s[k] === "key" ? "key" : "sub";
+      return "<label>" + esc(SETTINGS_LABELS[k]) + '<select data-k="sub_link_domain">' +
+        '<option value="sub"' + (cur === "sub" ? " selected" : "") + '>sub.drbl.tech (через CDN)</option>' +
+        '<option value="key"' + (cur === "key" ? " selected" : "") + '>key.drbl.tech (напрямую)</option></select></label>';
+    }
     let v = s[k];
     // В днях показываем только значения, кратные суткам: 12-часовой бонус
     // честнее оставить секундами, чем округлить до «1 день» и переписать.
@@ -1091,6 +1102,9 @@ $("btn-save").onclick = withSpin($("btn-save"), async function(){
     let v = inp.type === "checkbox" ? inp.checked : (inp.type === "number" ? parseInt(inp.value || "0", 10) : inp.value);
     if (inp.dataset.days && typeof v === "number") v = v * 86400;
     patch[inp.dataset.k] = v;
+  });
+  document.querySelectorAll("#settings select").forEach(function(sel){
+    patch[sel.dataset.k] = sel.value;
   });
   const r = await api("/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({settings: patch})});
   $("save-msg").textContent = r.status === 200 ? "Сохранено" : ("Ошибка: " + (r.data.error || r.status));
@@ -1343,32 +1357,71 @@ async function openSubEditor(id){
   if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить подписку</p>'; return; }
   renderSubEditor(r.data);
 }
+function fmtBytesAdmin(n){
+  n = Number(n || 0);
+  if (n <= 0) return "0 Б";
+  const u = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? String(Math.round(n)) : n.toFixed(n >= 100 ? 0 : 1)) + " " + u[i];
+}
 function renderSubEditor(data){
   const s = data.subscription || {};
   const p = data.panel || {};
+  const usr = data.user || {};
+  const ref = data.referrer || null;
+  const pays = data.payments || {items: [], count: 0, sum: 0};
   $("drawer-title").textContent = "Подписка #" + s.id;
-  $("drawer-sub").textContent = (s.first_name || "") + (s.username ? " @" + s.username : "") + " · tg #" + s.tg_id;
+  $("drawer-sub").textContent = ((usr.first_name || "") + (usr.username ? " @" + usr.username : "") + " · tg #" + s.tg_id).trim();
+  const usedBytes = Number(p.up || 0) + Number(p.down || 0);
+  const limitBytes = Number(s.total_gb || 0) * 1073741824;
+  let leftTxt = "";
+  if (s.expire_date) {
+    const dl = Math.ceil((new Date(s.expire_date).getTime() - Date.now()) / 86400000);
+    leftTxt = dl > 0 ? " (ещё " + dl + " дн.)" : " (истекла)";
+  }
   let h = '<dl class="kv">';
-  h += kvRow("Email", '<span class="mono">' + esc(s.email || "") + '</span>');
+  h += kvRow("Логин в панели", '<span class="mono">' + esc(s.email || "") + '</span>');
+  h += kvRow("Владелец", esc((usr.first_name || "—") + (usr.username ? " @" + usr.username : "")) + ' · <span class="mono">tg ' + s.tg_id + '</span>');
+  if (ref) h += kvRow("Пригласил", esc(ref.first_name || "") + ' · <span class="mono">tg ' + ref.tg_id + '</span>');
   h += kvRow("UUID", '<span class="mono">' + esc(s.uuid || "") + '</span>');
   h += kvRow("Sub ID", '<span class="mono">' + esc(s.sub_id || "") + '</span>');
-  h += kvRow("Истекает", '<span class="mono">' + fmtDate(s.expire_date) + '</span>');
+  h += kvRow("Создана", '<span class="mono">' + esc(String(s.created_at || "").slice(0, 16)) + '</span>');
+  h += kvRow("Истекает", '<span class="mono">' + fmtDate(s.expire_date) + '</span>' + leftTxt);
   h += kvRow("Статус", subStatusPill(s.status));
   h += kvRow("Продлений", s.times_renewed == null ? "—" : s.times_renewed);
-  h += kvRow("Лимит трафика", (s.total_gb || 0) + " ГБ");
-  h += kvRow("Лимит устройств", s.limit_hwid == null ? "—" : s.limit_hwid);
+  if (typeof p.enabled !== "undefined") h += kvRow("В панели", p.enabled ? "включена" : "выключена");
+  if (p.traffic_ok) {
+    let t = fmtBytesAdmin(usedBytes) + (limitBytes > 0 ? " из " + (s.total_gb || 0) + " ГБ" : " · лимит не задан");
+    if (limitBytes > 0) {
+      const pct = Math.min(100, Math.round(usedBytes / limitBytes * 100));
+      t += '<span class="tbar"><span class="tbar-fill' + (pct >= 90 ? " hi" : "") + '" style="width:' + pct + '%"></span></span>';
+    }
+    h += kvRow("Трафик", t);
+  } else {
+    h += kvRow("Лимит трафика", Number(s.total_gb || 0) > 0 ? (s.total_gb + " ГБ") : "безлимит");
+  }
+  h += kvRow("Устройства", "лимит " + (s.limit_hwid == null ? "—" : s.limit_hwid) + (s.extra_devices ? " (включая купленные: +" + s.extra_devices + ")" : ""));
   h += kvRow("LTE", s.lte_gb == null ? "без лимита" : s.lte_gb + " ГБ");
   h += kvRow("Триал", s.trial_period == null ? "—" : fmtDays(s.trial_period));
-  if (p && typeof p.enabled !== "undefined") h += kvRow("В панели", p.enabled ? "включена" : "выключена");
   h += '</dl>';
+  if (data.display_url) {
+    h += '<h3>Ссылка подписки</h3><div class="sublink"><span class="mono">' + esc(data.display_url) + '</span><button class="ghost" id="ed-copy">Копировать</button></div>';
+  }
+  if (pays.items && pays.items.length) {
+    h += '<h3>Платежи владельца</h3><div class="tblwrap"><table><thead><tr><th>Дата</th><th>Провайдер</th><th>Сумма</th><th>Статус</th></tr></thead><tbody>' +
+      pays.items.map(function(it){
+        return '<tr><td class="mono">' + fmtDate(it.date) + '</td><td>' + esc(PROVIDER_LABELS[it.provider] || it.provider || "") + '</td><td class="num">' + fmtMoney(it.amount) + '</td><td>' + statusPill(it.status, PAY_LABELS[it.status] || it.status) + '</td></tr>';
+      }).join("") + '</tbody></table></div><p class="mut">Всего платежей: ' + pays.count + ' · на сумму ' + fmtMoney(pays.sum) + '</p>';
+  }
   h += '<h3>Продлить / изменить</h3>';
-  h += '<label>Продлить на дней<input id="ed-days" type="number" placeholder="дней"></label><div class="btnrow"><button class="ghost" data-ed="extend">Продлить</button></div>';
+  h += '<label>Продлить на дней<input id="ed-days" type="number" placeholder="дней"></label><div class="btnrow"><button class="ghost" data-ed="extend">Продлить</button><button class="ghost" data-quick="30">+30</button><button class="ghost" data-quick="90">+90</button><button class="ghost" data-quick="365">+365</button></div>';
   h += '<label>Новая дата истечения<input id="ed-until" placeholder="напр. 2026-12-31 23:59" value="' + esc(s.expire_date || "") + '"></label><div class="btnrow"><button class="ghost" data-ed="expire">Установить дату</button></div>';
   h += '<label>Лимит устройств (HWID)<input id="ed-hwid" type="number" value="' + (s.limit_hwid || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="hwid">Сохранить лимит</button></div>';
   h += '<label>Лимит трафика, ГБ<input id="ed-traffic" type="number" value="' + (s.total_gb || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="traffic">Сохранить лимит</button></div>';
   h += '<label>Лимит LTE, ГБ (пусто — без лимита)<input id="ed-lte" type="number" value="' + (s.lte_gb == null ? "" : s.lte_gb) + '"></label><div class="btnrow"><button class="ghost" data-ed="lte">Сохранить LTE</button></div>';
   h += '<label>Триал, дней<input id="ed-trial" type="number" value="' + Math.round((s.trial_period || 0) / 86400) + '"></label><div class="btnrow"><button class="ghost" data-ed="trial">Установить триал</button></div>';
-  h += '<h3>Устройства</h3><div class="btnrow"><button class="ghost" id="ed-devices">Показать устройства</button></div><div id="ed-devices-out"></div>';
+  h += '<h3>Устройства и подключения</h3><div class="btnrow"><button class="ghost" id="ed-devices">Показать устройства</button><button class="ghost" id="ed-ips">IP-адреса</button></div><div id="ed-devices-out"></div>';
   h += '<p class="mut" id="ed-msg" style="margin-top:10px"></p>';
   $("drawer-body").innerHTML = h;
   $("drawer-foot").innerHTML = '<button class="ghost" data-ed="toggle">Вкл / выкл</button><button class="ghost" data-ed="freeze">Заморозить</button><button class="ghost" data-ed="reissue">Перевыпустить</button><button class="danger" data-ed="delete">Удалить</button>';
@@ -1378,10 +1431,58 @@ function renderSubEditor(data){
     });
   };
   bind($("drawer-body")); bind($("drawer-foot"));
-  $("ed-devices").onclick = async function(){
-    const r = await api("/subs/" + subsCurrentId + "/devices");
-    renderOut("ed-devices-out", r.data);
+  $("drawer-body").querySelectorAll("[data-quick]").forEach(function(b){
+    b.onclick = withSpin(b, function(){ $("ed-days").value = b.dataset.quick; return subEditorAction("extend"); });
+  });
+  const cp = $("ed-copy");
+  if (cp) cp.onclick = function(){
+    if (navigator.clipboard) navigator.clipboard.writeText(data.display_url).then(function(){ toast("Ссылка скопирована", "ok"); });
   };
+  $("ed-devices").onclick = loadSubDevices;
+  $("ed-ips").onclick = loadSubIps;
+}
+async function loadSubDevices(){
+  const out = $("ed-devices-out");
+  if (!out) return;
+  out.innerHTML = '<p class="mut">Загрузка…</p>';
+  const r = await api("/subs/" + subsCurrentId + "/devices");
+  if (r.status !== 200 || !r.data.ok) { out.innerHTML = '<p class="err">Не удалось получить устройства</p>'; return; }
+  const items = r.data.items || [];
+  let h = "";
+  if (!items.length) h += '<p class="mut">Устройств нет</p>';
+  else {
+    h += '<div class="tblwrap"><table><thead><tr><th>Устройство</th><th>Платформа</th><th>IP</th><th>Последний визит</th><th></th></tr></thead><tbody>' +
+      items.map(function(d){
+        return '<tr><td>' + esc(d.deviceModel || "Устройство") + '</td><td>' + esc(d.platform || "") + '</td><td class="mono">' + esc(d.requestIp || "") + '</td><td class="mono">' + esc(String(d.lastSeen || "").slice(0, 16).replace("T", " ")) + '</td><td><button class="ghost" data-dev-del="' + esc(d.hwid || d.id || "") + '">Убрать</button></td></tr>';
+      }).join("") + '</tbody></table></div>';
+  }
+  h += '<div class="btnrow"><button class="danger" id="ed-dev-clear">Сбросить все устройства</button></div>';
+  out.innerHTML = h;
+  out.querySelectorAll("[data-dev-del]").forEach(function(b){
+    b.onclick = withSpin(b, async function(){
+      const rr = await postConfirm("/subs/" + subsCurrentId + "/devices/delete", {ref: b.dataset.devDel});
+      if (rr.status === 200) { toast("Устройство убрано", "ok"); loadSubDevices(); }
+      else toast("Ошибка: " + (rr.data.error || rr.status), "err");
+    });
+  });
+  const clr = $("ed-dev-clear");
+  if (clr) clr.onclick = withSpin(clr, async function(){
+    const rr = await postConfirm("/subs/" + subsCurrentId + "/devices/clear", {});
+    if (rr.status === 200) { toast("Устройства сброшены", "ok"); loadSubDevices(); }
+    else toast("Ошибка: " + (rr.data.error || rr.status), "err");
+  });
+}
+async function loadSubIps(){
+  const out = $("ed-devices-out");
+  if (!out) return;
+  out.innerHTML = '<p class="mut">Загрузка…</p>';
+  const r = await api("/subs/" + subsCurrentId + "/ips");
+  if (r.status !== 200 || !r.data.ok) { out.innerHTML = '<p class="err">Не удалось получить IP-адреса</p>'; return; }
+  const items = r.data.items || [];
+  if (!items.length) { out.innerHTML = '<p class="mut">IP-адресов нет</p>'; return; }
+  out.innerHTML = '<div class="tblwrap"><table><thead><tr><th>IP</th><th>Устройство</th><th>Когда</th></tr></thead><tbody>' +
+    items.map(function(it){ return '<tr><td class="mono">' + esc(it.ip || "") + '</td><td>' + esc(it.node || "") + '</td><td class="mono">' + esc(String(it.ts || "").slice(0, 16).replace("T", " ")) + '</td></tr>'; }).join("") +
+    '</tbody></table></div>';
 }
 async function subEditorAction(a){
   const id = subsCurrentId;
