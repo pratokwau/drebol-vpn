@@ -129,6 +129,8 @@ button{background:var(--grad);background-size:160% 100%;color:#050505;border:0;b
 button:hover{transform:translateY(-2px);background-position:90% 0;box-shadow:0 12px 26px rgba(255,255,255,.18)}
 button:active{transform:scale(.98)}
 button.ghost{background:rgba(255,255,255,.03);color:var(--txt);border:1px solid var(--line2);box-shadow:none}
+a.btnlike{display:inline-block;padding:8px 14px;border-radius:10px;background:rgba(255,255,255,.03);color:var(--txt);border:1px solid var(--line2);text-decoration:none;font-size:14px}
+a.btnlike:hover{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.06)}
 button.ghost:hover{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.06)}
 button.danger{background:transparent;color:var(--bad);border:1px solid rgba(248,113,113,.4);box-shadow:none}
 button.danger:hover{border-color:var(--bad);background:rgba(248,113,113,.08)}
@@ -182,6 +184,10 @@ details p,details ul{margin-top:8px}
 .drawer-close:hover{border-color:var(--gold);transform:none;background:rgba(255,255,255,.06)}
 .drawer-body{padding:18px 22px 28px;overflow-y:auto}
 .drawer-foot{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:8px;flex-wrap:wrap;background:rgba(255,255,255,.03)}
+label.chk{display:flex;gap:8px;align-items:center;color:var(--txt);font-size:14px;margin-top:6px}
+label.chk input{width:auto;margin:0}
+.chkgrid{margin:10px 0}
+.chkgrid>b{display:block;margin-bottom:4px}
 .tbar{display:block;height:6px;background:rgba(255,255,255,.08);border-radius:99px;margin-top:6px;overflow:hidden}
 .tbar-fill{display:block;height:100%;background:#D8DBE0;border-radius:99px}
 .tbar-fill.hi{background:#E5484D}
@@ -449,11 +455,15 @@ details p,details ul{margin-top:8px}
         <div class="card"><h2>Промокоды</h2><p class="sub">Скидки и бонусы для новых и действующих пользователей. Нажми на строку, чтобы изменить промокод, выключить его или удалить.</p>
           <div class="btnrow"><button id="btn-promos">Показать промокоды</button></div>
           <input id="pr-code" placeholder="код, напр. DREBOL10">
+          <label>Награда<select id="pr-kind"><option value="percent">Скидка, %</option><option value="days">Дни подписки</option></select></label>
+          <input id="pr-value" type="number" placeholder="размер: % (1–100) или дни (1–365)">
+          <input id="pr-max" type="number" placeholder="лимит использований (пусто/0 — без лимита)">
+          <label class="chk"><input id="pr-first" type="checkbox"> Только для первой покупки</label>
           <input id="pr-exp" placeholder="истекает, напр. 2026-12-31 (пусто — без срока)">
           <input id="pr-owner" type="number" placeholder="tg_id владельца (необязательно)">
           <input id="pr-note" placeholder="заметка (необязательно)">
           <div class="btnrow"><button id="btn-pr-add">Создать промокод</button><button id="btn-pr-find" class="ghost">Найти по коду</button></div>
-          <input id="pr-count" type="number" placeholder="сколько кодов сгенерировать пачкой">
+          <input id="pr-count" type="number" placeholder="сколько кодов сгенерировать пачкой (награда — та же, что выше)">
           <div class="btnrow"><button id="btn-pr-batch" class="ghost">Сгенерировать пачку</button></div>
           <div id="promos-out"></div>
         </div>
@@ -469,7 +479,7 @@ details p,details ul{margin-top:8px}
       <!-- Панель Remnawave -->
       <section id="sec-panel" class="page hidden">
         <div class="card"><h2>Панель Remnawave</h2><p class="sub">Профили, инбаунды и хосты — живые данные из панели. Нажми на строку, чтобы открыть профиль или хост в редакторе ниже. Правка инбаундов и хостов — только Mark, с проверкой конфига после сохранения.</p>
-          <div class="btnrow"><button id="btn-panel" class="ghost">Обновить списки</button><button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button></div>
+          <div class="btnrow"><button id="btn-panel" class="ghost">Обновить списки</button><button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button><button id="btn-links-panel" class="ghost">🔗 Основные ссылки</button></div>
           <div id="panel-out"></div>
           <h3>Профили</h3>
           <div id="profiles-table"></div>
@@ -509,7 +519,7 @@ details p,details ul{margin-top:8px}
       <!-- Узлы -->
       <section id="sec-nodes" class="page hidden">
         <div class="card"><h2>Узлы и здоровье</h2><p class="sub">Живой статус нод, панели и сайта подписки. Нажми на строку ноды, чтобы посмотреть её трафик.</p>
-          <div class="btnrow"><button id="btn-nodes">Здоровье узлов</button><button id="btn-squads" class="ghost">Сквады</button></div>
+          <div class="btnrow"><button id="btn-nodes">Здоровье узлов</button><button id="btn-squads" class="ghost">Сквады</button><button id="btn-links-nodes" class="ghost">🔗 Основные ссылки</button></div>
           <div id="nodes-table"></div>
           <input id="node-id" placeholder="UUID ноды — или клик по строке таблицы">
           <input id="node-start" placeholder="с даты, напр. 2026-11-01 (пусто — 30 дней назад)">
@@ -1298,7 +1308,7 @@ function statusPill(code, label){
   const s = String(code == null ? "" : code).toLowerCase();
   const cls = ["active","paid","ok","success","online","enabled","true","1"].indexOf(s) >= 0 ? "ok"
     : ["expired","refunded","failed","error","offline","disabled","false","0","blocked","banned"].indexOf(s) >= 0 ? "bad"
-    : ["pending","trial","warning","frozen","paused"].indexOf(s) >= 0 ? "warn" : "info";
+    : ["pending","trial","warning","frozen","paused","canceled","cancelled"].indexOf(s) >= 0 ? "warn" : "info";
   return '<span class="pill ' + cls + '">' + esc(label == null ? code : label) + "</span>";
 }
 function subStatusPill(s){ return statusPill(s, s === "active" ? "Активна" : s === "expired" ? "Истекла" : s === "frozen" ? "Заморожена" : (s || "—")); }
@@ -1739,7 +1749,7 @@ async function openServerEditor(sid){
 }
 /* --- Оплаты: список + карточка в редакторе --- */
 let paymentsLoaded = false;
-const PAY_LABELS = {paid: "Оплачено", pending: "Ожидает", refunded: "Возвращён", failed: "Неудачный"};
+const PAY_LABELS = {paid: "Оплачено", pending: "Ожидает", refunded: "Возвращён", failed: "Неудачный", expired: "Истёк", canceled: "Отменён", cancelled: "Отменён"};
 const PROVIDER_LABELS = {platega: "Platega", anore: "Anore", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта", manual: "Вручную"};
 let paymentsPage = 1, paymentsTotalPages = 1;
 async function loadPayments(page){
@@ -1863,8 +1873,15 @@ $("btn-promos").onclick = function(){ loadPromos(); };
 document.querySelector('[data-nav="promos"]').addEventListener("click", function(){
   if (!promosLoaded) { promosLoaded = true; loadPromos(); }
 });
+function promoReward(){
+  return {kind: $("pr-kind").value, value: parseInt($("pr-value").value || "0", 10)};
+}
 $("btn-pr-add").onclick = withSpin($("btn-pr-add"), async function(){
-  const body = {code: $("pr-code").value.trim()};
+  const rw = promoReward();
+  if (!rw.value) { toast("Укажи размер награды (скидку % или дни)", "err"); return; }
+  const body = {code: $("pr-code").value.trim(), kind: rw.kind, value: rw.value};
+  const mx = parseInt($("pr-max").value || "0", 10); if (mx > 0) body.max_uses = mx;
+  if ($("pr-first").checked) body.first_only = true;
   const exp = $("pr-exp").value.trim(); if (exp) body.expires_at = exp;
   const owner = $("pr-owner").value.trim(); if (owner) body.owner_tg_id = parseInt(owner, 10);
   const note = $("pr-note").value.trim(); if (note) body.note = note;
@@ -1877,8 +1894,10 @@ $("btn-pr-find").onclick = function(){
   if (code) openPromoEditor(code);
 };
 $("btn-pr-batch").onclick = withSpin($("btn-pr-batch"), async function(){
+  const rw = promoReward();
+  if (!rw.value) { toast("Укажи размер награды (скидку % или дни)", "err"); return; }
   const r = await api("/promos/batch", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({count: parseInt($("pr-count").value || "10", 10)})});
+    body: JSON.stringify({count: parseInt($("pr-count").value || "10", 10), kind: rw.kind, value: rw.value})});
   if (r.status === 200) { toast("Пачка промокодов создана", "ok"); loadPromos(); }
   else renderOut("promos-out", r.data);
 });
@@ -2063,8 +2082,9 @@ async function loadPanel(){
   else {
     let h2 = '<div class="tblwrap"><table><thead><tr><th>Хост</th><th>Адрес</th><th>Порт</th><th>Вкл</th></tr></thead><tbody>';
     hosts.forEach(function(x){
-      const stub = (x.port === 1234 || x.address === "12345") ? ' <span class="pill warn">служебный</span>' : "";
-      h2 += '<tr data-uuid="' + esc(x.uuid) + '" data-disabled="' + (x.isDisabled ? "true" : "false") + '"><td>' + esc(x.remark || "") + stub + '</td><td class="mono">' + esc(x.address || "") + '</td><td class="num">' + (x.port == null ? "—" : x.port) + '</td><td>' + statusPill(x.isDisabled ? "disabled" : "enabled", x.isDisabled ? "Выключен" : "Включён") + '</td></tr>';
+      const stub = (x.port === 1234 || x.address === "12345");
+      const marks = (stub ? ' <span class="pill warn">служебный</span>' : "") + (x.isHidden ? ' <span class="pill info">скрыт</span>' : "");
+      h2 += '<tr data-uuid="' + esc(x.uuid) + '" data-disabled="' + (x.isDisabled ? "true" : "false") + '"><td>' + esc(x.remark || "") + marks + '</td><td class="mono">' + (stub ? "—" : esc(x.address || "")) + '</td><td class="num">' + (stub || x.port == null ? "—" : x.port) + '</td><td>' + statusPill(x.isDisabled ? "disabled" : "enabled", x.isDisabled ? "Выключен" : "Включён") + '</td></tr>';
     });
     h2 += '</tbody></table></div>';
     $("hosts-table").innerHTML = h2;
@@ -2078,6 +2098,80 @@ document.querySelector('[data-nav="panel"]').addEventListener("click", function(
   if (!panelLoaded) { panelLoaded = true; loadPanel(); }
 });
 $("btn-yandex").onclick = async function(){ const r = await api("/yandex"); renderOut("panel-out", r.data); };
+/* --- Основные ссылки: справка по адресам проекта ---
+   Адреса подтягиваются сами: панель и сайт — из конфига бота, домены
+   подписки — из констант, ноды и хосты — живьём из панели Remnawave.
+   Поля можно подкорректировать: правка перекрывает авто-значение и
+   хранится в config.main_links; значение, равное авто, правкой не
+   считается и не сохраняется. */
+async function openLinksDrawer(){
+  $("drawer-title").textContent = "Основные ссылки";
+  $("drawer-sub").textContent = "Адреса панели, подписок и серверов";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:18px;width:50%;margin-bottom:10px"></div><div class="skel" style="height:160px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  const rl = await api("/links");
+  if (rl.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить ссылки</p>'; return; }
+  const auto = rl.data.auto || {}, ov = rl.data.overrides || {};
+  const eff = function(k){ return (ov[k] || "").trim() || auto[k] || ""; };
+  const FIELDS = [
+    ["panel_url", "Панель Remnawave", "https://…"],
+    ["site_url", "Сайт и кабинет", "https://…"],
+    ["key_domain", "Подписка — основной домен (origin)", "домен, напр. key.drbl.tech"],
+    ["sub_domain", "Подписка — через CDN", "домен, напр. sub.drbl.tech"]];
+  let h = '<p class="sub">Значения определены автоматически. Если что-то переехало — поправь здесь: правка перекрывает авто-значение, пустое поле возвращает авто.</p>';
+  FIELDS.forEach(function(f){
+    const k = f[0], val = eff(k);
+    const shown = (k === "key_domain" || k === "sub_domain") && val && val.indexOf("://") < 0 ? "https://" + val : val;
+    h += '<label>' + f[1] + '<input id="ml-' + k + '" value="' + esc(val) + '" placeholder="' + esc(f[2]) + '"></label>';
+    h += '<div class="sublink" style="margin:4px 0 10px"><span class="mono small">' + esc(shown || "—") + '</span>'
+      + (shown ? '<button class="ghost" data-copy="' + esc(shown) + '">Копировать</button><a class="ghost btnlike" href="' + esc(shown) + '" target="_blank" rel="noopener">Открыть</a>' : "")
+      + (ov[k] ? ' <span class="pill warn">правка</span>' : ' <span class="pill info">авто</span>') + "</div>";
+  });
+  h += '<div class="btnrow"><button id="ml-save">Сохранить правки</button></div><div id="ml-out"></div>';
+  const rp = await api("/panel");
+  let nodes = (rp.status === 200 && rp.data && rp.data.nodes) || [];
+  if (nodes && !Array.isArray(nodes)) nodes = nodes.nodes || nodes.response || [];
+  h += '<h3>Ноды (из панели)</h3>';
+  if (nodes.length) {
+    h += '<div class="tblwrap"><table><thead><tr><th>Нода</th><th>Адрес</th><th>Статус</th><th>Онлайн</th></tr></thead><tbody>';
+    nodes.forEach(function(n){
+      const alive = n.isConnected && n.isXrayRunning !== false;
+      h += '<tr><td>' + esc(n.name || "") + '</td><td class="mono">' + esc(n.address || "") + '</td><td>' + statusPill(n.isDisabled ? "disabled" : alive ? "online" : "offline", n.isDisabled ? "Выключена" : alive ? "Онлайн" : "Офлайн") + '</td><td class="num">' + (n.usersOnline == null ? "—" : n.usersOnline) + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  } else h += '<p class="mut">Панель не ответила — список нод недоступен.</p>';
+  const rh = await api("/panel/hosts");
+  const hosts = (rh.status === 200 && rh.data && rh.data.hosts) || [];
+  h += '<h3>Хосты подписки (из панели)</h3>';
+  if (hosts.length) {
+    h += '<div class="tblwrap"><table><thead><tr><th>Хост</th><th>Адрес:порт</th><th>SNI</th><th>Статус</th></tr></thead><tbody>';
+    hosts.forEach(function(x){
+      const stub = (x.port === 1234 || x.address === "12345");
+      const marks = (stub ? ' <span class="pill warn">служебный</span>' : "") + (x.isHidden ? ' <span class="pill info">скрыт</span>' : "");
+      h += '<tr><td>' + esc(x.remark || "") + marks + '</td><td class="mono">' + (stub ? "—" : esc(x.address || "") + ":" + (x.port == null ? "—" : x.port)) + '</td><td class="mono">' + esc(x.sni || x.serverName || "") + '</td><td>' + statusPill(x.isDisabled ? "disabled" : "enabled", x.isDisabled ? "Выключен" : "Включён") + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+  } else h += '<p class="mut">Панель не ответила — список хостов недоступен.</p>';
+  $("drawer-body").innerHTML = h;
+  $("drawer-body").querySelectorAll("[data-copy]").forEach(function(b){
+    b.onclick = function(){
+      if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.copy).then(function(){ toast("Скопировано", "ok"); });
+    };
+  });
+  $("ml-save").onclick = withSpin($("ml-save"), async function(){
+    const body = {};
+    FIELDS.forEach(function(f){
+      const k = f[0], v = $("ml-" + k).value.trim();
+      body[k] = (v === (auto[k] || "")) ? "" : v;
+    });
+    const r = await api("/links", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+    if (r.status === 200) { toast("Ссылки сохранены", "ok"); openLinksDrawer(); }
+    else toast("Ошибка: " + ((r.data && r.data.error) || r.status), "err");
+  });
+}
+$("btn-links-panel").onclick = openLinksDrawer;
+$("btn-links-nodes").onclick = openLinksDrawer;
 async function loadProfile(){
   const r = await api("/panel/profiles/" + $("pf-uuid").value);
   renderOut("pf-out", r.data);
@@ -2148,7 +2242,12 @@ async function loadNodes(){
   });
 }
 document.querySelector('[data-nav="nodes"]').addEventListener("click", function(){
-  if (!nodesLoaded) { nodesLoaded = true; loadNodes(); $("btn-nodes").click(); }
+  if (!nodesLoaded) {
+    nodesLoaded = true;
+    $("nodes-table").innerHTML = '<div class="skel" style="height:120px"></div>';
+    $("nodes-out").innerHTML = '<div class="skel" style="height:80px"></div>';
+    loadNodes(); $("btn-nodes").click();
+  }
 });
 async function loadHealth(){
   const r = await api("/nodes");
@@ -2226,13 +2325,13 @@ async function loadLogs(page){
   if (r.data.kind === "errors") {
     h = '<div class="tblwrap"><table><thead><tr><th>Время (МСК)</th><th>Источник</th><th>Уровень</th><th>Сообщение</th><th>Детали</th></tr></thead><tbody>';
     rows.forEach(function(it){
-      h += '<tr><td class="mono">' + fmtDate(it.time) + '</td><td>' + esc(it.source || "") + '</td><td>' + pill(it.level || "") + '</td><td>' + esc(it.message || "") + '</td><td class="trunc">' + esc(it.details || "") + "</td></tr>";
+      h += '<tr><td class="mono">' + fmtDate(it.time) + '</td><td>' + esc(it.source || "") + '</td><td>' + pill(it.level || "") + '</td><td>' + esc(it.message || "") + '</td><td class="trunc" title="' + esc(it.details || "") + '">' + esc(it.details || "") + "</td></tr>";
     });
   } else {
     h = '<div class="tblwrap"><table><thead><tr><th>Время (МСК)</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>';
     rows.forEach(function(it){
       const who = it.tg_id ? (esc(it.first_name || "") + (it.username ? ' <span class="mut">@' + esc(it.username) + "</span>" : "") + ' <span class="mono small">#' + it.tg_id + "</span>") : '<span class="mut">система</span>';
-      h += '<tr><td class="mono">' + fmtDate(it.time) + "</td><td>" + who + '</td><td>' + esc(it.label || it.action || "") + ' <span class="mono small mut">' + esc(it.action || "") + '</span></td><td class="trunc">' + esc(it.details || "") + "</td></tr>";
+      h += '<tr><td class="mono">' + fmtDate(it.time) + "</td><td>" + who + '</td><td title="' + esc(it.action || "") + '">' + esc(it.label || it.action || "") + '</td><td class="trunc" title="' + esc(it.details || "") + '">' + esc(it.details || "") + "</td></tr>";
     });
   }
   $("logs-out").innerHTML = h + "</tbody></table></div>";
@@ -2318,8 +2417,12 @@ async function loadSyncSettings(){
   const rep = st.last_report || {};
   const repKeys = Object.keys(rep);
   if (repKeys.length) {
+    const REP_LABELS = {at: "Время", checked: "Проверено подписок", updated: "Обновлено", orphans: "Сироты (нет в панели)", missing: "Отсутствуют в панели", names_updated: "Имён обновлено", names_errors: "Ошибок имён", disabled: "Отключено", enabled: "Включено"};
     h += '<h3>Последний отчёт</h3><dl class="kv">';
-    repKeys.forEach(function(k){ h += kvRow(esc(k), esc(rep[k])); });
+    repKeys.forEach(function(k){
+      const v = k === "at" ? fmtDate(rep[k]) : String(rep[k]);
+      h += kvRow(esc(REP_LABELS[k] || k), esc(v));
+    });
     h += "</dl>";
   }
   h += '<h3>Изменить расписание</h3>';
@@ -2388,7 +2491,37 @@ async function loadNetcheck(){
   h += '</tbody></table></div><h3>Операторы</h3><div class="tblwrap"><table><thead><tr><th>Оператор</th><th>ASN</th></tr></thead><tbody>';
   (d.operators || []).forEach(function(x){ h += "<tr><td>" + esc(x.label || "") + '</td><td class="mono">' + esc((x.asns || []).join(", ")) + "</td></tr>"; });
   h += "</tbody></table></div>";
+  // Форма настроек: что проверять. Пустой выбор в конфиге = «все», поэтому
+  // галочки ставим так: выбраны явно — по списку, список пуст — все.
+  const selD = d.selected_domains || [], selO = d.selected_operators || [];
+  const allD = d.all_domains || d.domains || [], allO = d.all_operators || d.operators || [];
+  h += '<h3>Настройки проверки</h3><p class="sub">Что проверять автоматически и вручную. Хотя бы один домен и один оператор должны остаться включёнными.</p>';
+  h += '<div class="chkgrid"><b>Домены</b>';
+  allD.forEach(function(x){
+    const on = !selD.length || selD.indexOf(x.label) >= 0;
+    h += '<label class="chk"><input type="checkbox" class="nc-dom" value="' + esc(x.label) + '"' + (on ? " checked" : "") + "> " + esc(x.label) + ' <span class="mut mono small">' + esc(x.domain) + "</span></label>";
+  });
+  h += '</div><div class="chkgrid"><b>Операторы</b>';
+  allO.forEach(function(x){
+    const on = !selO.length || selO.indexOf(x.label) >= 0;
+    h += '<label class="chk"><input type="checkbox" class="nc-op" value="' + esc(x.label) + '"' + (on ? " checked" : "") + "> " + esc(x.label) + "</label>";
+  });
+  h += '</div><label>Автопроверка раз в (дней)<input id="nc-days" type="number" min="1" value="' + (d.netcheck_days || 2) + '"></label>';
+  h += '<div class="btnrow"><button id="nc-save">Сохранить настройки</button></div>';
   $("netcheck-out").innerHTML = h;
+  $("nc-save").onclick = withSpin($("nc-save"), async function(){
+    const doms = Array.prototype.map.call(document.querySelectorAll(".nc-dom:checked"), function(c){ return c.value; });
+    const ops = Array.prototype.map.call(document.querySelectorAll(".nc-op:checked"), function(c){ return c.value; });
+    if (!doms.length || !ops.length) { toast("Нужен хотя бы один домен и один оператор", "err"); return; }
+    const body = {netcheck: {
+      domains: doms.length === allD.length ? [] : doms,
+      operators: ops.length === allO.length ? [] : ops,
+      netcheck_days: parseInt($("nc-days").value || "2", 10),
+      netcheck_last_run: d.netcheck_last_run || null}};
+    const r = await api("/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+    if (r.status === 200) { toast("Настройки проверки сохранены", "ok"); loadNetcheck(); }
+    else toast("Ошибка: " + ((r.data && r.data.error) || r.status), "err");
+  });
 }
 $("btn-netcheck-show").onclick = function(){ loadNetcheck(); };
 const NC_STATE = {ok: ["ok", "Доступен"], blocked: ["bad", "Заблокирован"], error: ["warn", "Ошибка"], no_probe: ["warn", "Нет пробы"]};
@@ -2434,6 +2567,10 @@ async function loadSite(){
   $("site-out").innerHTML = h + "</dl>";
 }
 $("btn-site-show").onclick = function(){ loadSite(); };
+let siteLoaded = false;
+document.querySelector('[data-nav="site"]').addEventListener("click", function(){
+  if (!siteLoaded) { siteLoaded = true; loadSite(); $("btn-st-show").click(); }
+});
 $("btn-deploy").onclick = async function(){ const r = await postConfirm("/site/deploy", {}); renderOut("site-out", r.data); };
 $("btn-st-show").onclick = async function(){
   const r = await api("/site/texts");
@@ -2493,10 +2630,14 @@ async function loadTopics(){
   if (r.status !== 200) { renderOut("topics-out", r.data); return; }
   const topics = r.data.topics || [];
   if (!topics.length) { $("topics-out").innerHTML = '<div class="empty"><span class="big">🛟</span>Открытых обращений нет</div>'; return; }
-  let h = '<div class="tblwrap"><table><thead><tr><th>Тема</th><th>Юзер</th></tr></thead><tbody>';
+  let h = '<div class="tblwrap"><table><thead><tr><th>Обращение</th><th>Топик</th></tr></thead><tbody>';
   topics.forEach(function(t){
     const who = esc(t.first_name || "") + (t.username ? ' <span class="mut">@' + esc(t.username) + "</span>" : "") + ' <span class="mono small">#' + t.user_id + "</span>";
-    h += '<tr data-user="' + t.user_id + '"><td>' + (t.topic_name ? esc(t.topic_name) : '<span class="mut">Без названия</span>') + "</td><td>" + who + "</td></tr>";
+    // Название топика в поддержке обычно повторяет имя юзера — тогда
+    // показываем только юзера, отдельная тема — отдельной строкой.
+    const topic = t.topic_name && t.topic_name !== t.first_name
+      ? '<b>' + esc(t.topic_name) + '</b><br><span class="mut">' + who + "</span>" : who;
+    h += '<tr data-user="' + t.user_id + '"><td>' + topic + '</td><td class="mono">#' + (t.topic_id || "—") + "</td></tr>";
   });
   h += '</tbody></table></div>';
   $("topics-out").innerHTML = h;

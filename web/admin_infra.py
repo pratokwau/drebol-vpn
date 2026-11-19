@@ -296,6 +296,7 @@ _ADMIN_LABELS = {
     "panel_host_edit": "✏️ Изменил хост в панели",
     "panel_profile_inbound_edit": "✏️ Изменил инбаунд профиля",
     "panel_settings": "⚙️ Настройки панели", "panel_settings_test": "🔌 Проверка панели",
+    "links_update": "🔗 Основные ссылки",
     "panel_sync": "🔄 Синхронизация с панелью", "panel_sync_settings": "🔄 Настройки синхронизации",
     "payment_refund": "💸 Оформил возврат", "platega_update": "💳 Настройки Platega",
     "promo_batch": "🎁 Пакетная раздача промокодов", "promo_create": "🎁 Создал промокод",
@@ -525,14 +526,83 @@ async def netcheck_get(request):
     from config import load_config
     cfg = load_config()
     net_cfg = cfg.get("netcheck") or {}
+    import services.globalping as gp
     return web.json_response({
         "domains": [{"label": label, "domain": domain}
                     for label, domain in domains],
         "operators": [{"label": label, "asns": asns}
                       for label, asns in operators],
+        "all_domains": [{"label": label, "domain": domain}
+                        for label, domain in gp.TARGETS],
+        "all_operators": [{"label": label, "asns": asns}
+                          for label, asns in gp.OPERATORS],
+        "selected_domains": list(net_cfg.get("domains") or []),
+        "selected_operators": list(net_cfg.get("operators") or []),
         "netcheck_days": net_cfg.get("netcheck_days"),
         "netcheck_last_run": net_cfg.get("netcheck_last_run"),
     })
+
+
+async def links_get(request):
+    """«Основные ссылки»: авто-значения из конфига + ручные правки.
+
+    Авто: адрес панели — rw_url, сайт — webapi_public, домены подписки —
+    константы config (key — origin, sub — CDN). Ручные правки лежат в
+    config.main_links и перекрывают авто при показе; пустая строка правки
+    означает «использовать авто».
+    """
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    from config import (SUB_DISPLAY_DOMAIN, SUB_STORED_DOMAIN, load_config)
+    cfg = load_config()
+    return web.json_response({
+        "auto": {
+            "panel_url": (cfg.get("rw_url") or "").rstrip("/"),
+            "site_url": (cfg.get("webapi_public") or "").rstrip("/"),
+            "key_domain": SUB_STORED_DOMAIN,
+            "sub_domain": SUB_DISPLAY_DOMAIN,
+        },
+        "overrides": cfg.get("main_links") or {},
+    })
+
+
+_LINKS_URL_KEYS = ("panel_url", "site_url")
+_LINKS_DOMAIN_KEYS = ("key_domain", "sub_domain")
+
+
+async def links_patch(request):
+    """Сохранить ручные правки основных ссылок (config.main_links)."""
+    from config import atomic_update
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    clean = {}
+    for key in _LINKS_URL_KEYS + _LINKS_DOMAIN_KEYS:
+        if key not in body:
+            continue
+        value = body[key]
+        if not isinstance(value, str):
+            return _json_error("bad_value")
+        value = value.strip().rstrip("/")
+        if key in _LINKS_URL_KEYS:
+            if value and not value.startswith("https://"):
+                return _json_error("bad_url")
+        else:
+            value = value.replace("https://", "").replace("http://", "")
+            if value and ("." not in value or " " in value or "/" in value):
+                return _json_error("bad_domain")
+        clean[key] = value
+
+    def _apply(cfg):
+        cur = dict(cfg.get("main_links") or {})
+        cur.update(clean)
+        cfg["main_links"] = cur
+    atomic_update(_apply)
+    await _audit(actor, "links_update", ", ".join(sorted(clean)) or "-")
+    return web.json_response({"ok": True, "overrides": clean})
 
 
 async def netcheck_run(request):
@@ -2015,6 +2085,8 @@ def register(app) -> None:
     app.router.add_post("/morning/run-now", morning_run_now)
     app.router.add_get("/netcheck", netcheck_get)
     app.router.add_post("/netcheck/run", netcheck_run)
+    app.router.add_get("/links", links_get)
+    app.router.add_patch("/links", links_patch)
     app.router.add_get("/site", site_get)
     app.router.add_post("/site/deploy", site_deploy)
     app.router.add_post("/site/delete", site_delete)
