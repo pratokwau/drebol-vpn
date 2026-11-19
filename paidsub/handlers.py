@@ -21,6 +21,13 @@ from paidsub import service as _svc
 from paidsub.time_parser import fmt_duration, fmt_duration_precise
 
 
+def _display_url(sub_url: str) -> str:
+    """Показная форма ссылки подписки: домен выбирает настройка
+    sub_link_domain (по умолчанию sub.drbl.tech), как у пользователя."""
+    from handlers.user import primary_sub_url
+    return primary_sub_url(sub_url)
+
+
 def _esc_name(value, fallback="") -> str:
     """Имя или @username человека для сообщения с разметкой.
 
@@ -1055,7 +1062,26 @@ async def handle_paid_sub_view(query, sub_id: int):
     status_labels = {"active": "активна", "expired": "истекла"}
     status_label = status_labels.get(status, status)
 
+    # Оплаты владельца: сколько всего заплатил и какая оплата последняя.
+    # Раньше здесь был пустой payment_line — блок задумывался, но не жил.
     payment_line = ""
+    if tg_id:
+        try:
+            from core.database import user_payments
+            prows, pcount, psum = await user_payments(tg_id, 1)
+            if pcount:
+                payment_line = (f"💰 Оплат: <b>{pcount}</b> · на сумму "
+                                f"<b>{psum} ₽</b>\n")
+                if prows:
+                    last = prows[0]
+                    prov = {"platega": "Platega", "anore": "Anore"}.get(
+                        last[1], last[1] or "")
+                    payment_line += (f"🧾 Последняя: <b>{last[2]} ₽</b>"
+                                     f" · {prov} · {str(last[4])[:10]}\n")
+            else:
+                payment_line = "💰 Оплат не было\n"
+        except Exception:
+            payment_line = ""
 
     # Количество продлений
     times_renewed = card["times_renewed"]
@@ -1132,7 +1158,7 @@ async def handle_paid_sub_view(query, sub_id: int):
         f"🆔 UUID: <code>{uuid_val}</code>\n"
         f"📋 Sub ID: <code>{sub_id_str}</code>"
         "</blockquote>\n\n"
-        f"🔗 <b>Ссылка</b>\n<code>{sub_url}</code>",
+        f"🔗 <b>Ссылка</b>\n<code>{_display_url(sub_url)}</code>",
         parse_mode="HTML",
         reply_markup=paid_sub_view_keyboard(sub_id, enabled),
         disable_web_page_preview=True,
@@ -1404,6 +1430,105 @@ async def handle_paid_ips(query, sub_id: int):
     kb.append([InlineKeyboardButton("📱 Устройства", callback_data=f"paid_devices:{sub_id}"),
                InlineKeyboardButton("🔄 Обновить", callback_data=f"paid_ips:{sub_id}")])
     kb.append([InlineKeyboardButton("◀️ К подписке", callback_data=f"paid_sub_view:{sub_id}")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
+async def handle_paid_sub_reissue(query, sub_id: int, context=None):
+    """Перевыпуск ключа платной подписки из админки.
+
+    Сервис владельцу не пишет (у платных перевыпуск обычно делает сам
+    владелец из своего чата), поэтому новую ссылку человеку отправляем
+    отсюда. Подтверждение перед действием — handlers/confirm.py
+    (paid_sub_reissue).
+    """
+    from html import escape
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    bot = context.bot if context and hasattr(context, "bot") else None
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    await query.edit_message_text("🔁 Перевыпускаю ключ…")
+    result = await _svc.reissue_sub(sub_id, kind="paid", bot=bot)
+    back_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ К подписке",
+                              callback_data=f"paid_sub_view:{sub_id}")]])
+    if not result.get("ok"):
+        await query.edit_message_text(
+            "❌ <b>Не получилось</b>\n\n"
+            f"<blockquote><code>{escape(str(result.get('error')))}</code></blockquote>\n\n"
+            "<i>Старая ссылка продолжает работать.</i>",
+            parse_mode="HTML", reply_markup=back_kb)
+        return
+    new_url = _display_url(result.get("new_url") or "")
+    tg_id = result.get("tg_id") or row[1]
+    sent = False
+    if bot and tg_id:
+        await _notify_user(
+            bot, tg_id,
+            "🔁 <b>Ключ подписки перевыпущен</b>\n\n"
+            f"<blockquote><code>{new_url}</code></blockquote>\n\n"
+            "Удалите старую подписку в приложении и вставьте эту ссылку — "
+            "старая больше не работает.")
+        sent = True
+    await query.edit_message_text(
+        "🔁 <b>Ключ перевыпущен</b>\n\n"
+        f"Новая ссылка:\n<code>{new_url}</code>"
+        + ("\n\n<i>Отправил её владельцу сообщением.</i>" if sent else ""),
+        parse_mode="HTML", reply_markup=back_kb)
+
+
+_HISTORY_LABELS = {
+    "trial_approved": "🆓 Триал одобрен",
+    "trial_rejected": "🚫 Триал отклонён",
+    "trial_stopped": "⏹ Триал остановлен",
+    "key_reissued": "🔁 Ключ перевыпущен",
+    "settings_changed": "⚙️ Изменены настройки",
+    "device_removed": "📱 Устройство убрано",
+    "promo_days": "🎟 Промокод: начислены дни",
+    "promo_issued": "🎟 Выдан промокод",
+    "blacklisted": "⛔ Чёрный список: добавлен",
+    "unblacklisted": "✅ Чёрный список: убран",
+}
+
+
+async def handle_paid_sub_history(query, sub_id: int, page: int = 1):
+    """История событий подписки: что с ней делали и когда."""
+    from html import escape
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_user_history
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    rows, total_pages = await get_user_history(row[1], page, 8)
+    page = min(max(1, page), total_pages)
+    lines = [f"📜 <b>История подписки #{sub_id}</b>\n"]
+    if not rows:
+        lines.append("<i>Событий пока не было.</i>")
+    for _id, _tg, action, details, created_at in rows:
+        label = _HISTORY_LABELS.get(action, action)
+        lines.append(f"• <b>{escape(str(created_at)[:16])}</b> — {escape(label)}")
+        if details:
+            det = escape(str(details))
+            if len(det) > 140:
+                det = det[:140] + "…"
+            lines.append(f"   <i>{det}</i>")
+    if total_pages > 1:
+        lines.append(f"\n<i>Стр. {page} из {total_pages}</i>")
+    kb = []
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton(
+            "⬅️", callback_data=f"paid_sub_history:{sub_id}:{page - 1}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton(
+            "➡️", callback_data=f"paid_sub_history:{sub_id}:{page + 1}"))
+    if nav:
+        kb.append(nav)
+    kb.append([InlineKeyboardButton("◀️ К подписке",
+                                    callback_data=f"paid_sub_view:{sub_id}")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb))
 

@@ -30,6 +30,7 @@ CONFIRM_TITLES = {
     "bl_readd": "Возврат в ЧС",
     "bl_remote_toggle": "Общий ЧС вкл/выкл",
     "paid_hwid_clear": "Очистка устройств подписки",
+    "paid_sub_reissue": "Перевыпуск ключа подписки",
     "sub_hwid_clear": "Очистка устройств админской подписки",
     "sub_reissue": "Перевыпуск ключа админской подписки",
     "site_delete": "Удаление сайта",
@@ -258,9 +259,20 @@ async def _sub_reissue(arg):
             "🔁 Да, перевыпустить", f"sub_view:{arg}", f"sub_view:{arg}")
 
 
+async def _paid_sub_reissue(arg):
+    from paidsub.storage import get_paid_sub
+    row = await get_paid_sub(int(arg))
+    who = await _who(row[1]) if row else "?"
+    return (f"🔁 <b>Перевыпустить ключ подписки #{arg}?</b>\n\n👤 {who}\n\n"
+            "Ссылка подписки сменится, старая сразу перестанет работать. "
+            "Новую бот отправит человеку сам.",
+            "🔁 Да, перевыпустить", f"paid_sub_view:{arg}", f"paid_sub_view:{arg}")
+
+
 RULES = {
     "sub_hwid_clear": _sub_hwid_clear,
     "sub_reissue": _sub_reissue,
+    "paid_sub_reissue": _paid_sub_reissue,
     "site_delete": _site_delete,
     "paid_hwid_clear": _paid_hwid_clear,
     "paid_sub_delete": _paid_sub_delete,

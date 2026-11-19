@@ -155,7 +155,7 @@ from paidsub.handlers import (
     handle_paid_bulk_hwid, handle_paid_bulk_lte, handle_paid_bulk_limits_apply,
     handle_paid_device_price, handle_paid_device_max,
     handle_paid_devices, handle_paid_ips, handle_paid_hwid_del,
-    handle_paid_hwid_clear,
+    handle_paid_hwid_clear, handle_paid_sub_reissue, handle_paid_sub_history,
     handle_paid_sub_settings, handle_paid_sub_edit_expire,
     handle_paid_sub_edit_hwid, handle_paid_sub_edit_traffic,
     handle_paid_sub_edit_lte, handle_paid_sub_edit_trial,
@@ -858,6 +858,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_devices(query, int(data.split(":")[1]))
     elif data.startswith("paid_ips:"):
         await handle_paid_ips(query, int(data.split(":")[1]))
+    elif data.startswith("paid_sub_history:"):
+        _hp = data.split(":")
+        await handle_paid_sub_history(
+            query, int(_hp[1]), int(_hp[2]) if len(_hp) > 2 else 1)
+    elif data.startswith("paid_sub_reissue:"):
+        await handle_paid_sub_reissue(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_hwid_del:"):
         _, sid, ref = data.split(":", 2)
         await handle_paid_hwid_del(query, context, int(sid), ref)

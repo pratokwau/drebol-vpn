@@ -118,6 +118,8 @@ def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardM
             InlineKeyboardButton("📱 Устройства", callback_data=f"paid_devices:{sub_id}"),
             InlineKeyboardButton("🌐 IP-адреса", callback_data=f"paid_ips:{sub_id}"),
         ],
+        [InlineKeyboardButton("📜 История", callback_data=f"paid_sub_history:{sub_id}"),
+         InlineKeyboardButton("🔁 Перевыпустить", callback_data=f"paid_sub_reissue:{sub_id}")],
         [InlineKeyboardButton("⚙️ Настройки", callback_data=f"paid_sub_settings:{sub_id}"),
          InlineKeyboardButton("🗑 Удалить", callback_data=f"paid_sub_delete:{sub_id}")],
         [InlineKeyboardButton("◀️ К списку", callback_data="paid_subs")],
