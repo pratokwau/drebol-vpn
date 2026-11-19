@@ -217,15 +217,13 @@ async def panel_sync_run(request):
 
 
 def _panel_sync_settings_snapshot() -> dict:
+    """Только последний запуск и отчёт: расписания у синхронизации нет,
+    она запускается вручную (решение владельца 2026-11-19)."""
     from config import load_config
     cfg = load_config()
     return {
-        "mode": cfg.get("panel_sync_mode") or "off",
-        "interval_hours": int(cfg.get("panel_sync_interval_hours") or 24),
-        "daily_time": cfg.get("panel_sync_daily_time") or "03:00",
         "last_run": cfg.get("panel_sync_last_run"),
         "last_report": cfg.get("panel_sync_last_report") or {},
-        "schedule": rw_mod.panel_sync_schedule_text(cfg),
     }
 
 
@@ -235,39 +233,6 @@ async def panel_sync_settings_get(request):
     except Exception:
         return _json_error("no_session", 401)
     return web.json_response({"settings": _panel_sync_settings_snapshot()})
-
-
-async def panel_sync_settings_patch(request):
-    actor, err = await _require_mutation(request)
-    if err is not None:
-        return err
-    body = await _json_body(request)
-    patch = body.get("settings") if isinstance(body, dict) else None
-    if not isinstance(patch, dict):
-        return _json_error("bad_request")
-    mode = patch.get("mode", _panel_sync_settings_snapshot()["mode"])
-    if mode not in ("off", "interval", "daily"):
-        return _json_error("bad_mode")
-    clean = {"panel_sync_mode": mode}
-    if "interval_hours" in patch:
-        try:
-            hours = int(patch["interval_hours"])
-        except (TypeError, ValueError):
-            return _json_error("bad_interval")
-        if hours < 1 or hours > 720:
-            return _json_error("bad_interval")
-        clean["panel_sync_interval_hours"] = hours
-    if "daily_time" in patch:
-        parsed = morning_mod.parse_time(str(patch["daily_time"] or ""))
-        if parsed is None:
-            return _json_error("bad_time")
-        clean["panel_sync_daily_time"] = f"{parsed[0]:02d}:{parsed[1]:02d}"
-    from config import atomic_update
-    atomic_update(lambda cfg: cfg.update(clean))
-    await _audit(actor, "panel_sync_settings",
-                 "mode: " + str(clean.get("panel_sync_mode")))
-    return web.json_response({"ok": True,
-                              "settings": _panel_sync_settings_snapshot()})
 
 
 # ── Логи ─────────────────────────────────────────────────────────────────────
@@ -2134,7 +2099,6 @@ def register(app) -> None:
     app.router.add_get("/nodes/{node_id}/users", node_users)
     app.router.add_post("/panel-sync", panel_sync_run)
     app.router.add_get("/panel-sync/settings", panel_sync_settings_get)
-    app.router.add_patch("/panel-sync/settings", panel_sync_settings_patch)
     app.router.add_get("/logs", logs_get)
     app.router.add_get("/logs/export", logs_export)
     app.router.add_post("/logs/purge", logs_purge)

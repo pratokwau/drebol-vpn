@@ -332,11 +332,9 @@ async def post_init(app: Application):
         from web.webapi import sessions_tick
         app.job_queue.run_repeating(sessions_tick, interval=24 * 3600, first=900)
 
-        # синхронизация с панелью по расписанию: тик каждые 15 минут
-        # проверяет, подошло ли время, и запускает сверку, если пора
-        from services.remnawave import panel_sync_tick
-        app.job_queue.run_repeating(
-            _gated(panel_sync_tick, "panel_sync"), interval=900, first=900)
+        # Синхронизации с панелью по расписанию НЕТ (решение владельца
+        # 2026-11-19): сверка панели и актуализация ников запускаются
+        # только вручную кнопками в админке (ТГ и веб).
 
     # Личный кабинет: http-api для сайта и мини-приложения.
     # Бота отдаём в API, чтобы оно само слало коды сброса пароля в чат.

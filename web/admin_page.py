@@ -624,7 +624,7 @@ label.chk input{width:auto;margin:0}
       <!-- Синхронизация -->
       <section id="sec-sync" class="page hidden">
         <div class="card"><h2>Синхронизация с панелью</h2><p class="sub">Сверка пользователей бота с клиентами Remnawave.</p>
-          <div class="btnrow"><button id="btn-psync">Запустить синхронизацию</button><button id="btn-psync-set" class="ghost">Показать расписание</button></div>
+          <div class="btnrow"><button id="btn-psync">Запустить синхронизацию</button><button id="btn-psync-set" class="ghost">Последний отчёт</button></div>
           <div id="psync-out"></div>
         </div>
         <div class="card"><h2>Утренняя сводка 09:00</h2><p class="sub">Что входит в ежедневную сводку и во сколько она приходит.</p>
@@ -2402,16 +2402,12 @@ $("btn-online").onclick = async function(){
   $("downtime-out").innerHTML = h;
 };
 $("btn-psync").onclick = async function(){ const r = await postConfirm("/panel-sync", {}); renderOut("psync-out", r.data); };
-const SYNC_MODE_LABELS = {off: "Выключена", interval: "По интервалу", daily: "Ежедневно в заданное время"};
 async function loadSyncSettings(){
   const r = await api("/panel-sync/settings");
   if (r.status !== 200) { renderOut("psync-out", r.data); return; }
   const st = r.data.settings || {};
   let h = '<dl class="kv">';
-  h += kvRow("Режим", esc(SYNC_MODE_LABELS[st.mode] || st.mode || "—"));
-  if (st.mode === "interval") h += kvRow("Интервал", (st.interval_hours || "—") + " ч");
-  if (st.mode === "daily") h += kvRow("Время запуска", esc(st.daily_time || "—"));
-  h += kvRow("Расписание", esc(st.schedule || "—"));
+  h += kvRow("Режим", "Только вручную — кнопкой «Синхронизировать» выше");
   h += kvRow("Последний запуск", st.last_run ? fmtDate(st.last_run) : "ещё не запускалась");
   h += "</dl>";
   const rep = st.last_report || {};
@@ -2425,24 +2421,10 @@ async function loadSyncSettings(){
     });
     h += "</dl>";
   }
-  h += '<h3>Изменить расписание</h3>';
-  h += '<label>Режим<select id="ps-mode"><option value="off">Выключена</option><option value="interval">По интервалу</option><option value="daily">Ежедневно</option></select></label>';
-  h += '<label>Интервал, часов<input id="ps-interval" type="number" min="1" max="720" value="' + (st.interval_hours || 24) + '"></label>';
-  h += '<label>Время (для «Ежедневно»)<input id="ps-daily" value="' + esc(st.daily_time || "03:00") + '"></label>';
-  h += '<div class="btnrow"><button class="ghost" id="ps-save">Сохранить расписание</button></div>';
   $("psync-out").innerHTML = h;
-  $("ps-mode").value = st.mode || "off";
-  $("ps-save").onclick = withSpin($("ps-save"), async function(){
-    const body = {settings: {mode: $("ps-mode").value,
-      interval_hours: parseInt($("ps-interval").value || "24", 10),
-      daily_time: $("ps-daily").value.trim()}};
-    const rr = await api("/panel-sync/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
-    if (rr.status === 200) { toast("Расписание сохранено", "ok"); loadSyncSettings(); }
-    else toast("Ошибка: " + ((rr.data && rr.data.error) || rr.status), "err");
-  });
 }
 $("btn-psync-set").onclick = function(){ loadSyncSettings(); };
-const MORNING_TOGGLES = {reconcile: "Сверка с Platega", netcheck: "Проверка операторов", alerts: "Алерты о проблемах", support_topics: "Темы поддержки", panel_sync: "Синхронизация с панелью", blacklist_sync: "Синхронизация ЧС", site_sync: "Синхронизация сайта", server_reminder: "Напоминания об оплате серверов", healthcheck: "Проверка здоровья"};
+const MORNING_TOGGLES = {reconcile: "Сверка с Platega", netcheck: "Проверка операторов", alerts: "Алерты о проблемах", support_topics: "Темы поддержки", blacklist_sync: "Синхронизация ЧС", site_sync: "Синхронизация сайта", server_reminder: "Напоминания об оплате серверов", healthcheck: "Проверка здоровья"};
 async function loadMorning(){
   const r = await api("/morning");
   if (r.status !== 200) { renderOut("morning-out", r.data); return; }

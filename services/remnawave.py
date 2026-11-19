@@ -1192,178 +1192,6 @@ def panel_sync_report_text(res: dict, title: str = "🔄 Синхронизац�
     return "\n".join(lines)
 
 
-# ── Расписание синхронизации ─────────────────────────────────────────────────
-
-def panel_sync_schedule_text(cfg: dict) -> str:
-    mode = cfg.get("panel_sync_mode") or "off"
-    if mode == "interval":
-        hours = int(cfg.get("panel_sync_interval_hours") or 24)
-        if hours % 24 == 0 and hours >= 24:
-            days = hours // 24
-            return f"каждые {days} дн." if days > 1 else "каждый день"
-        return f"каждые {hours} ч."
-    if mode == "daily":
-        return f"каждый день в {cfg.get('panel_sync_daily_time') or '—'}"
-    return "выключено"
-
-
-def panel_sync_due(cfg: dict, now=None) -> bool:
-    """Пора ли запускать плановую синхронизацию. Тик ходит каждые
-    15 минут, поэтому точность — до 15 минут."""
-    mode = cfg.get("panel_sync_mode") or "off"
-    if mode == "off":
-        return False
-    now = now or datetime.now()
-    last_raw = cfg.get("panel_sync_last_run")
-    last = None
-    if last_raw:
-        try:
-            last = datetime.fromisoformat(str(last_raw))
-        except ValueError:
-            last = None
-    if mode == "interval":
-        hours = int(cfg.get("panel_sync_interval_hours") or 24)
-        return last is None or (now - last).total_seconds() >= hours * 3600
-    if mode == "daily":
-        try:
-            hh, mm = (cfg.get("panel_sync_daily_time") or "03:00").split(":")
-            sched = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
-        except (ValueError, TypeError):
-            return False
-        return now >= sched and (last is None or last < sched)
-    return False
-
-
-_SYNC_RUNNING = False
-
-
-def panel_sync_full_report_text(panel_res: dict,
-                                names_res: dict | None) -> str:
-    """Единый отчёт плановой синхронизации: панель ↔ бот, ники."""
-    parts = [panel_sync_report_text(panel_res, "⏰ Плановая синхронизация")]
-    if names_res is not None:
-        if names_res.get("ok"):
-            parts.append(
-                "\n👤 <b>Ники и юзернеймы (бот → панель)</b>\n\n"
-                "<blockquote>"
-                f"Проверено подписок: <b>{names_res['checked']}</b>\n"
-                f"Обновлено описаний: <b>{names_res['updated']}</b>\n"
-                f"С ошибкой: <b>{len(names_res.get('errors') or [])}</b>"
-                "</blockquote>")
-            if names_res.get("errors"):
-                shown = "\n".join(str(e)[:120] for e in names_res["errors"][:5])
-                parts.append(f"<blockquote>{shown}</blockquote>")
-        else:
-            parts.append(f"\n👤 <b>Ники и юзернеймы</b>\n\n"
-                         f"<blockquote>{names_res.get('error')}</blockquote>")
-    return "\n".join(parts)
-
-
-async def panel_sync_tick(context):
-    """Единая плановая синхронизация по одному расписанию. Когда пора,
-    по очереди запускает две сверки — каждая независима, падение одной
-    не отменяет остальные:
-    1) панель → бот (обратная проверка): всё, что админ поменял в панели
-       (срок, лимиты, ссылка, uuid), переезжает в базу бота;
-    2) бот → панель: ники и юзернеймы сверяются живой проверкой
-       в Telegram и пишутся в описания клиентов панели.
-    Админу пишет только если есть что показать: изменения, ошибки
-    или расхождения."""
-    global _SYNC_RUNNING
-    if _SYNC_RUNNING:
-        return
-    from config import ADMIN_ID, load_config, save_config
-    cfg = load_config()
-    if not panel_sync_due(cfg):
-        return
-    _SYNC_RUNNING = True
-    try:
-        panel_res = await run_panel_sync()
-
-        names_res = None
-        if panel_res.get("ok"):
-            try:
-                from services.panel import refresh_panel_descriptions, tg_chat_resolver
-                bot = getattr(context, "bot", None)
-                resolver = await tg_chat_resolver(bot) if bot else None
-                names_res = await refresh_panel_descriptions(resolve_chat=resolver)
-            except Exception as e:
-                names_res = {"ok": False, "error": str(e)[:200]}
-
-        cfg = load_config()
-        # last_run двигаем только при успешной сверке панели: если панель
-        # лежала, следующая попытка будет уже через 15 минут, а не через
-        # весь интервал — как раньше
-        if panel_res.get("ok"):
-            cfg["panel_sync_last_run"] = datetime.now().isoformat(timespec="seconds")
-        cfg["panel_sync_last_report"] = {
-            "at": cfg.get("panel_sync_last_run"),
-            "checked": panel_res.get("checked", 0),
-            "updated": panel_res.get("updated_subs", 0),
-            "orphans": len(panel_res.get("orphans") or []),
-            "missing": len(panel_res.get("missing") or []),
-            "names_updated": (names_res or {}).get("updated", 0),
-            "names_errors": len((names_res or {}).get("errors") or []),
-        }
-        save_config(cfg)
-        notify = (not panel_res.get("ok")
-                  or panel_res.get("updated_subs")
-                  or panel_res.get("orphans") or panel_res.get("missing")
-                  or (names_res and (names_res.get("updated")
-                                     or names_res.get("errors"))))
-        if ADMIN_ID and notify:
-            try:
-                await context.bot.send_message(
-                    ADMIN_ID,
-                    panel_sync_full_report_text(panel_res, names_res),
-                    parse_mode="HTML")
-            except Exception:
-                pass
-
-        # исход сверки — в журнал системных событий и, при ошибке, в журнал ошибок
-        try:
-            from core.database import log_activity, log_error
-            if panel_res.get("ok"):
-                await log_activity(
-                    ADMIN_ID, "ev:panel_sync",
-                    f"проверено {panel_res.get('checked', 0)}, "
-                    f"обновлено {panel_res.get('updated_subs', 0)}, "
-                    f"сирот {len(panel_res.get('orphans') or [])}, "
-                    f"нет в панели {len(panel_res.get('missing') or [])}",
-                    is_admin=True)
-            else:
-                err = str(panel_res.get("error") or "неизвестная ошибка")[:200]
-                await log_activity(ADMIN_ID, "ev:panel_sync_failed", err,
-                                   is_admin=True)
-                await log_error("panel", "error", f"сверка с панелью: {err}")
-        except Exception:
-            pass
-    finally:
-        _SYNC_RUNNING = False
-
-
-def _parse_interval_hours(text: str) -> int | None:
-    """«3», «72ч», «3 дня», «2d» → часы. Допустимо от 1 часа до 30 дней."""
-    t = (text or "").strip().lower().replace(" ", "")
-    if not t:
-        return None
-    mult, num = 1, t
-    for suf in ("дней", "дня", "день", "дн", "д", "day", "days"):
-        if t.endswith(suf):
-            mult, num = 24, t[:-len(suf)]
-            break
-    else:
-        for suf in ("часов", "часа", "час", "ч", "hour", "hours", "h"):
-            if t.endswith(suf):
-                num = t[:-len(suf)]
-                break
-    try:
-        hours = int(num) * mult
-    except ValueError:
-        return None
-    return hours if 1 <= hours <= 24 * 30 else None
-
-
 # ── Подготовка данных подписки ────────────────────────────────────────────────
 
 def make_username(email: str, tg_id: int) -> str:
@@ -1740,25 +1568,21 @@ async def handle_panel_sync_menu(query, context=None):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if context:
         context.user_data.pop("state", None)
-    cfg = load_config()
     lines = ["🔄 <b>Синхронизация</b>", "",
-             "<blockquote>"
-             f"Расписание: <b>{panel_sync_schedule_text(cfg)}</b></blockquote>", "",
-             "По одному расписанию идут две сверки:",
+             "<blockquote>Запускается <b>только вручную</b> — кнопками ниже. "
+             "Само по расписанию ничего не сверяется.</blockquote>", "",
+             "Две сверки:",
              "🔄 <b>Панель → бот</b> — всё, что поменял в панели (ключи, "
              "ссылки, сроки, лимиты устройств и трафика), переезжает в базу бота.",
              "👤 <b>Бот → панель</b> — юзернеймы и ники проверяются напрямую "
              "в Telegram и пишутся в описания клиентов панели:",
              "<code>Drebol VPN · @юзернейм · Ник · TG ID · "
-             "Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС</code>",
-             "⏰ <b>Расписание</b> — когда всё это запускается само."]
+             "Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС</code>"]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Точечная синхронизация",
                                   callback_data="panel_sync")],
-            [InlineKeyboardButton("⏰ Расписание синхронизации",
-                                  callback_data="panel_sync_schedule")],
             [InlineKeyboardButton("👤 Актуализация юзернеймов и ников",
                                   callback_data="panel_names_sync")],
             [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
@@ -1839,88 +1663,8 @@ async def handle_panel_sync(query, context=None):
         panel_sync_report_text(res), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Ещё раз", callback_data="panel_sync"),
-             InlineKeyboardButton("⏰ Расписание", callback_data="panel_sync_schedule")],
-            [InlineKeyboardButton("◀️ К синхронизации",
+             InlineKeyboardButton("◀️ К синхронизации",
                                   callback_data="panel_sync_menu")]]))
-
-
-def _panel_sync_schedule_keyboard():
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⏰ Выкл", callback_data="panel_sync_off")],
-        [InlineKeyboardButton("🔁 Каждый час", callback_data="panel_sync_set:interval:1"),
-         InlineKeyboardButton("🔁 Каждые 6 ч.", callback_data="panel_sync_set:interval:6")],
-        [InlineKeyboardButton("🔁 Каждые 12 ч.", callback_data="panel_sync_set:interval:12"),
-         InlineKeyboardButton("🔁 Каждые 3 дня", callback_data="panel_sync_set:interval:72")],
-        [InlineKeyboardButton("🔁 Каждую неделю", callback_data="panel_sync_set:interval:168")],
-        [InlineKeyboardButton("📅 Каждый день в …", callback_data="panel_sync_daily"),
-         InlineKeyboardButton("✏️ Свой интервал", callback_data="panel_sync_interval")],
-        [InlineKeyboardButton("◀️ К синхронизации",
-                              callback_data="panel_sync_menu")]])
-
-
-async def handle_panel_sync_schedule(query, context=None):
-    """Экран расписания: текущий режим, последний отчёт, выбор периода."""
-    if context:
-        context.user_data.pop("state", None)
-    cfg = load_config()
-    lines = ["⏰ <b>Расписание синхронизации</b>", "",
-             f"<blockquote>Сейчас: <b>{panel_sync_schedule_text(cfg)}</b>"]
-    last = cfg.get("panel_sync_last_report") or {}
-    if last.get("at"):
-        lines.append(f"Последний запуск: {last['at'][:16].replace('T', ' ')} · "
-                     f"сверено {last.get('checked', 0)}, обновлено {last.get('updated', 0)}, "
-                     f"в панели без базы {last.get('orphans', 0)}, "
-                     f"в базе без панели {last.get('missing', 0)}")
-        if last.get("names_updated") is not None:
-            lines.append(f"Ники обновлено: {last.get('names_updated', 0)} "
-                         f"(ошибок: {last.get('names_errors', 0)})")
-    lines.append("</blockquote>")
-    lines += ["", "По этому расписанию идут две сверки: панель → бот "
-              "и ники (бот → панель).",
-              "", "<i>Плановая проверка ходит каждые 15 минут и запускается, "
-              "когда подошло время. Если панель недоступна — база не меняется, "
-              "а запуск повторится при следующей проверке. Ручные кнопки "
-              "работают всегда, вне расписания.</i>"]
-    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
-                                  reply_markup=_panel_sync_schedule_keyboard())
-
-
-async def handle_panel_sync_set(query, context, mode: str, value: str):
-    cfg = load_config()
-    if mode == "interval":
-        cfg["panel_sync_mode"] = "interval"
-        cfg["panel_sync_interval_hours"] = int(value)
-    save_config(cfg)
-    await handle_panel_sync_schedule(query, context)
-
-
-async def handle_panel_sync_off(query, context=None):
-    cfg = load_config()
-    cfg["panel_sync_mode"] = "off"
-    save_config(cfg)
-    await handle_panel_sync_schedule(query, context)
-
-
-async def handle_panel_sync_daily(query, context):
-    from core.states import AWAITING_PANEL_SYNC_DAILY
-    context.user_data["state"] = AWAITING_PANEL_SYNC_DAILY
-    await query.edit_message_text(
-        "📅 <b>Каждый день в …</b>\n\n"
-        "Пришли время в формате <code>ЧЧ:ММ</code>, например <code>03:00</code>.\n"
-        "<i>Время — по часовому поясу сервера.</i>",
-        parse_mode="HTML", reply_markup=_back())
-
-
-async def handle_panel_sync_interval(query, context):
-    from core.states import AWAITING_PANEL_SYNC_INTERVAL
-    context.user_data["state"] = AWAITING_PANEL_SYNC_INTERVAL
-    await query.edit_message_text(
-        "✏️ <b>Свой интервал</b>\n\n"
-        "Пришли, как часто сверяться: <code>2</code> — каждые 2 часа, "
-        "<code>72ч</code> — каждые 72 часа, <code>3 дня</code> — каждые 3 дня.\n"
-        "<i>От 1 часа до 30 дней.</i>",
-        parse_mode="HTML", reply_markup=_back())
 
 
 async def handle_rw_url(query, context):

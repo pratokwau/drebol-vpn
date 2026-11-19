@@ -41,9 +41,7 @@ from services.remnawave import (
     handle_rw_squads, handle_rw_squad_toggle,
     handle_rw_usage, handle_rw_usage_node, handle_rw_usage_all,
     handle_rw_usage_period, handle_rw_usage_set, handle_rw_usage_custom,
-    handle_panel_sync, handle_panel_sync_schedule, handle_panel_sync_set,
-    handle_panel_sync_off, handle_panel_sync_daily, handle_panel_sync_interval,
-    handle_panel_sync_menu, handle_panel_names_sync,
+    handle_panel_sync, handle_panel_sync_menu, handle_panel_names_sync,
 )
 from features.backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
@@ -586,17 +584,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_panel_names_sync(query, context)
     elif data == "panel_sync":
         await handle_panel_sync(query, context)
-    elif data == "panel_sync_schedule":
-        await handle_panel_sync_schedule(query, context)
-    elif data == "panel_sync_off":
-        await handle_panel_sync_off(query, context)
-    elif data.startswith("panel_sync_set:"):
-        _parts = data.split(":")
-        await handle_panel_sync_set(query, context, _parts[1], _parts[2])
-    elif data == "panel_sync_daily":
-        await handle_panel_sync_daily(query, context)
-    elif data == "panel_sync_interval":
-        await handle_panel_sync_interval(query, context)
     elif data == "backup_menu":
         await handle_backup_menu(query, context)
     elif data == "backup_export":

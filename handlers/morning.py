@@ -34,7 +34,6 @@ DEFAULTS = {
     # (панель, ЧС, сайт, здоровье) проверяют свой тумблер на каждом тике,
     # поэтому выключение срабатывает без перезапуска бота.
     "support_topics": True,
-    "panel_sync": True,
     "blacklist_sync": True,
     "site_sync": True,
     "server_reminder": True,
@@ -371,7 +370,7 @@ async def handle_morning_menu(query,
         f"🖥 Напоминание о серверах: <b>{_toggle_label(cfg['server_reminder'])}</b>",
         "",
         "<b>Фоновые проверки (на своих интервалах):</b>",
-        f"🔄 Синхронизация с панелью: <b>{_toggle_label(cfg['panel_sync'])}</b>",
+        "🔄 Синхронизация с панелью: <b>только вручную</b> (кнопка в Remnawave → Синхронизация)",
         f"🚫 Синхронизация ЧС: <b>{_toggle_label(cfg['blacklist_sync'])}</b>",
         f"🌐 Автообновление сайта: <b>{_toggle_label(cfg['site_sync'])}</b>",
         f"💓 Проверка здоровья: <b>{_toggle_label(cfg['healthcheck'])}</b>",
@@ -399,9 +398,6 @@ async def handle_morning_menu(query,
             f"🖥 Серверы: {_toggle_label(cfg['server_reminder'])}",
             callback_data="morning_toggle:server_reminder")],
         [InlineKeyboardButton(
-            f"🔄 Панель: {_toggle_label(cfg['panel_sync'])}",
-            callback_data="morning_toggle:panel_sync")],
-        [InlineKeyboardButton(
             f"🚫 ЧС: {_toggle_label(cfg['blacklist_sync'])}",
             callback_data="morning_toggle:blacklist_sync")],
         [InlineKeyboardButton(
@@ -427,7 +423,7 @@ async def handle_morning_toggle(query, context: ContextTypes.DEFAULT_TYPE,
                                 key: str):
     """Переключатель в настройках синхронизации."""
     if key not in ("enabled", "reconcile", "netcheck", "alerts",
-                   "support_topics", "panel_sync", "blacklist_sync",
+                   "support_topics", "blacklist_sync",
                    "site_sync", "server_reminder", "healthcheck"):
         return
     cfg = get_morning_cfg()
