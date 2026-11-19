@@ -1916,8 +1916,13 @@ async def helpers_delete(request):
     # Тот же путь, что features/staff.py handle_helper_del: из списка
     # и права вместе с ним.
     staff_mod._forget(tg_id)
-    await _audit(actor, "helpers_delete", f"tg_id={tg_id}")
-    return web.json_response({"ok": True})
+    # и из группы поддержки — иначе продолжит отвечать людям в темах
+    bot = get_bot()
+    kicked = (await staff_mod.kick_from_support_group(bot, tg_id)
+              if bot is not None else False)
+    await _audit(actor, "helpers_delete",
+                 f"tg_id={tg_id}" + (" kicked_from_group" if kicked else ""))
+    return web.json_response({"ok": True, "kicked_from_group": kicked})
 
 
 # ── Сайт: удаление и тексты ──────────────────────────────────────────────────

@@ -249,6 +249,26 @@ async def support_member_status(bot, uid: int) -> str:
     return "out"
 
 
+async def kick_from_support_group(bot, uid: int) -> bool:
+    """Вывести человека из группы поддержки (при снятии помощника).
+
+    ban+unban = выгон без вечного бана: если его снова добавят
+    помощником, он сможет вступить по новому приглашению. Админов
+    группы Telegram выгнать не даст — вернётся False.
+    """
+    gid = support_group_id()
+    if not gid:
+        return False
+    if await support_member_status(bot, uid) != "in":
+        return False
+    try:
+        await bot.ban_chat_member(chat_id=gid, user_id=uid)
+        await bot.unban_chat_member(chat_id=gid, user_id=uid, only_if_banned=True)
+        return True
+    except Exception:
+        return False
+
+
 async def make_support_invite(bot, uid: int) -> str | None:
     """Одноразовая ссылка-приглашение в группу поддержки для помощника."""
     gid = support_group_id()
@@ -574,10 +594,16 @@ async def handle_helper_del(query, context, uid: int):
         from core.database import get_user_info
         from core.log_channel import send_log
         u = await get_user_info(uid)
-        await send_log(context.bot, f"👥 Помощник убран: {_name(u, uid)} · <code>{uid}</code>")
+        # из группы поддержки — тоже вон, иначе продолжит отвечать людям
+        kicked = await kick_from_support_group(context.bot, uid)
+        await send_log(context.bot, f"👥 Помощник убран: {_name(u, uid)} · <code>{uid}</code>"
+                       + (" · выведен из группы поддержки" if kicked else ""))
         try:
-            await context.bot.send_message(chat_id=uid, text="🛡 <b>Доступ помощника снят</b>",
-                                           parse_mode="HTML")
+            await context.bot.send_message(
+                chat_id=uid,
+                text="🛡 <b>Доступ помощника снят</b>"
+                     + ("\n\n<i>Вы также выведены из группы поддержки.</i>" if kicked else ""),
+                parse_mode="HTML")
         except Exception:
             pass
-    await handle_helpers_menu(query)
+    await handle_helpers_menu(query, context)

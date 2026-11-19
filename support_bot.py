@@ -36,15 +36,8 @@ def _topic_name(first_name, username, tg_id: str) -> str:
     return label[:120]
 
 
-async def _ensure_topic(bot, user) -> int | None:
-    """Тема юзера в группе: вернуть topic_id (создать, если нет)."""
-    cfg = load_config()
-    group_id = cfg.get("support_group_id")
-    if not group_id:
-        return None
-    row = await db.get_support_topic(user.id)
-    if row and row[2] == "open":
-        return int(row[0])
+async def _create_topic(bot, user, group_id) -> int | None:
+    """Создать юзеру новую тему в группе и записать её в базу."""
     topic_name = _topic_name(user.first_name, user.username, user.id)
     try:
         topic = await bot.create_forum_topic(
@@ -64,6 +57,34 @@ async def _ensure_topic(bot, user) -> int | None:
     except Exception:
         pass
     return topic_id
+
+
+async def _ensure_topic(bot, user) -> int | None:
+    """Тема юзера в группе: одна на человека, навсегда.
+
+    Закрытие (/close) — только пометка в базе: если человек пишет снова,
+    обращение продолжается в той же теме (статус возвращается в open),
+    новая тема не создаётся — вся история переписки в одном месте.
+    Новая тема нужна лишь если старой нет или группа сменилась.
+    """
+    cfg = load_config()
+    group_id = cfg.get("support_group_id")
+    if not group_id:
+        return None
+    row = await db.get_support_topic(user.id)
+    if row and int(row[1]) == int(group_id):
+        if row[2] != "open":
+            await db.set_support_topic_status(user.id, "open")
+            try:
+                await bot.send_message(
+                    chat_id=group_id, message_thread_id=int(row[0]),
+                    text="♻️ <b>Обращение продолжено</b> — человек написал "
+                         "снова после закрытия.",
+                    parse_mode="HTML")
+            except Exception:
+                pass
+        return int(row[0])
+    return await _create_topic(bot, user, group_id)
 
 
 async def _register_user(user) -> None:
@@ -131,7 +152,18 @@ async def on_user_message(update: Update, context) -> None:
         await db.touch_support_topic(user.id)
         await _react_sent(msg)
     except Exception as e:
+        # Возможно, тему удалили из группы вручную: создать свежую
+        # и повторить отправку один раз, а не терять обращение.
         log.error("copy to topic failed for %s: %s", user.id, e)
+        new_topic = await _create_topic(context.bot, user, group_id)
+        if new_topic and new_topic != topic_id:
+            try:
+                await msg.copy(chat_id=group_id, message_thread_id=new_topic)
+                await db.touch_support_topic(user.id)
+                await _react_sent(msg)
+                return
+            except Exception as e2:
+                log.error("copy to new topic failed for %s: %s", user.id, e2)
         await msg.reply_text(
             "⚠️ Не удалось отправить — попробуйте ещё раз чуть позже.",
             parse_mode="HTML")
@@ -188,7 +220,9 @@ async def cmd_close(update: Update, context) -> None:
             parse_mode="HTML")
     except Exception:
         pass
-    await msg.reply_text("✅ Обращение закрыто.", parse_mode="HTML")
+    await msg.reply_text(
+        "✅ Обращение закрыто. Если человек напишет снова — переписка "
+        "продолжится прямо здесь, в этой же теме.", parse_mode="HTML")
 
 
 def main() -> None:
