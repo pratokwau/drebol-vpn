@@ -270,22 +270,16 @@ MIRROR_SUB_DOMAIN = "sub.drbl.tech"
 
 
 def primary_sub_url(sub_url: str) -> str:
-    """Основная ссылка подписки, которую даём пользователю: sub.drbl.tech.
+    """Ссылка подписки, которую даём пользователю.
 
-    В базе и в панели ссылка хранится с key.drbl.tech, но DPI режет TLS
-    до key — поэтому везде, где ссылка показывается пользователю (экран,
-    копирование, QR, диплинки в приложения, сообщение о создании), домен
-    меняем на sub.drbl.tech: тот же токен, тот же origin через Yandex CDN.
+    В базе и в панели ссылка хранится с key.drbl.tech. Показываемый
+    домен выбирается настройкой sub_link_domain в веб-админке
+    (по умолчанию sub.drbl.tech — тот же токен и origin, но через
+    Yandex CDN: DPI режет TLS до key). Логика — config.sub_url_for_display,
+    одна на бот, кабинет и админку.
     """
-    if not sub_url:
-        return ""
-    if MAIN_SUB_DOMAIN in sub_url:
-        return sub_url.replace(MAIN_SUB_DOMAIN, MIRROR_SUB_DOMAIN, 1)
-    if MIRROR_SUB_DOMAIN in sub_url:
-        return sub_url
-    from urllib.parse import urlparse
-    path = urlparse(sub_url).path.strip("/")
-    return f"https://{MIRROR_SUB_DOMAIN}/{path}" if path else ""
+    from config import sub_url_for_display
+    return sub_url_for_display(sub_url)
 
 
 # ── Добавление подписки в приложение ─────────────────────────────────────────

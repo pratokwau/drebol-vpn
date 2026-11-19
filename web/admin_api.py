@@ -41,7 +41,7 @@ SECRET_KEYS = {
 # Фаза 1: только безопасные, читаемые на лету настройки.
 # morning_sync и netcheck — словари, остальные — скаляры.
 SETTINGS_ALLOWLIST = {
-    "channel_url", "force_subscribe",
+    "channel_url", "force_subscribe", "sub_link_domain",
     "privacy_url", "terms_url", "refund_url", "rules_url", "consent_url",
     "paid_trial_period", "paid_preset_hwid", "paid_preset_traffic",
     "paid_preset_lte",
@@ -255,6 +255,11 @@ def validate_settings_patch(patch: dict):
         elif key in _URL_KEYS:
             if not isinstance(value, str) or (value and not value.startswith(("http://", "https://"))):
                 errors.append(f"{key} must be an http(s) URL or empty")
+            else:
+                clean[key] = value
+        elif key == "sub_link_domain":
+            if value not in ("sub", "key"):
+                errors.append('sub_link_domain must be "sub" or "key"')
             else:
                 clean[key] = value
         elif key == "features_off":

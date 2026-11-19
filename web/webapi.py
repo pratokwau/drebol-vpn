@@ -247,6 +247,7 @@ async def profile(tg_id: int) -> dict:
     end = parse_sub_date(row[6])
     left = int((end - datetime.now()).total_seconds()) if end else 0
 
+    from config import sub_url_for_display
     from services.panel import get_client_hwids, get_client_info, get_client_traffic
     info = await get_client_info(email)
     enabled = info.get("enabled", True) if info.get("success") else True
@@ -260,7 +261,7 @@ async def profile(tg_id: int) -> dict:
         "until": row[6],
         "left": max(0, left),
         "left_text": fmt_duration_precise(max(0, left)) if left > 0 else "",
-        "url": sub_url,
+        "url": sub_url_for_display(sub_url),
         "created_at": str(row[10] or "")[:16],
         "devices_limit": int(limit_hwid or 0),
         "devices_own": base_hwid(limit_hwid, extra),
@@ -646,7 +647,9 @@ def build_app():
         await update_paid_sub_field(row[0], "sub_id", res["sub_id"])
         await update_paid_sub_field(row[0], "sub_url", res["sub_url"])
         await add_history(tg_id, "key_reissued", "Ключ перевыпущен из кабинета")
-        return web.json_response({"ok": True, "url": res["sub_url"]})
+        from config import sub_url_for_display
+        return web.json_response(
+            {"ok": True, "url": sub_url_for_display(res["sub_url"])})
 
     async def renew_options(request):
         """Тарифы с посчитанными для этого человека ценами, висящий
