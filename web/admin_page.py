@@ -1405,8 +1405,10 @@ function renderSubEditor(data){
   h += kvRow("LTE", s.lte_gb == null ? "без лимита" : s.lte_gb + " ГБ");
   h += kvRow("Триал", s.trial_period == null ? "—" : fmtDays(s.trial_period));
   h += '</dl>';
-  if (data.display_url) {
-    h += '<h3>Ссылка подписки</h3><div class="sublink"><span class="mono">' + esc(data.display_url) + '</span><button class="ghost" id="ed-copy">Копировать</button></div>';
+  if (data.url_sub || data.url_key) {
+    h += '<h3>Ссылки подписки</h3>';
+    if (data.url_sub) h += '<div class="sublink"><span class="mut">sub</span><span class="mono">' + esc(data.url_sub) + '</span><button class="ghost" data-copy="' + esc(data.url_sub) + '">Копировать</button></div>';
+    if (data.url_key) h += '<div class="sublink"><span class="mut">key</span><span class="mono">' + esc(data.url_key) + '</span><button class="ghost" data-copy="' + esc(data.url_key) + '">Копировать</button></div>';
   }
   if (pays.items && pays.items.length) {
     h += '<h3>Платежи владельца</h3><div class="tblwrap"><table><thead><tr><th>Дата</th><th>Провайдер</th><th>Сумма</th><th>Статус</th></tr></thead><tbody>' +
@@ -1434,10 +1436,11 @@ function renderSubEditor(data){
   $("drawer-body").querySelectorAll("[data-quick]").forEach(function(b){
     b.onclick = withSpin(b, function(){ $("ed-days").value = b.dataset.quick; return subEditorAction("extend"); });
   });
-  const cp = $("ed-copy");
-  if (cp) cp.onclick = function(){
-    if (navigator.clipboard) navigator.clipboard.writeText(data.display_url).then(function(){ toast("Ссылка скопирована", "ok"); });
-  };
+  $("drawer-body").querySelectorAll("[data-copy]").forEach(function(b){
+    b.onclick = function(){
+      if (navigator.clipboard) navigator.clipboard.writeText(b.dataset.copy).then(function(){ toast("Ссылка скопирована", "ok"); });
+    };
+  });
   $("ed-devices").onclick = loadSubDevices;
   $("ed-ips").onclick = loadSubIps;
 }

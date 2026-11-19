@@ -317,12 +317,16 @@ async def sub_card(request):
         }
     except Exception:
         logging.exception("админка: sub_card #%s: платежи недоступны", sub_id)
-    from config import sub_url_for_display
+    from config import (SUB_DISPLAY_DOMAIN, SUB_STORED_DOMAIN,
+                        sub_url_for_display, sub_url_with_domain)
+    raw_url = row[5] if len(row) > 5 else ""
     return web.json_response({
         "subscription": _paid_sub_dict(row),
         "panel": panel, "user": user, "referrer": referrer,
         "payments": payments,
-        "display_url": sub_url_for_display(row[5] if len(row) > 5 else ""),
+        "display_url": sub_url_for_display(raw_url),
+        "url_sub": sub_url_with_domain(raw_url, SUB_DISPLAY_DOMAIN),
+        "url_key": sub_url_with_domain(raw_url, SUB_STORED_DOMAIN),
     })
 
 

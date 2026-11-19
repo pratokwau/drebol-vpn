@@ -28,6 +28,14 @@ def _display_url(sub_url: str) -> str:
     return primary_sub_url(sub_url)
 
 
+def _both_urls(sub_url: str) -> tuple[str, str]:
+    """Обе формы ссылки для админки: (sub.drbl.tech, key.drbl.tech)."""
+    from config import (SUB_DISPLAY_DOMAIN, SUB_STORED_DOMAIN,
+                        sub_url_with_domain)
+    return (sub_url_with_domain(sub_url, SUB_DISPLAY_DOMAIN),
+            sub_url_with_domain(sub_url, SUB_STORED_DOMAIN))
+
+
 def _esc_name(value, fallback="") -> str:
     """Имя или @username человека для сообщения с разметкой.
 
@@ -1137,6 +1145,9 @@ async def handle_paid_sub_view(query, sub_id: int):
         time_left_line = f"📅 До: <b>{expire}</b>\n⏱ <b>Истекла</b>\n"
 
     extra_lines = referral_line.strip()
+    # В админке показываем обе формы ссылки: sub — для людей, key — как
+    # хранится и как ходит origin; настройка домена на админку не влияет.
+    sub_form, key_form = _both_urls(sub_url)
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b>  {status_icon}\n"
         + tg_line
@@ -1158,7 +1169,9 @@ async def handle_paid_sub_view(query, sub_id: int):
         f"🆔 UUID: <code>{uuid_val}</code>\n"
         f"📋 Sub ID: <code>{sub_id_str}</code>"
         "</blockquote>\n\n"
-        f"🔗 <b>Ссылка</b>\n<code>{_display_url(sub_url)}</code>",
+        "🔗 <b>Ссылки</b>\n"
+        f"sub: <code>{sub_form}</code>\n"
+        f"key: <code>{key_form}</code>",
         parse_mode="HTML",
         reply_markup=paid_sub_view_keyboard(sub_id, enabled),
         disable_web_page_preview=True,

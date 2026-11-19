@@ -33,6 +33,20 @@ SUB_STORED_DOMAIN = "key.drbl.tech"
 SUB_DISPLAY_DOMAIN = "sub.drbl.tech"
 
 
+def sub_url_with_domain(sub_url: str, want: str) -> str:
+    """Та же ссылка подписки, но на заданном домене (key или sub)."""
+    if not sub_url:
+        return ""
+    other = SUB_DISPLAY_DOMAIN if want == SUB_STORED_DOMAIN else SUB_STORED_DOMAIN
+    if want in sub_url:
+        return sub_url
+    if other in sub_url:
+        return sub_url.replace(other, want, 1)
+    from urllib.parse import urlparse
+    path = urlparse(sub_url).path.strip("/")
+    return f"https://{want}/{path}" if path else ""
+
+
 def sub_url_for_display(sub_url: str) -> str:
     """Ссылка подписки в том виде, в каком её показывают пользователю.
 
@@ -42,18 +56,9 @@ def sub_url_for_display(sub_url: str) -> str:
     но через Yandex CDN; "key" — как хранится. Применяется везде:
     бот, личный кабинет, веб-админка.
     """
-    if not sub_url:
-        return ""
     mode = str(load_config().get("sub_link_domain") or "sub").strip().lower()
     want = SUB_STORED_DOMAIN if mode == "key" else SUB_DISPLAY_DOMAIN
-    other = SUB_DISPLAY_DOMAIN if want == SUB_STORED_DOMAIN else SUB_STORED_DOMAIN
-    if want in sub_url:
-        return sub_url
-    if other in sub_url:
-        return sub_url.replace(other, want, 1)
-    from urllib.parse import urlparse
-    path = urlparse(sub_url).path.strip("/")
-    return f"https://{want}/{path}" if path else ""
+    return sub_url_with_domain(sub_url, want)
 
 
 def turnstile_keys() -> tuple[str, str]:
