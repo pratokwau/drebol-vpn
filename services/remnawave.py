@@ -1192,6 +1192,237 @@ def panel_sync_report_text(res: dict, title: str = "🔄 Синхронизац�
     return "\n".join(lines)
 
 
+
+async def run_full_sync(bot) -> dict:
+    """Полная синхронизация одной кнопкой (решение владельца 2026-11-19):
+    всё, что бот сверяет с внешним миром, одним проходом. Шаги независимы:
+    падение одного не отменяет остальные, у каждого своя секция отчёта.
+      1) панель → бот: подписки (поля панели в базу);
+      2) бот → панель: ники и юзернеймы в описания клиентов;
+      3) ресурсы: панель, выдача подписок и все узлы — живы ли;
+      4) хосты панели: состав, отключённые, скрытые;
+      5) сквады: выбранные в боте против живых в панели;
+      6) сайт: пересборка и деплой, если что-то поменялось;
+      7) общий чёрный список: скачать и применить (если включён);
+      8) сверка Platega: только отчёт, исправления — отдельной кнопкой.
+    """
+    out: dict = {}
+    try:
+        out["panel"] = await run_panel_sync()
+    except Exception as e:
+        out["panel"] = {"ok": False, "error": str(e)[:200]}
+
+    if bot is not None and (out.get("panel") or {}).get("ok"):
+        try:
+            from services.panel import refresh_panel_descriptions, tg_chat_resolver
+            out["names"] = await refresh_panel_descriptions(
+                resolve_chat=await tg_chat_resolver(bot))
+        except Exception as e:
+            out["names"] = {"ok": False, "error": str(e)[:200]}
+    else:
+        out["names"] = None
+
+    try:
+        from services.panel import probe_servers
+        out["probe"] = await probe_servers()
+    except Exception as e:
+        out["probe"] = {"error": str(e)[:200]}
+
+    try:
+        out["hosts"] = await list_hosts()
+    except Exception as e:
+        out["hosts"] = {"ok": False, "error": str(e)[:200]}
+
+    try:
+        sq = await list_squads()
+        chosen = set(settings()["squads"])
+        live = {s["uuid"] for s in sq.get("squads") or []}
+        out["squads"] = {**sq, "chosen": len(chosen),
+                         "missing": sorted(chosen - live)}
+    except Exception as e:
+        out["squads"] = {"ok": False, "error": str(e)[:200]}
+
+    try:
+        from web.site_deploy import _build_and_maybe_deploy, configured as site_on
+        if not site_on():
+            out["site"] = {"status": "not_configured"}
+        elif not load_config().get("site_deployed_at"):
+            out["site"] = {"status": "not_deployed"}
+        elif bot is None:
+            out["site"] = {"status": "no_bot"}
+        else:
+            me = await bot.get_me()
+            status, _res = await _build_and_maybe_deploy(me.username)
+            out["site"] = {"status": status}
+    except Exception as e:
+        out["site"] = {"status": "failed", "error": str(e)[:200]}
+
+    try:
+        from features.blacklist import remote_on, sync_remote
+        if not remote_on():
+            out["blacklist"] = {"status": "off"}
+        elif bot is None:
+            out["blacklist"] = {"status": "no_bot"}
+        else:
+            out["blacklist"] = await sync_remote(bot)
+    except Exception as e:
+        out["blacklist"] = {"ok": False, "error": str(e)[:200]}
+
+    try:
+        from handlers.reconcile import run_reconciliation
+        out["reconcile"] = await run_reconciliation()
+    except Exception as e:
+        out["reconcile"] = {"error": str(e)[:200]}
+
+    # отметка о запуске — для «последнего отчёта» в обеих админках
+    try:
+        cfg = load_config()
+        cfg["panel_sync_last_run"] = datetime.now().isoformat(timespec="seconds")
+        p = out.get("panel") or {}
+        cfg["panel_sync_last_report"] = {
+            "at": cfg["panel_sync_last_run"],
+            "checked": p.get("checked", 0),
+            "updated": p.get("updated_subs", 0),
+            "orphans": len(p.get("orphans") or []),
+            "missing": len(p.get("missing") or []),
+            "names_updated": (out.get("names") or {}).get("updated", 0),
+            "names_errors": len((out.get("names") or {}).get("errors") or []),
+        }
+        save_config(cfg)
+    except Exception:
+        pass
+    return out
+
+
+def full_sync_report_text(res: dict) -> str:
+    """Единый отчёт полной синхронизации по всем секциям."""
+    parts = [panel_sync_report_text(res.get("panel") or {},
+                                    "🔄 Полная синхронизация · подписки")]
+
+    names = res.get("names")
+    if names is None:
+        parts.append("\n👤 <b>Ники и юзернеймы</b>\n\n"
+                     "<blockquote>Пропущено: панель недоступна.</blockquote>")
+    elif names.get("ok"):
+        parts.append(
+            "\n👤 <b>Ники и юзернеймы (бот → панель)</b>\n\n"
+            "<blockquote>"
+            f"Проверено подписок: <b>{names['checked']}</b>\n"
+            f"Обновлено описаний: <b>{names['updated']}</b>\n"
+            f"С ошибкой: <b>{len(names.get('errors') or [])}</b>"
+            "</blockquote>")
+        if names.get("errors"):
+            shown = "\n".join(str(e)[:120] for e in names["errors"][:5])
+            parts.append(f"<blockquote>{shown}</blockquote>")
+    else:
+        parts.append("\n👤 <b>Ники и юзернеймы</b>\n\n"
+                     f"<blockquote>{escape(str(names.get('error') or 'ошибка'))}</blockquote>")
+
+    probe = res.get("probe") or {}
+    if probe.get("error"):
+        parts.append("\n🖥 <b>Ресурсы и узлы</b>\n\n"
+                     f"<blockquote>Проверка не удалась: {escape(str(probe['error']))}</blockquote>")
+    else:
+        panel = probe.get("panel") or {}
+        sub = probe.get("sub") or {}
+        nodes = probe.get("nodes") or []
+        lines = ["\n🖥 <b>Ресурсы и узлы</b>", "", "<blockquote>",
+                 f"Панель: {'✅ отвечает' if panel.get('ok') else '❌ недоступна'}"
+                 f" · {panel.get('ms', '—')} мс\n"
+                 f"Выдача подписок: {'✅ отвечает' if sub.get('ok') else '❌ недоступна'}"
+                 f" · {sub.get('ms', '—')} мс"]
+        if nodes:
+            lines.append("")
+            for n in nodes:
+                if not n.get("enabled"):
+                    state = "⏸ выключен"
+                elif n.get("reachable"):
+                    state = "✅ онлайн"
+                else:
+                    state = "❌ " + (n.get("error") or "недоступен")
+                lines.append(
+                    f"{n.get('tag')}: <b>{state}</b> · {n.get('host') or ''}"
+                    f" · онлайн-клиентов: {n.get('clients', 0)}")
+        else:
+            lines.append("Узлов панель не отдала.")
+        lines.append("</blockquote>")
+        parts.append("\n".join(lines))
+
+    hosts = res.get("hosts") or {}
+    if hosts.get("ok"):
+        hs = hosts.get("hosts") or []
+        off = [h for h in hs if h.get("isDisabled")]
+        hidden = [h for h in hs if h.get("isHidden")]
+        block = (f"Всего: <b>{len(hs)}</b> · отключено: <b>{len(off)}</b>"
+                 f" · скрыто: <b>{len(hidden)}</b>")
+        if off:
+            block += "\nОтключены: " + ", ".join(
+                escape(str(h.get("remark") or h.get("address") or "?")) for h in off[:10])
+        parts.append("\n🌐 <b>Хосты в панели</b>\n\n"
+                     f"<blockquote>{block}</blockquote>")
+    else:
+        parts.append("\n🌐 <b>Хосты в панели</b>\n\n"
+                     f"<blockquote>Не получить: {escape(str(hosts.get('error') or 'ошибка'))}</blockquote>")
+
+    squads = res.get("squads") or {}
+    if squads.get("ok"):
+        block = (f"В панели: <b>{len(squads.get('squads') or [])}</b> · "
+                 f"выбрано для выдачи: <b>{squads.get('chosen', 0)}</b>")
+        if squads.get("missing"):
+            block += ("\n⚠️ Выбранных в панели больше нет: "
+                      f"<b>{len(squads['missing'])}</b> — проверь сквады в Remnawave.")
+        parts.append("\n👥 <b>Сквады</b>\n\n"
+                     f"<blockquote>{block}</blockquote>")
+    else:
+        parts.append("\n👥 <b>Сквады</b>\n\n"
+                     f"<blockquote>Не получить: {escape(str(squads.get('error') or 'ошибка'))}</blockquote>")
+
+    site = res.get("site") or {}
+    site_text = {
+        "unchanged": "✅ Актуален, изменений нет — деплой не понадобился.",
+        "deployed": "✅ Обновлён: залита свежая версия.",
+        "not_deployed": "Ещё ни разу не развёрнут — пропускаю (деплой делается вручную).",
+        "not_configured": "Не настроен — пропускаю.",
+        "no_bot": "Пропущено: нет доступа к боту.",
+    }.get(site.get("status"),
+          "❌ Не удалось: " + str(site.get("error") or site.get("status") or "ошибка"))
+    parts.append("\n🌍 <b>Сайт и кабинет</b>\n\n"
+                 f"<blockquote>{site_text}</blockquote>")
+
+    bl = res.get("blacklist") or {}
+    if bl.get("status") == "off":
+        bl_text = "Общий список выключен — пропускаю."
+    elif bl.get("status") == "no_bot":
+        bl_text = "Пропущено: нет доступа к боту."
+    elif bl.get("ok"):
+        stopped = (len(bl.get("trials_stopped") or [])
+                   + len(bl.get("paid_stopped") or [])
+                   + len(bl.get("admin_stopped") or []))
+        bl_text = (f"✅ Записей в списке: <b>{bl.get('total', 0)}</b> · "
+                   f"добавлено: <b>{bl.get('added', 0)}</b> · "
+                   f"снято: <b>{bl.get('removed', 0)}</b> · "
+                   f"остановлено подписок: <b>{stopped}</b> · "
+                   f"восстановлено: <b>{len(bl.get('restored') or [])}</b>")
+    else:
+        bl_text = "❌ Не удалось: " + str(bl.get("error") or "ошибка")
+    parts.append("\n🚫 <b>Чёрный список</b>\n\n"
+                 f"<blockquote>{bl_text}</blockquote>")
+
+    rec = res.get("reconcile") or {}
+    if rec.get("error"):
+        rec_text = "❌ Не удалось: " + str(rec["error"])
+    else:
+        issues = rec.get("issues") or []
+        rec_text = (f"Проверено счетов: <b>{rec.get('checked', 0)}</b> · "
+                    f"расхождений: <b>{len(issues)}</b>")
+        if issues:
+            rec_text += ("\n<i>Исправления отсюда не применяются — они в "
+                         "разделе сверки, по кнопке.</i>")
+    parts.append("\n🔍 <b>Сверка с Platega</b>\n\n"
+                 f"<blockquote>{rec_text}</blockquote>")
+    return "\n".join(parts)
+
+
 # ── Подготовка данных подписки ────────────────────────────────────────────────
 
 def make_username(email: str, tg_id: int) -> str:
@@ -1571,19 +1802,24 @@ async def handle_panel_sync_menu(query, context=None):
     lines = ["🔄 <b>Синхронизация</b>", "",
              "<blockquote>Запускается <b>только вручную</b> — кнопками ниже. "
              "Само по расписанию ничего не сверяется.</blockquote>", "",
-             "Две сверки:",
-             "🔄 <b>Панель → бот</b> — всё, что поменял в панели (ключи, "
-             "ссылки, сроки, лимиты устройств и трафика), переезжает в базу бота.",
-             "👤 <b>Бот → панель</b> — юзернеймы и ники проверяются напрямую "
-             "в Telegram и пишутся в описания клиентов панели:",
-             "<code>Drebol VPN · @юзернейм · Ник · TG ID · "
-             "Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС</code>"]
+             "<b>Полная синхронизация</b> одним проходом:",
+             "🔄 подписки: всё, что поменял в панели (ключи, ссылки, сроки, "
+             "лимиты устройств и трафика), переезжает в базу бота;",
+             "👤 ники и юзернеймы — проверяются напрямую в Telegram и пишутся "
+             "в описания клиентов панели;",
+             "🖥 ресурсы и узлы — панель, выдача подписок и все узлы: живы ли, "
+             "кто онлайн;",
+             "🌐 хосты и сквады панели — состав, отключённые, скрытые, "
+             "не пропали ли выбранные;",
+             "🌍 сайт и кабинет — пересборка, если что-то поменялось;",
+             "🚫 общий чёрный список — скачать и применить;",
+             "🔍 сверка с Platega — отчёт о расхождениях."]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Точечная синхронизация",
+            [InlineKeyboardButton("🔄 Полная синхронизация",
                                   callback_data="panel_sync")],
-            [InlineKeyboardButton("👤 Актуализация юзернеймов и ников",
+            [InlineKeyboardButton("👤 Только ники и юзернеймы",
                                   callback_data="panel_names_sync")],
             [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]))
 
@@ -1644,23 +1880,21 @@ async def handle_panel_names_sync(query, context=None):
 
 
 async def handle_panel_sync(query, context=None):
-    """Ручной запуск: идём в панель, сверяем каждую подписку с базой."""
+    """Ручной запуск полной синхронизации: панель, ники, узлы, хосты,
+    сквады, сайт, чёрный список и сверка Platega — одним проходом."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     if not is_configured():
         await query.answer("Сначала задай адрес панели и токен", show_alert=True)
         return
-    await query.edit_message_text("🔄 Иду в панель и сверяю каждую подписку…")
-    res = await run_panel_sync()
-    if res.get("ok"):
-        cfg = load_config()
-        cfg["panel_sync_last_run"] = datetime.now().isoformat(timespec="seconds")
-        cfg["panel_sync_last_report"] = {
-            "at": cfg["panel_sync_last_run"],
-            "checked": res["checked"], "updated": res["updated_subs"],
-            "orphans": len(res["orphans"]), "missing": len(res["missing"])}
-        save_config(cfg)
     await query.edit_message_text(
-        panel_sync_report_text(res), parse_mode="HTML",
+        "🔄 <b>Полная синхронизация</b>\n\n"
+        "Сверяю подписки и ники с панелью, проверяю узлы, хосты и сквады, "
+        "обновляю сайт, чёрный список и сверку Platega. Это может занять "
+        "минуту-другую…", parse_mode="HTML")
+    bot = getattr(context, "bot", None) if context else None
+    res = await run_full_sync(bot)
+    await query.edit_message_text(
+        full_sync_report_text(res), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Ещё раз", callback_data="panel_sync"),
              InlineKeyboardButton("◀️ К синхронизации",

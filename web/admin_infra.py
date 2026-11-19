@@ -191,28 +191,20 @@ async def node_users(request):
 # ── Синхронизация с панелью ──────────────────────────────────────────────────
 
 async def panel_sync_run(request):
+    """Полная синхронизация одной кнопкой: подписки, ники, узлы, хосты,
+    сквады, сайт, чёрный список, сверка Platega (та же, что в ТГ-боте)."""
     actor, err = await _require_mutation(request)
     if err is not None:
         return err
-    res = await rw_mod.run_panel_sync()
-    if res.get("ok"):
-        from config import load_config, save_config
-        cfg = load_config()
-        cfg["panel_sync_last_run"] = datetime.now().isoformat(timespec="seconds")
-        cfg["panel_sync_last_report"] = {
-            "at": cfg["panel_sync_last_run"],
-            "checked": res.get("checked", 0),
-            "updated": res.get("updated_subs", 0),
-            "orphans": len(res.get("orphans") or []),
-            "missing": len(res.get("missing") or []),
-        }
-        save_config(cfg)
+    res = await rw_mod.run_full_sync(get_bot())
+    panel = res.get("panel") or {}
     await _audit(actor, "panel_sync",
-                 f"ok={bool(res.get('ok'))} checked={res.get('checked', 0)} "
-                 f"updated={res.get('updated_subs', 0)}")
+                 f"ok={bool(panel.get('ok'))} checked={panel.get('checked', 0)} "
+                 f"updated={panel.get('updated_subs', 0)} "
+                 f"names={(res.get('names') or {}).get('updated', 0)}")
     return web.json_response({
-        "ok": bool(res.get("ok")), "result": res,
-        "report": rw_mod.panel_sync_report_text(res),
+        "ok": bool(panel.get("ok")),
+        "report": rw_mod.full_sync_report_text(res),
     })
 
 

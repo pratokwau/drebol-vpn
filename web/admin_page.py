@@ -623,8 +623,8 @@ label.chk input{width:auto;margin:0}
 
       <!-- Синхронизация -->
       <section id="sec-sync" class="page hidden">
-        <div class="card"><h2>Синхронизация с панелью</h2><p class="sub">Сверка пользователей бота с клиентами Remnawave.</p>
-          <div class="btnrow"><button id="btn-psync">Запустить синхронизацию</button><button id="btn-psync-set" class="ghost">Последний отчёт</button></div>
+        <div class="card"><h2>Полная синхронизация</h2><p class="sub">Одним проходом: подписки и ники ↔ панель, узлы и хосты, сквады, сайт, чёрный список, сверка Platega. Только вручную.</p>
+          <div class="btnrow"><button id="btn-psync">Запустить полную синхронизацию</button><button id="btn-psync-set" class="ghost">Последний отчёт</button></div>
           <div id="psync-out"></div>
         </div>
         <div class="card"><h2>Утренняя сводка 09:00</h2><p class="sub">Что входит в ежедневную сводку и во сколько она приходит.</p>
