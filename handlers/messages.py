@@ -44,6 +44,7 @@ from core.states import (
     AWAITING_SITE_HOST, AWAITING_SITE_USER, AWAITING_SITE_PASS,
     AWAITING_SITE_DOMAIN, AWAITING_SITE_TEXT, AWAITING_BACKUP_FILE,
     AWAITING_RW_URL, AWAITING_RW_TOKEN, AWAITING_RW_USAGE_PERIOD,
+    AWAITING_LINK_FIELD,
     AWAITING_PANEL_SYNC_DAILY, AWAITING_PANEL_SYNC_INTERVAL,
     AWAITING_DM_USER,
     AWAITING_PLATEGA_MERCHANT, AWAITING_PLATEGA_SECRET,
@@ -314,6 +315,48 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🔌 Проверить", callback_data="rw_test"),
                  InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]),
         )
+        return
+
+    if state == AWAITING_LINK_FIELD:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        from services.remnawave import LINK_FIELDS, save_link_override
+        key = context.user_data.get("link_field") or ""
+        spec = {k: (label, kind) for k, label, kind in LINK_FIELDS}.get(key)
+        back_links = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔗 К основным ссылкам", callback_data="rw_links")]])
+        if spec is None:
+            context.user_data.pop("state", None)
+            await update.message.reply_text("❌ Поле не выбрано.", reply_markup=back_links)
+            return
+        label, kind = spec
+        value = text.strip()
+        if value == "-":
+            save_link_override(key, "")
+            context.user_data.pop("state", None)
+            context.user_data.pop("link_field", None)
+            await update.message.reply_text(
+                f"✅ Правка убрана: {label} — снова авто-значение.",
+                reply_markup=back_links)
+            return
+        if kind == "url":
+            value = value.rstrip("/")
+            if not value.startswith("https://"):
+                await update.message.reply_text(
+                    "❌ Адрес должен начинаться с https://", reply_markup=back_links)
+                return
+        else:
+            value = value.replace("https://", "").replace("http://", "").rstrip("/")
+            if "." not in value or " " in value or "/" in value:
+                await update.message.reply_text(
+                    "❌ Это не похоже на домен. Пример: sub.drbl.tech",
+                    reply_markup=back_links)
+                return
+        save_link_override(key, value)
+        context.user_data.pop("state", None)
+        context.user_data.pop("link_field", None)
+        await update.message.reply_text(
+            f"✅ Сохранено: {label} → <code>{value}</code>", parse_mode="HTML",
+            reply_markup=back_links)
         return
 
     if state == AWAITING_RW_TOKEN:

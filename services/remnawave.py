@@ -1416,6 +1416,7 @@ async def handle_rw_menu(query, context=None):
     kb = [[InlineKeyboardButton("🌐 Адрес панели", callback_data="rw_url"),
            InlineKeyboardButton("🔑 Токен", callback_data="rw_token")]]
     if is_configured():
+        kb.append([InlineKeyboardButton("🔗 Основные ссылки", callback_data="rw_links")])
         kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")])
@@ -1426,6 +1427,158 @@ async def handle_rw_menu(query, context=None):
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb),
                                   disable_web_page_preview=True)
+
+
+# ── Основные ссылки ─────────────────────────────────────────────────────────
+# Справка по адресам проекта: панель, сайт, домены подписки, ноды и хосты.
+# Авто-значения: rw_url и webapi_public из конфига, домены — константы
+# config; ноды и хосты — живьём из панели. Ручные правки — config.main_links
+# (те же, что редактируются в веб-админке, PATCH /links): перекрывают авто.
+
+LINK_FIELDS = (
+    ("panel_url", "🌐 Панель Remnawave", "url"),
+    ("site_url", "🏠 Сайт и кабинет", "url"),
+    ("key_domain", "🔑 Подписка — основной домен (origin)", "domain"),
+    ("sub_domain", "☁️ Подписка — через CDN", "domain"),
+)
+
+
+def links_values() -> tuple[dict, dict, dict]:
+    """(auto, overrides, effective) для основных ссылок."""
+    from config import SUB_DISPLAY_DOMAIN, SUB_STORED_DOMAIN, load_config
+    cfg = load_config()
+    auto = {
+        "panel_url": (cfg.get("rw_url") or "").rstrip("/"),
+        "site_url": (cfg.get("webapi_public") or "").rstrip("/"),
+        "key_domain": SUB_STORED_DOMAIN,
+        "sub_domain": SUB_DISPLAY_DOMAIN,
+    }
+    overrides = {k: str(v).strip() for k, v in (cfg.get("main_links") or {}).items()
+                 if isinstance(v, str) and str(v).strip()}
+    eff = {k: overrides.get(k) or auto.get(k) or "" for k, _, _ in LINK_FIELDS}
+    return auto, overrides, eff
+
+
+def save_link_override(key: str, value: str) -> None:
+    """Сохранить/очистить (value="") одну правку основной ссылки."""
+    from config import atomic_update
+
+    def _apply(cfg):
+        cur = dict(cfg.get("main_links") or {})
+        cur[key] = value
+        cfg["main_links"] = cur
+    atomic_update(_apply)
+
+
+async def handle_rw_links(query, context=None):
+    """Экран «Основные ссылки»: адреса + живые ноды и хосты из панели."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if context:
+        context.user_data.pop("state", None)
+    _auto, overrides, eff = links_values()
+    lines = ["🔗 <b>Основные ссылки</b>", ""]
+    for key, label, kind in LINK_FIELDS:
+        val = eff[key]
+        shown = val if kind == "url" or "://" in val else f"https://{val}"
+        mark = " <i>(правка)</i>" if key in overrides else ""
+        lines.append(f"{label}: <code>{escape(shown) if shown else '—'}</code>{mark}")
+    nres = await nodes()
+    raw = nres.get("data") if nres.get("ok") else None
+    items = raw if isinstance(raw, list) else (raw or {}).get("response") or (raw or {}).get("nodes") or []
+    lines += ["", "<b>Ноды</b> <i>(из панели)</i>"]
+    if items:
+        for n in items:
+            if not isinstance(n, dict):
+                continue
+            if n.get("isDisabled"):
+                st = "⚫ выключена"
+            elif n.get("isConnected") and n.get("isXrayRunning") is not False:
+                st = "🟢 онлайн"
+            else:
+                st = "🔴 офлайн"
+            online = n.get("usersOnline")
+            tail = f" · {online} чел." if online is not None else ""
+            lines.append(f"• {escape(n.get('name') or '')} — "
+                         f"<code>{escape(n.get('address') or '')}</code> · {st}{tail}")
+    else:
+        lines.append("<i>Панель не ответила.</i>")
+    hres = await list_hosts()
+    hosts = hres.get("hosts") if hres.get("ok") else []
+    lines += ["", "<b>Хосты подписки</b> <i>(из панели)</i>"]
+    if hosts:
+        for x in hosts:
+            stub = x.get("port") == 1234 or x.get("address") == "12345"
+            addr = "служебный" if stub else f"{x.get('address') or ''}:{x.get('port') or '—'}"
+            st = "⚫ выкл" if x.get("isDisabled") else "🟢 вкл"
+            sni = f" · SNI <code>{escape(x.get('sni') or '')}</code>" if x.get("sni") else ""
+            lines.append(f"• {escape(x.get('remark') or '')} — <code>{escape(addr)}</code>{sni} · {st}")
+    else:
+        lines.append("<i>Панель не ответила.</i>")
+    kb = [
+        [InlineKeyboardButton("✏️ Поправить", callback_data="rw_links_edit"),
+         InlineKeyboardButton("🔄 Обновить", callback_data="rw_links")],
+        [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")],
+    ]
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb),
+                                  disable_web_page_preview=True)
+
+
+async def handle_rw_links_edit(query, context=None):
+    """Меню правок основных ссылок: по кнопке на поле + сброс всех правок."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    if context:
+        context.user_data.pop("state", None)
+    _auto, overrides, eff = links_values()
+    lines = ["✏️ <b>Поправить основные ссылки</b>", "",
+             "<i>Правка перекрывает авто-значение и действует и здесь, "
+             "и в веб-админке. Серверы правятся в самой панели — здесь "
+             "они только показываются.</i>"]
+    kb = []
+    for key, label, _kind in LINK_FIELDS:
+        mark = " (правка)" if key in overrides else ""
+        kb.append([InlineKeyboardButton(f"{label}{mark}", callback_data=f"rw_link_set:{key}")])
+    if overrides:
+        kb.append([InlineKeyboardButton("🧹 Сбросить все правки", callback_data="rw_links_reset")])
+    kb.append([InlineKeyboardButton("◀️ К ссылкам", callback_data="rw_links")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb),
+                                  disable_web_page_preview=True)
+
+
+async def handle_rw_link_set(query, context, key: str):
+    """Запросить новое значение одного поля основной ссылки."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from core.states import AWAITING_LINK_FIELD
+    spec = {k: (label, kind) for k, label, kind in LINK_FIELDS}.get(key)
+    if spec is None:
+        return
+    label, kind = spec
+    auto, overrides, eff = links_values()
+    context.user_data["state"] = AWAITING_LINK_FIELD
+    context.user_data["link_field"] = key
+    hint = ("адрес целиком, например <code>https://panel.drbl.tech</code>"
+            if kind == "url" else "домен без https://, например <code>sub.drbl.tech</code>")
+    lines = [f"✏️ <b>{label}</b>", "",
+             f"Сейчас: <code>{escape(eff[key] or '—')}</code>"
+             + (" (правка)" if key in overrides else " (авто)"),
+             f"Авто-значение: <code>{escape(auto[key] or '—')}</code>", "",
+             f"Пришли новое значение — {hint}.",
+             "Пришли <code>-</code>, чтобы убрать правку и вернуть авто."]
+    kb = [[InlineKeyboardButton("◀️ Отмена", callback_data="rw_links_edit")]]
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb),
+                                  disable_web_page_preview=True)
+
+
+async def handle_rw_links_reset(query, context=None):
+    """Сбросить все ручные правки основных ссылок."""
+    from config import atomic_update
+
+    def _apply(cfg):
+        cfg["main_links"] = {}
+    atomic_update(_apply)
+    await handle_rw_links(query, context)
 
 
 async def handle_rw_yandex(query, context=None):

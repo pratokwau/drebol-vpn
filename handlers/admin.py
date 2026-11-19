@@ -160,7 +160,8 @@ async def handle_healthcheck(query):
     back = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Проверить снова", callback_data="healthcheck"),
          InlineKeyboardButton("◀️ Назад", callback_data="rw_menu")],
-        [InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")],
+        [InlineKeyboardButton("🔗 Основные ссылки", callback_data="rw_links"),
+         InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")],
     ])
 
     lines = ["🩺 <b>Здоровье серверов</b>", ""]

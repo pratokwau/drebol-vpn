@@ -35,6 +35,8 @@ from features.fraud import (
 )
 from services.remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
+    handle_rw_links, handle_rw_links_edit, handle_rw_link_set,
+    handle_rw_links_reset,
     handle_rw_yandex, handle_rw_yandex_sub, handle_rw_yandex_whitelist,
     handle_rw_squads, handle_rw_squad_toggle,
     handle_rw_usage, handle_rw_usage_node, handle_rw_usage_all,
@@ -529,6 +531,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_clear_support_group(query)
     elif data == "rw_menu":
         await handle_rw_menu(query, context)
+    elif data == "rw_links":
+        await handle_rw_links(query, context)
+    elif data == "rw_links_edit":
+        await handle_rw_links_edit(query, context)
+    elif data == "rw_links_reset":
+        await handle_rw_links_reset(query, context)
+    elif data.startswith("rw_link_set:"):
+        await handle_rw_link_set(query, context, data.split(":", 1)[1])
     elif data == "rw_yandex":
         await handle_rw_yandex(query, context)
     elif data == "rw_yandex_sub":
