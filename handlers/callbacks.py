@@ -73,6 +73,7 @@ from handlers.control import (
 from features.staff import (
     is_helper, helper_can, handle_helper_panel, handle_helper_card, handle_helper_perm,
     handle_helpers_menu, handle_helper_add, handle_helper_del,
+    handle_helper_support, handle_helper_invite,
 )
 from handlers.confirm import confirm_gate
 from features.blacklist import (
@@ -439,10 +440,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_connect_help_toggle(query, context)
     elif data.startswith("ctl_ch_set:"):
         await handle_connect_help_set(query, context, int(data.split(":")[1]))
+    elif data == "helper_support":
+        await handle_helper_support(query, context)
     elif data == "helpers_menu":
         await handle_helpers_menu(query, context)
     elif data.startswith("helper_card:"):
-        await handle_helper_card(query, int(data.split(":")[1]))
+        await handle_helper_card(query, int(data.split(":")[1]), context)
+    elif data.startswith("helper_invite:"):
+        await handle_helper_invite(query, context, int(data.split(":")[1]))
     elif data.startswith("helper_perm:"):
         _, huid, perm = data.split(":", 2)
         await handle_helper_perm(query, context, int(huid), perm)

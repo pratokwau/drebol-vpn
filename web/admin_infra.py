@@ -286,6 +286,7 @@ _ADMIN_LABELS = {
     "fraud_scan": "🕵 Ручная проверка антифрода", "fraud_stop": "🚫 Закрыл триал за повтор",
     "git_update": "⬆️ Обновление с GitHub", "git_update_failed": "⚠️ Обновление с GitHub не удалось",
     "helpers_add": "👥 Добавил помощника", "helpers_delete": "👥 Удалил помощника",
+    "helper_invite": "📩 Приглашение в группу поддержки",
     "helpers_perm": "👥 Сменил права помощника",
     "jobs_run_now": "▶️ Запустил фоновую задачу", "jobs_run_now_failed": "⚠️ Фоновая задача упала",
     "logs_purge": "🧹 Очистил старые логи", "lte_check_now": "📶 Ручная проверка LTE",
@@ -845,17 +846,69 @@ async def helpers_get(request):
     except Exception:
         return _json_error("no_session", 401)
     from core.database import get_user_info
+    bot = get_bot()
     out = []
     for uid in staff_mod.helper_ids():
         u = await get_user_info(uid)
+        st = (await staff_mod.support_member_status(bot, uid)
+              if bot is not None else "unknown")
         out.append({
             "tg_id": uid,
             "first_name": (u[1] if u else "") or "",
             "username": (u[2] if u else "") or "",
             "perms": sorted(staff_mod.helper_perms(uid)),
             "web_access": False,
+            "in_group": st,
         })
-    return web.json_response({"helpers": out})
+    return web.json_response({
+        "helpers": out,
+        "support_group_set": bool(staff_mod.support_group_id()),
+    })
+
+
+async def helpers_invite(request):
+    """Приглашение помощника в группу поддержки: одноразовая ссылка от
+    бота (он админ группы) + сообщение помощнику в личку."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    try:
+        tg_id = int(request.match_info.get("tg_id") or 0)
+    except (TypeError, ValueError):
+        tg_id = 0
+    if not tg_id or tg_id not in staff_mod.helper_ids():
+        return _json_error("bad_request")
+    bot = get_bot()
+    if bot is None:
+        return _json_error("no_bot", 503)
+    invite = await staff_mod.make_support_invite(bot, tg_id)
+    if not invite:
+        return _json_error("invite_failed", 502)
+    sent = False
+    try:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        await bot.send_message(
+            chat_id=tg_id,
+            text=("🛟 <b>Приглашение в группу поддержки Drebol VPN</b>\n\n"
+                  "<i>В группе лежат обращения людей. Вступи — и сможешь отвечать "
+                  "им прямо в темах: бот поддержки доставит ответ человеку. "
+                  "Ссылка одноразовая, только для тебя.</i>"),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📩 Вступить в группу поддержки", url=invite)],
+            ]))
+        sent = True
+    except Exception:
+        sent = False
+    await _audit(actor, "helper_invite", f"tg_id={tg_id} sent={sent}")
+    return web.json_response({
+        "ok": True, "sent": sent,
+        # ссылку показываем админу только если бот не достучался сам
+        "invite_link": None if sent else invite,
+    })
 
 
 # ── Чёрный список ────────────────────────────────────────────────────────────
@@ -2112,6 +2165,7 @@ def register(app) -> None:
     app.router.add_get("/helpers", helpers_get)
     app.router.add_post("/helpers/add", helpers_add)
     app.router.add_post("/helpers/{tg_id}/perm", helpers_perm)
+    app.router.add_post("/helpers/{tg_id}/invite", helpers_invite)
     app.router.add_post("/helpers/{tg_id}/delete", helpers_delete)
     app.router.add_get("/blacklist", blacklist_get)
     app.router.add_post("/blacklist/add", blacklist_add)

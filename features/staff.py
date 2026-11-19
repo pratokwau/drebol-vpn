@@ -47,6 +47,14 @@ PERMS = {
         "states": {AWAITING_DM_USER},
         "button": None,
     },
+    "support": {
+        "label": "🛟 Поддержка",
+        "hint": "отвечать людям в группе поддержки; нужно состоять в группе — приглашение выдаёт бот",
+        "exact": {"helper_support"},
+        "prefix": (),
+        "states": set(),
+        "button": ("🛟 Поддержка", "helper_support"),
+    },
     "subs": {
         "label": "💳 Подписки — смотреть",
         "hint": "список подписок, карточка, устройства и адреса",
@@ -113,7 +121,7 @@ PERMS = {
 }
 
 # Что получает помощник, добавленный до появления прав
-DEFAULT_PERMS = ("users", "dm")
+DEFAULT_PERMS = ("users", "dm", "support")
 
 # Все состояния помощников — из них messages.py узнаёт, что ввод не пользовательский
 HELPER_STATES = {st for p in PERMS.values() for st in p["states"]}
@@ -204,6 +212,102 @@ def _name(u, uid) -> str:
     return f"{fn} (@{html.escape(u[2])})" if u[2] else fn
 
 
+# ── Группа поддержки: доступ помощников ──────────────────────────────────────
+# Поддержка живёт в форум-группе: бот поддержки копирует ответы из тем
+# пользователям, поэтому отвечать может любой участник группы. Барьер у
+# помощника один — он не состоит в группе. Бот — админ группы и выдаёт
+# одноразовые приглашения; членство проверяется через getChatMember.
+
+def support_group_id() -> int:
+    try:
+        return int(load_config().get("support_group_id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def group_open_url(group_id: int) -> str:
+    """Ссылка на приватную группу для тех, кто уже состоит в ней."""
+    s = str(group_id)
+    return f"https://t.me/c/{s[4:]}" if s.startswith("-100") else ""
+
+
+async def support_member_status(bot, uid: int) -> str:
+    """in / out / no_group / unknown — состоит ли человек в группе поддержки."""
+    gid = support_group_id()
+    if not gid:
+        return "no_group"
+    try:
+        m = await bot.get_chat_member(chat_id=gid, user_id=uid)
+    except Exception:
+        return "unknown"
+    status = getattr(m, "status", "")
+    status = str(getattr(status, "value", status))
+    if status in ("member", "administrator", "creator"):
+        return "in"
+    if status == "restricted" and getattr(m, "is_member", False):
+        return "in"
+    return "out"
+
+
+async def make_support_invite(bot, uid: int) -> str | None:
+    """Одноразовая ссылка-приглашение в группу поддержки для помощника."""
+    gid = support_group_id()
+    if not gid:
+        return None
+    try:
+        link = await bot.create_chat_invite_link(
+            chat_id=gid, name=f"Помощник {uid}"[:32], member_limit=1)
+        return link.invite_link
+    except Exception:
+        return None
+
+
+async def handle_helper_support(query, context=None):
+    """Экран помощника «Поддержка»: статус в группе и вход в неё."""
+    uid = query.from_user.id
+    bot = context.bot if context is not None else query.bot
+    gid = support_group_id()
+    back = [InlineKeyboardButton("◀️ В панель", callback_data="helper_panel")]
+    if not gid:
+        await query.edit_message_text(
+            "🛟 <b>Поддержка</b>\n\n"
+            "<i>Группа поддержки ещё не настроена — скажи администратору.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([back]))
+        return
+    status = await support_member_status(bot, uid)
+    if status == "in":
+        rows = []
+        url = group_open_url(gid)
+        if url:
+            rows.append([InlineKeyboardButton("💬 Открыть группу поддержки", url=url)])
+        rows.append([InlineKeyboardButton("🔄 Проверить снова", callback_data="helper_support")])
+        rows.append(back)
+        await query.edit_message_text(
+            "🛟 <b>Поддержка</b>\n\n"
+            "✅ <b>Вы в группе поддержки.</b>\n\n"
+            "<i>Обращения людей лежат в темах группы: открывай тему и отвечай "
+            "прямо в ней — бот поддержки сам доставит ответ человеку. "
+            "Команда /close в теме закрывает обращение.</i>",
+            parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
+        return
+    invite = await make_support_invite(bot, uid)
+    rows = []
+    if invite:
+        rows.append([InlineKeyboardButton("📩 Вступить в группу поддержки", url=invite)])
+    rows.append([InlineKeyboardButton("🔄 Я вступил — проверить", callback_data="helper_support")])
+    rows.append(back)
+    await query.edit_message_text(
+        "🛟 <b>Поддержка</b>\n\n"
+        "⚠️ <b>Вы пока не в группе поддержки</b>, а обращения людей лежат именно там.\n\n"
+        + ("<i>Нажми кнопку ниже — это одноразовое приглашение лично для тебя. "
+           "Вступишь — и сможешь отвечать людям в темах группы.</i>"
+           if invite else
+           "<i>Не удалось создать приглашение (бот должен быть админом группы). "
+           "Напиши администратору — он пришлёт ссылку вручную.</i>"),
+        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows))
+
+
 # ── Панель помощника ─────────────────────────────────────────────────────────
 
 async def handle_helper_panel(query):
@@ -245,11 +349,14 @@ async def handle_helpers_menu(query, context=None):
     lines = ["👥 <b>Помощники</b>", ""]
     kb = []
     if ids:
+        bot = context.bot if context is not None else query.bot
         people = []
         for uid in ids:
             u = await get_user_info(uid)
             perms = helper_perms(uid)
-            people.append(f"🛡 {_name(u, uid)} · прав: <b>{len(perms)}</b>")
+            st = await support_member_status(bot, uid)
+            badge = {"in": " · 🟢 в группе", "out": " · ⚪ нет в группе"}.get(st, "")
+            people.append(f"🛡 {_name(u, uid)} · прав: <b>{len(perms)}</b>{badge}")
             label = (u[1] if u and u[1] else str(uid))[:20]
             kb.append([InlineKeyboardButton(f"⚙️ {label} · {len(perms)} прав",
                                             callback_data=f"helper_card:{uid}")])
@@ -257,16 +364,18 @@ async def handle_helpers_menu(query, context=None):
     else:
         lines.append("<blockquote>Пока никого.</blockquote>")
     lines += ["", "<i>Права выдаются поштучно: карточки людей, подписки, "
-              "оплаты, промокоды, чёрный список, рассылки, статистика. Что не выдано — "
-              "закрыто. Действия помощников видны в 📜 Логи → Аудит админки.</i>"]
+              "оплаты, промокоды, чёрный список, рассылки, статистика, поддержка. "
+              "Для поддержки помощник должен состоять в группе — приглашение "
+              "выдаётся в его карточке. Что не выдано — закрыто. Действия "
+              "помощников видны в 📜 Логи → Аудит админки.</i>"]
     kb.append([InlineKeyboardButton("➕ Добавить помощника", callback_data="helper_add")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",
                                   reply_markup=InlineKeyboardMarkup(kb))
 
 
-async def handle_helper_card(query, uid: int):
-    """Карточка помощника: что ему открыто, и переключатели прав."""
+async def handle_helper_card(query, uid: int, context=None):
+    """Карточка помощника: что ему открыто, переключатели прав, группа."""
     from core.database import get_user_info
     if not is_helper(uid):
         await query.answer("Этот человек больше не помощник", show_alert=True)
@@ -274,6 +383,14 @@ async def handle_helper_card(query, uid: int):
         return
     u = await get_user_info(uid)
     perms = helper_perms(uid)
+    bot = context.bot if context is not None else query.bot
+    st = await support_member_status(bot, uid)
+    group_line = {
+        "in": "🟢 <b>В группе поддержки</b> — может отвечать людям в темах.",
+        "out": "⚪ <b>Не в группе поддержки</b> — отвечать людям не сможет, пока не вступит.",
+        "no_group": "⚠️ Группа поддержки не настроена.",
+        "unknown": "❔ Статус в группе поддержки не проверился.",
+    }[st]
 
     kb = []
     for key, rule in PERMS.items():
@@ -281,17 +398,65 @@ async def handle_helper_card(query, uid: int):
         kb.append([InlineKeyboardButton(
             f"{'✅' if on else '🔘'} {rule['label']}",
             callback_data=f"helper_perm:{uid}:{key}")])
+    if st == "out":
+        kb.append([InlineKeyboardButton("📩 Пригласить в группу поддержки",
+                                        callback_data=f"helper_invite:{uid}")])
     kb.append([InlineKeyboardButton("🗑 Убрать помощника", callback_data=f"helper_del:{uid}")])
     kb.append([InlineKeyboardButton("◀️ К помощникам", callback_data="helpers_menu")])
 
     hints = "\n".join(f"· {PERMS[k]['label']} — {PERMS[k]['hint']}" for k in PERMS if k in perms)
     await query.edit_message_text(
-        f"🛡 <b>{_name(u, uid)}</b>\n<code>{uid}</code>\n\n"
+        f"🛡 <b>{_name(u, uid)}</b>\n<code>{uid}</code>\n\n{group_line}\n\n"
         + ("<blockquote>" + hints + "</blockquote>\n\n" if hints
            else "<blockquote>Прав не выдано — панель поддержки у него пустая.</blockquote>\n\n")
         + "<i>Нажми на право, чтобы выдать или снять. Изменения действуют сразу.</i>",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb),
     )
+
+
+async def handle_helper_invite(query, context, uid: int):
+    """Админ: создать приглашение в группу и отправить его помощнику."""
+    from core.database import get_user_info
+    bot = context.bot if context is not None else query.bot
+    invite = await make_support_invite(bot, uid)
+    if not invite:
+        await query.answer("Не удалось создать приглашение: группа не настроена "
+                           "или бот не админ в ней", show_alert=True)
+        return
+    u = await get_user_info(uid)
+    sent = False
+    try:
+        await bot.send_message(
+            chat_id=uid,
+            text=("🛟 <b>Приглашение в группу поддержки Drebol VPN</b>\n\n"
+                  "<i>В группе лежат обращения людей. Вступи — и сможешь отвечать "
+                  "им прямо в темах: бот поддержки доставит ответ человеку. "
+                  "Ссылка одноразовая, только для тебя.</i>"),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📩 Вступить в группу поддержки", url=invite)],
+            ]))
+        sent = True
+    except Exception:
+        sent = False
+    from core.log_channel import send_log
+    await send_log(bot, f"👥 Приглашение в группу поддержки → {_name(u, uid)} · <code>{uid}</code>")
+    await query.answer(
+        "Приглашение отправлено помощнику в личку" if sent else
+        "Он не запускал бота — перешли ему ссылку вручную (см. карточку)",
+        show_alert=True)
+    if not sent:
+        # бот не достучался — покажем ссылку админу прямо в карточке
+        await query.edit_message_text(
+            f"📩 <b>Приглашение для {_name(u, uid)}</b>\n\n<code>{invite}</code>\n\n"
+            "<i>Бот не смог написать ему сам (не запускал бота или заблокировал). "
+            "Перешли ссылку вручную — она одноразовая.</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("◀️ К карточке", callback_data=f"helper_card:{uid}")],
+            ]))
+        return
+    await handle_helper_card(query, uid, context)
 
 
 async def handle_helper_perm(query, context, uid: int, perm: str):
@@ -360,19 +525,24 @@ async def handle_helper_input(update, context, text: str):
     set_helper_perms(uid, DEFAULT_PERMS)
 
     note = ""
+    invite = await make_support_invite(context.bot, uid)
+    rows = []
+    if invite:
+        rows.append([InlineKeyboardButton("📩 Вступить в группу поддержки", url=invite)])
+    rows.append([InlineKeyboardButton("🛡 Панель поддержки", callback_data="admin_panel")])
     try:
         await context.bot.send_message(
             chat_id=uid,
             text=(
-                "🛡 <b>Вам выдан доступ помощника</b>\n\n"
-                "<blockquote>Сюда будут приходить новые обращения в поддержку — отвечать "
-                "можно прямо из уведомления.</blockquote>\n\n"
-                "<i>Панель поддержки есть в главном меню.</i>"
+                "🛡 <b>Вам выдан доступ помощника Drebol VPN</b>\n\n"
+                "<blockquote>Поддержка живёт в отдельной группе: там лежат обращения "
+                "людей по темам. Вступи в группу по кнопке ниже — и сможешь отвечать "
+                "людям прямо в темах, бот поддержки доставит ответ человеку.</blockquote>\n\n"
+                "<i>Панель помощника — в главном меню бота, раздел «🛟 Поддержка» "
+                "покажет твой статус в группе.</i>"
             ),
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🛡 Панель поддержки", callback_data="admin_panel")],
-            ]),
+            reply_markup=InlineKeyboardMarkup(rows),
         )
     except Exception:
         note = "\n\n⚠️ <i>Написать ему не удалось — возможно, он заблокировал бота.</i>"
@@ -381,7 +551,9 @@ async def handle_helper_input(update, context, text: str):
     await send_log(context.bot, f"👥 Новый помощник: {_name(u, uid)} · <code>{uid}</code>")
     await update.message.reply_text(
         f"✅ <b>{_name(u, uid)}</b> теперь помощник.\n\n"
-        "<blockquote>Выдано по умолчанию: карточки людей, сообщения людям.</blockquote>"
+        "<blockquote>Выдано по умолчанию: карточки людей, сообщения людям, поддержка. "
+        "Приглашение в группу поддержки ушло ему в личку — без группы отвечать "
+        "людям он не сможет.</blockquote>"
         + note,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([

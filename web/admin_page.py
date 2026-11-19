@@ -743,7 +743,7 @@ label.chk input{width:auto;margin:0}
         </div>
         <div class="card"><h2>Помощники (только Mark)</h2><p class="sub">Помощники работают только в Telegram-боте, в вебе у них доступа нет.</p>
           <input id="helper-tg" type="number" placeholder="tg_id помощника">
-          <select id="helper-perm-sel"><option value="users">users</option><option value="dm">dm</option></select>
+          <select id="helper-perm-sel"><option value="users">Карточки людей</option><option value="dm">Писать людям</option><option value="support">Поддержка</option><option value="subs">Подписки — смотреть</option><option value="subs_edit">Подписки — менять</option><option value="payments">Оплаты</option><option value="promos">Промокоды</option><option value="blacklist">Чёрный список</option><option value="broadcast">Рассылки</option><option value="stats">Статистика</option></select>
           <div class="btnrow"><button id="btn-helper-add" class="ghost">Добавить</button><button id="btn-helper-perm" class="ghost">Переключить право</button><button id="btn-helper-del" class="danger">Удалить</button><button id="btn-helpers" class="ghost">Список</button></div>
           <div id="helpers-out"></div>
         </div>
@@ -2700,21 +2700,35 @@ $("btn-helper-del").onclick = async function(){
   const r = await postConfirm("/helpers/" + id + "/delete", {});
   if (r.status === 200) { toast("Помощник удалён", "ok"); loadHelpers(); } else renderOut("helpers-out", r.data);
 };
-const PERM_LABELS = {dm: "Сообщения юзерам (DM)", users: "Пользователи"};
+const PERM_LABELS = {users: "Карточки людей", dm: "Писать людям", support: "Поддержка", subs: "Подписки — смотреть", subs_edit: "Подписки — менять", payments: "Оплаты", promos: "Промокоды", blacklist: "Чёрный список", broadcast: "Рассылки", stats: "Статистика"};
 async function loadHelpers(){
   const r = await api("/helpers");
   if (r.status !== 200) { renderOut("helpers-out", r.data); return; }
   const items = r.data.helpers || r.data || [];
   const list = Array.isArray(items) ? items : (items.helpers || []);
   if (!list.length) { $("helpers-out").innerHTML = '<div class="empty">Помощников нет</div>'; return; }
-  let h = '<div class="tblwrap"><table><thead><tr><th>Помощник</th><th>TG ID</th><th>Права</th><th>Веб-доступ</th></tr></thead><tbody>';
+  let h = '<div class="tblwrap"><table><thead><tr><th>Помощник</th><th>TG ID</th><th>Права</th><th>Группа поддержки</th><th></th></tr></thead><tbody>';
   list.forEach(function(x){
     const perms = (x.perms || []).map(function(pp){ return '<span class="pill info">' + esc(PERM_LABELS[pp] || pp) + "</span>"; }).join(" ") || "—";
-    h += '<tr data-tg="' + x.tg_id + '"><td>' + esc(x.first_name || "") + (x.username ? ' <span class="mut">@' + esc(x.username) + "</span>" : "") + '</td><td class="mono">' + x.tg_id + "</td><td>" + perms + "</td><td>нет</td></tr>";
+    const grp = x.in_group === "in" ? '<span class="pill ok">в группе</span>'
+      : x.in_group === "out" ? '<span class="pill warn">не в группе</span>'
+      : x.in_group === "no_group" ? '<span class="mut">группа не настроена</span>' : '<span class="mut">не проверено</span>';
+    const inv = x.in_group === "out" ? '<button class="ghost" data-invite="' + x.tg_id + '">Пригласить в группу</button>' : "";
+    h += '<tr data-tg="' + x.tg_id + '"><td>' + esc(x.first_name || "") + (x.username ? ' <span class="mut">@' + esc(x.username) + "</span>" : "") + '</td><td class="mono">' + x.tg_id + "</td><td>" + perms + "</td><td>" + grp + "</td><td>" + inv + "</td></tr>";
   });
   $("helpers-out").innerHTML = h + "</tbody></table></div>";
   $("helpers-out").querySelectorAll("tr[data-tg]").forEach(function(tr){
     tr.onclick = function(){ $("helper-tg").value = tr.dataset.tg; };
+  });
+  $("helpers-out").querySelectorAll("[data-invite]").forEach(function(b){
+    b.onclick = async function(ev){
+      ev.stopPropagation();
+      const r = await api("/helpers/" + b.dataset.invite + "/invite", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+      if (r.status === 200 && r.data.sent) toast("Приглашение отправлено помощнику в Telegram", "ok");
+      else if (r.status === 200 && r.data.invite_link) { prompt("Бот не смог написать помощнику сам. Перешли ему ссылку вручную:", r.data.invite_link); }
+      else toast("Ошибка: " + ((r.data && r.data.error) || r.status), "err");
+      loadHelpers();
+    };
   });
 }
 $("btn-helpers").onclick = function(){ loadHelpers(); };
