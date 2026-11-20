@@ -1785,8 +1785,12 @@ async def handle_rw_plan_b_set(query, context, active: bool):
 
 
 def _variant_split(hosts):
+    # Вариант А — основная линейка на most2 плюс обычный «Автовыбор»:
+    # у него адрес-заглушка, поэтому опознаём по названию. LTE-автовыбор
+    # ([LTE]) — отдельная система, переключатель его не трогает никогда.
     a_hosts = [h for h in hosts
-               if h["address"] in PLAN_B_MAIN_ADDRESSES
+               if (h["address"] in PLAN_B_MAIN_ADDRESSES
+                   or ("Автовыбор" in h["remark"] and "[LTE]" not in h["remark"]))
                and VARIANT_B_MARK not in h["remark"]
                and PLAN_B_MARK not in h["remark"]]
     b_hosts = [h for h in hosts if VARIANT_B_MARK in h["remark"]]
