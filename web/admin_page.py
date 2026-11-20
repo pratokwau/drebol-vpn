@@ -663,8 +663,19 @@ label.chk input{width:auto;margin:0}
       <!-- Сайт -->
       <section id="sec-site" class="page hidden">
         <div class="card"><h2>Сайт</h2><p class="sub">Деплой сайта и кабинета на сервер. Тексты применяются после деплоя.</p>
-          <div class="btnrow"><button id="btn-site-show" class="ghost">Показать состояние</button><button id="btn-deploy">Деплой сайта</button></div>
+          <div class="btnrow"><button id="btn-site-show" class="ghost">Показать состояние</button><button id="btn-deploy">Деплой сайта</button><button id="btn-site-check" class="ghost">Проверить сайт</button></div>
           <div id="site-out"></div>
+          <div id="site-check-out"></div>
+        </div>
+        <div class="card"><h2>Настройки сайта</h2><p class="sub">Домен, автообновление и доступ к серверу сайта — то же, что в ТГ. Пароль сервера меняется только владельцем (Mark) и нигде не показывается.</p>
+          <label>Домен сайта<input id="ss-domain" placeholder="vpn.example.com"></label>
+          <label><input id="ss-auto" type="checkbox"> автообновление сайта после обновления бота</label>
+          <label>Хост сервера<input id="ss-host" placeholder="IP или домен сервера"></label>
+          <label>SSH-порт<input id="ss-port" type="number" placeholder="22"></label>
+          <label>Пользователь<input id="ss-user" placeholder="root"></label>
+          <label>Пароль сервера (только Mark)<input id="ss-pass" type="password" placeholder="оставь пустым — не менять" autocomplete="new-password"></label>
+          <div class="btnrow"><button id="btn-ss2-save" class="ghost">Сохранить настройки сайта</button><button id="btn-site-cert" class="ghost">Выпустить HTTPS-сертификат</button></div>
+          <div id="ss2-out"></div>
         </div>
         <div class="card"><h2>Тексты сайта</h2>
           <input id="st-field" placeholder="поле, напр. hero_title">
@@ -680,7 +691,7 @@ label.chk input{width:auto;margin:0}
 
       <!-- Бэкап -->
       <section id="sec-backup" class="page hidden">
-        <div class="card"><h2>Бэкап и перенос</h2><p class="sub">Архив базы и настроек. Восстановление — только Mark, с подтверждением, и только после свежего бэкапа: текущие данные будут заменены, бот перезапустится.</p>
+        <div class="card"><h2>Бэкап и перенос</h2><p class="sub">Полный архив бота: база, все настройки, .env с токеном и все файлы assets, с контрольными суммами. Внутри — ключи от всего проекта, архив никому не пересылать. Восстановление — только Mark, с подтверждением, и только после свежего бэкапа: текущие данные будут заменены полностью, бот перезапустится.</p>
           <div class="btnrow"><a id="btn-backup" href="/api/admin/backup/export"><button type="button" class="ghost">Скачать бэкап</button></a></div>
           <label>Файл архива (.zip)</label>
           <input id="bk-file" type="file" accept=".zip,application/zip">
@@ -751,8 +762,13 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-webacc" class="ghost">Показать настройки</button></div>
           <input id="wa-port" type="number" placeholder="порт, напр. 8088">
           <input id="wa-bind" placeholder="bind: 127.0.0.1 или 0.0.0.0">
-          <div class="btnrow"><button id="btn-wa-save" class="ghost">Сохранить порт/bind</button></div>
+          <input id="wa-public" placeholder="публичный адрес кабинета, напр. https://vpn.example.com">
+          <input id="wa-upstream" placeholder="upstream (куда проксируется API), напр. http://127.0.0.1:8088">
+          <input id="wa-ts-site" placeholder="Turnstile site key (оставь пустым — не менять)">
+          <input id="wa-ts-secret" type="password" placeholder="Turnstile secret key (оставь пустым — не менять)" autocomplete="new-password">
+          <div class="btnrow"><button id="btn-wa-save" class="ghost">Сохранить веб-доступ</button><button id="btn-wa-check" class="ghost">Проверить кабинет</button></div>
           <div id="wa-out"></div>
+          <div id="wa-check-out"></div>
         </div>
         <div class="card"><h2>Помощь при подключении</h2><p class="sub">Подсказки новичкам, которые не смогли подключиться.</p>
           <div class="btnrow"><button id="btn-ch-show" class="ghost">Показать настройки</button></div>
@@ -2424,7 +2440,7 @@ async function loadSyncSettings(){
   $("psync-out").innerHTML = h;
 }
 $("btn-psync-set").onclick = function(){ loadSyncSettings(); };
-const MORNING_TOGGLES = {reconcile: "Сверка с Platega", netcheck: "Проверка операторов", alerts: "Алерты о проблемах", support_topics: "Темы поддержки", blacklist_sync: "Синхронизация ЧС", site_sync: "Синхронизация сайта", server_reminder: "Напоминания об оплате серверов", healthcheck: "Проверка здоровья"};
+const MORNING_TOGGLES = {reconcile: "Сверка с Platega", netcheck: "Проверка операторов", alerts: "Алерты о проблемах", support_topics: "Темы поддержки", blacklist_sync: "Синхронизация ЧС", site_sync: "Синхронизация сайта", server_reminder: "Напоминания об оплате серверов", healthcheck: "Проверка здоровья", backup: "Бэкап файлом со сводкой"};
 async function loadMorning(){
   const r = await api("/morning");
   if (r.status !== 200) { renderOut("morning-out", r.data); return; }
@@ -2546,8 +2562,36 @@ async function loadSite(){
   h += kvRow("Ожидает обновления", st.update_pending ? '<span class="pill warn">Да — нужен деплой</span>' : "нет");
   if (st.host) h += kvRow("Хост", '<span class="mono">' + esc(st.host) + "</span>");
   if (st.user) h += kvRow("Пользователь", '<span class="mono">' + esc(st.user) + "</span>");
+  h += kvRow("Пароль сервера", st.password_set ? "задан" : "не задан");
   $("site-out").innerHTML = h + "</dl>";
+  $("ss-domain").value = st.domain || "";
+  $("ss-auto").checked = !!st.auto;
+  $("ss-host").value = st.host || "";
+  $("ss-port").value = st.port || 22;
+  $("ss-user").value = st.user || "";
+  $("ss-pass").value = "";
 }
+$("btn-ss2-save").onclick = async function(){
+  const body = {domain: $("ss-domain").value.trim(), auto: $("ss-auto").checked,
+    host: $("ss-host").value.trim(), user: $("ss-user").value.trim()};
+  const port = parseInt($("ss-port").value, 10);
+  if (port) body.port = port;
+  const pass = $("ss-pass").value;
+  if (pass) body.password = pass;
+  const r = await api("/site/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+  if (r.status === 200) { toast("Настройки сайта сохранены", "ok"); loadSite(); }
+  else renderOut("ss2-out", r.data);
+};
+$("btn-site-cert").onclick = async function(){ const r = await postConfirm("/site/cert", {}); renderOut("ss2-out", r.data); if (r.status === 200) loadSite(); };
+$("btn-site-check").onclick = async function(){
+  const r = await api("/site/check");
+  if (r.status !== 200) { renderOut("site-check-out", r.data); return; }
+  const d = r.data.data || {};
+  let h = '<dl class="kv">';
+  Object.keys(d).forEach(function(k){ h += kvRow(esc(k), '<span class="mono">' + esc(String(d[k])) + "</span>"); });
+  $("site-check-out").innerHTML = h + "</dl>";
+  loadSite();
+};
 $("btn-site-show").onclick = function(){ loadSite(); };
 let siteLoaded = false;
 document.querySelector('[data-nav="site"]').addEventListener("click", function(){
@@ -2720,6 +2764,8 @@ async function loadWebAccess(){
   const d = r.data, w = d.webapi || {};
   $("wa-port").value = w.port || "";
   $("wa-bind").value = w.bind || "";
+  $("wa-public").value = d.public || "";
+  $("wa-upstream").value = d.upstream || "";
   const ss = d.sessions || {};
   let h = '<dl class="kv">';
   h += kvRow("Веб-API", w.enabled ? '<span class="pill ok">Включён</span>' : '<span class="pill bad">Выключен</span>');
@@ -2728,6 +2774,7 @@ async function loadWebAccess(){
   if (d.public) h += kvRow("Публичный адрес", '<span class="mono">' + esc(d.public) + "</span>");
   if (d.upstream) h += kvRow("Upstream", '<span class="mono">' + esc(d.upstream) + "</span>");
   h += kvRow("Ключ Turnstile задан", d.turnstile_site_key_set ? "да" : "нет");
+  h += kvRow("Секрет Turnstile задан", d.turnstile_secret_set ? "да" : "нет");
   h += kvRow("Живых сессий кабинета", fmtNum(ss.live || 0) + " · пользователей: " + fmtNum(ss.people || 0) + " · сегодня: " + fmtNum(ss.today || 0));
   $("wa-out").innerHTML = h + "</dl>";
 }
@@ -2738,8 +2785,26 @@ $("btn-wa-save").onclick = async function(){
   if (port) body.webapi_port = parseInt(port, 10);
   const bind = $("wa-bind").value.trim();
   if (bind) body.webapi_bind = bind;
+  body.webapi_public = $("wa-public").value.trim();
+  body.webapi_upstream = $("wa-upstream").value.trim();
+  const tsSite = $("wa-ts-site").value.trim();
+  if (tsSite) body.turnstile_site_key = tsSite;
+  const tsSecret = $("wa-ts-secret").value.trim();
+  if (tsSecret) body.turnstile_secret_key = tsSecret;
   const r = await api("/web-access", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
-  if (r.status === 200) { toast("Сохранено — применится после рестарта бота", "ok"); loadWebAccess(); } else renderOut("wa-out", r.data);
+  if (r.status === 200) { toast("Сохранено — применится после рестарта бота", "ok"); $("wa-ts-site").value = ""; $("wa-ts-secret").value = ""; loadWebAccess(); } else renderOut("wa-out", r.data);
+};
+$("btn-wa-check").onclick = async function(){
+  const r = await api("/web-access/check", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+  if (r.status !== 200) { renderOut("wa-check-out", r.data); return; }
+  const c = r.data.check || {};
+  let h = '<dl class="kv">';
+  h += kvRow("API включён", c.enabled ? "да" : "нет");
+  h += kvRow("Сервер поднят", c.running ? "да" : "нет");
+  if (c.local) h += kvRow("Отвечает себе", c.local.ok ? "да" : "нет");
+  if (c.outside) h += kvRow("Отвечает снаружи", c.outside.ok ? "да" : "нет");
+  if (c.public) h += kvRow("Проверял", '<span class="mono">' + esc(c.public) + "</span>");
+  $("wa-check-out").innerHTML = h + "</dl>" + ((c.advice || []).map(function(a){ return '<p class="sub">⚠️ ' + esc(a) + "</p>"; }).join(""));
 };
 async function loadConnectHelp(){
   const r = await api("/connect-help");

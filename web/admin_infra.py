@@ -600,7 +600,9 @@ def _site_snapshot() -> dict:
         "url": site_mod.site_url(),
         "configured": site_mod.configured(),
         "host": creds.get("host") or "",
+        "port": creds.get("port") or 22,
         "user": creds.get("user") or "",
+        "password_set": bool(creds.get("password")),
         "update_pending": bool(cfg.get("site_update_pending")),
     }
 
@@ -643,6 +645,104 @@ async def site_deploy(request):
         return _json_error("deploy_failed", 502)
     await _audit(actor, "site_deploy", "")
     return web.json_response({"ok": True, "site": _site_snapshot()})
+
+
+async def site_settings_patch(request):
+    """Настройки сайта, которые раньше жили только в ТГ: домен, авто-обновление
+    и доступ к серверу сайта. Пароль сервера — только владелец (mark):
+    это пароль от целого сервера, а не настройка."""
+    import re
+    from config import atomic_update
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    creds_patch = {}
+    if "domain" in body:
+        domain = str(body.get("domain") or "").strip().lower()
+        if domain and not re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}", domain):
+            return _json_error("bad_domain", 400)
+        creds_patch["site_domain"] = domain
+    if "host" in body:
+        host = str(body.get("host") or "").strip()
+        if " " in host or "/" in host:
+            return _json_error("bad_host", 400)
+        creds_patch["site_host"] = host
+    if "port" in body:
+        port = body.get("port")
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            return _json_error("bad_port", 400)
+        creds_patch["site_port"] = port
+    if "user" in body:
+        user = str(body.get("user") or "").strip()
+        if " " in user:
+            return _json_error("bad_user", 400)
+        creds_patch["site_user"] = user
+    if body.get("password"):
+        creds_patch["site_pass"] = str(body["password"])
+    if any(k in creds_patch for k in ("site_host", "site_user", "site_pass")):
+        mark_err = _mark_only(actor)
+        if mark_err is not None:
+            return mark_err
+    changed = []
+    if creds_patch:
+        site_mod.save_creds(**creds_patch)
+        # пароль в аудит не пишем никогда — только факт смены
+        changed += [k for k in creds_patch if k != "site_pass"]
+        if "site_pass" in creds_patch:
+            changed.append("site_pass(скрыт)")
+    if "auto" in body:
+        if not isinstance(body["auto"], bool):
+            return _json_error("bad_value", 400)
+
+        def _apply_auto(cfg):
+            cfg["site_auto"] = body["auto"]
+        atomic_update(_apply_auto)
+        changed.append("site_auto")
+    await _audit(actor, "site_settings_update", "keys: " + ", ".join(changed))
+    return web.json_response({"ok": True, "site": _site_snapshot()})
+
+
+async def site_cert(request):
+    """Выпуск HTTPS-сертификата — как в ТГ, с двухшаговым подтверждением."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    token = body.get("confirm_token")
+    if not token:
+        return confirm_needed_response(
+            issue_confirm(actor, "site_cert", {},
+                          "Выпустить HTTPS-сертификат для сайта?"),
+            "Выпустить HTTPS-сертификат для сайта?")
+    if take_confirm(actor, token, "site_cert") is None:
+        return _json_error("bad_confirm", 403)
+    try:
+        res = await site_mod.issue_cert()
+    except Exception as ex:
+        logging.error("админка: site cert: %s", ex)
+        return _json_error("cert_failed", 502)
+    if not res.get("ok"):
+        await _audit(actor, "site_cert_failed", "")
+        return _json_error("cert_failed", 502)
+    await _audit(actor, "site_cert", "")
+    return web.json_response({"ok": True, "site": _site_snapshot()})
+
+
+async def site_check(request):
+    """Диагностика сайта — та же, что кнопка «Проверить» в ТГ."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    try:
+        res = await site_mod.diagnose()
+    except Exception as ex:
+        logging.error("админка: site diagnose: %s", ex)
+        return _json_error("check_failed", 502)
+    return web.json_response({"ok": bool(res.get("ok")),
+                              "data": res.get("data") or {},
+                              "site": _site_snapshot()})
 
 
 # ── Git update (Mark и Muse) ───────────────────────────────────────────────
@@ -1177,6 +1277,7 @@ async def web_access_get(request):
         "public": cfg.get("webapi_public") or "",
         "upstream": cfg.get("webapi_upstream") or "",
         "turnstile_site_key_set": bool(cfg.get("turnstile_site_key")),
+        "turnstile_secret_set": bool(cfg.get("turnstile_secret_key")),
         "sessions": stats,
     })
 
@@ -1203,6 +1304,18 @@ async def web_access_patch(request):
         if bind not in ("127.0.0.1", "0.0.0.0"):
             return _json_error("bad_value", 400)
         patch["webapi_bind"] = bind
+    # Публичный адрес и upstream раньше правились только из ТГ — теперь и здесь.
+    for key in ("webapi_public", "webapi_upstream"):
+        if key in body:
+            val = str(body.get(key) or "").strip().rstrip("/")
+            if val and not val.startswith(("http://", "https://")):
+                return _json_error("bad_value", 400)
+            patch[key] = val
+    # Ключи Turnstile — только запись: наружу отдаём лишь факт, что заданы.
+    if body.get("turnstile_site_key"):
+        patch["turnstile_site_key"] = str(body["turnstile_site_key"]).strip()
+    if body.get("turnstile_secret_key"):
+        patch["turnstile_secret_key"] = str(body["turnstile_secret_key"]).strip()
     if "webapi_enabled" in body:
         return _json_error(
             "webapi_enabled меняется только из ТГ: выключение убьёт и эту админку",
@@ -1211,10 +1324,28 @@ async def web_access_patch(request):
         def _apply(cfg):
             cfg.update(patch)
         atomic_update(_apply)
+    shown = [k for k in sorted(patch) if "turnstile" not in k]
+    if any("turnstile" in k for k in patch):
+        shown.append("turnstile(скрыт)")
     await _audit(actor, "web_access_update",
-                 "keys: " + ", ".join(sorted(patch)) + " (restart_required)")
+                 "keys: " + ", ".join(shown) + " (restart_required)")
     return web.json_response({"ok": True, "restart_required": True,
-                              "webapi": patch})
+                              "webapi": {k: v for k, v in patch.items()
+                                         if "turnstile" not in k}})
+
+
+async def web_access_check(request):
+    """Проверка кабинета — та же, что кнопка «Проверить» в ТГ (webapi.probe)."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    from web.webapi import probe
+    try:
+        res = await probe()
+    except Exception as ex:
+        logging.error("админка: web-access probe: %s", ex)
+        return _json_error("check_failed", 502)
+    return web.json_response({"check": res})
 
 
 async def connect_help_get(request):
@@ -2111,6 +2242,9 @@ def register(app) -> None:
     app.router.add_get("/links", links_get)
     app.router.add_patch("/links", links_patch)
     app.router.add_get("/site", site_get)
+    app.router.add_patch("/site/settings", site_settings_patch)
+    app.router.add_post("/site/cert", site_cert)
+    app.router.add_get("/site/check", site_check)
     app.router.add_post("/site/deploy", site_deploy)
     app.router.add_post("/site/delete", site_delete)
     app.router.add_get("/site/texts", site_texts_get)
@@ -2152,5 +2286,6 @@ def register(app) -> None:
     app.router.add_get("/online", online_get)
     app.router.add_get("/web-access", web_access_get)
     app.router.add_patch("/web-access", web_access_patch)
+    app.router.add_post("/web-access/check", web_access_check)
     app.router.add_get("/connect-help", connect_help_get)
     app.router.add_patch("/connect-help", connect_help_patch)
