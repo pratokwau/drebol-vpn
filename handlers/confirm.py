@@ -26,6 +26,8 @@ CONFIRM_TITLES = {
     "git_update": "Обновление с GitHub",
     "rw_plan_b_on": "Включение плана Б",
     "rw_plan_b_off": "Возврат основного моста",
+    "rw_variant_a": "Возврат варианта А (DNAT)",
+    "rw_variant_b": "Включение варианта Б (доковый мост)",
     "clear_log_channel": "Отключение лог-канала",
     "bl_del": "Снятие с ЧС",
     "bl_stop": "Остановка подписки из-за ЧС",
@@ -171,6 +173,21 @@ async def _rw_plan_b_off(arg):
             "↩️ Да, вернуть oblako", "rw_plan_b", "rw_menu")
 
 
+async def _rw_variant_b(arg):
+    return ("🔀 <b>Включить вариант Б?</b>\n\n"
+            "Хосты варианта А (DNAT через oblako) выключатся, хосты докового "
+            "моста Remnawave — включатся. Клиенты подхватят смену при "
+            "следующем обновлении подписки.",
+            "🔀 Да, включить вариант Б", "rw_bridge_variant", "rw_menu")
+
+
+async def _rw_variant_a(arg):
+    return ("↩️ <b>Вернуть вариант А?</b>\n\n"
+            "Хосты варианта Б (доковый мост) выключатся, хосты DNAT через "
+            "oblako — включатся.",
+            "↩️ Да, вернуть вариант А", "rw_bridge_variant", "rw_menu")
+
+
 async def _site_delete(arg):
     from web.site_deploy import site_url
     url = site_url()
@@ -301,6 +318,8 @@ RULES = {
     "git_update": _git_update,
     "rw_plan_b_on": _rw_plan_b_on,
     "rw_plan_b_off": _rw_plan_b_off,
+    "rw_variant_a": _rw_variant_a,
+    "rw_variant_b": _rw_variant_b,
     "clear_log_channel": _clear_log_channel,
     "bl_del": _bl_del,
     "bl_stop": _bl_stop,

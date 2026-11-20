@@ -1477,6 +1477,7 @@ async def handle_rw_menu(query, context=None):
     if is_configured():
         kb.append([InlineKeyboardButton("🔗 Основные ссылки", callback_data="rw_links")])
         kb.append([InlineKeyboardButton("🚨 План Б (аварийный мост)", callback_data="rw_plan_b")])
+        kb.append([InlineKeyboardButton("🔀 Вариант моста (А/Б)", callback_data="rw_bridge_variant")])
         kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")])
@@ -1650,13 +1651,17 @@ async def handle_rw_links_reset(query, context=None):
 # ни секунды без живых хостов.
 
 PLAN_B_MARK = "(план Б)"
+# Пометка хостов докового моста (вариант Б) — в основную линейку плана Б
+# они не входят, у них свой переключатель ниже.
+VARIANT_B_MARK = "(вариант Б)"
 # Адреса основной линейки: IP oblako и его будущий домен (если заведён) —
 # хост опознаётся по любому из них.
 PLAN_B_MAIN_ADDRESSES = {"187.54.0.243", "most2.tembadr.tech"}
 
 
 def _plan_b_split(hosts):
-    mains = [h for h in hosts if h["address"] in PLAN_B_MAIN_ADDRESSES]
+    mains = [h for h in hosts if h["address"] in PLAN_B_MAIN_ADDRESSES
+             and VARIANT_B_MARK not in h["remark"]]
     backups = [h for h in hosts if PLAN_B_MARK in h["remark"]]
     return mains, backups
 
@@ -1762,6 +1767,137 @@ async def handle_rw_plan_b_set(query, context, active: bool):
                        ("🚨 <b>Включён план Б</b> — хосты переведены на мост DE"
                         if active else
                         "✅ <b>План Б выключен</b> — хосты возвращены на мост oblako")
+                       + f" (переключено: {res.get('changed', 0)})")
+    except Exception:
+        pass
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=_back())
+
+
+# ── Вариант моста: А (DNAT) ↔ Б (доковый, server-side routing) ─────────────
+# Оба варианта — вход через oblako. Вариант А: основная линейка, трафик идёт
+# DNAT-пробросом в инбаунды выходных нод. Вариант Б: те же страны через
+# официальный мост Remnawave — Xray на oblako сам ведёт трафик в выходные
+# ноды по профилю BRIDGE; хосты помечены «(вариант Б)» и в мирное время
+# выключены. Переключатель гасит один вариант и поднимает другой; порядок —
+# сначала включения, потом выключения, как в плане Б. Аварийный план Б
+# (мост DE) сюда не входит и переключателем не трогается.
+
+
+def _variant_split(hosts):
+    a_hosts = [h for h in hosts
+               if h["address"] in PLAN_B_MAIN_ADDRESSES
+               and VARIANT_B_MARK not in h["remark"]
+               and PLAN_B_MARK not in h["remark"]]
+    b_hosts = [h for h in hosts if VARIANT_B_MARK in h["remark"]]
+    return a_hosts, b_hosts
+
+
+async def bridge_variant_state() -> dict:
+    r = await list_hosts()
+    if not r.get("ok"):
+        return {"ok": False}
+    a_hosts, b_hosts = _variant_split(r["hosts"])
+    return {
+        "ok": True,
+        "a_hosts": a_hosts,
+        "b_hosts": b_hosts,
+        "a_on": sum(1 for h in a_hosts if not h["isDisabled"]),
+        "b_on": sum(1 for h in b_hosts if not h["isDisabled"]),
+    }
+
+
+async def set_bridge_variant(variant: str) -> dict:
+    """variant='b' — трафик на доковый мост, 'a' — обратно на DNAT."""
+    st = await bridge_variant_state()
+    if not st.get("ok"):
+        return {"ok": False, "error": "Панель не ответила"}
+    if not st["b_hosts"]:
+        return {"ok": False, "error": "Хосты варианта Б в панели не найдены"}
+    if not st["a_hosts"]:
+        return {"ok": False, "error": "Хосты варианта А в панели не найдены"}
+    to_b = variant == "b"
+    plan = [(h, not to_b) for h in st["b_hosts"]]
+    plan += [(h, to_b) for h in st["a_hosts"]]
+    plan.sort(key=lambda t: t[1])  # сначала включения (isDisabled=False)
+    changed = failed = 0
+    for h, disabled in plan:
+        if h["isDisabled"] == disabled:
+            continue
+        res = await patch_host(h["uuid"], {"isDisabled": disabled})
+        if res.get("ok"):
+            changed += 1
+        else:
+            failed += 1
+    after = await bridge_variant_state()
+    return {"ok": failed == 0, "changed": changed, "failed": failed,
+            "state": after}
+
+
+async def handle_rw_bridge_variant(query, context=None):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    st = await bridge_variant_state()
+    if not st.get("ok"):
+        text = ("🔀 <b>Вариант моста</b>\n\n"
+                "<i>Панель не ответила — состояние хостов неизвестно.</i>")
+        kb = [[InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]
+        await query.edit_message_text(text, parse_mode="HTML",
+                                      reply_markup=InlineKeyboardMarkup(kb))
+        return
+    if st["b_on"] and not st["a_on"]:
+        mode = "✅ <b>Сейчас работает вариант Б</b> — доковый мост Remnawave."
+    elif st["a_on"] and not st["b_on"]:
+        mode = "✅ <b>Сейчас работает вариант А</b> — DNAT через oblako."
+    elif st["a_on"] and st["b_on"]:
+        mode = "⚠️ <b>Включены оба варианта</b> — клиенты видят и А, и Б."
+    else:
+        mode = "⚠️ <b>Оба варианта выключены</b> — ни один мост не поднят!"
+    lines = ["🔀 <b>Вариант моста</b>", "",
+             f"<blockquote>Вариант А (DNAT): включено {st['a_on']} из {len(st['a_hosts'])}\n"
+             f"Вариант Б (доковый): включено {st['b_on']} из {len(st['b_hosts'])}</blockquote>",
+             "", mode, "",
+             "<i>Оба варианта — вход через oblako. А — проброс DNAT в выходные ноды, "
+             "Б — официальный мост Remnawave (профиль BRIDGE). Вариант Б — резерв на случай, "
+             "если DNAT-путь сломается; аварийный план Б через DE — отдельная кнопка выше.</i>"]
+    kb = []
+    if st["a_hosts"] and st["b_hosts"]:
+        if not st["b_on"]:
+            kb.append([InlineKeyboardButton("🔀 Включить вариант Б (доковый)",
+                                            callback_data="rw_variant_b")])
+        if st["b_on"] or not st["a_on"]:
+            kb.append([InlineKeyboardButton("↩️ Вернуть вариант А (DNAT)",
+                                            callback_data="rw_variant_a")])
+    kb.append([InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
+async def handle_rw_bridge_variant_set(query, context, variant: str):
+    await query.edit_message_text("⏳ Переключаю хосты…")
+    res = await set_bridge_variant(variant)
+    if not res.get("ok") and not res.get("state"):
+        await query.edit_message_text(
+            f"❌ <b>Не получилось переключить</b>\n\n<i>{escape(res.get('error') or 'ошибка панели')}</i>",
+            parse_mode="HTML",
+            reply_markup=_back())
+        return
+    st = res.get("state") or {}
+    head = ("🔀 <b>Вариант Б включён</b> — трафик идёт через доковый мост Remnawave."
+            if variant == "b" else
+            "✅ <b>Вариант А возвращён</b> — трафик идёт через DNAT (oblako).")
+    lines = [head, "",
+             f"<blockquote>Переключено хостов: {res.get('changed', 0)}"
+             + (f"\n⚠️ Не удалось переключить: {res['failed']}" if res.get("failed") else "")
+             + f"\nВариант А: включено {st.get('a_on', '?')} из {len(st.get('a_hosts') or [])}"
+             f"\nВариант Б: включено {st.get('b_on', '?')} из {len(st.get('b_hosts') or [])}</blockquote>",
+             "",
+             "<i>Клиенты подхватят новые хосты при следующем обновлении подписки в приложении.</i>"]
+    from core.log_channel import send_log
+    try:
+        await send_log(context.bot,
+                       ("🔀 <b>Включён вариант Б</b> — хосты переведены на доковый мост Remnawave"
+                        if variant == "b" else
+                        "✅ <b>Возвращён вариант А</b> — хосты переведены обратно на DNAT")
                        + f" (переключено: {res.get('changed', 0)})")
     except Exception:
         pass
