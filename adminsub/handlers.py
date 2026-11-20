@@ -52,20 +52,64 @@ def _fmt_presets(cfg: dict, squad_names: dict | None = None) -> str:
     )
 
 
-async def handle_admin_subs_menu(query, page: int = 1):
-    rows, total_pages = await list_subs(page)
+async def handle_admin_subs_menu(query, page: int = 1, scope: str = "all",
+                                 sort: str = "new"):
+    from adminsub.keyboards import ADMIN_TABS, ADMIN_SORT_LABELS
+    from adminsub.storage import admin_counts
+    if scope not in ADMIN_TABS:
+        scope = "all"
+    if sort not in ADMIN_SORT_LABELS:
+        sort = "new"
+    rows, total_pages = await list_subs(page, scope, sort)
+    page = min(max(1, page), total_pages)
+    counts = await admin_counts()
     cfg = load_config()
     ready = _presets_ready(cfg)
+    icon, label = ADMIN_TABS[scope]
     header = "📋 <b>Админские подписки</b>"
-    body = ("\n\n<blockquote>Подписок пока нет.</blockquote>" if not rows
-            else f"\n<i>Страница {page} из {total_pages} · нажми на подписку, чтобы открыть</i>")
+    body = (f"\n\n{icon} <b>{label}</b> · сортировка: "
+            f"<b>{ADMIN_SORT_LABELS[sort]}</b> · стр. {page} из {total_pages}")
+    body += ("\n\n<blockquote>В этой вкладке пусто.</blockquote>" if not rows
+             else "\n<i>Нажми на подписку, чтобы открыть</i>")
     if not ready:
         body += "\n\n⚠️ <i>Задай настройки, чтобы создавать подписки.</i>"
     await query.edit_message_text(
         header + body,
         parse_mode="HTML",
-        reply_markup=subs_list_keyboard(rows, page, total_pages, ready),
+        reply_markup=subs_list_keyboard(rows, page, total_pages, ready,
+                                        scope, sort, counts),
     )
+
+
+async def handle_admin_search(query, context):
+    from core.states import AWAITING_ADMIN_SUB_SEARCH
+    context.user_data["state"] = AWAITING_ADMIN_SUB_SEARCH
+    await query.edit_message_text(
+        "🔎 <b>Поиск админской подписки</b>\n\n"
+        "Пришли что знаешь: TG ID, email, часть UUID или Sub ID, ник или имя.",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def apply_admin_search(message, context, text: str):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from adminsub.storage import search_admin_subs
+    rows = await search_admin_subs(text)
+    if not rows:
+        await message.reply_text("🔎 Ничего не нашлось.", reply_markup=back_admin())
+        return
+    lines = [f"🔎 <b>Нашлось подписок: {len(rows)}</b>\n"]
+    kb = []
+    for r in rows:
+        lines.append(f"• <code>{escape(str(r[2] or ''))}</code> · до {str(r[3])[:10]} · "
+                     f"TG <code>{r[1]}</code>")
+        kb.append([InlineKeyboardButton(
+            f"👤 {str(r[2] or r[1])} · до {str(r[3])[:10]}",
+            callback_data=f"sub_view:{r[0]}")])
+    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="admin_subs")])
+    await message.reply_text("\n".join(lines), parse_mode="HTML",
+                             reply_markup=InlineKeyboardMarkup(kb))
 
 
 async def handle_presets_menu(query):
@@ -253,9 +297,18 @@ async def handle_sub_view(query, sub_id: int):
     else:
         time_line = "📅 До: <b>" + expire + "</b>" + NL + "⏱ <b>Истекла</b>"
 
+    referrer = card.get("referrer")
+    ref_line = ""
+    if referrer and referrer.get("tg_id"):
+        ref_line = (NL + "🎁 Пригласил: <b>" + escape(str(referrer.get("first_name") or ""))
+                    + "</b> · <code>" + str(referrer["tg_id"]) + "</code>")
+
+    from config import sub_url_for_display
+    display_url = sub_url_for_display(sub_url)
+
     text = (
         "📄 <b>Админская подписка #" + str(sub_id) + "</b>  " + status_icon + NL
-        + tg_line + NL
+        + tg_line + ref_line + NL
         + NL + "📌 <b>Срок</b>" + NL + "<blockquote>"
         + "Статус: <b>" + status_label + "</b>  ·  выдана вручную" + NL
         + time_line
@@ -271,7 +324,9 @@ async def handle_sub_view(query, sub_id: int):
         + "🆔 UUID: <code>" + uuid_val + "</code>" + NL
         + "📋 Sub ID: <code>" + sub_id_str + "</code>"
         + "</blockquote>" + NL + NL
-        + "🔗 <b>Ссылка</b>" + NL + "<code>" + sub_url + "</code>"
+        + "🔗 <b>Ссылки</b>" + NL
+        + "Для человека: <code>" + escape(display_url) + "</code>" + NL
+        + "Прямая (key): <code>" + escape(sub_url) + "</code>"
     )
     await query.edit_message_text(
         text,
@@ -300,6 +355,69 @@ async def handle_sub_toggle(query, sub_id: int, context=None):
             )
         return
     await handle_sub_view(query, sub_id)
+
+
+async def handle_sub_freeze(query, sub_id: int, context=None):
+    bot = context.bot if context and hasattr(context, "bot") else None
+    row = await get_sub(sub_id)
+    if not row:
+        await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+    await query.edit_message_text("🧊 Замораживаю подписку...")
+    result = await _svc.freeze_sub(sub_id, kind="admin", bot=bot)
+    if not result.get("ok"):
+        if result.get("error") == "already_frozen":
+            await query.answer("Подписка уже заморожена", show_alert=True)
+        else:
+            await query.edit_message_text(
+                f"❌ Ошибка: <code>{result['error']}</code>",
+                parse_mode="HTML", reply_markup=back_admin())
+            return
+    await handle_sub_view(query, sub_id)
+
+
+async def handle_sub_history(query, sub_id: int, page: int = 1):
+    """История событий по человеку: у админских подписок она теперь тоже
+    пишется (раньше история была только у платных)."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import get_user_history
+    row = await get_sub(sub_id)
+    if not row:
+        await query.answer("Подписка не найдена", show_alert=True)
+        return
+    if not row[1]:
+        await query.answer("У подписки нет TG ID — истории нет", show_alert=True)
+        return
+    rows, total_pages = await get_user_history(row[1], page, 8)
+    page = min(max(1, page), total_pages)
+    try:
+        from paidsub.handlers import _HISTORY_LABELS
+    except Exception:
+        _HISTORY_LABELS = {}
+    lines = [f"📜 <b>История подписки #{sub_id}</b>\n"]
+    if not rows:
+        lines.append("<i>Событий пока не было.</i>")
+    for _id, _tg, action, details, created_at in rows:
+        label = _HISTORY_LABELS.get(action, action)
+        lines.append(f"• <b>{escape(str(created_at)[:16])}</b> — {escape(str(label))}")
+        if details:
+            det = escape(str(details))
+            if len(det) > 140:
+                det = det[:140] + "…"
+            lines.append(f"   <i>{det}</i>")
+    kb = []
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton(
+            "⬅️", callback_data=f"sub_history:{sub_id}:{page - 1}"))
+    if page < total_pages:
+        nav.append(InlineKeyboardButton(
+            "➡️", callback_data=f"sub_history:{sub_id}:{page + 1}"))
+    if nav:
+        kb.append(nav)
+    kb.append([InlineKeyboardButton("◀️ К подписке", callback_data=f"sub_view:{sub_id}")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
 
 
 async def handle_sub_delete(query, sub_id: int, context=None):

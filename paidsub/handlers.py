@@ -155,6 +155,8 @@ async def handle_paid_subs_menu(query, page: int = 1, scope: str = "all", sort: 
         sort = "new"
 
     counts = await paid_counts()
+    from paidsub.storage import count_pending_requests
+    counts["pending"] = await count_pending_requests()
     panel = await panel_states()
     states = panel["states"]
     off_emails = {e for e, st in states.items() if st == "DISABLED"}
@@ -193,6 +195,71 @@ async def handle_paid_subs_menu(query, page: int = 1, scope: str = "all", sort: 
         reply_markup=paid_subs_list_keyboard(rows, page, total_pages, ready,
                                              scope, sort, counts, marks),
     )
+
+
+# ── Поиск и заявки ────────────────────────────────────────────────────────────
+
+async def handle_paid_search(query, context):
+    from core.states import AWAITING_PAID_SUB_SEARCH
+    context.user_data["state"] = AWAITING_PAID_SUB_SEARCH
+    await query.edit_message_text(
+        "🔎 <b>Поиск подписки</b>\n\n"
+        "Пришли что знаешь: TG ID, email клиента, часть UUID или Sub ID, "
+        "ник или имя владельца.",
+        parse_mode="HTML",
+        reply_markup=back_admin(),
+    )
+
+
+async def apply_paid_search(message, context, text: str):
+    from html import escape
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import search_paid_subs
+    rows = await search_paid_subs(text)
+    if not rows:
+        await message.reply_text(
+            "🔎 Ничего не нашлось. Проверь запрос и попробуй ещё раз — "
+            "или ищи через раздел пользователей.",
+            reply_markup=back_admin())
+        return
+    lines = [f"🔎 <b>Нашлось подписок: {len(rows)}</b>\n"]
+    kb = []
+    for r in rows:
+        name = str(r[2] or "").removeprefix("paid_")
+        lines.append(f"• <code>{escape(name)}</code> · до {str(r[3])[:10]} · "
+                     f"TG <code>{r[1]}</code>")
+        kb.append([InlineKeyboardButton(
+            f"💳 {name} · до {str(r[3])[:10]}",
+            callback_data=f"paid_sub_view:{r[0]}")])
+    kb.append([InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
+    await message.reply_text("\n".join(lines), parse_mode="HTML",
+                             reply_markup=InlineKeyboardMarkup(kb))
+
+
+async def handle_paid_requests(query):
+    """Заявки, ждущие решения: раньше жили только в уведомлениях — потерял
+    уведомление, потерял заявку. Теперь у них свой экран."""
+    from html import escape
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from paidsub.storage import list_pending_requests
+    rows = await list_pending_requests()
+    lines = ["📥 <b>Заявки на подписку</b>\n"]
+    kb = []
+    if not rows:
+        lines.append("<blockquote>Ждущих заявок нет.</blockquote>")
+    for tg_id, created, first_name, username in rows:
+        name = escape(str(first_name or tg_id))
+        uname = f" · @{escape(str(username))}" if username else ""
+        lines.append(f"• <b>{name}</b>{uname} · <code>{tg_id}</code> · {str(created)[:16]}")
+        kb.append([
+            InlineKeyboardButton(f"✅ {str(first_name or tg_id)[:16]}",
+                                 callback_data=f"paid_approve:{tg_id}"),
+            InlineKeyboardButton("❌ Отклонить", callback_data=f"paid_reject:{tg_id}"),
+        ])
+    kb.append([InlineKeyboardButton("🔄 Обновить", callback_data="paid_requests"),
+               InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
 
 
 # ── Настройки ─────────────────────────────────────────────────────────────────
@@ -806,13 +873,26 @@ async def handle_request_sub(query, context):
     traf_str = f"{traf_raw} ГБ" if traf_raw > 0 else "безлимит"
     hwid_str = str(hwid) if hwid > 0 else "безлимит"
 
+    fraud_block = ""
+    try:
+        from html import escape
+        from features.fraud import pre_trial_check
+        warns = await pre_trial_check(user.id)
+        if warns:
+            fraud_block = ("\n🕵 <b>Антифрод:</b>\n"
+                           + "\n".join(f"· {escape(w)}" for w in warns)
+                           + "\n")
+    except Exception:
+        pass
+
     await context.bot.send_message(
         chat_id=ADMIN_ID,
         text=(
             f"🆕 <b>Запрос на подписку</b>\n\n"
             f'👤 <a href="tg://user?id={user.id}">{_esc_name(user.first_name, user.id)}</a> '
             f"({_esc_name(uname, user.id)})\n"
-            f"🆔 TG ID: <code>{user.id}</code>\n\n"
+            f"🆔 TG ID: <code>{user.id}</code>\n"
+            f"{fraud_block}\n"
             f"<b>Параметры подписки:</b>\n"
             f"🆓 Пробный период: <b>{fmt_duration(trial_sec)}</b>\n"
             f"🖥 Лимит устройств: <b>{hwid_str}</b>\n"
@@ -1266,33 +1346,48 @@ async def handle_paid_sub_reduce(query, sub_id: int, context):
 
 # ── Массовые действия ─────────────────────────────────────────────────────────
 
-async def handle_paid_bulk_menu(query):
+BULK_SCOPES = ("all", "active", "trial", "paying", "soon", "expired")
+
+
+async def handle_paid_bulk_menu(query, context=None, scope: str = "all"):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    import aiosqlite
-    from core.database import DB_PATH
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT COUNT(*) FROM paid_subs") as cur:
-            total = (await cur.fetchone())[0]
+    from paidsub.keyboards import PAID_TABS
+    from paidsub.storage import paid_counts
+    if scope not in BULK_SCOPES:
+        scope = "all"
+    if context is not None:
+        context.user_data["bulk_scope"] = scope
+    counts = await paid_counts()
+    total = counts.get(scope, 0)
+    icon, label = PAID_TABS[scope]
+    scope_row = [InlineKeyboardButton(
+        ("• " if k == scope else "") + f"{PAID_TABS[k][0]} {counts.get(k, 0)}",
+        callback_data=f"paid_bulk_menu:{k}") for k in BULK_SCOPES[:3]]
+    scope_row2 = [InlineKeyboardButton(
+        ("• " if k == scope else "") + f"{PAID_TABS[k][0]} {counts.get(k, 0)}",
+        callback_data=f"paid_bulk_menu:{k}") for k in BULK_SCOPES[3:]]
     await query.edit_message_text(
         "⚡ <b>Массовые действия</b>\n\n"
-        f"<blockquote>Всего платных подписок: <b>{total}</b></blockquote>\n\n"
-        "⚠️ <i>Действие применится ко <b>всем</b> платным подпискам сразу.</i>",
+        f"<blockquote>Выборка: {icon} <b>{label}</b> — подписок: <b>{total}</b></blockquote>\n\n"
+        "⚠️ <i>Действие применится ко всей выбранной вкладке сразу.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("➕ Добавить срок", callback_data="paid_bulk_extend"),
-             InlineKeyboardButton("➖ Убавить срок", callback_data="paid_bulk_reduce")],
-            [InlineKeyboardButton("🖥 Лимит устройств всем", callback_data="paid_bulk_hwid")],
-            [InlineKeyboardButton("📡 LTE-трафик всем", callback_data="paid_bulk_lte")],
+            scope_row, scope_row2,
+            [InlineKeyboardButton("➕ Добавить срок", callback_data=f"paid_bulk_extend:{scope}"),
+             InlineKeyboardButton("➖ Убавить срок", callback_data=f"paid_bulk_reduce:{scope}")],
+            [InlineKeyboardButton("🖥 Лимит устройств", callback_data=f"paid_bulk_hwid:{scope}")],
+            [InlineKeyboardButton("📡 LTE-трафик", callback_data=f"paid_bulk_lte:{scope}")],
             [InlineKeyboardButton("◀️ К подпискам", callback_data="paid_subs")],
         ]),
     )
 
 
-async def handle_paid_bulk_extend(query, context):
+async def handle_paid_bulk_extend(query, context, scope: str = "all"):
     from core.states import AWAITING_PAID_BULK_EXTEND
     context.user_data["state"] = AWAITING_PAID_BULK_EXTEND
+    context.user_data["bulk_scope"] = scope if scope in BULK_SCOPES else "all"
     await query.edit_message_text(
-        "➕ <b>Добавить срок всем подпискам</b>\n\n"
+        "➕ <b>Добавить срок подпискам выборки</b>\n\n"
         "<blockquote>Время — в свободной форме:\n"
         "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code></blockquote>",
         parse_mode="HTML",
@@ -1300,11 +1395,12 @@ async def handle_paid_bulk_extend(query, context):
     )
 
 
-async def handle_paid_bulk_reduce(query, context):
+async def handle_paid_bulk_reduce(query, context, scope: str = "all"):
     from core.states import AWAITING_PAID_BULK_REDUCE
     context.user_data["state"] = AWAITING_PAID_BULK_REDUCE
+    context.user_data["bulk_scope"] = scope if scope in BULK_SCOPES else "all"
     await query.edit_message_text(
-        "➖ <b>Убавить срок всем подпискам</b>\n\n"
+        "➖ <b>Убавить срок у подписок выборки</b>\n\n"
         "<blockquote>Время — в свободной форме:\n"
         "<code>5 часов</code>, <code>7 дней</code>, <code>2 недели</code>, <code>1 месяц</code></blockquote>",
         parse_mode="HTML",
@@ -1317,12 +1413,17 @@ async def handle_paid_bulk_apply(query, context):
     pending = context.user_data.pop("bulk_pending", None)
     if not pending:
         # уже применено или бот перезапускался — вводить срок заново
-        await handle_paid_bulk_menu(query)
+        await handle_paid_bulk_menu(query, context)
         return
     seconds, direction = int(pending["seconds"]), int(pending["direction"])
-    await query.edit_message_text("⏳ Применяю ко всем подпискам...")
+    scope = pending.get("scope", "all")
+    await query.edit_message_text("⏳ Применяю к подпискам выборки...")
     bot = context.bot if hasattr(context, "bot") else None
-    result = await _svc.bulk_extend(seconds, direction, bot=bot)
+    only_ids = None
+    if scope != "all":
+        from paidsub.storage import all_paid_subs
+        only_ids = [r[0] for r in await all_paid_subs(scope)]
+    result = await _svc.bulk_extend(seconds, direction, bot=bot, only_ids=only_ids)
     action = "добавлен" if direction > 0 else "убавлен"
     await query.edit_message_text(
         f"✅ <b>Массовое действие завершено</b>\n\n"
@@ -1603,11 +1704,12 @@ async def handle_paid_device_max(query, context):
 
 
 
-async def handle_paid_bulk_hwid(query, context):
+async def handle_paid_bulk_hwid(query, context, scope: str = "all"):
     from core.states import AWAITING_PAID_BULK_HWID
     context.user_data["state"] = AWAITING_PAID_BULK_HWID
+    context.user_data["bulk_scope"] = scope if scope in BULK_SCOPES else "all"
     await query.edit_message_text(
-        "🔑 <b>Лимит устройств (HWID) для всех подписок</b>\n\n"
+        "🔑 <b>Лимит устройств (HWID) для подписок выборки</b>\n\n"
         "Сколько устройств разрешить на подписку?\n"
         "Введи число, <code>0</code> — без ограничения.",
         parse_mode="HTML", reply_markup=back_admin(),
@@ -1619,14 +1721,15 @@ LIMIT_KINDS = {"hwid": ("🖥", "устройств", "limit_hwid"),
                "lte": ("📡", "LTE-трафика", "lte_gb")}
 
 
-async def handle_paid_bulk_lte(query, context):
+async def handle_paid_bulk_lte(query, context, scope: str = "all"):
     from core.states import AWAITING_PAID_BULK_LTE
     context.user_data["state"] = AWAITING_PAID_BULK_LTE
+    context.user_data["bulk_scope"] = scope if scope in BULK_SCOPES else "all"
     cfg = load_config()
     cur = cfg.get("paid_preset_lte")
     cur_str = f"{cur} ГБ" if cur is not None else "30 ГБ (по умолчанию)"
     await query.edit_message_text(
-        "🌐 <b>LTE-трафик для всех подписок (ГБ в месяц)</b>\n\n"
+        "🌐 <b>LTE-трафик для подписок выборки (ГБ в месяц)</b>\n\n"
         f"<blockquote>Пресет для новых: <b>{cur_str}</b></blockquote>\n\n"
         "Сколько LTE-трафика дать каждой подписке в месяц?\n"
         "Введи число в ГБ (0 — LTE закрыт для всех) или <code>-</code>, "
@@ -1643,11 +1746,19 @@ async def preview_bulk_limits(message, context, kind: str, value: int | None):
     from core.database import DB_PATH
     from handlers.confirm import confirm_keyboard
     emoji, label, field = LIMIT_KINDS[kind]
+    scope = context.user_data.get("bulk_scope", "all")
+    id_filter = None
+    if scope != "all":
+        from paidsub.storage import all_paid_subs
+        id_filter = {r[0] for r in await all_paid_subs(scope)}
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            f"SELECT tg_id, {field}, extra_devices FROM paid_subs"
+            f"SELECT id, tg_id, {field}, extra_devices FROM paid_subs"
         ) as cur:
-            rows = await cur.fetchall()
+            all_rows = await cur.fetchall()
+    rows = [(tg, f, ex) for sid, tg, f, ex in all_rows
+            if id_filter is None or sid in id_filter]
+    context.user_data["bulk_scope"] = scope
     skip = await blacklisted_ids()
     targets = [r for r in rows if r[0] not in skip]
     with_extra = sum(1 for _tg, _old, ex in targets if kind == "hwid" and ex)
@@ -1672,7 +1783,7 @@ async def preview_bulk_limits(message, context, kind: str, value: int | None):
         panel_note = "Меняем и в базе, и в панели. "
     context.user_data["bulk_limits"] = {"kind": kind, "value": value}
     await message.reply_text(
-        f"{emoji} <b>Поставить лимит {label} = {value_label} всем?</b>\n\n"
+        f"{emoji} <b>Поставить лимит {label} = {value_label} подпискам выборки?</b>\n\n"
         f"👥 Затронет подписок: <b>{len(targets)}</b>"
         + (f" · пропустим из ЧС: {len(rows) - len(targets)}\n" if len(rows) != len(targets) else "\n")
         + (f"⚠️ У <b>{tighter}</b> лимит станет строже — им придёт уведомление.\n" if tighter else "")
@@ -1693,9 +1804,14 @@ async def handle_paid_bulk_limits_apply(query, context):
         return
     kind, value = plan["kind"], plan["value"]
     emoji, label, _field = LIMIT_KINDS[kind]
-    await query.edit_message_text(f"{emoji} Меняю лимит {label} у всех подписок…")
+    await query.edit_message_text(f"{emoji} Меняю лимит {label} у подписок выборки…")
     bot = context.bot if hasattr(context, "bot") else None
-    r = await _svc.bulk_set_limits(kind, value, bot=bot)
+    scope = context.user_data.pop("bulk_scope", "all")
+    only_ids = None
+    if scope != "all":
+        from paidsub.storage import all_paid_subs
+        only_ids = [r[0] for r in await all_paid_subs(scope)]
+    r = await _svc.bulk_set_limits(kind, value, bot=bot, only_ids=only_ids)
     if kind == "lte":
         value_label = "по умолчанию" if value is None else f"{value} ГБ"
     else:

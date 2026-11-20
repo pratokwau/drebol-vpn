@@ -1710,6 +1710,22 @@ async def ensure_trial(user, context, on_start=None) -> bool:
             except Exception:
                 pass
             try:
+                # Предпроверка антифрода: отпечатков у новичка ещё нет, но
+                # ник/почта/пригласивший уже могут совпасть с пойманными.
+                from features.fraud import pre_trial_check
+                warns = await pre_trial_check(user.id)
+                if warns:
+                    await context.bot.send_message(
+                        chat_id=ADMIN_ID,
+                        text=("🕵 <b>Триал выдан, но есть совпадения</b>\n\n"
+                              f"{who} ({uname}) · <code>{user.id}</code>\n"
+                              + "\n".join(f"· {escape(w)}" for w in warns)
+                              + "\n\n<i>Триал не блокировался — проверь в "
+                                "«Повторные триалы», когда появятся устройства.</i>"),
+                        parse_mode="HTML")
+            except Exception:
+                pass
+            try:
                 await send_log(context.bot,
                     f"⚡ Триал выдан при входе: {who} ({uname}) · <code>{user.id}</code>")
             except Exception:

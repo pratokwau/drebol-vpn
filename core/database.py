@@ -548,6 +548,25 @@ async def init_db():
                 PRIMARY KEY (tg_a, tg_b)
             )
         """)
+        # Улики по паре копятся отдельно: одна пара может совпасть и по
+        # устройству, и по адресу, и по реферальной связи — вердикт строится
+        # по сумме улик (score), а не по первому совпадению.
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS fraud_evidence (
+                tg_a INTEGER NOT NULL,
+                tg_b INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                value TEXT NOT NULL,
+                weight INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (tg_a, tg_b, kind, value)
+            )
+        """)
+        try:
+            await db.execute(
+                "ALTER TABLE fraud_pairs ADD COLUMN score INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
         await db.execute(
             "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)"
         )
@@ -3187,20 +3206,21 @@ async def get_fraud_pair(a: int, b: int) -> tuple | None:
     lo, hi = (a, b) if a <= b else (b, a)
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT tg_a, tg_b, kind, value, status, created_at FROM fraud_pairs "
+            "SELECT tg_a, tg_b, kind, value, status, created_at, score FROM fraud_pairs "
             "WHERE tg_a = ? AND tg_b = ?", (lo, hi),
         ) as cur:
             return await cur.fetchone()
 
 
 async def list_fraud_pairs(status: str | None = None, limit: int = 15) -> list:
-    """Находки для экрана. status=None — все, иначе new / ignored / blocked."""
-    q = ("SELECT tg_a, tg_b, kind, value, status, created_at FROM fraud_pairs")
+    """Находки для экрана. status=None — все, иначе new / ignored / blocked.
+    Сортировка — сначала самые убедительные (по сумме улик)."""
+    q = ("SELECT tg_a, tg_b, kind, value, status, created_at, score FROM fraud_pairs")
     args: list = []
     if status:
         q += " WHERE status = ?"
         args.append(status)
-    q += " ORDER BY created_at DESC LIMIT ?"
+    q += " ORDER BY score DESC, created_at DESC LIMIT ?"
     args.append(int(limit))
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(q, args) as cur:
@@ -3246,4 +3266,91 @@ async def fraud_stats() -> dict:
             "clusters": await one(
                 "SELECT COUNT(*) FROM (SELECT value FROM device_seen WHERE kind = 'hwid' "
                 "AND tg_id IS NOT NULL GROUP BY value HAVING COUNT(DISTINCT tg_id) > 2)"),
+            "abuse": await one(
+                "SELECT COUNT(*) FROM fraud_pairs WHERE score >= 50 AND status = 'new'"),
         }
+
+
+async def record_fraud_evidence(a: int, b: int, kind: str, value: str,
+                                weight: int) -> bool:
+    """Добавляет улику по паре. True — улика новая."""
+    lo, hi = (a, b) if a <= b else (b, a)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO fraud_evidence (tg_a, tg_b, kind, value, weight) "
+            "VALUES (?, ?, ?, ?, ?)", (lo, hi, kind, str(value)[:200], int(weight)),
+        )
+        await db.commit()
+        return bool(cur.rowcount)
+
+
+async def get_fraud_evidence(a: int, b: int) -> list:
+    """Все улики по паре: (kind, value, weight, created_at), сильные первыми."""
+    lo, hi = (a, b) if a <= b else (b, a)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT kind, value, weight, created_at FROM fraud_evidence "
+            "WHERE tg_a = ? AND tg_b = ? ORDER BY weight DESC, created_at",
+            (lo, hi),
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def set_fraud_pair_score(a: int, b: int, score: int):
+    lo, hi = (a, b) if a <= b else (b, a)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE fraud_pairs SET score = ? WHERE tg_a = ? AND tg_b = ?",
+            (int(score), lo, hi),
+        )
+        await db.commit()
+
+
+async def shared_fingerprints(a: int, b: int) -> list:
+    """Отпечатки, которые есть у обоих аккаунтов: (kind, value)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT kind, value FROM device_seen WHERE tg_id = ? AND value IN "
+            "(SELECT value FROM device_seen WHERE tg_id = ?) "
+            "GROUP BY kind, value ORDER BY kind, value",
+            (a, b),
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def fraud_account_facts(tg_id: int) -> dict:
+    """Всё, по чему аккаунт можно сшить с другим: имя, ник, почта, рефералы,
+    промокоды, даты. Для полной сверки пары в антифроде."""
+    out = {"tg_id": tg_id, "first_name": "", "username": "", "login_email": "",
+           "user_created": None, "referred_by": None, "sub_created": None,
+           "times_renewed": 0, "promo_uses": []}
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT first_name, username, login_email, created_at FROM users "
+            "WHERE id = ?", (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            out["first_name"], out["username"] = row[0] or "", row[1] or ""
+            out["login_email"], out["user_created"] = row[2] or "", row[3]
+        async with db.execute(
+            "SELECT referred_by FROM referrals WHERE tg_id = ? "
+            "ORDER BY id LIMIT 1", (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            out["referred_by"] = row[0]
+        async with db.execute(
+            "SELECT created_at, times_renewed FROM paid_subs WHERE tg_id = ? "
+            "ORDER BY created_at LIMIT 1", (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            out["sub_created"], out["times_renewed"] = row[0], row[1] or 0
+        async with db.execute(
+            "SELECT pu.code, pc.owner_tg_id, pu.used_at FROM promo_uses pu "
+            "LEFT JOIN promo_codes pc ON pc.code = pu.code WHERE pu.tg_id = ?",
+            (tg_id,),
+        ) as cur:
+            out["promo_uses"] = await cur.fetchall()
+    return out

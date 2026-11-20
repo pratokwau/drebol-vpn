@@ -3,13 +3,17 @@
 Человек берёт пробный период, потом заводит новый аккаунт и берёт ещё один —
 с тем же телефоном и той же квартирой. Панель про это знает: у подписки видны
 устройства (HWID) и адреса, с которых она подключалась. Бот их постепенно
-запоминает и, когда у двух разных аккаунтов совпадает устройство или адрес,
-приносит находку админу — решение всегда за человеком, сам бот никого не банит.
+запоминает и сверяет аккаунты друг с другом по всем параметрам, какие у него
+есть: устройства (сильные HWID и слабый композит модели), адреса, ники и
+имена, почта кабинета (с вариантами написания), реферальные связи, личные
+промокоды и даты регистраций.
 
-Совпадение устройства — сильная улика: это буквально один и тот же телефон.
-Совпадение адреса слабее (общий Wi-Fi, оператор сотовой связи), поэтому про
-него бот пишет только когда замешана пробная подписка, и честно помечает,
-что улика слабая.
+Каждое совпадение — улика с весом. Вердикт строится по сумме улик: одно
+устройство — уже почти наверняка один человек; один адрес — почти ни о чём
+не говорит; а вот адрес + та же модель телефона + регистрация в один час +
+реферальная связь между аккаунтами — это уже реальный абуз, а не совпадение.
+Находку бот приносит админу — решение всегда за человеком, сам бот никого
+не банит.
 """
 
 from config import ADMIN_ID, load_config, save_config
@@ -48,6 +52,261 @@ def device_key(item: dict):
     return ("|".join(parts), False) if parts else (None, False)
 
 
+# ── Полная сверка пары: каждый параметр — улика с весом ──────────────────────
+
+WEIGHTS = {
+    "hwid": 50,           # один и тот же телефон/компьютер — почти приговор
+    "promo_personal": 35,  # чужой личный промокод не вводят случайно
+    "email_variant": 30,  # та же почта кабинета, записанная с точками/плюсом
+    "ip": 20,             # общий публичный адрес (но бывает и общий Wi-Fi)
+    "referral_direct": 15,  # один пригласил другого — аккаунты знакомы лично
+    "username": 15,       # тот же ник или ник, отличающийся цифрами/точками
+    "referral_common": 10,  # оба пришли от одного пригласившего
+    "hwid_weak": 10,      # та же связка ОС + модель + версия приложения
+    "name": 5,            # то же имя — слабенько, но в сумме помогает
+    "promo_shared": 5,    # оба ввели один общий код почти одновременно
+    "timing": 5,          # регистрации в один час
+}
+
+_KIND_LABEL = {
+    "hwid": "📱 Одно устройство",
+    "ip": "🌐 Один IP-адрес",
+    "hwid_weak": "📲 Та же модель и ОС",
+    "username": "🪪 Совпадение ника",
+    "name": "🪪 Одно имя",
+    "email_variant": "✉️ Та же почта кабинета",
+    "referral_direct": "🔗 Реферальная связь между аккаунтами",
+    "referral_common": "🔗 Общий пригласивший",
+    "promo_personal": "🎟 Чужой личный промокод",
+    "promo_shared": "🎟 Один промокод в одно время",
+    "timing": "🕐 Регистрации почти одновременно",
+}
+
+
+def verdict(score: int) -> str:
+    """Человеческий вердикт по сумме улик."""
+    if score >= 50:
+        return "🔴 Похоже на реальный абуз"
+    if score >= 30:
+        return "🟠 Вероятно, один человек"
+    if score >= 15:
+        return "🟡 Подозрительно"
+    return "⚪ Слабое совпадение"
+
+
+def _norm_name(s: str) -> str:
+    import re
+    return re.sub(r"[^a-zа-яё0-9]", "", (s or "").lower())
+
+
+def _norm_username(s: str) -> str:
+    import re
+    return re.sub(r"[0-9._]+$", "", (s or "").lower().lstrip("@"))
+
+
+def _norm_email(s: str) -> str:
+    """Почта без точечных и плюсовых вариантов: ivan.petrov+x@gmail = ivanpetrov@gmail."""
+    s = (s or "").strip().lower()
+    if "@" not in s:
+        return ""
+    local, domain = s.split("@", 1)
+    local = local.split("+", 1)[0].replace(".", "")
+    return f"{local}@{domain}" if local and domain else ""
+
+
+def _close_in_time(a, b, seconds: int = 3600) -> bool:
+    """Две даты из базы (строки) — рядом по времени или нет."""
+    from datetime import datetime
+    if not a or not b:
+        return False
+    try:
+        da = datetime.fromisoformat(str(a))
+        db = datetime.fromisoformat(str(b))
+    except ValueError:
+        return False
+    return abs((da - db).total_seconds()) <= seconds
+
+
+async def evaluate_pair(tg_a: int, tg_b: int) -> dict:
+    """Сверяет два аккаунта по всем параметрам. Возвращает улики и сумму.
+
+    Улика — (kind, value, weight). Это полная проверка пары «здесь и сейчас»
+    по всем данным базы: отпечатки, ники, почта, рефералы, промо, даты.
+    """
+    from core.database import shared_fingerprints, fraud_account_facts
+    ev: list = []
+    seen_kinds: set = set()
+
+    def add(kind, value):
+        if kind in seen_kinds and kind not in ("ip",):
+            return
+        seen_kinds.add(kind)
+        ev.append((kind, str(value)[:120], WEIGHTS[kind]))
+
+    shared = await shared_fingerprints(tg_a, tg_b)
+    ip_count = 0
+    for kind, value in shared:
+        if kind == "hwid":
+            add("hwid", value)
+        elif kind == "ip":
+            if is_public_ip(value):
+                ip_count += 1
+                if ip_count <= 2:  # два общих адреса — потолок веса IP
+                    ev.append(("ip", value, WEIGHTS["ip"]))
+        elif kind == "hwid_weak":
+            add("hwid_weak", value)
+
+    fa = await fraud_account_facts(tg_a)
+    fb = await fraud_account_facts(tg_b)
+
+    ua, ub = (fa["username"] or "").lower(), (fb["username"] or "").lower()
+    if ua and ub:
+        if ua == ub or _norm_username(ua) == _norm_username(ub):
+            add("username", fa["username"])
+    na, nb = _norm_name(fa["first_name"]), _norm_name(fb["first_name"])
+    if na and na == nb and len(na) >= 3:
+        add("name", fa["first_name"])
+
+    ea, eb = _norm_email(fa["login_email"]), _norm_email(fb["login_email"])
+    if ea and ea == eb:
+        add("email_variant", fa["login_email"])
+
+    if fa["referred_by"] == tg_b or fb["referred_by"] == tg_a:
+        add("referral_direct", "один пригласил другого")
+    elif fa["referred_by"] and fa["referred_by"] == fb["referred_by"]:
+        add("referral_common", f"пригласил {fa['referred_by']}")
+
+    owners_a = {code: owner for code, owner, _u in fa["promo_uses"]}
+    owners_b = {code: owner for code, owner, _u in fb["promo_uses"]}
+    for code, owner in owners_a.items():
+        if owner == tg_b:
+            add("promo_personal", code)
+    for code, owner in owners_b.items():
+        if owner == tg_a:
+            add("promo_personal", code)
+    shared_codes = set(owners_a) & set(owners_b)
+    if shared_codes and "promo_personal" not in seen_kinds:
+        uses_a = {c: u for c, _o, u in fa["promo_uses"]}
+        uses_b = {c: u for c, _o, u in fb["promo_uses"]}
+        for code in shared_codes:
+            if _close_in_time(uses_a.get(code), uses_b.get(code), 48 * 3600):
+                add("promo_shared", code)
+                break
+
+    if _close_in_time(fa["user_created"], fb["user_created"]):
+        add("timing", "аккаунты в один час")
+    elif _close_in_time(fa["sub_created"], fb["sub_created"]):
+        add("timing", "подписки в один час")
+
+    return {"score": sum(w for _k, _v, w in ev), "evidence": ev}
+
+
+async def apply_evaluation(context, tg_a: int, tg_b: int) -> int:
+    """Оценивает пару, записывает улики и балл, присылает алерт, если пара
+    новая и убедительная — или если улики дотянули её до «абуза»."""
+    from core.database import (note_fraud_pair, record_fraud_evidence,
+                               get_fraud_pair, set_fraud_pair_score)
+    res = await evaluate_pair(tg_a, tg_b)
+    score, ev = res["score"], res["evidence"]
+    if not ev:
+        return 0
+    for kind, value, weight in ev:
+        await record_fraud_evidence(tg_a, tg_b, kind, value, weight)
+
+    strongest = max(ev, key=lambda e: e[2])
+    pair = await get_fraud_pair(tg_a, tg_b)
+    was_new = pair is None
+    prev_score = (pair[6] if pair and len(pair) > 6 else 0) or 0
+    if was_new:
+        if score < 15 and strongest[0] != "hwid":
+            return score  # слишком слабо — пару даже не заводим
+        await note_fraud_pair(tg_a, tg_b, strongest[0], strongest[1])
+    await set_fraud_pair_score(tg_a, tg_b, score)
+
+    pair = await get_fraud_pair(tg_a, tg_b)
+    status = pair[4] if pair else "new"
+    if status != "new":
+        return score
+    if was_new and score >= 15:
+        await send_fraud_alert(context, tg_a, tg_b, score, ev)
+    elif not was_new and prev_score < 50 <= score:
+        await send_fraud_alert(context, tg_a, tg_b, score, ev, boosted=True)
+    return score
+
+
+async def send_fraud_alert(context, tg_a: int, tg_b: int, score: int,
+                           ev: list, boosted: bool = False):
+    """Алерт админу: пара, вердикт и главные улики."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    top = sorted(ev, key=lambda e: -e[2])[:4]
+    lines = "\n".join(f"· {_KIND_LABEL.get(k, k)} (+{w})" for k, _v, w in top)
+    head = ("🕵 <b>Улики усилились до абуза</b>" if boosted
+            else "🕵 <b>Похожие аккаунты</b>")
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=(f"{head}\n\n"
+              f"{await who_line(tg_a)}\n\n"
+              f"{await who_line(tg_b)}\n\n"
+              f"<blockquote>{verdict(score)} · <b>{score}</b> баллов\n{lines}</blockquote>"),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔍 Разобрать",
+                                  callback_data=f"fraud_pair:{tg_a}:{tg_b}")],
+            [InlineKeyboardButton("⛔ В ЧС первого", callback_data=f"bl_add_for:{tg_a}"),
+             InlineKeyboardButton("🙈 Не фрод", callback_data=f"fraud_ok:{tg_a}:{tg_b}")],
+        ]),
+    )
+    from core.log_channel import send_log
+    await send_log(context.bot,
+                   f"🕵 Антифрод: <code>{tg_a}</code> ↔ <code>{tg_b}</code> — "
+                   f"{score} баллов ({verdict(score)})")
+
+
+async def pre_trial_check(tg_id: int) -> list:
+    """Быстрые предупреждения перед выдачей триала новому аккаунту.
+
+    Отпечатков у новичка ещё нет, поэтому сверяем то, что уже известно:
+    ник и имя против уже пойманных на абузе, варианты почты кабинета и
+    пригласившего. Возвращает список строк-предупреждений (пустой — чисто).
+    """
+    from core.database import fraud_account_facts
+    import aiosqlite
+    from core.database import DB_PATH
+    facts = await fraud_account_facts(tg_id)
+    out = []
+    blocked: set = set()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT tg_a, tg_b FROM fraud_pairs WHERE status = 'blocked'"
+        ) as cur:
+            for a, b in await cur.fetchall():
+                blocked.add(a)
+                blocked.add(b)
+        if facts["referred_by"] and facts["referred_by"] in blocked:
+            out.append("пригласивший уже блокировался за повторные триалы")
+        email = _norm_email(facts["login_email"])
+        if email:
+            async with db.execute(
+                "SELECT id, login_email FROM users WHERE login_email IS NOT NULL "
+                "AND id != ?", (tg_id,),
+            ) as cur:
+                for other_id, other_email in await cur.fetchall():
+                    if _norm_email(other_email) == email:
+                        out.append(f"почта кабинета совпадает с аккаунтом {other_id} "
+                                   "(вариант написания)")
+                        break
+        uname = _norm_username(facts["username"])
+        if uname:
+            async with db.execute(
+                "SELECT id, username FROM users WHERE id != ?", (tg_id,),
+            ) as cur:
+                for other_id, other_name in await cur.fetchall():
+                    if other_id in blocked and _norm_username(other_name or "") == uname:
+                        out.append(f"ник совпадает с заблокированным за абуз {other_id}")
+                        break
+    return out
+
+
 async def _subs_slice(limit: int) -> list:
     """Очередная порция подписок для опроса панели.
 
@@ -61,7 +320,10 @@ async def _subs_slice(limit: int) -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
             "SELECT id, tg_id, email, times_renewed FROM paid_subs "
-            "WHERE tg_id IS NOT NULL AND status IN ('active', 'renewal') ORDER BY id"
+            "WHERE tg_id IS NOT NULL "
+            "UNION ALL "
+            "SELECT id, tg_id, email, 1 FROM admin_subs WHERE tg_id IS NOT NULL "
+            "ORDER BY 3"
         ) as cur:
             rows = await cur.fetchall()
     if not rows:
@@ -89,8 +351,14 @@ async def fraud_tick(context):
 
 
 async def scan_sub(context, tg_id: int, email: str, paid: bool) -> list:
-    """Запоминает отпечатки одной подписки и проверяет их на пересечения."""
-    from core.database import remember_fingerprints, fingerprint_owners
+    """Запоминает отпечатки одной подписки и полностью сверяет совпавшие пары.
+
+    Раньше пара рождалась из одного совпадения. Теперь каждое свежее
+    совпадение запускает полную сверку пары по всем параметрам
+    (evaluate_pair), а вердикт и алерт зависят от суммы улик.
+    """
+    from core.database import (remember_fingerprints, fingerprint_owners,
+                               fingerprint_cluster)
     from services.panel import get_client_hwids, get_client_ips
 
     found = []
@@ -102,9 +370,15 @@ async def scan_sub(context, tg_id: int, email: str, paid: bool) -> list:
             if not value:
                 continue
             (strong if is_strong else weak).append(value)
-        await remember_fingerprints(email, tg_id, "hwid_weak", weak)
+        fresh_weak = await remember_fingerprints(email, tg_id, "hwid_weak", weak)
         fresh = await remember_fingerprints(email, tg_id, "hwid", strong)
         found += [("hwid", v) for v in fresh]
+        # слабый композит (модель+ОС) сам по себе — не улика, но как повод
+        # для полной сверки годится, если такой телефон не у половины города
+        for v in fresh_weak:
+            cluster = await fingerprint_cluster("hwid_weak", v)
+            if len(cluster) <= 6:
+                found.append(("hwid_weak", v))
 
     cfg = load_config()
     if cfg.get("fraud_use_ip", True):
@@ -113,61 +387,20 @@ async def scan_sub(context, tg_id: int, email: str, paid: bool) -> list:
             values = [i["ip"] for i in ips["items"]
                       if i.get("ip") and is_public_ip(i["ip"])]
             fresh = await remember_fingerprints(email, tg_id, "ip", values)
-            # адрес — улика слабая, поэтому смотрим на него только у пробных
-            if not paid:
-                found += [("ip", v) for v in fresh]
+            found += [("ip", v) for v in fresh]
 
     alerts = []
+    checked_pairs = set()
     for kind, value in found:
-        for other_tg, other_email in await fingerprint_owners(kind, value, tg_id):
-            if await report_pair(context, tg_id, other_tg, kind, value, email, other_email):
+        for other_tg, _other_email in await fingerprint_owners(kind, value, tg_id):
+            pair_key = (min(tg_id, other_tg), max(tg_id, other_tg))
+            if pair_key in checked_pairs:
+                continue
+            checked_pairs.add(pair_key)
+            score = await apply_evaluation(context, tg_id, other_tg)
+            if score >= 15:
                 alerts.append((other_tg, kind))
     return alerts
-
-
-async def report_pair(context, tg_id: int, other_tg: int, kind: str,
-                      value: str, email: str, other_email: str) -> bool:
-    """Показывает находку админу. Одну пару беспокоим только раз."""
-    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    from core.database import note_fraud_pair
-
-    if not await note_fraud_pair(tg_id, other_tg, kind, value):
-        return False
-
-    if kind == "hwid":
-        head = "🕵 <b>Одно устройство на двух аккаунтах</b>"
-        note = "Совпал идентификатор устройства — это один и тот же телефон или компьютер."
-    else:
-        head = "🕵 <b>Один адрес на двух аккаунтах</b>"
-        note = ("Совпал IP-адрес. Улика слабая: общий Wi-Fi, семья или "
-                "мобильный оператор дают такое же совпадение.")
-
-    from core.database import fingerprint_cluster
-    cluster = await fingerprint_cluster(kind, value)
-    cluster_line = (f"\n👥 Аккаунтов с этим отпечатком: <b>{len(cluster)}</b>"
-                    if len(cluster) > 2 else "")
-
-    await context.bot.send_message(
-        chat_id=ADMIN_ID,
-        text=(
-            f"{head}\n\n"
-            f"{await who_line(tg_id)}\n\n"
-            f"{await who_line(other_tg)}\n\n"
-            f"<blockquote>{_match_line(kind, value)}{cluster_line}</blockquote>\n\n"
-            f"<i>{note}</i>"
-        ),
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔍 Разобрать",
-                                  callback_data=f"fraud_pair:{tg_id}:{other_tg}")],
-            [InlineKeyboardButton("⛔ В ЧС первого", callback_data=f"bl_add_for:{tg_id}"),
-             InlineKeyboardButton("🙈 Не фрод", callback_data=f"fraud_ok:{tg_id}:{other_tg}")],
-        ]),
-    )
-    from core.log_channel import send_log
-    await send_log(context.bot,
-        f"🕵 Совпадение ({kind}): <code>{tg_id}</code> и <code>{other_tg}</code>")
-    return True
 
 
 # ── Кто эти двое ──────────────────────────────────────────────────────────────
@@ -202,11 +435,8 @@ async def who_line(tg_id: int) -> str:
 
 
 def _match_line(kind: str, value: str) -> str:
-    if kind == "hwid":
-        return f"📱 Одно устройство · <code>{value[:24]}</code>"
-    if kind == "ip":
-        return f"🌐 Один адрес · <code>{value[:40]}</code>"
-    return f"🔎 {kind} · <code>{value[:30]}</code>"
+    label = _KIND_LABEL.get(kind, f"🔎 {kind}")
+    return f"{label} · <code>{value[:40]}</code>"
 
 
 # ── Экран в админке ───────────────────────────────────────────────────────────
@@ -228,14 +458,16 @@ async def handle_fraud_menu(query):
              "<blockquote>"
              f"🔎 Находок всего: <b>{st['pairs']}</b>\n"
              f"🆕 Не разобрано: <b>{st['new']}</b>\n"
+             f"🔴 Из них похожи на абуз (50+ баллов): <b>{st.get('abuse', 0)}</b>\n"
              f"⛔ Закончились блокировкой: <b>{st['blocked']}</b>\n"
              f"🙈 Отмечено «не фрод»: <b>{st['ignored']}</b>"
              + (f"\n👨‍👩‍👧 Устройств на трёх и более аккаунтах: <b>{st['clusters']}</b>"
                 if st["clusters"] else "")
              + "</blockquote>", "",
-             "<i>Бот по кругу опрашивает панель и запоминает, с каких устройств и "
-             "адресов работают подписки. Совпало устройство у двух аккаунтов — "
-             "приносит находку сюда. Сам никого не банит: решение за тобой.</i>"]
+             "<i>Бот по кругу опрашивает панель и сверяет аккаунты по всем "
+             "параметрам: устройства, адреса, ники, почта кабинета, реферальные "
+             "связи, промокоды и даты. Каждое совпадение — улика с весом, "
+             "вердикт — по сумме. Сам никого не банит: решение за тобой.</i>"]
 
     kb = [[InlineKeyboardButton("🔴 Выключить" if enabled else "🟢 Включить",
                                 callback_data="fraud_toggle"),
@@ -278,16 +510,16 @@ async def handle_fraud_list(query, which: str = "new"):
     kb = []
     if not rows:
         lines.append("<blockquote>Пусто.</blockquote>")
-    for tg_a, tg_b, kind, _value, st, created in rows:
+    for tg_a, tg_b, kind, _value, st, created, score in rows:
         a = await get_user_info(tg_a)
         b = await get_user_info(tg_b)
         a_name = _esc_name(a[1] if a else None, tg_a)
         b_name = _esc_name(b[1] if b else None, tg_b)
         when = str(created)[5:16] if created else ""
         lines.append(f"{_STATUS_LABEL.get(st, '·')} {_KIND_ICON.get(kind, '🔎')} "
-                     f"{a_name} ↔ {b_name} · {when}")
+                     f"{a_name} ↔ {b_name} · <b>{score or 0}</b> баллов · {when}")
         kb.append([InlineKeyboardButton(
-            f"{_KIND_ICON.get(kind, '🔎')} {a_name[:14]} ↔ {b_name[:14]}",
+            f"{score or 0}б · {a_name[:14]} ↔ {b_name[:14]}",
             callback_data=f"fraud_pair:{tg_a}:{tg_b}")])
 
     tabs = [("🆕 Новые", "new"), ("⛔ Блок", "blocked"),
@@ -312,14 +544,23 @@ async def handle_fraud_pair(query, a: int, b: int):
         await query.answer("Находка не найдена", show_alert=True)
         await handle_fraud_list(query, "all")
         return
-    tg_a, tg_b, kind, value, status, created = pair
+    tg_a, tg_b, kind, value, status, created = pair[:6]
+    score = pair[6] if len(pair) > 6 else 0
 
     cluster = await fingerprint_cluster(kind, value)
     others = [c for c in cluster if c[0] not in (tg_a, tg_b)]
     first_seen = min((c[2] for c in cluster if c[2]), default=None)
     last_seen = max((c[3] for c in cluster if c[3]), default=None)
 
-    facts = [_match_line(kind, value)]
+    from core.database import get_fraud_evidence
+    evidence = await get_fraud_evidence(tg_a, tg_b)
+    facts = [f"{verdict(score or 0)} · <b>{score or 0}</b> баллов"]
+    if evidence:
+        facts.append("<b>Улики:</b>")
+        for ek, ev_value, ew, _ec in evidence:
+            facts.append(f"· {_match_line(ek, ev_value)} (+{ew})")
+    else:
+        facts.append(_match_line(kind, value))
     if first_seen:
         facts.append(f"📆 Впервые: {str(first_seen)[:16]} · последний раз: "
                      f"{str(last_seen)[:16]}")
@@ -329,9 +570,10 @@ async def handle_fraud_pair(query, a: int, b: int):
             u = await get_user_info(tg_id)
             names.append(_esc_name(u[1] if u else None, tg_id))
         facts.append(f"👥 Тот же отпечаток ещё у <b>{len(others)}</b>: " + ", ".join(names))
-    if kind == "ip":
-        facts.append("<i>Адрес — улика слабая: общий Wi-Fi, семья или мобильный "
-                     "оператор дают такое же совпадение.</i>")
+    if any(ek == "ip" for ek, *_ in evidence) and not any(
+            ek == "hwid" for ek, *_ in evidence):
+        facts.append("<i>Сильной улики (устройства) нет: адрес и прочее по "
+                     "отдельности слабы, смотри на сумму.</i>")
 
     state_line = {"new": "🆕 не разобрано", "ignored": "🙈 отмечено «не фрод»",
                   "blocked": "⛔ закончилось блокировкой"}.get(status, status)
@@ -344,6 +586,8 @@ async def handle_fraud_pair(query, a: int, b: int):
 
     kb = [[InlineKeyboardButton("👤 Первый", callback_data=f"user_profile:{tg_a}"),
            InlineKeyboardButton("👤 Второй", callback_data=f"user_profile:{tg_b}")],
+          [InlineKeyboardButton("🔄 Перепроверить пару",
+                                callback_data=f"fraud_recheck:{tg_a}:{tg_b}")],
           [InlineKeyboardButton("⛔ В ЧС первого", callback_data=f"bl_add_for:{tg_a}"),
            InlineKeyboardButton("⛔ В ЧС второго", callback_data=f"bl_add_for:{tg_b}")]]
 
@@ -426,3 +670,11 @@ async def handle_fraud_ok(query, a: int, b: int):
         await handle_fraud_pair(query, a, b)
     else:
         await handle_fraud_menu(query)
+
+
+async def handle_fraud_recheck(query, context, a: int, b: int):
+    """Полная пересверка пары по всем параметрам прямо из карточки."""
+    score = await apply_evaluation(context, a, b)
+    await query.answer(f"Перепроверил: {score} баллов — {verdict(score)}",
+                       show_alert=True)
+    await handle_fraud_pair(query, a, b)

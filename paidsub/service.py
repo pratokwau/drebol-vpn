@@ -124,10 +124,13 @@ async def _set_expire_db(kind: str, sub_id: int, new_expire: str):
 
 
 async def _history(kind: str, tg_id, action: str, details: str | None = None):
-    """История пишется только для платных подписок (у админских её нет)."""
-    if kind != "paid" or not tg_id:
+    """История пишется обоим видам подписок: она одна на человека (по tg_id),
+    а у админских событий в деталях помечаем, что речь об админской подписке."""
+    if not tg_id:
         return
     from paidsub.storage import add_history
+    if kind == "admin":
+        details = ("[админская] " + details) if details else "[админская подписка]"
     await add_history(tg_id, action, details)
 
 
@@ -633,9 +636,11 @@ async def reissue_sub(sub_id: int, *, kind: str = "paid", bot=None, panel=None) 
 
 # ── Массовые действия (только платные) ────────────────────────────────────────
 
-async def bulk_extend(seconds: int, direction: int, *, bot=None, panel=None) -> dict:
-    """Сдвигает срок у всех платных подписок. direction: +1 добавить, -1 убавить.
+async def bulk_extend(seconds: int, direction: int, *, bot=None, panel=None,
+                      only_ids=None) -> dict:
+    """Сдвигает срок у платных подписок. direction: +1 добавить, -1 убавить.
 
+    only_ids — ограничить выборкой (вкладка списка); None — все подписки.
     Подписки из ЧС не трогаются. Ошибка панели по одной подписке не
     останавливает остальные (как было в хендлере: результат панели
     здесь не проверяется, срок в базе уже сдвинут).
@@ -646,9 +651,12 @@ async def bulk_extend(seconds: int, direction: int, *, bot=None, panel=None) -> 
     from core.database import DB_PATH
     import aiosqlite
     panel_mod = _panel(panel)
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT id FROM paid_subs") as cur:
-            all_ids = [r[0] for r in await cur.fetchall()]
+    if only_ids is not None:
+        all_ids = [int(i) for i in only_ids]
+    else:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT id FROM paid_subs") as cur:
+                all_ids = [r[0] for r in await cur.fetchall()]
 
     updated = errors = skipped = 0
     skip_ids = await blacklisted_ids()
@@ -690,9 +698,11 @@ async def bulk_extend(seconds: int, direction: int, *, bot=None, panel=None) -> 
             "total": len(all_ids), "skipped": skipped}
 
 
-async def bulk_set_limits(kind_limit: str, value, *, bot=None, panel=None) -> dict:
-    """Ставит лимит всем платным подпискам. kind_limit: "hwid" или "lte".
+async def bulk_set_limits(kind_limit: str, value, *, bot=None, panel=None,
+                          only_ids=None) -> dict:
+    """Ставит лимит платным подпискам. kind_limit: "hwid" или "lte".
 
+    only_ids — ограничить выборкой (вкладка списка); None — все подписки.
     Устройства — в базе и в панели, LTE — только в базе (панель о нём
     не знает). Оплаченные слоты устройств идут сверх общего лимита.
     Тем, кому стало строже, приходит уведомление.
@@ -707,10 +717,19 @@ async def bulk_set_limits(kind_limit: str, value, *, bot=None, panel=None) -> di
               "lte": ("📡", "LTE-трафика", "lte_gb")}
     _emoji, label, field = limits[kind_limit]
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            f"SELECT id, tg_id, email, {field}, extra_devices FROM paid_subs"
-        ) as cur:
-            rows = await cur.fetchall()
+        if only_ids is not None:
+            ids = [int(i) for i in only_ids] or [-1]
+            marks = ",".join("?" for _ in ids)
+            async with db.execute(
+                f"SELECT id, tg_id, email, {field}, extra_devices FROM paid_subs "
+                f"WHERE id IN ({marks})", ids
+            ) as cur:
+                rows = await cur.fetchall()
+        else:
+            async with db.execute(
+                f"SELECT id, tg_id, email, {field}, extra_devices FROM paid_subs"
+            ) as cur:
+                rows = await cur.fetchall()
 
     skip_ids = await blacklisted_ids()
     panel_mod = _panel(panel)

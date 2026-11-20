@@ -38,6 +38,9 @@ DEFAULTS = {
     "site_sync": True,
     "server_reminder": True,
     "healthcheck": True,
+    # Свежий полный бэкап файлом следом за сводкой — чтобы актуальный
+    # слепок бота всегда лежал у владельца под рукой.
+    "backup": True,
 }
 
 _FALL_LABELS = {
@@ -341,6 +344,24 @@ async def morning_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             chat_id=ADMIN_ID, text="\n".join(lines), parse_mode="HTML")
     except Exception:
         pass
+    if cfg.get("backup", True):
+        # Свежий полный бэкап — отдельным сообщением-файлом следом за сводкой.
+        # Ошибка бэкапа сводку не роняет: она уже ушла.
+        try:
+            import io as _io
+            from features.backup import make_archive, human_size, _counts_block
+            blob, name, counts = make_archive()
+            await context.bot.send_document(
+                chat_id=ADMIN_ID,
+                document=_io.BytesIO(blob), filename=name,
+                caption=("💾 <b>Утренний бэкап</b>\n\n"
+                         f"<blockquote>{_counts_block(counts)}\n"
+                         f"Размер: <b>{human_size(len(blob))}</b></blockquote>\n\n"
+                         "<i>Полный архив: база, настройки, .env и assets. "
+                         "Внутри ключи от всего проекта — не пересылай.</i>"),
+                parse_mode="HTML")
+        except Exception:
+            pass
 
 
 def _toggle_label(on: bool) -> str:
@@ -368,6 +389,7 @@ async def handle_morning_menu(query,
         f" · раз в {cfg['netcheck_days']} дн.",
         f"👥 Темы поддержки: <b>{_toggle_label(cfg['support_topics'])}</b>",
         f"🖥 Напоминание о серверах: <b>{_toggle_label(cfg['server_reminder'])}</b>",
+        f"💾 Бэкап со сводкой: <b>{_toggle_label(cfg.get('backup', True))}</b>",
         "",
         "<b>Фоновые проверки (на своих интервалах):</b>",
         "🔄 Синхронизация с панелью: <b>только вручную</b> (кнопка в Remnawave → Синхронизация)",
@@ -398,6 +420,9 @@ async def handle_morning_menu(query,
             f"🖥 Серверы: {_toggle_label(cfg['server_reminder'])}",
             callback_data="morning_toggle:server_reminder")],
         [InlineKeyboardButton(
+            f"💾 Бэкап: {_toggle_label(cfg.get('backup', True))}",
+            callback_data="morning_toggle:backup")],
+        [InlineKeyboardButton(
             f"🚫 ЧС: {_toggle_label(cfg['blacklist_sync'])}",
             callback_data="morning_toggle:blacklist_sync")],
         [InlineKeyboardButton(
@@ -424,7 +449,7 @@ async def handle_morning_toggle(query, context: ContextTypes.DEFAULT_TYPE,
     """Переключатель в настройках синхронизации."""
     if key not in ("enabled", "reconcile", "netcheck", "alerts",
                    "support_topics", "blacklist_sync",
-                   "site_sync", "server_reminder", "healthcheck"):
+                   "site_sync", "server_reminder", "healthcheck", "backup"):
         return
     cfg = get_morning_cfg()
     save_morning_cfg({key: not cfg.get(key, True)})

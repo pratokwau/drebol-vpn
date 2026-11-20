@@ -1,14 +1,23 @@
 """Бэкап бота: выгрузить всё одним файлом и залить обратно на новом сервере.
 
-В архив идёт база (подписки, платежи, промокоды, тикеты, история), config.json
-со всеми настройками и папка assets с логотипом. Токен бота не кладём: он
-живёт в .env и задаётся при установке — случайно переслать архив с токеном
-опаснее, чем один раз вписать его руками.
+Архив — ПОЛНЫЙ слепок данных бота, без выбора и исключений (решение
+владельца): база (подписки, платежи, промокоды, тикеты, история),
+config.json со всеми настройками, .env с токеном и секретами и вся папка
+assets со всеми вложенными папками. Внутри манифест с SHA-256 каждого
+файла: при восстановлении архив сверяется по нему, битый файл не встанет.
+
+⚠️ В архиве — токен бота, ключи платёжки и пароль сервера сайта.
+Это фактически ключи от всего проекта: архив никому не пересылать
+и не хранить в открытых местах.
+
+Чего в архиве нет и быть не может: сам код (он в git) и файлы сайта —
+они живут на другом сервере, бот их не видит; сайт переносится деплоем.
 
 База копируется средствами самой SQLite, а не «cp файла»: бот в этот момент
 работает, и простая копия могла бы застать базу на середине записи.
 """
 
+import hashlib
 import io
 import json
 import os
@@ -19,7 +28,9 @@ from datetime import datetime
 from config import INSTALL_DIR, CONFIG_FILE
 
 DB_NAME = "bot.db"
+ENV_NAME = ".env"
 ASSETS_DIR = os.path.join(INSTALL_DIR, "assets")
+ENV_FILE = os.path.join(INSTALL_DIR, ENV_NAME)
 STAGED = os.path.join(INSTALL_DIR, "restore_staged.zip")
 # таблицы, без которых архив точно не наш
 REQUIRED_TABLES = {"users", "paid_subs", "payments"}
@@ -68,25 +79,44 @@ def db_counts(path: str = "") -> dict:
     return out
 
 
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def make_archive() -> tuple:
-    """Готовит архив. Возвращает (байты, имя файла, что внутри)."""
+    """Готовит ПОЛНЫЙ архив: база, config.json, .env и вся папка assets
+    (рекурсивно). Возвращает (байты, имя файла, что внутри)."""
     stamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
     counts = db_counts()
-    meta = {"created_at": datetime.now().isoformat(timespec="seconds"),
-            "counts": counts, "source": os.uname().nodename if hasattr(os, "uname") else ""}
+    files: dict = {}
+
+    payload: list = [(DB_NAME, snapshot_db())]
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, "rb") as f:
+            payload.append(("config.json", f.read()))
+    if os.path.exists(ENV_FILE):
+        with open(ENV_FILE, "rb") as f:
+            payload.append((ENV_NAME, f.read()))
+    if os.path.isdir(ASSETS_DIR):
+        for root, _dirs, names in os.walk(ASSETS_DIR):
+            for name in sorted(names):
+                path = os.path.join(root, name)
+                rel = os.path.relpath(path, ASSETS_DIR).replace(os.sep, "/")
+                with open(path, "rb") as f:
+                    payload.append((f"assets/{rel}", f.read()))
+
+    for arc, data in payload:
+        files[arc] = {"sha256": _sha256(data), "size": len(data)}
+    meta = {"format": 2,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "counts": counts,
+            "source": os.uname().nodename if hasattr(os, "uname") else "",
+            "files": files}
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr(DB_NAME, snapshot_db())
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, "rb") as f:
-                z.writestr("config.json", f.read())
-        if os.path.isdir(ASSETS_DIR):
-            for name in sorted(os.listdir(ASSETS_DIR)):
-                path = os.path.join(ASSETS_DIR, name)
-                if os.path.isfile(path):
-                    with open(path, "rb") as f:
-                        z.writestr(f"assets/{name}", f.read())
+        for arc, data in payload:
+            z.writestr(arc, data)
         z.writestr("meta.json", json.dumps(meta, ensure_ascii=False, indent=2))
     return buf.getvalue(), f"drebol-backup_{stamp}.zip", counts
 
@@ -121,6 +151,9 @@ def inspect_archive(blob: bytes) -> dict:
         counts = db_counts(tmp)
     except sqlite3.Error as e:
         return {"ok": False, "error": f"базу не открыть: {e}"}
+    except Exception as e:
+        # битый zip (CRC) и прочие повреждения чтения — тоже «не подходит»
+        return {"ok": False, "error": f"архив повреждён: {type(e).__name__}"}
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -131,8 +164,32 @@ def inspect_archive(blob: bytes) -> dict:
             meta = json.loads(z.read("meta.json").decode("utf-8"))
         except Exception:
             meta = {}
+
+    # Целостность: у новых архивов есть манифест с SHA-256 каждого файла.
+    # Битый или подменённый файл по нему видно сразу; старые архивы без
+    # манифеста принимаем, но честно помечаем.
+    checksum = "none"
+    manifest = meta.get("files") or {}
+    if manifest:
+        checksum = "ok"
+        for arc, info in manifest.items():
+            if arc not in names:
+                return {"ok": False, "error": f"в архиве нет файла из манифеста: {arc}"}
+            try:
+                data = z.read(arc)
+            except Exception:
+                return {"ok": False,
+                        "error": f"файл {arc} не читается — архив повреждён"}
+            if _sha256(data) != (info or {}).get("sha256"):
+                checksum = "bad"
+                return {"ok": False,
+                        "error": f"файл {arc} не сошёлся по контрольной сумме — "
+                                 "архив повреждён или изменён"}
+
     return {"ok": True, "counts": counts, "meta": meta,
             "has_config": "config.json" in names,
+            "has_env": ENV_NAME in names,
+            "checksum": checksum,
             "assets": sorted(n.split("/", 1)[1] for n in names
                              if n.startswith("assets/") and not n.endswith("/"))}
 
@@ -169,16 +226,37 @@ def apply_archive(blob: bytes) -> dict:
 
     try:
         z = zipfile.ZipFile(io.BytesIO(blob))
+        names = set(z.namelist())
         with open(_db_path(), "wb") as f:
             f.write(z.read(DB_NAME))
-        if "config.json" in z.namelist():
+        if "config.json" in names:
             with open(CONFIG_FILE, "wb") as f:
                 f.write(z.read("config.json"))
+        if ENV_NAME in names:
+            with open(ENV_FILE, "wb") as f:
+                f.write(z.read(ENV_NAME))
+        # assets заменяем целиком: что было на диске, но нет в архиве, —
+        # убираем, иначе после переноса останутся чужие остатки.
         os.makedirs(ASSETS_DIR, exist_ok=True)
+        wanted = {}
         for entry in z.namelist():
             if entry.startswith("assets/") and not entry.endswith("/"):
-                with open(os.path.join(ASSETS_DIR, os.path.basename(entry)), "wb") as f:
-                    f.write(z.read(entry))
+                rel = entry[len("assets/"):]
+                parts = rel.replace("\\", "/").split("/")
+                if any(p in ("", ".", "..") for p in parts):
+                    continue  # путь наружу не выпускаем
+                wanted["/".join(parts)] = entry
+        for root, _dirs, fnames in os.walk(ASSETS_DIR):
+            for fn in fnames:
+                rel = os.path.relpath(
+                    os.path.join(root, fn), ASSETS_DIR).replace(os.sep, "/")
+                if rel not in wanted:
+                    os.remove(os.path.join(root, fn))
+        for rel, entry in wanted.items():
+            dest = os.path.join(ASSETS_DIR, *rel.split("/"))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(z.read(entry))
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
     return {"ok": True, "safety": safety_path, "counts": db_counts()}
@@ -210,10 +288,14 @@ async def handle_backup_menu(query, context=None):
         "💾 <b>Бэкап и перенос</b>\n\n"
         f"<blockquote>{_counts_block(counts)}\n"
         f"База: <b>{human_size(size)}</b></blockquote>\n\n"
-        "В архив идут база, настройки и логотип. Токен бота не кладём — "
-        "он в <code>.env</code> и задаётся при установке.\n\n"
-        "<i>В настройках лежат ключи платёжки и пароль сервера сайта: "
-        "архив никому не пересылай.</i>",
+        "Архив — полный слепок бота: база, все настройки, <code>.env</code> "
+        "с токеном и все файлы assets. Без выбора и исключений. Внутри — "
+        "контрольные суммы каждого файла, при восстановлении архив по ним "
+        "сверяется.\n\n"
+        "⚠️ <i>В архиве токен бота, ключи платёжки и пароль сервера сайта — "
+        "это ключи от всего проекта. Никому не пересылай.</i>\n\n"
+        "<i>Код бота в архив не входит (он в git), а файлы сайта живут на "
+        "другом сервере — сайт переносится деплоем.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📤 Выгрузить", callback_data="backup_export"),
@@ -244,8 +326,9 @@ async def handle_backup_export(query, context):
         caption=(f"💾 <b>Бэкап Drebol VPN</b>\n\n"
                  f"<blockquote>{_counts_block(counts)}\n"
                  f"Размер: <b>{human_size(len(blob))}</b></blockquote>\n\n"
-                 "На новом сервере: поставь бота, задай токен в <code>.env</code> "
-                 "и пришли этот файл в «💾 Бэкап» → «📥 Загрузить»."),
+                 "Полный архив: база, настройки, <code>.env</code> и assets. "
+                 "На новом сервере: поставь код бота из git и пришли этот файл "
+                 "в «💾 Бэкап» → «📥 Загрузить» — встанет всё, включая токен."),
         parse_mode="HTML",
     )
     await query.edit_message_text(
@@ -291,14 +374,20 @@ async def offer_restore(message, context, blob: bytes):
     extras = []
     if info["has_config"]:
         extras.append("настройки")
+    if info.get("has_env"):
+        extras.append(".env с токеном")
     if info["assets"]:
-        extras.append("логотип")
+        extras.append(f"файлов assets: {len(info['assets'])}")
+    if info.get("checksum") == "ok":
+        extras.append("контрольные суммы сошлись ✅")
+    elif info.get("checksum") == "none":
+        extras.append("старый формат — без контрольных сумм")
     await message.reply_text(
         "📥 <b>Проверил архив</b>\n\n"
         f"<blockquote>{_counts_block(info['counts'])}</blockquote>\n"
         + (f"📅 Создан: <b>{when}</b>\n" if when else "")
-        + (f"📦 Ещё внутри: {', '.join(extras)}\n" if extras else "")
-        + "\n⚠️ <b>Текущие данные бота будут заменены.</b>",
+        + (f"📦 Внутри: {', '.join(extras)}\n" if extras else "")
+        + "\n⚠️ <b>Текущие данные бота будут заменены полностью.</b>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("♻️ Заменить данные", callback_data="backup_apply")],

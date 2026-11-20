@@ -32,6 +32,7 @@ from features.winback import (
 from features.fraud import (
     handle_fraud_menu, handle_fraud_toggle, handle_fraud_scan, handle_fraud_ok,
     handle_fraud_list, handle_fraud_pair, handle_fraud_stop, handle_fraud_ip_toggle,
+    handle_fraud_recheck,
 )
 from services.remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
@@ -139,6 +140,7 @@ from adminsub.handlers import (
     handle_sub_extend, handle_sub_reduce, handle_sub_devices, handle_sub_ips,
     handle_sub_hwid_del, handle_sub_hwid_clear, handle_sub_reissue,
     handle_subs_names_sync,
+    handle_admin_search, handle_sub_freeze, handle_sub_history,
 )
 from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
@@ -163,6 +165,7 @@ from paidsub.handlers import (
     handle_paid_sub_edit_lte, handle_paid_sub_edit_trial,
     handle_referral_settings, handle_set_referral_bonus, handle_set_referral_invited_bonus,
     handle_toggle_auto_trial, handle_paid_bulk_apply,
+    handle_paid_search, handle_paid_requests,
 )
 
 
@@ -662,6 +665,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("fraud_pair:"):
         _p = data.split(":")
         await handle_fraud_pair(query, int(_p[1]), int(_p[2]))
+    elif data.startswith("fraud_recheck:"):
+        _p = data.split(":")
+        await handle_fraud_recheck(query, context, int(_p[1]), int(_p[2]))
     elif data.startswith("fraud_stop:"):
         _p = data.split(":")
         await handle_fraud_stop(query, context, int(_p[1]), int(_p[2]), int(_p[3]))
@@ -722,7 +728,13 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "admin_subs":
         await handle_admin_subs_menu(query)
     elif data.startswith("subs_page:"):
-        await handle_admin_subs_menu(query, int(data.split(":")[1]))
+        _sp = data.split(":")
+        if len(_sp) >= 4:
+            await handle_admin_subs_menu(query, int(_sp[3]), _sp[1], _sp[2])
+        else:
+            await handle_admin_subs_menu(query, int(_sp[1]))
+    elif data == "admin_sub_search":
+        await handle_admin_search(query, context)
     elif data == "create_sub":
         await handle_create_sub(query, context)
     elif data == "subs_names_sync":
@@ -741,6 +753,12 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_sub_view(query, int(data.split(":")[1]))
     elif data.startswith("sub_toggle:"):
         await handle_sub_toggle(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_freeze:"):
+        await handle_sub_freeze(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_history:"):
+        _sh = data.split(":")
+        await handle_sub_history(query, int(_sh[1]),
+                                 int(_sh[2]) if len(_sh) > 2 else 1)
     elif data.startswith("sub_delete:"):
         await handle_sub_delete(query, int(data.split(":")[1]), context)
     elif data.startswith("sub_extend:"):
@@ -900,20 +918,29 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_extend(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_reduce:"):
         await handle_paid_sub_reduce(query, int(data.split(":")[1]), context)
-    elif data == "paid_bulk_menu":
-        await handle_paid_bulk_menu(query)
-    elif data == "paid_bulk_extend":
-        await handle_paid_bulk_extend(query, context)
-    elif data == "paid_bulk_reduce":
-        await handle_paid_bulk_reduce(query, context)
+    elif data == "paid_bulk_menu" or data.startswith("paid_bulk_menu:"):
+        await handle_paid_bulk_menu(
+            query, context, data.split(":", 1)[1] if ":" in data else "all")
+    elif data == "paid_bulk_extend" or data.startswith("paid_bulk_extend:"):
+        await handle_paid_bulk_extend(
+            query, context, data.split(":", 1)[1] if ":" in data else "all")
+    elif data == "paid_bulk_reduce" or data.startswith("paid_bulk_reduce:"):
+        await handle_paid_bulk_reduce(
+            query, context, data.split(":", 1)[1] if ":" in data else "all")
     elif data == "paid_device_price":
         await handle_paid_device_price(query, context)
     elif data == "paid_device_max":
         await handle_paid_device_max(query, context)
-    elif data == "paid_bulk_hwid":
-        await handle_paid_bulk_hwid(query, context)
-    elif data == "paid_bulk_lte":
-        await handle_paid_bulk_lte(query, context)
+    elif data == "paid_bulk_hwid" or data.startswith("paid_bulk_hwid:"):
+        await handle_paid_bulk_hwid(
+            query, context, data.split(":", 1)[1] if ":" in data else "all")
+    elif data == "paid_bulk_lte" or data.startswith("paid_bulk_lte:"):
+        await handle_paid_bulk_lte(
+            query, context, data.split(":", 1)[1] if ":" in data else "all")
+    elif data == "paid_sub_search":
+        await handle_paid_search(query, context)
+    elif data == "paid_requests":
+        await handle_paid_requests(query)
     elif data == "paid_bulk_limits_apply":
         await handle_paid_bulk_limits_apply(query, context)
     elif data == "paid_bulk_apply":

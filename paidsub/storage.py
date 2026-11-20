@@ -113,6 +113,51 @@ async def paid_counts() -> dict:
         return out
 
 
+async def search_paid_subs(query: str, limit: int = 20) -> list:
+    """Поиск подписки внутри раздела: по TG ID, email, UUID, Sub ID,
+    а также по нику и имени владельца. Строки — как в списке."""
+    q = (query or "").strip().lstrip("@")
+    if not q:
+        return []
+    async with aiosqlite.connect(DB_PATH) as db:
+        if q.isdigit():
+            async with db.execute(
+                f"SELECT {_PAID_LIST_COLS} FROM paid_subs "
+                "WHERE tg_id = ? OR id = ? ORDER BY created_at DESC LIMIT ?",
+                (int(q), int(q), int(limit)),
+            ) as cur:
+                return await cur.fetchall()
+        like = f"%{q}%"
+        async with db.execute(
+            f"SELECT {_PAID_LIST_COLS} FROM paid_subs WHERE email LIKE ? "
+            "OR uuid LIKE ? OR sub_id LIKE ? OR tg_id IN "
+            "(SELECT id FROM users WHERE username LIKE ? OR first_name LIKE ?) "
+            "ORDER BY created_at DESC LIMIT ?",
+            (like, like, like, like, like, int(limit)),
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def list_pending_requests(limit: int = 30) -> list:
+    """Заявки на подписку, ждущие решения: (tg_id, created_at, first_name, username)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT r.tg_id, r.created_at, u.first_name, u.username "
+            "FROM paid_sub_requests r LEFT JOIN users u ON u.id = r.tg_id "
+            "WHERE r.status = 'pending' ORDER BY r.created_at LIMIT ?",
+            (int(limit),),
+        ) as cur:
+            return await cur.fetchall()
+
+
+async def count_pending_requests() -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM paid_sub_requests WHERE status = 'pending'"
+        ) as cur:
+            return (await cur.fetchone())[0]
+
+
 # ВНИМАНИЕ: у двух выборок подписки поля совпадают только до 11-го индекса.
 # Дальше они расходятся, и ряд нельзя передавать «куда попало»:
 #   get_paid_sub:          12 payment_pending … 18 period_end, 19 lte_gb

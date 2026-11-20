@@ -28,6 +28,7 @@ from core.states import (
     AWAITING_PAID_SUB_REDUCE,
     AWAITING_PAID_BULK_EXTEND, AWAITING_PAID_BULK_REDUCE,
     AWAITING_PAID_BULK_HWID, AWAITING_PAID_BULK_LTE,
+    AWAITING_PAID_SUB_SEARCH, AWAITING_ADMIN_SUB_SEARCH,
     AWAITING_DEVICE_PRICE, AWAITING_DEVICE_MAX,
     AWAITING_PROMO_CODE, AWAITING_PROMO_NEW_CODE, AWAITING_PROMO_NEW_VALUE,
     AWAITING_PROMO_NEW_LIMIT, AWAITING_PROMO_NEW_EXPIRE, AWAITING_PROMO_FIND,
@@ -581,6 +582,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML", reply_markup=back_admin())
         return
 
+    # ── Поиск внутри разделов подписок ─────────────────────────────────────────
+    if state == AWAITING_PAID_SUB_SEARCH:
+        context.user_data.pop("state", None)
+        from paidsub.handlers import apply_paid_search
+        await apply_paid_search(update.message, context, text)
+        return
+
+    if state == AWAITING_ADMIN_SUB_SEARCH:
+        context.user_data.pop("state", None)
+        from adminsub.handlers import apply_admin_search
+        await apply_admin_search(update.message, context, text)
+        return
+
     # ── Платные подписки: TG ID ──────────────────────────────────────────────────
     if state == AWAITING_PAID_SUB_TG_ID:
         if not text.isdigit():
@@ -864,25 +878,32 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         direction = 1 if state == AWAITING_PAID_BULK_EXTEND else -1
         context.user_data.pop("state", None)
-        # меняет срок всем сразу — сначала спрашиваем, применяем после «Да»
-        context.user_data["bulk_pending"] = {"seconds": seconds, "direction": direction}
-        from paidsub.storage import count_paid_subs
+        # меняет срок всей выборке сразу — сначала спрашиваем, применяем после «Да»
+        scope = context.user_data.get("bulk_scope", "all")
+        context.user_data["bulk_pending"] = {
+            "seconds": seconds, "direction": direction, "scope": scope}
+        from paidsub.storage import count_paid_subs, all_paid_subs
         from paidsub.time_parser import fmt_duration as fmt_dur
         from handlers.confirm import confirm_keyboard
-        total = await count_paid_subs()
+        if scope != "all":
+            total = len(await all_paid_subs(scope))
+            scope_note = f" (вкладка «{scope}»)"
+        else:
+            total = await count_paid_subs()
+            scope_note = ""
         if direction > 0:
             question = (
-                f"➕ <b>Добавить {fmt_dur(seconds)} всем подпискам?</b>\n\n"
-                f"Затронет подписок: <b>{total}</b> — все, включая истёкшие: они снова включатся.\n"
+                f"➕ <b>Добавить {fmt_dur(seconds)} подпискам{scope_note}?</b>\n\n"
+                f"Затронет подписок: <b>{total}</b> — истёкшие из выборки снова включатся.\n"
                 "Каждому клиенту придёт уведомление."
             )
-            yes = "➕ Да, добавить всем"
+            yes = "➕ Да, добавить"
         else:
             question = (
-                f"➖ <b>Убавить {fmt_dur(seconds)} у всех подписок?</b>\n\n"
+                f"➖ <b>Убавить {fmt_dur(seconds)} у подписок{scope_note}?</b>\n\n"
                 f"Затронет подписок: <b>{total}</b>. У кого срок уйдёт в прошлое — подписка закончится."
             )
-            yes = "➖ Да, убавить всем"
+            yes = "➖ Да, убавить"
         await update.message.reply_text(
             question, parse_mode="HTML",
             reply_markup=confirm_keyboard(yes, "paid_bulk_apply", "paid_bulk_menu", "paid_subs"),
