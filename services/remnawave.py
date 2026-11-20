@@ -1476,6 +1476,7 @@ async def handle_rw_menu(query, context=None):
            InlineKeyboardButton("🔑 Токен", callback_data="rw_token")]]
     if is_configured():
         kb.append([InlineKeyboardButton("🔗 Основные ссылки", callback_data="rw_links")])
+        kb.append([InlineKeyboardButton("🚨 План Б (аварийный мост)", callback_data="rw_plan_b")])
         kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")])
@@ -1638,6 +1639,134 @@ async def handle_rw_links_reset(query, context=None):
         cfg["main_links"] = {}
     atomic_update(_apply)
     await handle_rw_links(query, context)
+
+
+# ── План Б: аварийный переход с моста oblako на мост DE ─────────────────────
+# Основная линейка ходит через oblako (единственная дверь). Резерв — те же
+# страны через DNAT на главном сервере DE. Резервные хосты живут в панели
+# выключенными с пометкой «(план Б)» в названии; кнопка в админке одним
+# движением гасит основные и поднимает резерв (или наоборот). Порядок
+# переключения: сначала включаем тех, кто поднимается, потом гасим остальных —
+# ни секунды без живых хостов.
+
+PLAN_B_MARK = "(план Б)"
+# Адреса основной линейки: IP oblako и его будущий домен (если заведён) —
+# хост опознаётся по любому из них.
+PLAN_B_MAIN_ADDRESSES = {"187.54.0.243", "most2.tembadr.tech"}
+
+
+def _plan_b_split(hosts):
+    mains = [h for h in hosts if h["address"] in PLAN_B_MAIN_ADDRESSES]
+    backups = [h for h in hosts if PLAN_B_MARK in h["remark"]]
+    return mains, backups
+
+
+async def plan_b_state() -> dict:
+    r = await list_hosts()
+    if not r.get("ok"):
+        return {"ok": False}
+    mains, backups = _plan_b_split(r["hosts"])
+    return {
+        "ok": True,
+        "mains": mains,
+        "backups": backups,
+        "main_on": sum(1 for h in mains if not h["isDisabled"]),
+        "back_on": sum(1 for h in backups if not h["isDisabled"]),
+    }
+
+
+async def set_plan_b(active: bool) -> dict:
+    """active=True — трафик на мост DE (план Б), False — обратно на oblako."""
+    st = await plan_b_state()
+    if not st.get("ok"):
+        return {"ok": False, "error": "Панель не ответила"}
+    if not st["backups"]:
+        return {"ok": False, "error": "Резервные хосты (план Б) в панели не найдены"}
+    if not st["mains"]:
+        return {"ok": False, "error": "Основные хосты (мост oblako) в панели не найдены"}
+    plan = [(h, not active) for h in st["backups"]]
+    plan += [(h, active) for h in st["mains"]]
+    plan.sort(key=lambda t: t[1])  # сначала включения (isDisabled=False)
+    changed = failed = 0
+    for h, disabled in plan:
+        if h["isDisabled"] == disabled:
+            continue
+        res = await patch_host(h["uuid"], {"isDisabled": disabled})
+        if res.get("ok"):
+            changed += 1
+        else:
+            failed += 1
+    after = await plan_b_state()
+    return {"ok": failed == 0, "changed": changed, "failed": failed,
+            "state": after}
+
+
+async def handle_rw_plan_b(query, context=None):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    st = await plan_b_state()
+    if not st.get("ok"):
+        text = ("🚨 <b>План Б</b>\n\n"
+                "<i>Панель не ответила — состояние хостов неизвестно.</i>")
+        kb = [[InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]
+        await query.edit_message_text(text, parse_mode="HTML",
+                                      reply_markup=InlineKeyboardMarkup(kb))
+        return
+    if st["back_on"]:
+        mode = "🚨 <b>Сейчас работает ПЛАН Б</b> — трафик идёт через мост DE."
+    elif st["main_on"]:
+        mode = "✅ <b>Сейчас основной режим</b> — трафик идёт через мост oblako."
+    else:
+        mode = "⚠️ <b>Все хосты выключены</b> — ни один мост не поднят!"
+    lines = ["🚨 <b>План Б — аварийный мост</b>", "",
+             f"<blockquote>Основные (oblako): включено {st['main_on']} из {len(st['mains'])}\n"
+             f"Резервные (DE, план Б): включено {st['back_on']} из {len(st['backups'])}</blockquote>",
+             "", mode, "",
+             "<i>План Б — те же страны через DNAT главного сервера. "
+             "Включать, если мост oblako лёг или его IP забанили операторы.</i>"]
+    kb = []
+    if st["backups"] and st["mains"]:
+        if not st["back_on"]:
+            kb.append([InlineKeyboardButton("🚨 Включить план Б",
+                                            callback_data="rw_plan_b_on")])
+        if st["back_on"] or not st["main_on"]:
+            kb.append([InlineKeyboardButton("↩️ Вернуть основной мост",
+                                            callback_data="rw_plan_b_off")])
+    kb.append([InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")])
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
+async def handle_rw_plan_b_set(query, context, active: bool):
+    await query.edit_message_text("⏳ Переключаю хосты…")
+    res = await set_plan_b(active)
+    if not res.get("ok") and not res.get("state"):
+        await query.edit_message_text(
+            f"❌ <b>Не получилось переключить</b>\n\n<i>{escape(res.get('error') or 'ошибка панели')}</i>",
+            parse_mode="HTML",
+            reply_markup=_back())
+        return
+    st = res.get("state") or {}
+    head = ("🚨 <b>План Б включён</b> — трафик идёт через мост DE."
+            if active else
+            "✅ <b>Основной режим возвращён</b> — трафик идёт через мост oblako.")
+    lines = [head, "",
+             f"<blockquote>Переключено хостов: {res.get('changed', 0)}"
+             + (f"\n⚠️ Не удалось переключить: {res['failed']}" if res.get("failed") else "")
+             + f"\nОсновные: включено {st.get('main_on', '?')} из {len(st.get('mains') or [])}"
+             f"\nРезервные: включено {st.get('back_on', '?')} из {len(st.get('backups') or [])}</blockquote>",
+             "",
+             "<i>Клиенты подхватят новые хосты при следующем обновлении подписки в приложении.</i>"]
+    from core.log_channel import send_log
+    try:
+        await send_log(context.bot,
+                       ("🚨 <b>Включён план Б</b> — хосты переведены на мост DE"
+                        if active else
+                        "✅ <b>План Б выключен</b> — хосты возвращены на мост oblako")
+                       + f" (переключено: {res.get('changed', 0)})")
+    except Exception:
+        pass
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=_back())
 
 
 async def handle_rw_yandex(query, context=None):

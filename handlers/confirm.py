@@ -24,6 +24,8 @@ CONFIRM_TITLES = {
     "helper_del": "Снятие помощника",
     "mnt_toggle": "Вкл/выкл техработ",
     "git_update": "Обновление с GitHub",
+    "rw_plan_b_on": "Включение плана Б",
+    "rw_plan_b_off": "Возврат основного моста",
     "clear_log_channel": "Отключение лог-канала",
     "bl_del": "Снятие с ЧС",
     "bl_stop": "Остановка подписки из-за ЧС",
@@ -156,6 +158,19 @@ async def _git_update(arg):
             "🔄 Да, обновить", "admin_panel", "admin_panel")
 
 
+async def _rw_plan_b_on(arg):
+    return ("🚨 <b>Включить план Б?</b>\n\n"
+            "Основные хосты (мост oblako) выключатся, резервные через DE — включатся. "
+            "Клиенты подхватят смену при следующем обновлении подписки.",
+            "🚨 Да, включить план Б", "rw_plan_b", "rw_menu")
+
+
+async def _rw_plan_b_off(arg):
+    return ("↩️ <b>Вернуть основной мост?</b>\n\n"
+            "Резервные хосты (план Б) выключатся, основные через oblako — включатся.",
+            "↩️ Да, вернуть oblako", "rw_plan_b", "rw_menu")
+
+
 async def _site_delete(arg):
     from web.site_deploy import site_url
     url = site_url()
@@ -284,6 +299,8 @@ RULES = {
     "helper_del": _helper_del,
     "mnt_toggle": _mnt_toggle,
     "git_update": _git_update,
+    "rw_plan_b_on": _rw_plan_b_on,
+    "rw_plan_b_off": _rw_plan_b_off,
     "clear_log_channel": _clear_log_channel,
     "bl_del": _bl_del,
     "bl_stop": _bl_stop,
