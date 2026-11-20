@@ -238,6 +238,10 @@ def validate_settings_patch(patch: dict):
                         errors.append("netcheck.netcheck_days must be int >= 1")
                     else:
                         sub[k] = v
+                elif k == "netcheck_last_run":
+                    # Дата последнего запуска — строка «YYYY-MM-DD» или
+                    # null; мусор приводим к строке, как в morning_sync.
+                    sub[k] = v if v is None or isinstance(v, str) else str(v)
                 else:
                     sub[k] = v
             clean[key] = sub
