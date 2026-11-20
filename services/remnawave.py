@@ -1662,6 +1662,14 @@ PLAN_B_MAIN_ADDRESSES = {"187.54.0.243", "most2.tembadr.tech"}
 # (мост DE) сюда не входит и переключателем не трогается.
 
 
+def _is_variant_b(remark: str) -> bool:
+    """Хост докового моста? В панели они названы коротко — «… #1 (Б)», а
+    автовыбор — полностью «(вариант Б)»; опознаём оба написания, иначе
+    переключатель страновые хосты не видит (баг 2026-11-21)."""
+    r = (remark or "").rstrip()
+    return VARIANT_B_MARK in r or r.endswith("(Б)")
+
+
 def _variant_split(hosts):
     # Вариант А — основная линейка на most2 плюс обычный «Автовыбор»:
     # у него адрес-заглушка, поэтому опознаём по названию. LTE-автовыбор
@@ -1669,9 +1677,9 @@ def _variant_split(hosts):
     a_hosts = [h for h in hosts
                if (h["address"] in PLAN_B_MAIN_ADDRESSES
                    or ("Автовыбор" in h["remark"] and "[LTE]" not in h["remark"]))
-               and VARIANT_B_MARK not in h["remark"]
+               and not _is_variant_b(h["remark"])
                and PLAN_B_MARK not in h["remark"]]
-    b_hosts = [h for h in hosts if VARIANT_B_MARK in h["remark"]]
+    b_hosts = [h for h in hosts if _is_variant_b(h["remark"])]
     return a_hosts, b_hosts
 
 
