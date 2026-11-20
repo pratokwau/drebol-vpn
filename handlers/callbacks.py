@@ -236,12 +236,24 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         # подписался на канал — сразу выдаём пробный период и показываем его
         from handlers.user import ensure_trial, start_screen
-        fresh = await ensure_trial(
-            user, context,
-            on_start=lambda: query.edit_message_text("⏳ Готовлю ваш доступ…"))
+        try:
+            fresh = await ensure_trial(
+                user, context,
+                on_start=lambda: query.edit_message_text("⏳ Готовлю ваш доступ…"))
+        except Exception:
+            fresh = False
         text, markup = await start_screen(user, fresh=fresh)
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
-                                      disable_web_page_preview=True)
+        try:
+            await query.edit_message_text(text, parse_mode="HTML", reply_markup=markup,
+                                          disable_web_page_preview=True)
+        except Exception:
+            # Правка сообщения не прошла — меню обязано дойти, шлём новым
+            try:
+                await query.message.reply_text(
+                    text, parse_mode="HTML", reply_markup=markup,
+                    disable_web_page_preview=True)
+            except Exception:
+                pass
         return
 
     # ── Юзер ─────────────────────────────────────────────────────────────────

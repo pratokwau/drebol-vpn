@@ -71,11 +71,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async def _show_progress():
         waiting.append(await update.message.reply_text("⏳ Готовлю ваш доступ…"))
 
-    fresh = await ensure_trial(user, context, on_start=_show_progress)
+    try:
+        fresh = await ensure_trial(user, context, on_start=_show_progress)
+    except Exception:
+        fresh = False
     text, markup = await start_screen(user, fresh=fresh)
     if waiting:
-        await waiting[0].edit_text(text, parse_mode="HTML", reply_markup=markup,
-                                   disable_web_page_preview=True)
+        try:
+            await waiting[0].edit_text(text, parse_mode="HTML", reply_markup=markup,
+                                       disable_web_page_preview=True)
+        except Exception:
+            await update.message.reply_text(text, parse_mode="HTML", reply_markup=markup,
+                                            disable_web_page_preview=True)
     else:
         await update.message.reply_text(text, parse_mode="HTML", reply_markup=markup,
                                         disable_web_page_preview=True)

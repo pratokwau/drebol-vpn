@@ -1702,16 +1702,41 @@ async def ensure_trial(user, context, on_start=None) -> bool:
         uname = escape(f"@{user.username}" if user.username else f"id{user.id}")
         who = escape(str(user.first_name or user.id))
         if created:
-            await _process_referral_bonus(user.id, context)
-            await send_log(context.bot,
-                f"⚡ Триал выдан при входе: {who} ({uname}) · <code>{user.id}</code>")
+            # Бонус и лог — побочные эффекты: их сбой не должен ронять
+            # выдачу, иначе человек навсегда останется на «⏳ Готовлю
+            # ваш доступ…», хотя подписка уже создана.
+            try:
+                await _process_referral_bonus(user.id, context)
+            except Exception:
+                pass
+            try:
+                await send_log(context.bot,
+                    f"⚡ Триал выдан при входе: {who} ({uname}) · <code>{user.id}</code>")
+            except Exception:
+                pass
         else:
             # панель не ответила — человек увидит обычное меню, а админ причину
             reason = escape(replies[-1][:300]) if replies else "неизвестно"
-            await send_log(context.bot,
-                f"⚠️ Не удалось выдать триал при входе: {who} · <code>{user.id}</code>\n"
-                f"{reason}")
+            try:
+                await send_log(context.bot,
+                    f"⚠️ Не удалось выдать триал при входе: {who} · <code>{user.id}</code>\n"
+                    f"{reason}")
+            except Exception:
+                pass
         return created
+    except Exception as ex:
+        # Сбой после создания не должен глушить выдачу: если подписка
+        # в базе уже есть — для вызывающего это успех, меню покажется.
+        try:
+            await send_log(context.bot,
+                f"⚠️ Сбой хвоста авто-триала у <code>{user.id}</code>: "
+                f"{escape(str(ex)[:200])}")
+        except Exception:
+            pass
+        try:
+            return bool(await get_paid_sub_by_tg_id(user.id))
+        except Exception:
+            return False
     finally:
         _ISSUING.discard(user.id)
 
