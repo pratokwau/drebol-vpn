@@ -24,8 +24,6 @@ CONFIRM_TITLES = {
     "helper_del": "Снятие помощника",
     "mnt_toggle": "Вкл/выкл техработ",
     "git_update": "Обновление с GitHub",
-    "rw_plan_b_on": "Включение плана Б",
-    "rw_plan_b_off": "Возврат основного моста",
     "rw_variant_a": "Возврат варианта А (DNAT)",
     "rw_variant_b": "Включение варианта Б (доковый мост)",
     "clear_log_channel": "Отключение лог-канала",
@@ -158,19 +156,6 @@ async def _git_update(arg):
             "Бот скачает код из репозитория и перезапустится — несколько секунд он не будет отвечать.\n"
             "Если в обновлении есть правки сайта, он обновится сразу после перезапуска.",
             "🔄 Да, обновить", "admin_panel", "admin_panel")
-
-
-async def _rw_plan_b_on(arg):
-    return ("🚨 <b>Включить план Б?</b>\n\n"
-            "Основные хосты (мост oblako) выключатся, резервные через DE — включатся. "
-            "Клиенты подхватят смену при следующем обновлении подписки.",
-            "🚨 Да, включить план Б", "rw_plan_b", "rw_menu")
-
-
-async def _rw_plan_b_off(arg):
-    return ("↩️ <b>Вернуть основной мост?</b>\n\n"
-            "Резервные хосты (план Б) выключатся, основные через oblako — включатся.",
-            "↩️ Да, вернуть oblako", "rw_plan_b", "rw_menu")
 
 
 async def _rw_variant_b(arg):
@@ -316,8 +301,6 @@ RULES = {
     "helper_del": _helper_del,
     "mnt_toggle": _mnt_toggle,
     "git_update": _git_update,
-    "rw_plan_b_on": _rw_plan_b_on,
-    "rw_plan_b_off": _rw_plan_b_off,
     "rw_variant_a": _rw_variant_a,
     "rw_variant_b": _rw_variant_b,
     "clear_log_channel": _clear_log_channel,
