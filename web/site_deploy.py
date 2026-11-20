@@ -1353,6 +1353,31 @@ body.tg-fullscreen .tabs { top:96px; }
 
  if (tg && tg.initData) {
    tg.ready(); tg.expand();
+   // Полный экран (Bot API 8.0+, мобильный Telegram): кабинет открывается
+   // на весь дисплей, а не в шторке на пол-экрана. Класс tg-fullscreen
+   // включает CSS-отступы под плавающие кнопки клиента (закрыть, меню) —
+   // правила для него уже есть в стилях выше. Если клиент старый или
+   // запрос отклонён (fullscreenFailed), остаёмся в expand() — максимум
+   // по высоте, как раньше. При ручном выходе из полного экрана класс
+   // снимается по событию fullscreenChanged.
+   function applyFsClass() {
+     try {
+       document.body.classList.toggle("tg-fullscreen", !!tg.isFullscreen);
+     } catch (e) {}
+   }
+   try {
+     if (tg.requestFullscreen) { tg.requestFullscreen(); }
+   } catch (e) {}
+   applyFsClass();
+   try {
+     if (tg.onEvent) {
+       tg.onEvent("fullscreenChanged", applyFsClass);
+       tg.onEvent("fullscreenFailed", applyFsClass);
+     }
+   } catch (e) {}
+   // В полном экране вертикальный свайп вниз сворачивает приложение —
+   // отключаем, чтобы случайный скролл не закрывал кабинет.
+   try { if (tg.disableVerticalSwipes) { tg.disableVerticalSwipes(); } } catch (e) {}
    // внутри Telegram красим шапку в цвет страницы
    try { tg.setHeaderColor("#050505"); tg.setBackgroundColor("#050505"); } catch (e) {}
    // Безопасная зона Telegram: в полном экране шапка клиента
