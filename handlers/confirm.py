@@ -26,6 +26,7 @@ CONFIRM_TITLES = {
     "git_update": "Обновление с GitHub",
     "rw_variant_a": "Возврат варианта А (DNAT)",
     "rw_variant_b": "Включение варианта Б (доковый мост)",
+    "rw_tags_apply": "Применение тегов всем подписчикам",
     "clear_log_channel": "Отключение лог-канала",
     "bl_del": "Снятие с ЧС",
     "bl_stop": "Остановка подписки из-за ЧС",
@@ -173,6 +174,15 @@ async def _rw_variant_a(arg):
             "↩️ Да, вернуть вариант А", "rw_bridge_variant", "rw_menu")
 
 
+async def _rw_tags_apply(arg):
+    return ("🏷 <b>Применить теги всем подписчикам?</b>\n\n"
+            "Бот пройдётся по всем, у кого есть подписки или запись в ЧС, "
+            "и проставит каждому клиенту в панели тег по статусу: BANNED, "
+            "TRIAL, PAID, ADMIN или EXPIRED. Сами подписки и доступ "
+            "это не меняет — только подпись в панели.",
+            "🏷 Да, применить", "rw_tags", "rw_menu")
+
+
 async def _site_delete(arg):
     from web.site_deploy import site_url
     url = site_url()
@@ -303,6 +313,7 @@ RULES = {
     "git_update": _git_update,
     "rw_variant_a": _rw_variant_a,
     "rw_variant_b": _rw_variant_b,
+    "rw_tags_apply": _rw_tags_apply,
     "clear_log_channel": _clear_log_channel,
     "bl_del": _bl_del,
     "bl_stop": _bl_stop,

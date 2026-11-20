@@ -134,6 +134,21 @@ async def _history(kind: str, tg_id, action: str, details: str | None = None):
     await add_history(tg_id, action, details)
 
 
+async def _retag(tg_id):
+    """Тег человека в панели по новому статусу подписки (services/panel_tags).
+
+    Best-effort: статус в базе уже сменился, а панель может лежать —
+    тег тогда подтянет ручное «Применить ко всем» в админке.
+    """
+    if not tg_id:
+        return
+    try:
+        from services.panel_tags import refresh_user_tag
+        await refresh_user_tag(tg_id)
+    except Exception:
+        pass
+
+
 async def _re_enable_if_needed(panel_mod, email: str):
     """Вернуть доступ, если клиент был выключен в панели."""
     info = await panel_mod.get_client_info(email)
@@ -382,6 +397,7 @@ async def extend_sub(sub_id: int, seconds: int, *, kind: str = "paid",
                           "ℹ️ <b>Срок подписки изменён</b>\n\n"
                           f"<blockquote>➖ Убавлено: <b>{_fmt_seconds(abs(seconds))}</b>\n"
                           f"📅 Действует до: <b>{new_str[:16]}</b></blockquote>")
+    await _retag(sub["tg_id"])
     return {"ok": True, "until": new_str, "seconds": seconds,
             "direction": direction, "panel_ok": panel_ok,
             "panel_error": panel_error}
@@ -409,6 +425,7 @@ async def set_expire(sub_id: int, new_expire: str, *, kind: str = "paid",
     panel_error = "" if panel_ok else str(res.get("error") or "?")
     await _history(kind, sub["tg_id"], "settings_changed",
                    f"Подписка #{sub_id}: дата окончания → {new_expire}")
+    await _retag(sub["tg_id"])
     return {"ok": True, "expire": new_expire,
             "panel_ok": panel_ok, "panel_error": panel_error}
 
@@ -835,6 +852,7 @@ async def create_paid_sub(tg_id: int, *, trial: bool = False,
     await _history("paid", tg_id, "sub_created",
                    f"Подписка #{new_sub_id} ({period_label})\n"
                    f"Email: {result['email']}\nДо: {result['expire']}")
+    await _retag(tg_id)
     return {"ok": True, "sub_id": new_sub_id, "email": result["email"],
             "uuid": result["uuid"], "sub_url": result["sub_url"],
             "expire": result["expire"], "period_label": period_label,
@@ -888,6 +906,7 @@ async def create_admin_sub(tg_id: int, *, bot=None, panel=None) -> dict:
                   f"📶 Трафик: <b>{traffic_str}</b>\n\n"
                   f"🔗 Ссылка подписки:\n<code>{result['sub_url']}</code>\n\n"
                   "Скопируй ссылку и вставь в приложение (INCY, Happ и др.)")
+    await _retag(tg_id)
     return {"ok": True, "sub_id": new_sub_id, "email": result["email"],
             "uuid": result["uuid"], "sub_url": result["sub_url"],
             "expire": result["expire"], "traffic_str": traffic_str}
@@ -1092,6 +1111,7 @@ async def apply_paid_payment(tg_id: int, amount: int, *, promo_code: str | None 
                                    parse_mode="HTML")
     except Exception:
         pass
+    await _retag(tg_id)
     return {"ok": True, "expire": new_expire_str}
 
 
@@ -1233,4 +1253,5 @@ async def revoke_period(tg_id: int, period_seconds: int | None, *,
                    f"{reason}\nОтозвано: {_fmt_seconds(int(period_seconds))}\n"
                    f"Новая дата: {new_expire_str}"
                    + (f"\n⚠️ Панель: {panel_error}" if panel_error else ""))
+    await _retag(tg_id)
     return {"ok": True, "expire": new_expire_str, "panel_error": panel_error}

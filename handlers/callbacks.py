@@ -38,6 +38,7 @@ from services.remnawave import (
     handle_rw_menu, handle_rw_url, handle_rw_token, handle_rw_test,
     handle_rw_links, handle_rw_links_edit, handle_rw_link_set,
     handle_rw_bridge_variant, handle_rw_bridge_variant_set,
+    handle_rw_tags, handle_rw_tags_apply,
     handle_rw_links_reset,
     handle_rw_yandex, handle_rw_yandex_sub, handle_rw_yandex_whitelist,
     handle_rw_squads, handle_rw_squad_toggle,
@@ -562,6 +563,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_rw_bridge_variant_set(query, context, "b")
     elif data == "rw_variant_a":
         await handle_rw_bridge_variant_set(query, context, "a")
+    elif data == "rw_tags":
+        await handle_rw_tags(query, context)
+    elif data == "rw_tags_apply":
+        await handle_rw_tags_apply(query, context)
     elif data.startswith("rw_link_set:"):
         await handle_rw_link_set(query, context, data.split(":", 1)[1])
     elif data == "rw_yandex":

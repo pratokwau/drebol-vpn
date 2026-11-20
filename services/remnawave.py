@@ -1477,6 +1477,7 @@ async def handle_rw_menu(query, context=None):
     if is_configured():
         kb.append([InlineKeyboardButton("🔗 Основные ссылки", callback_data="rw_links")])
         kb.append([InlineKeyboardButton("🔀 Вариант моста (А/Б)", callback_data="rw_bridge_variant")])
+        kb.append([InlineKeyboardButton("🏷 Теги подписчиков", callback_data="rw_tags")])
         kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")])
@@ -1780,6 +1781,53 @@ async def handle_rw_bridge_variant_set(query, context, variant: str):
                         if variant == "b" else
                         "✅ <b>Возвращён вариант А</b> — хосты переведены обратно на DNAT")
                        + f" (переключено: {res.get('changed', 0)})")
+    except Exception:
+        pass
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=_back())
+
+
+async def handle_rw_tags(query, context=None):
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from services.panel_tags import ALL_TAGS, TAG_LABELS, tag_counters
+    counts = await tag_counters()
+    rows = "\n".join(f"{TAG_LABELS[t]}: <b>{counts.get(t, 0)}</b>"
+                     for t in ALL_TAGS)
+    lines = ["🏷 <b>Теги подписчиков</b>", "",
+             f"<blockquote>{rows}\nВсего: <b>{counts.get('total', 0)}</b></blockquote>",
+             "",
+             "<i>Тег стоит у клиента в панели и показывает статус человека. "
+             "Счётчики — по данным бота. Кнопка ниже приведёт теги в панели "
+             "к этим статусам; дальше бот обновляет тег сам при смене "
+             "статуса: оплата, выдача, истечение, бан и разбан.</i>"]
+    kb = [[InlineKeyboardButton("🏷 Применить ко всем",
+                                 callback_data="rw_tags_apply")],
+          [InlineKeyboardButton("◀️ К Remnawave", callback_data="rw_menu")]]
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML",
+                                  reply_markup=InlineKeyboardMarkup(kb))
+
+
+async def handle_rw_tags_apply(query, context=None):
+    from services.panel_tags import apply_all_tags
+    await query.edit_message_text("⏳ Применяю теги всем подписчикам…")
+    res = await apply_all_tags()
+    counts = res.get("counts") or {}
+    rows = "\n".join(f"{t}: {counts.get(t, 0)}"
+                     for t in ("BANNED", "TRIAL", "PAID", "ADMIN", "EXPIRED"))
+    lines = ["🏷 <b>Теги применены</b>", "",
+             f"<blockquote>Обработано людей: {res.get('people', 0)}\n{rows}\n"
+             f"Клиентов обновлено: {res.get('updated', 0)}\n"
+             f"Без изменений: {res.get('unchanged', 0)}\n"
+             f"Ошибок: {res.get('errors', 0)}</blockquote>"]
+    if res.get("error_samples"):
+        lines += ["", "<i>Первые ошибки: " +
+                  escape("; ".join(res["error_samples"])) + "</i>"]
+    from core.log_channel import send_log
+    try:
+        await send_log(context.bot,
+                       f"🏷 <b>Теги подписчиков применены ко всем</b> "
+                       f"(людей: {res.get('people', 0)}, обновлено клиентов: "
+                       f"{res.get('updated', 0)}, ошибок: {res.get('errors', 0)})")
     except Exception:
         pass
     await query.edit_message_text("\n".join(lines), parse_mode="HTML",

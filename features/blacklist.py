@@ -233,6 +233,16 @@ async def _log(bot, text: str):
     await send_log(bot, text)
 
 
+async def _retag(tg_id: int):
+    """Тег человека в панели по новому статусу ЧС (services/panel_tags).
+    Best-effort: ошибка панели не должна ронять бан/разбан."""
+    try:
+        from services.panel_tags import refresh_user_tag
+        await refresh_user_tag(tg_id)
+    except Exception:
+        pass
+
+
 # ── Подписки ─────────────────────────────────────────────────────────────────
 
 async def stop_subs(tg_id: int, reason: str) -> dict:
@@ -405,6 +415,7 @@ async def blacklist_add(bot, tg_id: int, reason: str, until: str | None = None,
     await bl_add_manual(tg_id, reason, until, by_id)
     await bl_log(tg_id, "added", reason, by_id)
     res = await stop_subs(tg_id, reason)
+    await _retag(tg_id)
     await _notify_blocked(bot, tg_id, reason, _to_local(until))
     await _log(bot, f"⛔ В чёрный список: <code>{tg_id}</code> — {html.escape(reason[:200])}"
                     f" · {term_line(until)}")
@@ -418,6 +429,7 @@ async def blacklist_remove(bot, tg_id: int, by_id: int | None = None,
     await bl_log(tg_id, "expired" if auto else "removed",
                  "срок блокировки вышел" if auto else None, by_id)
     res = await restore_subs(tg_id)
+    await _retag(tg_id)
     await _notify_restored(bot, tg_id, res)
     await _log(bot, ("⏳ Срок в ЧС вышел, доступ вернул сам: " if auto
                      else "✅ Убран из чёрного списка: ") + f"<code>{tg_id}</code>")
@@ -433,6 +445,7 @@ async def blacklist_readd(bot, tg_id: int, by_id: int | None = None) -> dict | N
         return None
     await bl_log(tg_id, "readded", e["reason"], by_id)
     res = await stop_subs(tg_id, e["reason"])
+    await _retag(tg_id)
     await _notify_blocked(bot, tg_id, e["reason"])
     await _log(bot, f"⛔ Снова в чёрном списке: <code>{tg_id}</code>")
     return res
@@ -444,6 +457,7 @@ async def blacklist_stop(bot, tg_id: int) -> dict | None:
     if not e:
         return None
     res = await stop_subs(tg_id, e["reason"])
+    await _retag(tg_id)
     await _notify_blocked(bot, tg_id, e["reason"], e.get("until"))
     return res
 

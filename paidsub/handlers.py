@@ -2050,6 +2050,7 @@ async def check_expired_subs(context):
     """
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     from paidsub.storage import parse_sub_date
+    from services.panel_tags import refresh_user_tag
 
     now = datetime.now()
     for row in await get_expired_paid_subs():
@@ -2063,6 +2064,7 @@ async def check_expired_subs(context):
         if now < expire_dt:
             if status != "active":
                 await update_paid_sub_field(sub_id, "status", "active")
+                await refresh_user_tag(tg_id)
             continue
 
         if status == "expired":
@@ -2070,6 +2072,7 @@ async def check_expired_subs(context):
 
         # Срок вышел: помечаем истёкшей и один раз говорим об этом человеку
         await update_paid_sub_field(sub_id, "status", "expired")
+        await refresh_user_tag(tg_id)
         if tg_id:
             from core.database import log_activity
             await log_activity(tg_id, "ev:period_ended",
