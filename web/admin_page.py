@@ -1062,8 +1062,8 @@ $("expiring-out").addEventListener("click", function(e){
 $("btn-paid-more").onclick = withSpin($("btn-paid-more"), async function(){ if (paidPage < paidTotalPages) await loadPaid(paidPage + 1); });
 $("btn-quick-git").onclick = withSpin($("btn-quick-git"), async function(){
   const r = await postConfirm("/git-update", {});
-  $("quick-upd-msg").textContent = r.status === 200 ? "Обновление запущено: бот перезапускается, страница обновится сама." : ("Ошибка: " + (r.data.error || r.status));
-  if (r.status === 200) toast("Обновление с GitHub запущено", "ok");
+  $("quick-upd-msg").textContent = r.status === 200 ? (r.data.up_to_date ? "Новых обновлений нет: бот уже на последней версии, перезапуск не нужен." : "Обновление запущено: бот перезапускается, страница обновится сама.") : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 200) toast(r.data.up_to_date ? "Бот уже обновлён" : "Обновление с GitHub запущено", "ok");
 });
 $("btn-quick-deploy").onclick = withSpin($("btn-quick-deploy"), async function(){
   const r = await postConfirm("/site/deploy", {});

@@ -362,6 +362,23 @@ async def handle_git_update(query):
             ["git", "-C", INSTALL_DIR, "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10,
         ).stdout.strip()
+        # Ничего нового не приехало — перезапускать нечего: бот и так
+        # работает на этом коде. HEAD не сдвинулся (или pull прямо
+        # сказал «Already up to date») — выходим без рестарта обоих
+        # сервисов и без флага сайта.
+        up_to_date = (
+            (old_head and new_head and old_head == new_head)
+            or "Already up to date" in output
+        )
+        if up_to_date:
+            await query.edit_message_text(
+                "✅ <b>Бот уже обновлён</b>\n\n"
+                f"<blockquote expandable><code>{escape(output[-1500:])}</code></blockquote>\n\n"
+                "<i>Новых коммитов нет — перезапуск не нужен, бот продолжает работать.</i>",
+                parse_mode="HTML",
+                reply_markup=back_admin(),
+            )
+            return
         if old_head and new_head and old_head != new_head:
             diff = subprocess.run(
                 ["git", "-C", INSTALL_DIR, "diff", "--name-only", old_head, new_head],

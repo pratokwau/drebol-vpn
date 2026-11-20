@@ -672,6 +672,13 @@ def run_git_update() -> dict:
             ["git", "-C", INSTALL_DIR, "rev-parse", "HEAD"],
             capture_output=True, text=True, timeout=10,
         ).stdout.strip()
+        # Ничего нового не приехало — рестарт не нужен (как в TG-пути).
+        up_to_date = bool(
+            (old_head and new_head and old_head == new_head)
+            or "Already up to date" in (result.stdout or "")
+        )
+        if up_to_date:
+            return {"ok": True, "up_to_date": True, "site_changed": False}
         if old_head and new_head and old_head != new_head:
             diff = subprocess.run(
                 ["git", "-C", INSTALL_DIR, "diff", "--name-only",
@@ -719,7 +726,9 @@ async def git_update(request):
                  f"site_changed={bool(res.get('site_changed'))}")
     return web.json_response({"ok": True,
                               "site_changed": bool(res.get("site_changed")),
-                              "restart": "scheduled"})
+                              "up_to_date": bool(res.get("up_to_date")),
+                              "restart": ("skipped" if res.get("up_to_date")
+                                          else "scheduled")})
 
 
 # ── Бэкап ────────────────────────────────────────────────────────────────────
