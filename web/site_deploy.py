@@ -546,6 +546,17 @@ body.tg-fullscreen .tabs { top:96px; }
  function haptic(kind) {
    try { if (tg && tg.HapticFeedback) { tg.HapticFeedback.notificationOccurred(kind || "success"); } } catch (e) {}
  }
+ function hapticSelect() {
+   try { if (tg && tg.HapticFeedback) { tg.HapticFeedback.selectionChanged(); } } catch (e) {}
+ }
+ // Подтверждение по-telegramовски: нативный попап Mini App вместо
+ // браузерного confirm(), который в WebView выглядит чужеродно.
+ function askConfirm(text, cb) {
+   if (tg && tg.showConfirm) {
+     try { tg.showConfirm(text, function (ok) { if (ok) { cb(); } }); return; } catch (e) {}
+   }
+   if (confirm(text)) { cb(); }
+ }
 
  // Иконки обводкой — те же, что на главной, плюс разделы кабинета
  var ICON = {
@@ -576,16 +587,24 @@ body.tg-fullscreen .tabs { top:96px; }
      return r.text().then(function (body) {
        var data = {};
        try { data = JSON.parse(body); } catch (e) { data = {raw: body}; }
+       // Истёкшая сессия в любом действии — на экран входа, а не
+       // безликий тост «попробуйте позже». Авторизацию не трогаем:
+       // её 401 — это «неверный пароль», а не конец сессии.
+       if (r.status === 401 && path.indexOf("/api/auth") !== 0 && token()) {
+         setToken("");
+         showLogin();
+         say("Сессия истекла — войдите заново.");
+       }
        return {status: r.status, data: data};
      });
    });
  }
 
- // Причину видно сразу: иначе вход «проходит», а страница молча остаётся формой
+ // Человеку — человеческий текст; технические детали (адрес API, сырая
+ // ошибка) — только в консоль, на экране входа им не место.
  function fail(where, err) {
-   var addr = API || location.origin;
-   say("Не получилось " + where + ".<code>" + esc(addr) + "</code>" +
-       esc(err && err.message ? err.message : err || "нет ответа"));
+   try { console.warn("cabinet:", where, err); } catch (e) {}
+   say("Не получилось " + where + ". Проверьте соединение и попробуйте ещё раз.");
  }
 
  function login(payload) {
@@ -665,7 +684,13 @@ body.tg-fullscreen .tabs { top:96px; }
  // раздел обещан на экране входа, теперь он есть.
  function paymentsCard(p) {
    var items = p.payments || [];
-   if (!items.length) { return ""; }
+   if (!items.length) {
+     // Пустое состояние вместо молча исчезающей вкладки: раздел обещан,
+     // человек должен видеть, что платежей просто ещё не было.
+     return '<div data-sec="payments"><div class="card">' + title("card", "Платежи") +
+            '<p class="card-sub">Платежей пока не было. Когда оплатите подписку, ' +
+            "они появятся здесь.</p></div></div>";
+   }
    var tot = p.payments_total || {};
    var sub = "Всего оплат: " + esc(tot.count != null ? tot.count : items.length) +
              (tot.sum ? " · на сумму " + esc(fmtMoney(tot.sum)) : "") +
@@ -761,7 +786,7 @@ body.tg-fullscreen .tabs { top:96px; }
    var big = s.status === "expired" ? "Подписка закончилась"
            : (s.left_text ? esc(s.left_text) : "до " + esc(s.until));
    var bigSub = s.status === "expired" ? "Продлите здесь — доступ вернётся сразу."
-              : (s.left_text ? "осталось · до " + esc(s.until) : "действует");
+              : (s.left_text ? "осталось · до " + esc(fmtDate(s.until)) : "действует");
    if (s.status !== "expired" && s.left > 0 && s.left <= 3 * 86400) {
      bigSub += " · скоро закончится — продлите, чтобы не терять доступ";
    }
@@ -780,7 +805,7 @@ body.tg-fullscreen .tabs { top:96px; }
             '<div class="big">' + big + "</div>" +
             '<div class="big-sub">' + bigSub + "</div>" +
             '<div class="stats">' +
-              stat(esc(s.until), "действует до") +
+              stat(esc(fmtDate(s.until)), "действует до") +
               stat(s.devices_limit ? "до " + esc(s.devices_limit) : "∞", "устройств") +
               stat(traffic || "—", s.traffic_limit_gb ? "трафик" : "трафик · безлимит") +
             "</div>" + trafficBar +
@@ -794,7 +819,7 @@ body.tg-fullscreen .tabs { top:96px; }
 
    // Детали подписки: что не влезло в главную карточку
    var details = [row("Продлений", esc(s.renewed))];
-   if (s.created_at) { details.push(row("Подписка с", esc(s.created_at))); }
+   if (s.created_at) { details.push(row("Подписка с", esc(fmtDate(s.created_at)))); }
    if (s.devices_extra) { details.push(row("Докуплено мест", "+" + esc(s.devices_extra))); }
    out.push('<div data-sec="sub"><div class="card">' + title("key", "О подписке") +
             '<p class="card-sub">Цифры на сейчас — кнопка «Обновить» внизу пересчитает их.</p>' +
@@ -819,6 +844,12 @@ body.tg-fullscreen .tabs { top:96px; }
                    : "");
      }
      out.push('<div data-sec="lte"><div class="card">' + title("lte", "LTE-интернет") + lteBody + "</div></div>");
+   } else if (!p.lte) {
+     // Панель не ответила — раздел не прячем молча, а честно говорим,
+     // что данные временно недоступны.
+     out.push('<div data-sec="lte"><div class="card">' + title("lte", "LTE-интернет") +
+              '<p class="card-sub">Не удалось получить данные LTE — панель временно ' +
+              "не отвечает. Нажмите «Обновить данные» чуть позже.</p></div></div>");
    }
 
    // Подключение: приложение в одно нажатие и ссылка с копированием
@@ -831,6 +862,10 @@ body.tg-fullscreen .tabs { top:96px; }
             '<div class="steps"><span><b>1</b>Нажмите кнопку приложения</span><span><b>2</b>Разрешите открыть приложение</span><span><b>3</b>Подписка добавится сама</span></div>' +
             '<div class="link"><code id="suburl">' + esc(s.url) + "</code>" +
             '<button class="copy" type="button" data-copy="' + esc(s.url) + '">Скопировать</button></div>' +
+            '<button class="btn btn-ghost" type="button" id="qr-btn" style="margin-top:12px">📷 QR-код для другого устройства</button>' +
+            '<div id="qr-box" class="hide" style="text-align:center;margin-top:12px">' +
+            '<img id="qr-img" alt="QR-код подписки" style="width:220px;height:220px;border-radius:16px;background:#fff;padding:10px;box-sizing:border-box">' +
+            '<p class="card-sub" style="margin-top:8px">Наведите камеру второго устройства — подписка добавится сама.</p></div>' +
             "</div></div>");
 
    // Устройства: каждое можно отключить прямо здесь
@@ -949,6 +984,7 @@ body.tg-fullscreen .tabs { top:96px; }
    var bc = document.getElementById("breadcrumb");
    if (bc) { bc.innerHTML = '<span>Кабинет</span> <span style="opacity:.4">/</span> <span>' + (SEC_LABELS[name] || name) + "</span>"; }
    if (!silent) {
+     hapticSelect();
      try { localStorage.setItem("drebol_tab", name); } catch (e) {}
      try { history.replaceState(null, "", cabinetBase() + "/" + name); } catch (e) {}
      try { window.scrollTo({top: 0, behavior: "smooth"}); } catch (e) {}
@@ -977,32 +1013,53 @@ body.tg-fullscreen .tabs { top:96px; }
    document.querySelectorAll("[data-del]").forEach(function (btn) {
      btn.onclick = function () {
        var name = btn.getAttribute("data-name") || "это устройство";
-       if (!confirm("Отключить " + name + "? Оно потеряет доступ, слот освободится.")) { return; }
-       btn.disabled = true; btn.textContent = "Отключаем…";
-       api("/api/device/delete", {method: "POST",
-           body: JSON.stringify({hwid: btn.getAttribute("data-del")})})
-         .then(function (r) {
-           if (r.status === 200) { toast("Устройство отключено"); haptic(); return load(); }
-           toast(r.data && r.data.error === "already_gone"
-             ? "Это устройство уже отключено." : "Не получилось — попробуйте позже.");
-           load();
-         })
-         .catch(function () { toast("Не получилось — попробуйте позже."); load(); });
+       askConfirm("Отключить " + name + "? Оно потеряет доступ, слот освободится.", function () {
+         btn.disabled = true; btn.textContent = "Отключаем…";
+         api("/api/device/delete", {method: "POST",
+             body: JSON.stringify({hwid: btn.getAttribute("data-del")})})
+           .then(function (r) {
+             if (r.status === 200) { toast("Устройство отключено"); haptic(); return load(); }
+             haptic("error");
+             toast(r.data && r.data.error === "already_gone"
+               ? "Это устройство уже отключено." : "Не получилось — попробуйте позже.");
+             load();
+           })
+           .catch(function () { haptic("error"); toast("Не получилось — попробуйте позже."); load(); });
+       });
      };
    });
    var re = document.getElementById("reissue");
    if (re) {
      re.onclick = function () {
-       if (!confirm("Перевыпустить ключ? Старая ссылка перестанет работать на всех устройствах, " +
-                    "новую нужно будет заново вставить в приложение.")) { return; }
-       re.disabled = true; re.textContent = "Перевыпускаем…";
-       api("/api/reissue", {method: "POST", body: "{}"})
-         .then(function (r) {
-           if (r.status === 200) { toast("Готово — новая ссылка уже в карточке «Подключение»"); haptic(); }
-           else { toast("Не получилось — попробуйте позже."); }
-           load();
-         })
-         .catch(function () { toast("Не получилось — попробуйте позже."); load(); });
+       askConfirm("Перевыпустить ключ? Старая ссылка перестанет работать на всех устройствах, " +
+                  "новую нужно будет заново вставить в приложение.", function () {
+         re.disabled = true; re.textContent = "Перевыпускаем…";
+         api("/api/reissue", {method: "POST", body: "{}"})
+           .then(function (r) {
+             if (r.status === 200) { toast("Готово — новая ссылка уже в карточке «Подключение»"); haptic(); }
+             else { haptic("error"); toast("Не получилось — попробуйте позже."); }
+             load();
+           })
+           .catch(function () { haptic("error"); toast("Не получилось — попробуйте позже."); load(); });
+       });
+     };
+   }
+   // QR-код: картинку отдаёт наш API (сессионный запрос с токеном),
+   // ссылка подписки не уходит в сторонние QR-сервисы.
+   var qb = document.getElementById("qr-btn");
+   if (qb) {
+     qb.onclick = function () {
+       var box = document.getElementById("qr-box");
+       var img = document.getElementById("qr-img");
+       if (!box || !img) { return; }
+       var opening = box.classList.contains("hide");
+       box.classList.toggle("hide");
+       if (opening && !img.getAttribute("src")) {
+         fetch(API + "/api/qr", {headers: {"Authorization": "Bearer " + token()}})
+           .then(function (r) { if (!r.ok) { throw new Error("qr"); } return r.blob(); })
+           .then(function (b) { img.src = URL.createObjectURL(b); })
+           .catch(function () { haptic("error"); toast("Не получилось показать QR — попробуйте позже."); });
+       }
      };
    }
    var ro = document.getElementById("renew-open");
@@ -1210,9 +1267,11 @@ body.tg-fullscreen .tabs { top:96px; }
    } else { select(); }
  });
 
- function load() {
+ var lastLoadAt = 0;
+ function load(quiet) {
    stopRenewPoll();
-   showSkeleton();
+   lastLoadAt = Date.now();
+   if (!quiet) { showSkeleton(); }
    return api("/api/me").then(function (r) {
      if (r.status === 200) { say(""); return render(r.data); }
      setToken("");
@@ -1220,6 +1279,18 @@ body.tg-fullscreen .tabs { top:96px; }
      if (r.status !== 401) { fail("получить данные", "ответ " + r.status); }
    }).catch(function (e) { showLogin(); fail("связаться с кабинетом", e); });
  }
+
+ // Вернулись в приложение — тихо освежаем данные: остаток срока и
+ // трафик не должны устаревать в давно открытом кабинете. Не мешаем
+ // человеку, который прямо сейчас что-то печатает в форме профиля.
+ document.addEventListener("visibilitychange", function () {
+   if (document.visibilityState !== "visible") { return; }
+   if (!token() || !window.LOGIN) { return; }
+   if (Date.now() - lastLoadAt < 60000) { return; }
+   var ae = document.activeElement;
+   if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) { return; }
+   load(true);
+ });
 
  var widgetShown = false;
  function showLogin() {

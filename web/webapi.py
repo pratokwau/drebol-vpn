@@ -431,6 +431,30 @@ def build_app():
             return web.json_response({"error": "no_session"}, status=401)
         return web.json_response(await profile(tg_id))
 
+    async def qr(request):
+        """QR-код ссылки подписки (PNG) — как кнопка QR в боте.
+        Генерируем на сервере тем же qrcode, что и бот: ссылка
+        подписки не уходит в сторонние QR-сервисы."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        data = await profile(tg_id)
+        url = ((data.get("subscription") or {}).get("url") or "")
+        if not url:
+            return web.json_response({"error": "no_subscription"}, status=404)
+        import asyncio
+        from io import BytesIO
+
+        def _make() -> bytes:
+            import qrcode
+            buf = BytesIO()
+            qrcode.make(url).save(buf, format="PNG")
+            return buf.getvalue()
+
+        png = await asyncio.to_thread(_make)
+        return web.Response(body=png, content_type="image/png",
+                            headers={"Cache-Control": "no-store"})
+
     async def logout(request):
         from core.database import web_session_drop
         token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
@@ -898,6 +922,7 @@ def build_app():
     app.router.add_post("/api/profile/email", profile_email)
     app.router.add_post("/api/profile/password", profile_password)
     app.router.add_get("/api/me", me)
+    app.router.add_get("/api/qr", qr)
     app.router.add_post("/api/logout", logout)
     app.router.add_post("/api/device/delete", device_delete)
     app.router.add_post("/api/reissue", reissue)
