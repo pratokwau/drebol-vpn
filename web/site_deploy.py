@@ -910,7 +910,8 @@ body.tg-fullscreen .tabs { top:96px; }
             (s.devices_limit ? " из " + esc(s.devices_limit) : "") +
             (s.devices_limit && p.devices && p.devices.length >= s.devices_limit
               ? " · все места заняты" : "") + "</p>" +
-            (devList || '<p class="card-sub">Пока ни одного — подключитесь в приложении.</p>') + "</div></div>");
+            (devList || '<p class="card-sub">Пока ни одного — подключитесь в приложении.</p>') +
+            devBuyBlock(s) + "</div></div>");
 
    // Действия: перевыпуск ключа — как кнопка «Новый ключ» в боте
    if ((s.status === "active" || s.status === "renewal") && s.enabled) {
@@ -1055,6 +1056,85 @@ body.tg-fullscreen .tabs { top:96px; }
              " из " + esc(r.list_total) + ".</p>";
    }
    return '<div style="margin-top:10px">' + html + "</div>";
+ }
+
+ // Докупка мест для устройств: отдельный счёт kind="devices", как в боте.
+ // Места начисляет подтверждение оплаты — страница только ждёт и обновляется.
+ function devBuyBlock(s) {
+   var b = s.devices_buy;
+   if (!b) { return ""; }
+   window.DEVBUY = {price: b.price, left: b.left, count: 1};
+   return '<div id="devbuy" style="margin-top:14px">' +
+     '<p class="card-sub">Нужно ещё место? Дополнительное устройство — ' + esc(fmtMoney(b.price)) +
+     ", можно докупить ещё " + esc(b.left) + ".</p>" +
+     '<div style="display:flex;gap:8px;align-items:stretch">' +
+       '<button class="btn btn-ghost" type="button" onclick="devStep(-1)" style="flex:0 0 52px">−</button>' +
+       '<button class="btn btn-main" type="button" onclick="buyDevices()" style="flex:1">' +
+       'Добавить <span id="dev-count">1</span> <span id="dev-word">место</span> · <span id="dev-sum">' +
+       esc(fmtMoney(b.price)) + "</span></button>" +
+       '<button class="btn btn-ghost" type="button" onclick="devStep(1)" style="flex:0 0 52px">+</button>' +
+     "</div></div>";
+ }
+ function devStep(d) {
+   var st = window.DEVBUY || {price: 0, left: 1, count: 1};
+   st.count = Math.max(1, Math.min(st.left, st.count + d));
+   window.DEVBUY = st;
+   var c = document.getElementById("dev-count");
+   var sum = document.getElementById("dev-sum");
+   var w = document.getElementById("dev-word");
+   if (c) { c.textContent = st.count; }
+   if (sum) { sum.textContent = fmtMoney(st.count * st.price); }
+   if (w) { w.textContent = st.count === 1 ? "место" : st.count < 5 ? "места" : "мест"; }
+   hapticSelect();
+ }
+ function buyDevices() {
+   var st = window.DEVBUY || {count: 1};
+   var box = document.getElementById("devbuy");
+   api("/api/devices/buy", {method: "POST", body: JSON.stringify({count: st.count})})
+     .then(function (r) {
+       if (r.status !== 200 || !r.data.url) {
+         haptic("error");
+         toast(r.data && r.data.error === "max_reached" ? "Больше мест добавить нельзя."
+               : "Не получилось создать счёт. Попробуйте позже.");
+         return;
+       }
+       window.devPayUrl = r.data.url;
+       if (box) {
+         box.innerHTML = '<div id="devbuy-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
+           esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — места добавятся сами, " +
+           "обычно в течение минуты.</p>" +
+           '<button class="btn btn-main" type="button" onclick="openPay(devPayUrl)">Оплатить</button></div>';
+       }
+       openPay(r.data.url);
+       devPoll(r.data.payment_id, 90);
+     })
+     .catch(function () { haptic("error"); toast("Не получилось — попробуйте позже."); });
+ }
+ var devTimer = null;
+ function devPoll(id, tries) {
+   if (devTimer) { clearTimeout(devTimer); devTimer = null; }
+   api("/api/payment?id=" + id).then(function (r) {
+     var box = document.getElementById("devbuy-wait");
+     if (r.status === 200) {
+       var st = r.data.status;
+       if (st === "paid" || st === "refund_pending") {
+         toast("Оплата прошла — места добавлены"); haptic(); load(); return;
+       }
+       if (st === "canceled" || st === "cancelled" || st === "expired" || st === "error" ||
+           st === "refunded" || st === "chargebacked") {
+         if (box) { box.innerHTML = '<p class="card-sub">Счёт не оплачен. Обновите данные и попробуйте ещё раз.</p>'; }
+         return;
+       }
+     }
+     if (tries <= 0) {
+       if (box) { box.innerHTML = '<p class="card-sub">Пока не оплачено. Если вы уже оплатили, ' +
+         "подождите немного и обновите данные.</p>"; }
+       return;
+     }
+     devTimer = setTimeout(function () { devPoll(id, tries - 1); }, 10000);
+   }).catch(function () {
+     devTimer = setTimeout(function () { devPoll(id, tries - 1); }, 10000);
+   });
  }
 
  // Кнопки действий после отрисовки: отключение устройства и перевыпуск

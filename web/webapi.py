@@ -327,6 +327,19 @@ async def profile(tg_id: int) -> dict:
                 "platform": d.get("platform") or "",
                 "seen": str(d.get("lastSeen") or "")[:16].replace("T", " "),
             })
+    # Докупка мест: страница показывает сценарий, только когда он реален —
+    # цена задана, лимит конечен и потолок докупа ещё не выбран.
+    try:
+        from config import load_config as _lc
+        _cfg = _lc()
+        _price = int(_cfg.get("device_price", 0) or 0)
+        _max_extra = int(_cfg.get("device_max_extra") or 5)
+        _left = max(0, _max_extra - int(extra or 0))
+        if _price > 0 and limit_hwid and base_hwid(limit_hwid, extra) and _left > 0:
+            out["subscription"]["devices_buy"] = {"price": _price, "left": _left}
+    except Exception:
+        pass
+
     rows, pays_count, pays_sum = await user_payments(tg_id, 10)
     # строки user_payments: id, provider, amount, status, date, promo_code —
     # провайдера и промокод тоже отдаём: из них складывается карточка платежа
@@ -869,6 +882,82 @@ def build_app():
         return web.json_response({"payment_id": pid, "url": res["url"],
                                   "amount": q["price"]})
 
+    async def devices_buy(request):
+        """Докупка мест для устройств отдельным счётом — как кнопка
+        «Добавить место» в боте: платёж kind="devices", подтверждение
+        вебхуком начислит места через apply_devices_payment."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            count = int(body.get("count") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        from features.blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        from config import load_config
+        from core.database import (add_payment, get_active_payment, get_user_info,
+                                   set_payment_external_id, set_payment_status)
+        from paidsub.storage import base_hwid, get_paid_sub_by_tg_id
+        import services.platega_api as pg
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        cfg = load_config()
+        price = int(cfg.get("device_price", 0) or 0)
+        max_extra = int(cfg.get("device_max_extra") or 5)
+        bought = int(row[18] or 0) if len(row) > 18 else 0
+        limit_now = int(row[8] or 0)
+        if price <= 0 or not limit_now or not base_hwid(limit_now, bought):
+            return web.json_response({"error": "unavailable"}, status=409)
+        left = max(0, max_extra - bought)
+        if left <= 0:
+            return web.json_response({"error": "max_reached"}, status=409)
+        count = max(1, min(count, left))
+        amount = price * count
+        if not pg.is_configured():
+            return web.json_response({"error": "pay_unavailable"}, status=503)
+        existing = await get_active_payment(tg_id, "platega")
+        if (existing and existing[4] == amount and existing[8]
+                and len(existing) > 11 and existing[10] == "devices"
+                and existing[11] == count):
+            return web.json_response({"payment_id": existing[0],
+                                      "url": existing[8],
+                                      "amount": existing[4], "reused": True})
+        user = await get_user_info(tg_id)
+        from web.site_deploy import pay_redirect_urls
+        urls = pay_redirect_urls()
+        cabinet_url = ""
+        try:
+            from web import site_deploy as site
+            cabinet_url = (site.cabinet_link() or "") + "/payments"
+        except Exception:
+            cabinet_url = ""
+        pid = await add_payment(
+            tg_id, "platega", None, amount, 0,
+            "", promo_code=None, kind="devices", extra=count)
+        res = await pg.create_payment(
+            amount=amount,
+            description=f"Доп. устройства Drebol VPN · {count} · {tg_id}",
+            tg_id=tg_id, username=user[2] if user else None,
+            order_id=f"drebol-{pid}",
+            success_url=urls.get("success") or cabinet_url or None,
+            fail_url=urls.get("fail") or cabinet_url or None,
+            back_url=urls.get("back") or cabinet_url or None)
+        if not res.get("ok"):
+            logging.error("кабинет: счёт за устройства не создан для %s: %s",
+                          tg_id, res.get("error"))
+            await set_payment_status(pid, "error", res.get("error"))
+            return web.json_response({"error": "pay_failed"}, status=502)
+        await set_payment_external_id(pid, res["payment_id"], res["url"])
+        return web.json_response({"payment_id": pid, "url": res["url"],
+                                  "amount": amount})
+
     async def payment_status(request):
         """Статус своего счёта — его опрашивает страница, пока ждёт
         подтверждения. Чужие счета не отдаём: только свои."""
@@ -1012,6 +1101,7 @@ def build_app():
     app.router.add_post("/api/promo/apply", promo_apply)
     app.router.add_post("/api/promo/remove", promo_remove)
     app.router.add_post("/api/renew", renew)
+    app.router.add_post("/api/devices/buy", devices_buy)
     app.router.add_get("/api/payment", payment_status)
     app.router.add_post("/api/webhooks/platega", platega_webhook)
     return app
