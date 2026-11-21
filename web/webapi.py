@@ -227,7 +227,7 @@ async def profile(tg_id: int) -> dict:
         out["support_url"] = ""
     # Рефералка не зависит от подписки: её видно и без неё
     try:
-        from paidsub.storage import get_referral_stats
+        from paidsub.storage import get_referral_list, get_referral_stats
         from paidsub.time_parser import fmt_duration
         rs = await get_referral_stats(tg_id)
         out["referral"] = {
@@ -235,6 +235,20 @@ async def profile(tg_id: int) -> dict:
             "rewarded": int(rs["rewarded"] or 0),
             "bonus_text": fmt_duration(rs["total_bonus"]) if rs["total_bonus"] else "",
         }
+        # Список приглашённых: кто пришёл и кому уже начислен бонус.
+        lst = await get_referral_list(tg_id)
+        items = []
+        for r in lst[:20]:
+            ui = await get_user_info(r[0])
+            items.append({
+                "name": (ui[1] if ui else "") or "Без имени",
+                "username": (ui[2] if ui else "") or "",
+                "rewarded": bool(r[1]),
+                "bonus_text": fmt_duration(r[2]) if r[2] else "",
+                "date": str(r[3] or "")[:16],
+            })
+        out["referral"]["list"] = items
+        out["referral"]["list_total"] = len(lst)
     except Exception:
         pass
     ble = await bl_entry(tg_id)
@@ -720,6 +734,26 @@ def build_app():
                         if pending and pending[8] else None),
         })
 
+    async def payments_more(request):
+        """История платежей шире первых десяти из профиля: страница
+        догружает её кнопкой «Показать ещё» растущим лимитом."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            limit = int(request.query.get("limit", "10"))
+        except Exception:
+            limit = 10
+        limit = max(10, min(100, limit))
+        from core.database import user_payments
+        rows, cnt, total = await user_payments(tg_id, limit)
+        return web.json_response({
+            "payments": [{"id": r[0], "provider": r[1] or "", "amount": r[2],
+                          "status": r[3], "date": str(r[4] or "")[:16],
+                          "promo": r[5] or ""} for r in rows],
+            "payments_total": {"count": cnt, "sum": total},
+        })
+
     async def promo_apply(request):
         """Ввод промокода в кабинете — та же валидация, что в боте.
         Код сохраняется как pending: скидку подхватит _renew_quote,
@@ -974,6 +1008,7 @@ def build_app():
     app.router.add_post("/api/device/delete", device_delete)
     app.router.add_post("/api/reissue", reissue)
     app.router.add_get("/api/renew-options", renew_options)
+    app.router.add_get("/api/payments", payments_more)
     app.router.add_post("/api/promo/apply", promo_apply)
     app.router.add_post("/api/promo/remove", promo_remove)
     app.router.add_post("/api/renew", renew)

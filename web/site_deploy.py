@@ -695,19 +695,48 @@ body.tg-fullscreen .tabs { top:96px; }
    var sub = "Всего оплат: " + esc(tot.count != null ? tot.count : items.length) +
              (tot.sum ? " · на сумму " + esc(fmtMoney(tot.sum)) : "") +
              ". Показаны последние " + items.length + ".";
-   var list = items.map(function (x) {
-     var st = PAY_STATUS[String(x.status || "").toLowerCase()] || {text: String(x.status || ""), kind: "warn"};
-     var meta = "";
-     if (x.provider) { meta += '<span class="chip">' + esc(payProvider(x.provider)) + "</span>"; }
-     if (x.promo) { meta += '<span class="chip">🎟 ' + esc(x.promo) + "</span>"; }
-     return '<div class="pay"><div class="pay-head"><div>' +
-       '<div class="pay-amount">' + esc(fmtMoney(x.amount)) + '</div>' +
-       '<div class="pay-date">' + esc(fmtDate(x.date)) + "</div></div>" +
-       pill(st.text, st.kind) + "</div>" +
-       (meta ? '<div class="pay-meta">' + meta + "</div>" : "") + "</div>";
-   }).join("");
+   PAY_SHOWN = items.length;
+   var more = items.length >= 10
+     ? '<div id="pay-more" style="margin-top:10px"><button class="btn btn-ghost" type="button" ' +
+       'onclick="morePayments()">Показать ещё</button></div>' : '<div id="pay-more"></div>';
    return '<div data-sec="payments"><div class="card">' + title("card", "Платежи") +
-          '<p class="card-sub">' + sub + "</p>" + list + "</div></div>";
+          '<p class="card-sub" id="pay-sub">' + sub + "</p>" +
+          '<div id="pay-list">' + items.map(payItem).join("") + "</div>" + more + "</div></div>";
+ }
+ function payItem(x) {
+   var st = PAY_STATUS[String(x.status || "").toLowerCase()] || {text: String(x.status || ""), kind: "warn"};
+   var meta = "";
+   if (x.provider) { meta += '<span class="chip">' + esc(payProvider(x.provider)) + "</span>"; }
+   if (x.promo) { meta += '<span class="chip">🎟 ' + esc(x.promo) + "</span>"; }
+   return '<div class="pay"><div class="pay-head"><div>' +
+     '<div class="pay-amount">' + esc(fmtMoney(x.amount)) + '</div>' +
+     '<div class="pay-date">' + esc(fmtDate(x.date)) + "</div></div>" +
+     pill(st.text, st.kind) + "</div>" +
+     (meta ? '<div class="pay-meta">' + meta + "</div>" : "") + "</div>";
+ }
+ // Догрузка истории: API отдаёт растущим лимитом; если список не вырос —
+ // это все платежи, кнопку прячем.
+ var PAY_SHOWN = 10;
+ function morePayments() {
+   api("/api/payments?limit=" + (PAY_SHOWN + 10)).then(function (r) {
+     if (r.status !== 200 || !r.data.payments) { toast("Не получилось — попробуйте позже."); return; }
+     var grew = r.data.payments.length > PAY_SHOWN;
+     PAY_SHOWN = r.data.payments.length;
+     var list = document.getElementById("pay-list");
+     if (list) { list.innerHTML = r.data.payments.map(payItem).join(""); }
+     var tot = r.data.payments_total || {};
+     var sub = document.getElementById("pay-sub");
+     if (sub) {
+       sub.textContent = "Всего оплат: " + (tot.count != null ? tot.count : PAY_SHOWN) +
+         (tot.sum ? " · на сумму " + fmtMoney(tot.sum) : "") +
+         ". Показаны последние " + PAY_SHOWN + ".";
+     }
+     var more = document.getElementById("pay-more");
+     if (more && (!grew || PAY_SHOWN >= 100)) {
+       more.innerHTML = "";
+       if (!grew) { toast("Это все платежи"); }
+     }
+   }).catch(function () { toast("Не получилось — попробуйте позже."); });
  }
 
  // Профиль: почта и пароль для входа из браузера. Пока что-то не задано,
@@ -1005,8 +1034,27 @@ body.tg-fullscreen .tabs { top:96px; }
      (r.bonus_text ? " · вам начислено: <b style=\"color:var(--ink)\">+" + esc(r.bonus_text) + "</b>" : "") + "</p>" +
      '<div class="link"><code id="reflink">' + esc(link) + "</code>" +
      '<button class="copy" type="button" data-copy="' + esc(link) + '">Скопировать</button></div>' +
+     referralList(r) +
      '<div class="stack" style="margin-top:12px"><a class="btn btn-ghost" href="' + share +
      '">📤 Поделиться ссылкой</a></div></div>';
+ }
+ // Кто именно пришёл по ссылке и кому бонус уже начислен
+ function referralList(r) {
+   var lst = r.list || [];
+   if (!lst.length) { return ""; }
+   var html = lst.map(function (x) {
+     return '<div class="pay"><div class="pay-head"><div>' +
+       '<div class="pay-amount" style="font-size:15px">' + esc(x.name) + "</div>" +
+       '<div class="pay-date">' + (x.username ? "@" + esc(x.username) + " · " : "") +
+       esc(fmtDate(x.date) || x.date) + "</div></div>" +
+       (x.rewarded ? pill("+" + esc(x.bonus_text || "бонус"), "ok")
+                   : pill("бонус не начислен", "warn")) + "</div></div>";
+   }).join("");
+   if (r.list_total > lst.length) {
+     html += '<p class="card-sub">Показаны последние ' + lst.length +
+             " из " + esc(r.list_total) + ".</p>";
+   }
+   return '<div style="margin-top:10px">' + html + "</div>";
  }
 
  // Кнопки действий после отрисовки: отключение устройства и перевыпуск
