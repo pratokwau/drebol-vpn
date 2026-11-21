@@ -46,6 +46,18 @@ def _service():
 _ADMIN_SCOPES = ("all", "active", "soon", "expired")
 _ADMIN_SORTS = ("new", "expire", "name")
 
+# Вкладки и сортировки платных подписок — те же, что в ТГ
+# (PAID_TABS / SORT_LABELS в paidsub/keyboards.py, экран —
+# handle_paid_subs_menu в paidsub/handlers.py).
+_PAID_SCOPES = ("all", "active", "soon", "expired", "off", "trial", "paying")
+_PAID_SORTS = ("new", "expire", "name")
+_PAID_PER_PAGE = 25
+
+# Состояния клиентов в панели меняются редко, а список листают часто —
+# тот же кэш на 60 с, что в paidsub/handlers.py (panel_states).
+_PANEL_STATES = {"at": 0.0, "states": {}, "ok": False}
+_PANEL_STATES_TTL = 60
+
 # Подписи событий истории — копия _HISTORY_LABELS из
 # paidsub/handlers.py (там же источник истины; неизвестное действие
 # показываем сырым именем, как в ТГ).
@@ -469,29 +481,134 @@ async def admin_sub_history(request):
 
 # ── Подписки: действия ─────────────────────────────────────────────────────
 
+async def _paid_panel_states() -> dict:
+    """Живые состояния клиентов панели с кэшем на 60 с — как panel_states
+    в paidsub/handlers.py: {"ok": bool, "states": {email: STATUS}}."""
+    import time
+    if (_PANEL_STATES["ok"]
+            and time.time() - _PANEL_STATES["at"] < _PANEL_STATES_TTL):
+        return _PANEL_STATES
+    try:
+        from services.panel import get_client_states
+        got = await get_client_states()
+    except Exception:
+        logging.exception("админка: subs_list: панель недоступна")
+        got = {"ok": False, "states": {}}
+    if got.get("ok"):
+        _PANEL_STATES.update(at=time.time(), states=got["states"], ok=True)
+    else:
+        _PANEL_STATES.update(ok=False, states={})
+    return _PANEL_STATES
+
+
+def _paid_mark_raw(row, states: dict) -> str:
+    """Значок подписки в списке — копия _sub_mark из paidsub/handlers.py:
+    что с ней прямо сейчас. row — полная строка, как в _paid_sub_dict
+    (логин — [2], срок — [6], статус — [11])."""
+    from datetime import datetime
+    from paidsub.storage import SOON_DAYS, parse_sub_date
+    if states.get(row[2] or "") == "DISABLED":
+        return "⏸"
+    if row[11] == "expired":
+        return "🔴"
+    end = parse_sub_date(row[6])
+    if end and (end - datetime.now()).total_seconds() <= SOON_DAYS * 86400:
+        return "⏳"
+    return "🟢"
+
+
+async def _paid_full_rows(ids: list) -> list:
+    """Полные строки платных подписок по id — те же колонки, что в
+    admin_list_paid_subs (core/database.py), плюс имена владельцев."""
+    from core.database import DB_PATH
+    import aiosqlite
+    cols = ("s.id, s.tg_id, s.email, s.uuid, s.sub_id, s.sub_url, s.expire_date,"
+            " s.limit_ip, s.limit_hwid, s.total_gb, s.created_at, s.status,"
+            " s.times_renewed, s.ind_trial_period, s.ind_pay_period,"
+            " s.ind_renew_time, s.ind_price, s.ind_pay_url,"
+            " s.extra_devices, s.lte_gb, s.lte_fallback_month,"
+            " u.first_name, u.username")
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT " + cols + " FROM paid_subs s "
+            "LEFT JOIN users u ON u.id = s.tg_id "
+            f"WHERE s.id IN ({','.join('?' * len(ids))})", ids) as cur:
+            return await cur.fetchall()
+
+
+async def _paid_subs_enriched(short_rows, states: dict) -> list:
+    """Короткие строки (id, tg_id, email, ...) из paidsub/storage.py →
+    полные dict для фронта: те же поля, что раньше, плюс значок mark.
+    Порядок коротких строк (сортировка вкладки) сохраняется."""
+    if not short_rows:
+        return []
+    by_id = {r[0]: r for r in await _paid_full_rows([r[0] for r in short_rows])}
+    subs = []
+    for sr in short_rows:
+        r = by_id.get(sr[0])
+        if r is None:
+            continue
+        d = _paid_sub_dict(r)
+        d["first_name"] = r[-2]
+        d["username"] = r[-1]
+        d["mark"] = _paid_mark_raw(r, states)
+        subs.append(d)
+    return subs
+
+
 async def subs_list(request):
-    """Все платные подписки: список с поиском, фильтром по статусу, страницы."""
+    """Платные подписки: вкладки, сортировка, поиск и счётчики — тот же
+    экран, что handle_paid_subs_menu в ТГ (paidsub/handlers.py):
+    list_paid_subs / paid_counts / search_paid_subs из paidsub/storage.py,
+    выключенные — из живых состояний панели, как в ТГ."""
     from aiohttp import web
     try:
         await _require_actor(request)
     except Exception:
         return web.json_response({"error": "no_session"}, status=401)
-    from core.database import admin_list_paid_subs
+    from paidsub.storage import (all_paid_subs, list_paid_subs, paid_counts,
+                                 paid_emails, search_paid_subs)
     try:
-        page = int(request.query.get("page") or 1)
+        page = max(1, int(request.query.get("page", "1")))
     except ValueError:
         return web.json_response({"error": "bad_page"}, status=400)
+    scope = (request.query.get("scope") or "all").strip()
+    if scope not in _PAID_SCOPES:
+        scope = "all"
+    sort = (request.query.get("sort") or "new").strip()
+    if sort not in _PAID_SORTS:
+        sort = "new"
     q = (request.query.get("q") or "").strip()
-    status = (request.query.get("status") or "").strip()
-    rows, total_pages = await admin_list_paid_subs(page, 25, q, status)
-    subs = []
-    for r in rows:
-        d = _paid_sub_dict(r)
-        d["first_name"] = r[-2]
-        d["username"] = r[-1]
-        subs.append(d)
-    return web.json_response({"subs": subs, "page": max(1, page),
-                              "total_pages": total_pages})
+    counts = await paid_counts()
+    panel = await _paid_panel_states()
+    states = panel["states"]
+    off_emails = {e for e, st in states.items() if st == "DISABLED"}
+    counts["off"] = (len(off_emails & await paid_emails())
+                     if panel["ok"] else None)
+    if q:
+        # Поиск — отдельным экраном, как в ТГ (apply_paid_search):
+        # вкладки и страницы не применяются, найдено — до 20 строк.
+        subs = await _paid_subs_enriched(await search_paid_subs(q), states)
+        return web.json_response({"subs": subs, "page": 1, "total_pages": 1,
+                                  "scope": scope, "sort": sort,
+                                  "counts": counts, "panel_ok": panel["ok"]})
+    if scope == "off":
+        # Выключенных знает только панель: фильтруем уже выбранные строки.
+        picked = [r for r in await all_paid_subs("all", sort)
+                  if r[2] in off_emails]
+        total_pages = max(1, (len(picked) + _PAID_PER_PAGE - 1)
+                          // _PAID_PER_PAGE)
+        page = min(page, total_pages)
+        short = picked[(page - 1) * _PAID_PER_PAGE:page * _PAID_PER_PAGE]
+    else:
+        short, total_pages = await list_paid_subs(page, scope, sort,
+                                                  _PAID_PER_PAGE)
+        page = min(page, total_pages)
+    subs = await _paid_subs_enriched(short, states)
+    return web.json_response({"subs": subs, "page": page,
+                              "total_pages": total_pages, "scope": scope,
+                              "sort": sort, "counts": counts,
+                              "panel_ok": panel["ok"]})
 
 
 async def sub_card(request):

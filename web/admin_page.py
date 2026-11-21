@@ -356,18 +356,19 @@ label.chk input{width:auto;margin:0}
           <div id="requests-table"></div>
           <div id="requests-out"></div>
         </div>
-        <div class="card"><h2>Платные подписки</h2><p class="sub">Все платные подписки. Нажми на строку, чтобы открыть и поменять параметры — изменения сразу уходят в базу бота и в панель Remnawave. Удаление и перевыпуск — с подтверждением.</p>
+        <div class="card"><h2>Платные подписки</h2><p class="sub">Вкладки и сортировка — как в ТГ. Значки: 🟢 работает · ⏳ скоро кончится · 🔴 истекла · ⏸ выключена в панели. Нажми на строку, чтобы открыть и поменять параметры — изменения сразу уходят в базу бота и в панель Remnawave. Удаление и перевыпуск — с подтверждением.</p>
+          <div class="btnrow" id="subs-tabs" style="flex-wrap:wrap"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <input id="subs-q" placeholder="Поиск: имя, @username, email, tg_id" style="flex:1;min-width:200px">
-            <select id="subs-status" style="width:auto;min-width:150px">
-              <option value="">Все статусы</option>
-              <option value="active">Активна</option>
-              <option value="expired">Истекла</option>
-              <option value="frozen">Заморожена</option>
+            <input id="subs-q" placeholder="Поиск: имя, @username, email, tg_id, uuid" style="flex:1;min-width:200px">
+            <select id="subs-sort" style="width:auto;min-width:150px">
+              <option value="new">Новые сверху</option>
+              <option value="expire">По сроку</option>
+              <option value="name">По имени</option>
             </select>
             <button id="btn-subs-search">Найти</button>
             <button id="btn-subs-refresh" class="ghost">Обновить</button>
           </div>
+          <div id="subs-panel-warn" class="mut" style="margin-top:6px"></div>
           <div id="subs-table"></div>
           <div class="btnrow" style="margin-top:10px;align-items:center">
             <button id="btn-subs-prev" class="ghost">← Назад</button>
@@ -1345,7 +1346,8 @@ $("btn-fraud-stop").onclick = async function(){
 };
 
 /* --- Подписки: список + редактор --- */
-let subsPage = 1, subsTotalPages = 1, subsLoaded = false, subsCurrentId = null, subsCurrentKind = "paid";
+let subsPage = 1, subsTotalPages = 1, subsLoaded = false, subsCurrentId = null, subsCurrentKind = "paid", subsScope = "all";
+const SUBS_TABS = {all: ["📋", "Все"], active: ["🟢", "Активные"], soon: ["⏳", "Скоро кончатся"], expired: ["🔴", "Истёкшие"], off: ["⏸", "Выключены в панели"], trial: ["🆓", "Пробные"], paying: ["💳", "Платящие"]};
 function statusPill(code, label){
   const s = String(code == null ? "" : code).toLowerCase();
   const cls = ["active","paid","ok","success","online","enabled","true","1"].indexOf(s) >= 0 ? "ok"
@@ -1356,11 +1358,17 @@ function statusPill(code, label){
 function subStatusPill(s){ return statusPill(s, s === "active" ? "Активна" : s === "expired" ? "Истекла" : s === "frozen" ? "Заморожена" : (s || "—")); }
 async function loadSubs(page){
   const q = encodeURIComponent($("subs-q").value.trim());
-  const st = $("subs-status").value;
+  const sort = $("subs-sort").value;
   let r;
-  try { r = await api("/subs?page=" + page + (q ? "&q=" + q : "") + (st ? "&status=" + st : "")); }
+  try { r = await api("/subs?page=" + page + "&scope=" + subsScope + "&sort=" + sort + (q ? "&q=" + q : "")); }
   catch(e) { $("subs-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { $("subs-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  const counts = r.data.counts || {};
+  $("subs-tabs").innerHTML = Object.keys(SUBS_TABS).map(function(k){
+    const c = counts[k];
+    return '<button class="ghost' + (k === subsScope ? " active" : "") + '" data-subs-tab="' + k + '">' + SUBS_TABS[k][0] + " " + SUBS_TABS[k][1] + (c == null ? "" : " · " + c) + "</button>";
+  }).join("");
+  $("subs-panel-warn").textContent = r.data.panel_ok === false ? "⚠️ Панель не ответила — не знаю, кто выключен, вкладка «Выключены в панели» пуста." : "";
   const items = r.data.subs || [];
   subsPage = r.data.page || page; subsTotalPages = r.data.total_pages || 1;
   $("subs-page-label").textContent = "Страница " + subsPage + " из " + subsTotalPages;
@@ -1371,14 +1379,21 @@ async function loadSubs(page){
     const name = esc(it.first_name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "") + ' <span class="mono small">#' + it.tg_id + '</span>';
     const traf = it.total_gb > 0 ? "до " + it.total_gb + " ГБ" : "безлимит";
     const devs = (it.limit_hwid || 0) + (it.extra_devices || 0);
-    h += '<tr data-sub-id="' + it.id + '"><td>' + name + '</td><td class="trunc"><span class="mono">' + esc(it.email || "") + '</span></td><td>' + subStatusPill(it.status) + '</td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td class="num">' + traf + '</td><td class="num">до ' + devs + '</td></tr>';
+    const mark = it.mark ? esc(it.mark) + " " : "";
+    h += '<tr data-sub-id="' + it.id + '"><td>' + name + '</td><td class="trunc"><span class="mono">' + esc(it.email || "") + '</span></td><td>' + mark + subStatusPill(it.status) + '</td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td class="num">' + traf + '</td><td class="num">до ' + devs + '</td></tr>';
   });
   $("subs-table").innerHTML = h + '</tbody></table></div>';
 }
 $("btn-subs-search").onclick = function(){ loadSubs(1); };
 $("btn-subs-refresh").onclick = function(){ loadSubs(subsPage); };
 $("subs-q").addEventListener("keydown", function(e){ if (e.key === "Enter") loadSubs(1); });
-$("subs-status").onchange = function(){ loadSubs(1); };
+$("subs-sort").onchange = function(){ loadSubs(1); };
+$("subs-tabs").addEventListener("click", function(e){
+  const b = e.target.closest("button[data-subs-tab]");
+  if (!b) return;
+  subsScope = b.dataset.subsTab;
+  loadSubs(1);
+});
 $("btn-subs-prev").onclick = function(){ if (subsPage > 1) loadSubs(subsPage - 1); };
 $("btn-subs-next").onclick = function(){ if (subsPage < subsTotalPages) loadSubs(subsPage + 1); };
 $("subs-table").addEventListener("click", function(e){
