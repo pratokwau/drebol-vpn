@@ -76,17 +76,17 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [b("🔍 Найти юзера", "find_user"), b("📜 Логи", "ctl_menu")],
         [b("💳 Платные подписки", "paid_subs"), b("📋 Админские", "admin_subs")],
         # общение
-        [b("📣 Рассылка", "broadcast"), b("👥 Помощники", "helpers_menu")],
-        [b("📢 Канал", "channel_menu"), b("🌐 Проверка операторов", "netcheck_menu")],
+        [b("📣 Рассылка", "broadcast"), b("📣 Пост в ТГК", "chpost_menu")],
+        [b("📢 Канал", "channel_menu"), b("👥 Помощники", "helpers_menu")],
+        [b("🌐 Проверка операторов", "netcheck_menu"), b("🛟 Поддержка и логи", "support_group_settings")],
         # удержание и защита
         [b("🎯 Возврат ушедших", "winback_settings"), b("⏰ Напоминания", "remind_settings")],
         [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
         # инфраструктура
         [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Веб-доступ", "web_menu")],
         [b("💾 Бэкап и перенос", "backup_menu"), b("📄 Документы", "documents_menu")],
-        [b("🛟 Поддержка и логи", "support_group_settings"), b(mnt_label, "mnt_menu")],
-        [b("🔄 Обновиться с GitHub", "git_update"), b(f"⏰ Синхронизация · {sync_time}", "morning_menu")],
-        [b("◀️ Назад", "back_start")],
+        [b(mnt_label, "mnt_menu"), b("🔄 Обновиться с GitHub", "git_update")],
+        [b(f"⏰ Синхронизация · {sync_time}", "morning_menu"), b("◀️ Назад", "back_start")],
     ])
 
 

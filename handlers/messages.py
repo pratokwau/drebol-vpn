@@ -7,6 +7,7 @@ from config import ADMIN_ID, load_config, save_config
 from core.keyboards import back_admin
 from core.states import (
     AWAITING_CHANNEL, AWAITING_BROADCAST, AWAITING_BROADCAST_BUTTONS, AWAITING_BROADCAST_PHOTO,
+    AWAITING_CHPOST_TEXT, AWAITING_CHPOST_PHOTO, AWAITING_CHPOST_SIGN,
     AWAITING_PRIVACY_URL, AWAITING_TERMS_URL,
     AWAITING_REFUND_URL, AWAITING_RULES_URL, AWAITING_CONSENT_URL,
     AWAITING_PRESET_EXPIRE,
@@ -249,6 +250,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("state", None)
         context.user_data["bcast_buttons"] = spec
         await show_preview(update.message, context)
+        return
+
+    # ── Пост в ТГК: текст поста ─────────────────────────────────────────────
+    if state == AWAITING_CHPOST_TEXT and is_admin:
+        from handlers.channel_post import accept_text
+        await accept_text(update.message, context)
+        return
+
+    # ── Пост в ТГК: подпись (пишется в config) ──────────────────────────────
+    if state == AWAITING_CHPOST_SIGN and is_admin:
+        from handlers.channel_post import accept_signature
+        await accept_signature(update.message, context)
         return
 
     if state == AWAITING_PRIVACY_URL:
@@ -1392,5 +1405,15 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await accept_photo(msg, context)
         else:
             # фото прислали вместо текста — подпись станет текстом рассылки
+            await accept_photo_with_text(msg, context)
+        return
+
+    # ── Картинки для поста в ТГК ────────────────────────────────────────────
+    if is_admin and msg.photo and state in (AWAITING_CHPOST_PHOTO, AWAITING_CHPOST_TEXT):
+        from handlers.channel_post import accept_photo, accept_photo_with_text
+        if state == AWAITING_CHPOST_PHOTO:
+            await accept_photo(msg, context)
+        else:
+            # фото прислали вместо текста — подпись станет текстом поста
             await accept_photo_with_text(msg, context)
         return

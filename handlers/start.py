@@ -63,6 +63,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # Диплинки из постов канала: /start ch_mysub и подобные открывают
+    # сразу экран, на который ведёт кнопка поста (см. handlers/channel_post)
+    if context.args and context.args[0].startswith("ch_"):
+        from handlers.channel_post import open_deep_link
+        if await open_deep_link(update, context, context.args[0][3:]):
+            return
+
     # Канал пройден — пробный период выдаём сразу, без лишних нажатий.
     # Пока панель создаёт клиента, человек видит «⏳», а не тишину
     from handlers.user import ensure_trial, start_screen

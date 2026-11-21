@@ -124,6 +124,14 @@ from handlers.finance import (
     handle_server_del, handle_server_del_ok,
     handle_server_mark, handle_server_paid_answer,
 )
+from handlers.channel_post import (
+    handle_chpost_menu, handle_chpost_new, handle_chpost_sign_view,
+    handle_chpost_sign_edit, handle_chpost_sign_del,
+    handle_chpost_photo_add, handle_chpost_photo_del, handle_chpost_photo_next,
+    handle_chpost_pick, handle_chpost_toggle, handle_chpost_pick_done,
+    handle_chpost_buttons_skip, handle_chpost_edit_text,
+    handle_chpost_toggle_sign, handle_chpost_send, handle_chpost_cancel,
+)
 from handlers.broadcast import (
     handle_broadcast_start, handle_broadcast_segment,
     handle_bcast_buttons_add, handle_bcast_buttons_skip,
@@ -721,6 +729,38 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_bcast_send(query, context)
     elif data == "bcast_cancel":
         await handle_bcast_cancel(query, context)
+    elif data == "chpost_menu":
+        await handle_chpost_menu(query, context)
+    elif data == "chpost_new":
+        await handle_chpost_new(query, context)
+    elif data == "chpost_sign_view":
+        await handle_chpost_sign_view(query, context)
+    elif data == "chpost_sign_edit":
+        await handle_chpost_sign_edit(query, context)
+    elif data == "chpost_sign_del":
+        await handle_chpost_sign_del(query, context)
+    elif data == "chpost_photo_add":
+        await handle_chpost_photo_add(query, context)
+    elif data == "chpost_photo_del":
+        await handle_chpost_photo_del(query, context)
+    elif data == "chpost_photo_next":
+        await handle_chpost_photo_next(query, context)
+    elif data == "chpost_pick":
+        await handle_chpost_pick(query, context)
+    elif data.startswith("chpost_tgl:"):
+        await handle_chpost_toggle(query, context, data.split(":", 1)[1])
+    elif data == "chpost_pick_done":
+        await handle_chpost_pick_done(query, context)
+    elif data == "chpost_buttons_skip":
+        await handle_chpost_buttons_skip(query, context)
+    elif data == "chpost_edit_text":
+        await handle_chpost_edit_text(query, context)
+    elif data == "chpost_toggle_sign":
+        await handle_chpost_toggle_sign(query, context)
+    elif data == "chpost_send":
+        await handle_chpost_send(query, context)
+    elif data == "chpost_cancel":
+        await handle_chpost_cancel(query, context)
 
     # Админские подписки
     elif data == "admin_subs":
