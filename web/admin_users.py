@@ -41,6 +41,43 @@ def _service():
     return service
 
 
+# Вкладки и сортировки админских подписок — те же, что в ТГ
+# (ADMIN_TABS / ADMIN_SORT_LABELS в adminsub/keyboards.py).
+_ADMIN_SCOPES = ("all", "active", "soon", "expired")
+_ADMIN_SORTS = ("new", "expire", "name")
+
+# Подписи событий истории — копия _HISTORY_LABELS из
+# paidsub/handlers.py (там же источник истины; неизвестное действие
+# показываем сырым именем, как в ТГ).
+_HISTORY_LABELS = {
+    "trial_approved": "🆓 Триал одобрен",
+    "trial_rejected": "🚫 Триал отклонён",
+    "trial_stopped": "⏹ Триал остановлен",
+    "key_reissued": "🔁 Ключ перевыпущен",
+    "settings_changed": "⚙️ Изменены настройки",
+    "device_removed": "📱 Устройство убрано",
+    "promo_days": "🎟 Промокод: начислены дни",
+    "promo_issued": "🎟 Выдан промокод",
+    "blacklisted": "⛔ Чёрный список: добавлен",
+    "unblacklisted": "✅ Чёрный список: убран",
+}
+
+
+def _admin_sub_status(expire_raw) -> str:
+    """Статус админской подписки: в базе status нет, как в ТГ
+    (handle_sub_view) активна/истекла выводится из срока."""
+    from datetime import datetime
+    from core.database import _expire_to_iso
+    try:
+        iso = _expire_to_iso(expire_raw)
+        dt = datetime.fromisoformat(iso) if iso else None
+    except Exception:
+        dt = None
+    if dt is None:
+        return "active"
+    return "active" if dt > datetime.now() else "expired"
+
+
 async def _json_body(request):
     try:
         body = await request.json()
@@ -382,6 +419,54 @@ async def _notify_request_user(bot, tg_id: int, text: str) -> bool:
     return True
 
 
+# ── История подписки ─────────────────────────────────────────────────────
+
+async def _sub_history(request, kind: str):
+    """История событий подписки: та же get_user_history, что в ТГ
+    (handle_paid_sub_history / handle_sub_history), 8 событий на
+    страницу. У подписки без TG ID истории нет — как в ТГ."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    try:
+        sub_id = int(request.match_info["sub_id"])
+        page = max(1, int(request.query.get("page", "1")))
+    except (KeyError, ValueError):
+        return web.json_response({"error": "bad_id"}, status=400)
+    if kind == "admin":
+        from adminsub.storage import get_sub
+        row = await get_sub(sub_id)
+    else:
+        from paidsub.storage import get_paid_sub
+        row = await get_paid_sub(sub_id)
+    if not row:
+        return web.json_response({"error": "not_found"}, status=404)
+    tg_id = row[1]
+    if not tg_id:
+        return web.json_response({"events": [], "page": 1, "total_pages": 1,
+                                  "no_tg_id": True})
+    from paidsub.storage import get_user_history
+    rows, total_pages = await get_user_history(tg_id, page, 8)
+    if page > total_pages:
+        page = total_pages
+        rows, _ = await get_user_history(tg_id, page, 8)
+    return web.json_response({"events": [
+        {"id": r[0], "action": r[2],
+         "label": _HISTORY_LABELS.get(r[2], r[2]),
+         "details": r[3] or "", "created_at": str(r[4] or "")[:16]}
+        for r in rows], "page": page, "total_pages": total_pages})
+
+
+async def sub_history(request):
+    return await _sub_history(request, "paid")
+
+
+async def admin_sub_history(request):
+    return await _sub_history(request, "admin")
+
+
 # ── Подписки: действия ─────────────────────────────────────────────────────
 
 async def subs_list(request):
@@ -534,26 +619,68 @@ async def _sub_action(request, action: str):
         return web.json_response(
             {"error": "action_failed", "details": str(res.get("error") or "")},
             status=400)
-    await _audit(actor, f"sub_{action}", f"sub_id: {sub_id}")
+    await _audit(actor, f"sub_{action}",
+                 f"sub_id: {sub_id}" + (", kind: admin" if kind == "admin"
+                                         else ""))
     return web.json_response({"ok": True, "result": res})
 
 
-async def sub_devices(request):
+async def _sub_devices_impl(request, kind: str):
     from aiohttp import web
     try:
         await _require_actor(request)
     except Exception:
         return web.json_response({"error": "no_session"}, status=401)
-    from paidsub.storage import get_paid_sub
     try:
         sub_id = int(request.match_info["sub_id"])
     except (KeyError, ValueError):
         return web.json_response({"error": "bad_id"}, status=400)
-    row = await get_paid_sub(sub_id)
+    if kind == "admin":
+        from adminsub.storage import get_sub
+        row = await get_sub(sub_id)
+    else:
+        from paidsub.storage import get_paid_sub
+        row = await get_paid_sub(sub_id)
     if not row:
         return web.json_response({"error": "not_found"}, status=404)
     svc = _service()
-    res = await svc.list_devices(sub_id)
+    res = await svc.list_devices(sub_id, kind=kind)
+    if not res.get("ok"):
+        return web.json_response({"error": "action_failed",
+                                  "details": str(res.get("error") or "")},
+                                 status=400)
+    return web.json_response(res)
+
+
+async def sub_devices(request):
+    return await _sub_devices_impl(request, "paid")
+
+
+async def admin_sub_devices(request):
+    return await _sub_devices_impl(request, "admin")
+
+
+async def _sub_ips_impl(request, kind: str):
+    """IP-адреса, с которых подписка ходит в панель (по устройствам)."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    try:
+        sub_id = int(request.match_info["sub_id"])
+    except (KeyError, ValueError):
+        return web.json_response({"error": "bad_id"}, status=400)
+    if kind == "admin":
+        from adminsub.storage import get_sub
+        row = await get_sub(sub_id)
+    else:
+        from paidsub.storage import get_paid_sub
+        row = await get_paid_sub(sub_id)
+    if not row:
+        return web.json_response({"error": "not_found"}, status=404)
+    svc = _service()
+    res = await svc.list_ips(sub_id, kind=kind)
     if not res.get("ok"):
         return web.json_response({"error": "action_failed",
                                   "details": str(res.get("error") or "")},
@@ -562,32 +689,18 @@ async def sub_devices(request):
 
 
 async def sub_ips(request):
-    """IP-адреса, с которых подписка ходит в панель (по устройствам)."""
-    from aiohttp import web
-    try:
-        await _require_actor(request)
-    except Exception:
-        return web.json_response({"error": "no_session"}, status=401)
-    from paidsub.storage import get_paid_sub
-    try:
-        sub_id = int(request.match_info["sub_id"])
-    except (KeyError, ValueError):
-        return web.json_response({"error": "bad_id"}, status=400)
-    row = await get_paid_sub(sub_id)
-    if not row:
-        return web.json_response({"error": "not_found"}, status=404)
-    svc = _service()
-    res = await svc.list_ips(sub_id)
-    if not res.get("ok"):
-        return web.json_response({"error": "action_failed",
-                                  "details": str(res.get("error") or "")},
-                                 status=400)
-    return web.json_response(res)
+    return await _sub_ips_impl(request, "paid")
 
 
-async def _sub_device_mutation(request, kind: str):
+async def admin_sub_ips(request):
+    return await _sub_ips_impl(request, "admin")
+
+
+async def _sub_device_mutation(request, kind: str, sub_kind: str = "paid"):
     """Убрать одно устройство / сбросить все: с подтверждением, как
-    остальные разрушительные действия по подписке."""
+    остальные разрушительные действия по подписке. Для админских токен
+    подтверждения выписывается отдельно (admin_…), чтобы его нельзя
+    было применить к платной подписке и наоборот."""
     from aiohttp import web
     actor, err = await _require_mutation(request)
     if err is not None:
@@ -597,24 +710,28 @@ async def _sub_device_mutation(request, kind: str):
     except (KeyError, ValueError):
         return web.json_response({"error": "bad_id"}, status=400)
     body = await _json_body(request)
+    confirm_action = kind if sub_kind == "paid" else f"admin_{kind}"
     token = str(body.get("confirm_token") or "")
     if not token:
         summary = (f"Убрать устройство подписки #{sub_id}"
                    if kind == "sub_device_delete"
                    else f"Сбросить все устройства подписки #{sub_id}")
-        tok = issue_confirm(actor, kind, {"sub_id": sub_id, "body": body},
-                            summary)
+        if sub_kind == "admin":
+            summary += " (админская)"
+        tok = issue_confirm(actor, confirm_action,
+                            {"sub_id": sub_id, "body": body}, summary)
         return confirm_needed_response(tok, summary)
-    payload = take_confirm(actor, token, kind)
+    payload = take_confirm(actor, token, confirm_action)
     if payload is None:
         return web.json_response({"error": "bad_confirm"}, status=403)
     body = payload.get("body") or {}
     svc = _service()
     try:
         if kind == "sub_device_delete":
-            res = await svc.delete_device(sub_id, str(body.get("ref") or ""))
+            res = await svc.delete_device(sub_id, str(body.get("ref") or ""),
+                                          kind=sub_kind)
         else:
-            res = await svc.clear_hwid(sub_id)
+            res = await svc.clear_hwid(sub_id, kind=sub_kind)
     except Exception as ex:
         logging.error("админка: %s #%s: %s", kind, sub_id, ex)
         return web.json_response({"error": "action_failed"}, status=502)
@@ -622,7 +739,7 @@ async def _sub_device_mutation(request, kind: str):
         return web.json_response(
             {"error": "action_failed",
              "details": str(res.get("error") or "")}, status=400)
-    await _audit(actor, kind, f"sub_id: {sub_id}")
+    await _audit(actor, confirm_action, f"sub_id: {sub_id}")
     return web.json_response({"ok": True, "result": res})
 
 
@@ -632,6 +749,14 @@ async def sub_device_delete(request):
 
 async def sub_devices_clear(request):
     return await _sub_device_mutation(request, "sub_devices_clear")
+
+
+async def admin_sub_device_delete(request):
+    return await _sub_device_mutation(request, "sub_device_delete", "admin")
+
+
+async def admin_sub_devices_clear(request):
+    return await _sub_device_mutation(request, "sub_devices_clear", "admin")
 
 
 async def subs_bulk(request):
@@ -716,27 +841,56 @@ async def lte_check_now(request):
 # ── Админские подписки ─────────────────────────────────────────────────────
 
 async def admin_subs_list(request):
+    """Админские подписки: вкладки, сортировка, поиск и счётчики — тот же
+    экран, что handle_admin_subs_menu в ТГ (adminsub/handlers.py):
+    list_subs / admin_counts / search_admin_subs из adminsub/storage.py."""
     from aiohttp import web
     try:
         await _require_actor(request)
     except Exception:
         return web.json_response({"error": "no_session"}, status=401)
-    from adminsub.storage import list_subs
+    from adminsub.storage import admin_counts, list_subs, search_admin_subs
+    from core.database import _expire_to_iso, get_user_info
     try:
         page = max(1, int(request.query.get("page", "1")))
     except ValueError:
+        return web.json_response({"error": "bad_page"}, status=400)
+    scope = (request.query.get("scope") or "all").strip()
+    if scope not in _ADMIN_SCOPES:
+        scope = "all"
+    sort = (request.query.get("sort") or "new").strip()
+    if sort not in _ADMIN_SORTS:
+        sort = "new"
+    q = (request.query.get("q") or "").strip()
+    if q:
+        # Поиск — отдельным экраном, как в ТГ (apply_admin_search):
+        # вкладки и страницы не применяются, найдено — до 20 строк.
+        rows = await search_admin_subs(q)
+        pages = 1
         page = 1
-    rows, pages = await list_subs(page)
-    # list_subs: id, tg_id, email, expire_date, total_gb, created_at.
-    from core.database import _expire_to_iso
-    return web.json_response({"subs": [
-        {"id": r[0], "tg_id": r[1], "email": r[2],
-         "expire_date": _expire_to_iso(r[3]),
-         "total_gb": r[4], "created_at": str(r[5] or "")}
-        for r in rows], "page": page, "pages": pages})
+    else:
+        rows, pages = await list_subs(page, scope, sort)
+        page = min(page, pages)
+    counts = await admin_counts()
+    subs = []
+    for r in rows:
+        first_name, username = None, None
+        if r[1]:
+            info = await get_user_info(r[1])
+            if info:
+                first_name, username = info[1], info[2]
+        subs.append({"id": r[0], "tg_id": r[1], "email": r[2],
+                     "expire_date": _expire_to_iso(r[3]),
+                     "total_gb": r[4], "created_at": str(r[5] or ""),
+                     "first_name": first_name, "username": username})
+    return web.json_response({"subs": subs, "page": page, "pages": pages,
+                              "scope": scope, "sort": sort, "counts": counts})
 
 
 async def admin_sub_card(request):
+    """Живая карточка админской подписки — тот же набор, что у платной
+    (sub_card) и в ТГ (handle_sub_view): состояние в панели, владелец,
+    платежи, обе ссылки (sub + key)."""
     from aiohttp import web
     try:
         await _require_actor(request)
@@ -751,12 +905,51 @@ async def admin_sub_card(request):
     if not row:
         return web.json_response({"error": "not_found"}, status=404)
     from core.database import _expire_to_iso
+    # Живое состояние из панели + владелец: get_sub_card в
+    # paidsub/service.py (раньше карточка была голыми полями базы).
+    panel, user, referrer = {}, None, None
+    try:
+        svc = _service()
+        card = await svc.get_sub_card(sub_id, kind="admin")
+        if card.get("ok"):
+            panel = card.get("panel") or {}
+            user = card.get("user")
+            referrer = card.get("referrer")
+    except Exception:
+        logging.exception("админка: admin_sub_card #%s: панель недоступна",
+                          sub_id)
+    payments = {"items": [], "count": 0, "sum": 0}
+    if row[1]:
+        try:
+            from core.database import user_payments
+            prows, pcount, psum = await user_payments(row[1], 5)
+            payments = {
+                "items": [{"id": r[0], "provider": r[1] or "", "amount": r[2],
+                           "status": r[3], "date": str(r[4] or "")[:16],
+                           "promo": r[5] or ""} for r in prows],
+                "count": pcount, "sum": psum,
+            }
+        except Exception:
+            logging.exception("админка: admin_sub_card #%s: платежи "
+                              "недоступны", sub_id)
+    from config import (SUB_DISPLAY_DOMAIN, SUB_STORED_DOMAIN,
+                        sub_url_for_display, sub_url_with_domain)
+    raw_url = row[5] if len(row) > 5 else ""
     return web.json_response({"subscription": {
         "id": row[0], "tg_id": row[1], "email": row[2], "uuid": row[3],
-        "sub_id": row[4], "sub_url": row[5], "expire_date": _expire_to_iso(row[6]),
+        "sub_id": row[4], "sub_url": row[5],
+        "expire_date": _expire_to_iso(row[6]),
         "limit_ip": row[7], "limit_hwid": row[8], "total_gb": row[9],
-        "created_at": str(row[10] or ""), "lte_gb": row[11] if len(row) > 11 else None,
-        "kind": "admin"}})
+        "created_at": str(row[10] or ""),
+        "lte_gb": row[11] if len(row) > 11 else None,
+        "status": _admin_sub_status(row[6]),
+        "times_renewed": None, "trial_period": None, "kind": "admin"},
+        "panel": panel, "user": user, "referrer": referrer,
+        "payments": payments,
+        "display_url": sub_url_for_display(raw_url),
+        "url_sub": sub_url_with_domain(raw_url, SUB_DISPLAY_DOMAIN),
+        "url_key": sub_url_with_domain(raw_url, SUB_STORED_DOMAIN),
+    })
 
 
 async def admin_sub_create(request):
@@ -909,8 +1102,16 @@ def register(app) -> None:
     app.router.add_get("/admin-subs", admin_subs_list)
     app.router.add_post("/admin-subs", admin_sub_create)
     app.router.add_get("/admin-subs/{sub_id}", admin_sub_card)
+    app.router.add_get("/admin-subs/{sub_id}/history", admin_sub_history)
+    app.router.add_get("/admin-subs/{sub_id}/devices", admin_sub_devices)
+    app.router.add_get("/admin-subs/{sub_id}/ips", admin_sub_ips)
+    app.router.add_post("/admin-subs/{sub_id}/devices/delete",
+                        admin_sub_device_delete)
+    app.router.add_post("/admin-subs/{sub_id}/devices/clear",
+                        admin_sub_devices_clear)
     app.router.add_get("/referrals", referrals_get)
     app.router.add_get("/subs/{sub_id}", sub_card)
+    app.router.add_get("/subs/{sub_id}/history", sub_history)
     for action in ("toggle", "freeze", "delete", "reissue", "extend",
                    "expire", "hwid", "traffic", "lte", "trial"):
         app.router.add_post(

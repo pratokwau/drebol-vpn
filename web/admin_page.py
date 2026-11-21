@@ -132,6 +132,7 @@ button.ghost{background:rgba(255,255,255,.03);color:var(--txt);border:1px solid 
 a.btnlike{display:inline-block;padding:8px 14px;border-radius:10px;background:rgba(255,255,255,.03);color:var(--txt);border:1px solid var(--line2);text-decoration:none;font-size:14px}
 a.btnlike:hover{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.06)}
 button.ghost:hover{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.06)}
+button.ghost.active{background:var(--grad);background-size:160% 100%;color:#050505;border-color:transparent}
 button.danger{background:transparent;color:var(--bad);border:1px solid rgba(248,113,113,.4);box-shadow:none}
 button.danger:hover{border-color:var(--bad);background:rgba(248,113,113,.08)}
 button:disabled{opacity:.55;cursor:default;transform:none}
@@ -386,11 +387,26 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-presets" class="ghost">Показать пресеты</button></div>
           <div id="presets-out"></div>
         </div>
-        <div class="card"><h2>Админские подписки</h2><p class="sub">Подписки, выданные вручную администратором.</p>
+        <div class="card"><h2>Админские подписки</h2><p class="sub">Подписки, выданные вручную администратором. Вкладки и сортировка — как в ТГ, нажми на строку, чтобы открыть карточку со всеми действиями: заморозка, продление, устройства, история.</p>
+          <div class="btnrow" id="asub-tabs" style="flex-wrap:wrap"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input id="asub-q" placeholder="Поиск: имя, @username, email, tg_id" style="flex:1;min-width:200px">
+            <select id="asub-sort" style="width:auto;min-width:150px">
+              <option value="new">Новые сверху</option>
+              <option value="expire">По сроку</option>
+              <option value="name">По имени</option>
+            </select>
+            <button id="btn-asub-search">Найти</button>
+            <button id="btn-asub-refresh" class="ghost">Обновить</button>
+          </div>
+          <div id="asub-table"></div>
+          <div class="btnrow" style="margin-top:10px;align-items:center">
+            <button id="btn-asub-prev" class="ghost">← Назад</button>
+            <span class="mut" id="asub-page-label"></span>
+            <button id="btn-asub-next" class="ghost">Вперёд →</button>
+          </div>
           <input id="asub-tg" type="number" placeholder="tg_id — создать админскую подписку">
-          <div class="btnrow"><button id="btn-asub" class="ghost">Создать админскую подписку</button><button id="btn-asub-list" class="ghost">Список админских</button></div>
-          <input id="asub-id" type="number" placeholder="ID админской подписки — показать карточку">
-          <div class="btnrow"><button id="btn-asub-card" class="ghost">Показать карточку</button></div>
+          <div class="btnrow"><button id="btn-asub" class="ghost">Создать админскую подписку</button></div>
           <div id="asub-out"></div>
         </div>
         <div class="card"><h2>Рефералка</h2><p class="sub">Кто приводит друзей и какие бонусы настроены.</p>
@@ -1329,7 +1345,7 @@ $("btn-fraud-stop").onclick = async function(){
 };
 
 /* --- Подписки: список + редактор --- */
-let subsPage = 1, subsTotalPages = 1, subsLoaded = false, subsCurrentId = null;
+let subsPage = 1, subsTotalPages = 1, subsLoaded = false, subsCurrentId = null, subsCurrentKind = "paid";
 function statusPill(code, label){
   const s = String(code == null ? "" : code).toLowerCase();
   const cls = ["active","paid","ok","success","online","enabled","true","1"].indexOf(s) >= 0 ? "ok"
@@ -1370,7 +1386,52 @@ $("subs-table").addEventListener("click", function(e){
   if (tr) openSubEditor(parseInt(tr.dataset.subId, 10));
 });
 document.querySelector('[data-nav="subs"]').addEventListener("click", function(){
-  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); }
+  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); }
+});
+
+/* --- Админские подписки: список с вкладками --- */
+let asubPage = 1, asubTotalPages = 1, asubScope = "all";
+const ASUB_TABS = {all: ["📋", "Все"], active: ["🟢", "Активные"], soon: ["⏳", "Скоро кончатся"], expired: ["🔴", "Истёкшие"]};
+async function loadAdminSubs(page){
+  const q = encodeURIComponent($("asub-q").value.trim());
+  const sort = $("asub-sort").value;
+  let r;
+  try { r = await api("/admin-subs?page=" + page + "&scope=" + asubScope + "&sort=" + sort + (q ? "&q=" + q : "")); }
+  catch(e) { $("asub-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { $("asub-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  const counts = r.data.counts || {};
+  $("asub-tabs").innerHTML = Object.keys(ASUB_TABS).map(function(k){
+    const c = counts[k];
+    return '<button class="ghost' + (k === asubScope ? " active" : "") + '" data-asub-tab="' + k + '">' + ASUB_TABS[k][0] + " " + ASUB_TABS[k][1] + (c == null ? "" : " · " + c) + "</button>";
+  }).join("");
+  const items = r.data.subs || [];
+  asubPage = r.data.page || page; asubTotalPages = r.data.pages || 1;
+  $("asub-page-label").textContent = "Страница " + asubPage + " из " + asubTotalPages;
+  show("btn-asub-prev", asubPage > 1); show("btn-asub-next", asubPage < asubTotalPages);
+  if (!items.length) { $("asub-table").innerHTML = '<div class="empty"><span class="big">🔍</span>Админских подписок не найдено</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Пользователь</th><th>Логин в панели</th><th>Истекает</th><th>Трафик (лимит)</th><th>Создана</th></tr></thead><tbody>';
+  items.forEach(function(it){
+    const name = esc(it.first_name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "") + (it.tg_id ? ' <span class="mono small">#' + it.tg_id + '</span>' : "");
+    const traf = it.total_gb > 0 ? "до " + it.total_gb + " ГБ" : "безлимит";
+    h += '<tr data-asub-id="' + it.id + '"><td>' + name + '</td><td class="trunc"><span class="mono">' + esc(it.email || "") + '</span></td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td class="num">' + traf + '</td><td><span class="mono">' + fmtDate(it.created_at) + '</span></td></tr>';
+  });
+  $("asub-table").innerHTML = h + '</tbody></table></div>';
+}
+$("btn-asub-search").onclick = function(){ loadAdminSubs(1); };
+$("btn-asub-refresh").onclick = function(){ loadAdminSubs(asubPage); };
+$("asub-q").addEventListener("keydown", function(e){ if (e.key === "Enter") loadAdminSubs(1); });
+$("asub-sort").onchange = function(){ loadAdminSubs(1); };
+$("btn-asub-prev").onclick = function(){ if (asubPage > 1) loadAdminSubs(asubPage - 1); };
+$("btn-asub-next").onclick = function(){ if (asubPage < asubTotalPages) loadAdminSubs(asubPage + 1); };
+$("asub-tabs").addEventListener("click", function(e){
+  const b = e.target.closest("button[data-asub-tab]");
+  if (!b) return;
+  asubScope = b.dataset.asubTab;
+  loadAdminSubs(1);
+});
+$("asub-table").addEventListener("click", function(e){
+  const tr = e.target.closest("tr[data-asub-id]");
+  if (tr) openSubEditor(parseInt(tr.dataset.asubId, 10), "admin");
 });
 
 /* --- Заявки на подписку --- */
@@ -1417,15 +1478,16 @@ $("drawer-close").onclick = closeDrawer;
 $("drawer-overlay").onclick = closeDrawer;
 document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDrawer(); });
 function kvRow(k, v){ return "<dt>" + esc(k) + "</dt><dd>" + v + "</dd>"; }
-async function openSubEditor(id){
+async function openSubEditor(id, kind){
   subsCurrentId = id;
-  $("drawer-title").textContent = "Подписка #" + id;
+  subsCurrentKind = kind || "paid";
+  $("drawer-title").textContent = (subsCurrentKind === "admin" ? "Админская подписка #" : "Подписка #") + id;
   $("drawer-sub").textContent = "Загрузка…";
   $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:18px;width:50%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
   $("drawer-foot").innerHTML = "";
   openDrawer();
   let r;
-  try { r = await api("/subs/" + id); }
+  try { r = await api((subsCurrentKind === "admin" ? "/admin-subs/" : "/subs/") + id); }
   catch(e) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить подписку</p>'; return; }
   if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить подписку</p>'; return; }
   renderSubEditor(r.data);
@@ -1444,7 +1506,7 @@ function renderSubEditor(data){
   const usr = data.user || {};
   const ref = data.referrer || null;
   const pays = data.payments || {items: [], count: 0, sum: 0};
-  $("drawer-title").textContent = "Подписка #" + s.id;
+  $("drawer-title").textContent = (subsCurrentKind === "admin" ? "Админская подписка #" : "Подписка #") + s.id;
   $("drawer-sub").textContent = ((usr.first_name || "") + (usr.username ? " @" + usr.username : "") + " · tg #" + s.tg_id).trim();
   const usedBytes = Number(p.up || 0) + Number(p.down || 0);
   const limitBytes = Number(s.total_gb || 0) * 1073741824;
@@ -1462,7 +1524,8 @@ function renderSubEditor(data){
   h += kvRow("Создана", '<span class="mono">' + esc(String(s.created_at || "").slice(0, 16)) + '</span>');
   h += kvRow("Истекает", '<span class="mono">' + fmtDate(s.expire_date) + '</span>' + leftTxt);
   h += kvRow("Статус", subStatusPill(s.status));
-  h += kvRow("Продлений", s.times_renewed == null ? "—" : s.times_renewed);
+  // Продлений и триал — только у платных: у админских их нет (как в ТГ).
+  if (subsCurrentKind !== "admin") h += kvRow("Продлений", s.times_renewed == null ? "—" : s.times_renewed);
   if (typeof p.enabled !== "undefined") h += kvRow("В панели", p.enabled ? "включена" : "выключена");
   if (p.traffic_ok) {
     let t = fmtBytesAdmin(usedBytes) + (limitBytes > 0 ? " из " + (s.total_gb || 0) + " ГБ" : " · лимит не задан");
@@ -1476,7 +1539,7 @@ function renderSubEditor(data){
   }
   h += kvRow("Устройства", "лимит " + (s.limit_hwid == null ? "—" : s.limit_hwid) + (s.extra_devices ? " (включая купленные: +" + s.extra_devices + ")" : ""));
   h += kvRow("LTE", s.lte_gb == null ? "без лимита" : s.lte_gb + " ГБ");
-  h += kvRow("Триал", s.trial_period == null ? "—" : fmtDays(s.trial_period));
+  if (subsCurrentKind !== "admin") h += kvRow("Триал", s.trial_period == null ? "—" : fmtDays(s.trial_period));
   h += '</dl>';
   if (data.url_sub || data.url_key) {
     h += '<h3>Ссылки подписки</h3>';
@@ -1495,8 +1558,9 @@ function renderSubEditor(data){
   h += '<label>Лимит устройств (HWID)<input id="ed-hwid" type="number" value="' + (s.limit_hwid || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="hwid">Сохранить лимит</button></div>';
   h += '<label>Лимит трафика, ГБ<input id="ed-traffic" type="number" value="' + (s.total_gb || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="traffic">Сохранить лимит</button></div>';
   h += '<label>Лимит LTE, ГБ (пусто — без лимита)<input id="ed-lte" type="number" value="' + (s.lte_gb == null ? "" : s.lte_gb) + '"></label><div class="btnrow"><button class="ghost" data-ed="lte">Сохранить LTE</button></div>';
-  h += '<label>Триал, дней<input id="ed-trial" type="number" value="' + Math.round((s.trial_period || 0) / 86400) + '"></label><div class="btnrow"><button class="ghost" data-ed="trial">Установить триал</button></div>';
+  if (subsCurrentKind !== "admin") h += '<label>Триал, дней<input id="ed-trial" type="number" value="' + Math.round((s.trial_period || 0) / 86400) + '"></label><div class="btnrow"><button class="ghost" data-ed="trial">Установить триал</button></div>';
   h += '<h3>Устройства и подключения</h3><div class="btnrow"><button class="ghost" id="ed-devices">Показать устройства</button><button class="ghost" id="ed-ips">IP-адреса</button></div><div id="ed-devices-out"></div>';
+  h += '<h3>История</h3><div class="btnrow"><button class="ghost" id="ed-history">Показать историю</button></div><div id="ed-history-out"></div>';
   h += '<p class="mut" id="ed-msg" style="margin-top:10px"></p>';
   $("drawer-body").innerHTML = h;
   $("drawer-foot").innerHTML = '<button class="ghost" data-ed="toggle">Вкл / выкл</button><button class="ghost" data-ed="freeze">Заморозить</button><button class="ghost" data-ed="reissue">Перевыпустить</button><button class="danger" data-ed="delete">Удалить</button>';
@@ -1516,12 +1580,42 @@ function renderSubEditor(data){
   });
   $("ed-devices").onclick = loadSubDevices;
   $("ed-ips").onclick = loadSubIps;
+  $("ed-history").onclick = function(){ loadSubHistory(1); };
+}
+let subHistoryPage = 1;
+async function loadSubHistory(page){
+  const out = $("ed-history-out");
+  if (!out) return;
+  out.innerHTML = '<p class="mut">Загрузка…</p>';
+  const prefix = subsCurrentKind === "admin" ? "/admin-subs/" : "/subs/";
+  const r = await api(prefix + subsCurrentId + "/history?page=" + page);
+  if (r.status !== 200) { out.innerHTML = '<p class="err">Не удалось получить историю</p>'; return; }
+  if (r.data.no_tg_id) { out.innerHTML = '<p class="mut">У подписки нет TG ID — истории нет</p>'; return; }
+  const items = r.data.events || [];
+  subHistoryPage = r.data.page || page;
+  const total = r.data.total_pages || 1;
+  let h = "";
+  if (!items.length) h += '<p class="mut">Событий пока не было</p>';
+  else {
+    h += '<div class="tblwrap"><table><thead><tr><th>Когда</th><th>Событие</th><th>Подробности</th></tr></thead><tbody>' +
+      items.map(function(it){
+        return '<tr><td class="mono">' + fmtDate(it.created_at) + '</td><td>' + esc(it.label || it.action || "") + '</td><td class="mut">' + esc(String(it.details || "").slice(0, 140)) + '</td></tr>';
+      }).join("") + '</tbody></table></div>';
+  }
+  if (total > 1) {
+    h += '<div class="btnrow" style="margin-top:8px;align-items:center"><button class="ghost" id="ed-hist-prev"' + (subHistoryPage <= 1 ? " disabled" : "") + '>← Назад</button><span class="mut">Страница ' + subHistoryPage + ' из ' + total + '</span><button class="ghost" id="ed-hist-next"' + (subHistoryPage >= total ? " disabled" : "") + '>Вперёд →</button></div>';
+  }
+  out.innerHTML = h;
+  const pv = $("ed-hist-prev"), nx = $("ed-hist-next");
+  if (pv) pv.onclick = function(){ if (subHistoryPage > 1) loadSubHistory(subHistoryPage - 1); };
+  if (nx) nx.onclick = function(){ if (subHistoryPage < total) loadSubHistory(subHistoryPage + 1); };
 }
 async function loadSubDevices(){
   const out = $("ed-devices-out");
   if (!out) return;
   out.innerHTML = '<p class="mut">Загрузка…</p>';
-  const r = await api("/subs/" + subsCurrentId + "/devices");
+  const prefix = subsCurrentKind === "admin" ? "/admin-subs/" : "/subs/";
+  const r = await api(prefix + subsCurrentId + "/devices");
   if (r.status !== 200 || !r.data.ok) { out.innerHTML = '<p class="err">Не удалось получить устройства</p>'; return; }
   const items = r.data.items || [];
   let h = "";
@@ -1536,14 +1630,16 @@ async function loadSubDevices(){
   out.innerHTML = h;
   out.querySelectorAll("[data-dev-del]").forEach(function(b){
     b.onclick = withSpin(b, async function(){
-      const rr = await postConfirm("/subs/" + subsCurrentId + "/devices/delete", {ref: b.dataset.devDel});
+      const prefix = subsCurrentKind === "admin" ? "/admin-subs/" : "/subs/";
+      const rr = await postConfirm(prefix + subsCurrentId + "/devices/delete", {ref: b.dataset.devDel});
       if (rr.status === 200) { toast("Устройство убрано", "ok"); loadSubDevices(); }
       else toast("Ошибка: " + (rr.data.error || rr.status), "err");
     });
   });
   const clr = $("ed-dev-clear");
   if (clr) clr.onclick = withSpin(clr, async function(){
-    const rr = await postConfirm("/subs/" + subsCurrentId + "/devices/clear", {});
+    const prefix = subsCurrentKind === "admin" ? "/admin-subs/" : "/subs/";
+    const rr = await postConfirm(prefix + subsCurrentId + "/devices/clear", {});
     if (rr.status === 200) { toast("Устройства сброшены", "ok"); loadSubDevices(); }
     else toast("Ошибка: " + (rr.data.error || rr.status), "err");
   });
@@ -1552,7 +1648,8 @@ async function loadSubIps(){
   const out = $("ed-devices-out");
   if (!out) return;
   out.innerHTML = '<p class="mut">Загрузка…</p>';
-  const r = await api("/subs/" + subsCurrentId + "/ips");
+  const prefix = subsCurrentKind === "admin" ? "/admin-subs/" : "/subs/";
+  const r = await api(prefix + subsCurrentId + "/ips");
   if (r.status !== 200 || !r.data.ok) { out.innerHTML = '<p class="err">Не удалось получить IP-адреса</p>'; return; }
   const items = r.data.items || [];
   if (!items.length) { out.innerHTML = '<p class="mut">IP-адресов нет</p>'; return; }
@@ -1563,20 +1660,24 @@ async function loadSubIps(){
 async function subEditorAction(a){
   const id = subsCurrentId;
   let body = {};
-  if (a === "extend") body = {days: parseInt($("ed-days").value || "0", 10)};
-  if (a === "expire") body = {until: $("ed-until").value};
-  if (a === "hwid") body = {limit: parseInt($("ed-hwid").value || "0", 10)};
-  if (a === "traffic") body = {gb: parseInt($("ed-traffic").value || "0", 10)};
-  if (a === "lte") { const v = $("ed-lte").value.trim(); body = v === "" ? {gb: null} : {gb: parseInt(v, 10)}; }
-  if (a === "trial") body = {period_days: parseInt($("ed-trial").value || "0", 10)};
+  // Действия админской подписки идут тем же маршрутом, что у платной,
+  // но с kind="admin" — сервис тогда правит таблицу admin_subs.
+  if (subsCurrentKind === "admin") body.kind = "admin";
+  if (a === "extend") body.days = parseInt($("ed-days").value || "0", 10);
+  if (a === "expire") body.until = $("ed-until").value;
+  if (a === "hwid") body.limit = parseInt($("ed-hwid").value || "0", 10);
+  if (a === "traffic") body.gb = parseInt($("ed-traffic").value || "0", 10);
+  if (a === "lte") { const v = $("ed-lte").value.trim(); body.gb = v === "" ? null : parseInt(v, 10); }
+  if (a === "trial") body.period_days = parseInt($("ed-trial").value || "0", 10);
   const r = await postConfirm("/subs/" + id + "/" + a, body);
   const msg = $("ed-msg");
   if (msg) msg.textContent = r.status === 200 ? "Готово" : ("Ошибка: " + (r.data.error || r.status));
   if (r.status === 200) {
     toast("Подписка обновлена", "ok");
-    const c = await api("/subs/" + id);
+    const c = await api((subsCurrentKind === "admin" ? "/admin-subs/" : "/subs/") + id);
     if (c.status === 200) renderSubEditor(c.data);
     loadSubs(subsPage);
+    if (subsCurrentKind === "admin") loadAdminSubs(asubPage);
   }
 }
 $("btn-bulk").onclick = async function(){
@@ -1614,32 +1715,8 @@ $("btn-asub").onclick = withSpin($("btn-asub"), async function(){
   const r = await api("/admin-subs", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({tg_id: parseInt($("asub-tg").value || "0", 10)})});
   renderOut("asub-out", r.data);
+  if (r.status === 200) loadAdminSubs(1);
 });
-$("btn-asub-list").onclick = async function(){
-  const r = await api("/admin-subs");
-  if (r.status !== 200) { renderOut("asub-out", r.data); return; }
-  const items = r.data.subs || [];
-  if (!items.length) { $("asub-out").innerHTML = '<div class="empty">Админских подписок нет</div>'; return; }
-  let h = '<div class="tblwrap"><table><thead><tr><th>ID</th><th>TG ID</th><th>Логин в панели</th><th>Истекает</th><th>Трафик (лимит)</th><th>Создана</th></tr></thead><tbody>';
-  items.forEach(function(it){
-    h += '<tr><td class="mono">' + it.id + '</td><td class="mono">' + (it.tg_id || "—") + '</td><td class="trunc"><span class="mono">' + esc(it.email || "") + '</span></td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td class="num">' + (it.total_gb > 0 ? "до " + it.total_gb + " ГБ" : "безлимит") + '</td><td><span class="mono">' + fmtDate(it.created_at) + '</span></td></tr>';
-  });
-  $("asub-out").innerHTML = h + "</tbody></table></div>";
-};
-$("btn-asub-card").onclick = async function(){
-  const r = await api("/admin-subs/" + $("asub-id").value);
-  if (r.status !== 200 || !r.data.subscription) { renderOut("asub-out", r.data); return; }
-  const s = r.data.subscription;
-  let h = '<dl class="kv">';
-  h += kvRow("ID", '<span class="mono">' + s.id + '</span>');
-  h += kvRow("TG ID", '<span class="mono">' + (s.tg_id || "—") + '</span>');
-  h += kvRow("Логин в панели", '<span class="mono">' + esc(s.email || "") + '</span>');
-  h += kvRow("Истекает", '<span class="mono">' + fmtDate(s.expire_date) + '</span>');
-  h += kvRow("Трафик (лимит)", s.total_gb > 0 ? "до " + s.total_gb + " ГБ" : "безлимит");
-  h += kvRow("Устройства (лимит)", "до " + ((s.limit_hwid || 0)));
-  if (s.sub_url) h += kvRow("Ссылка подписки", '<span class="mono small">' + esc(s.sub_url) + '</span>');
-  $("asub-out").innerHTML = h + "</dl>";
-};
 $("btn-referrals").onclick = async function(){ const r = await api("/referrals"); renderOut("ref-out", r.data); };
 $("btn-lte").onclick = async function(){ const r = await postConfirm("/subs/lte/check-now", {}); renderOut("ref-out", r.data); };
 
