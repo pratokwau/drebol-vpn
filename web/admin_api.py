@@ -80,7 +80,6 @@ _MORNING_BOOL = {
 _NETCHECK_KEYS = {"domains", "operators", "netcheck_days", "netcheck_last_run"}
 
 _application = None
-_morning_rescheduler = None
 
 # Двухшаговое подтверждение разрушительных действий (DESIGN §4.4):
 # первый POST возвращает confirm_token, второй выполняет действие.
@@ -145,20 +144,7 @@ def set_application(application) -> None:
     _application = application
 
 
-def set_morning_rescheduler(fn) -> None:
-    """Тестовый/альтернативный хук пересборки утренней задачи."""
-    global _morning_rescheduler
-    _morning_rescheduler = fn
-
-
 def _reschedule_morning() -> bool:
-    if _morning_rescheduler is not None:
-        try:
-            _morning_rescheduler()
-        except Exception as ex:
-            logging.error("админка: reschedule morning: %s", ex)
-            return False
-        return True
     if _application is not None:
         try:
             from handlers.morning import schedule_morning_sync
