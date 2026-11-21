@@ -251,6 +251,137 @@ def _actor_tg_id(actor: dict) -> int:
     return int(actor["tg_id"]) if actor["kind"] == "mark" else 0
 
 
+# ── Заявки на подписку ─────────────────────────────────────────────────────
+
+async def subs_requests_list(request):
+    """Ждущие заявки на подписку: тот же экран «📥 Заявки», что в ТГ
+    (handle_paid_requests в paidsub/handlers.py)."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from paidsub.storage import count_pending_requests, list_pending_requests
+    rows = await list_pending_requests()
+    return web.json_response({
+        "requests": [
+            {"tg_id": r[0], "created_at": str(r[1] or "")[:16],
+             "first_name": r[2], "username": r[3]} for r in rows],
+        "count": await count_pending_requests()})
+
+
+async def _subs_request_action(request, action: str):
+    """Одобрить / отклонить заявку: тот же смысл, что handle_approve /
+    handle_reject в ТГ, с подтверждением, как остальные действия по
+    подпискам в вебе.
+
+    Отличие от ТГ сознательное: заявка переводится из pending только
+    после успешного создания подписки — иначе при сбое панели заявка
+    теряется, а подписки у человека нет.
+    """
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    try:
+        tg_id = int(request.match_info["tg_id"])
+    except (KeyError, ValueError):
+        return web.json_response({"error": "bad_id"}, status=400)
+    if tg_id <= 0:
+        return web.json_response({"error": "bad_id"}, status=400)
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        summary = (f"Одобрить заявку на подписку от {tg_id} (выдать триал)"
+                   if action == "approve"
+                   else f"Отклонить заявку на подписку от {tg_id}")
+        tok = issue_confirm(actor, f"sub_request_{action}",
+                            {"tg_id": tg_id}, summary)
+        return confirm_needed_response(tok, summary)
+    payload = take_confirm(actor, token, f"sub_request_{action}")
+    if payload is None or payload.get("tg_id") != tg_id:
+        return web.json_response({"error": "bad_confirm"}, status=403)
+    from paidsub.storage import (add_history, get_paid_sub_by_tg_id,
+                                 get_pending_request, resolve_request)
+    pending = await get_pending_request(tg_id)
+    if not pending:
+        return web.json_response({"error": "request_not_found"}, status=404)
+    bot = get_bot()
+    if action == "reject":
+        await resolve_request(tg_id, "rejected")
+        await add_history(tg_id, "trial_rejected")
+        notified = await _notify_request_user(
+            bot, tg_id,
+            "😕 <b>Запрос на подписку отклонён</b>\n\n"
+            "<i>Если это ошибка — напишите в поддержку, разберёмся.</i>")
+        await _audit(actor, "sub_request_reject", f"tg_id: {tg_id}")
+        return web.json_response({"ok": True, "notified": notified})
+    existing = await get_paid_sub_by_tg_id(tg_id)
+    if existing:
+        await resolve_request(tg_id, "approved")
+        await _audit(actor, "sub_request_approve",
+                     f"tg_id: {tg_id}, already_has_sub")
+        return web.json_response({"ok": True, "already_has_sub": True})
+    svc = _service()
+    try:
+        res = await svc.create_paid_sub(tg_id, trial=True, bot=bot)
+    except Exception as ex:
+        logging.error("админка: request approve %s: %s", tg_id, ex)
+        return web.json_response({"error": "create_failed"}, status=502)
+    if not res.get("ok"):
+        return web.json_response(
+            {"error": "panel_failed",
+             "details": str(res.get("error") or "")}, status=502)
+    await resolve_request(tg_id, "approved")
+    await add_history(tg_id, "trial_approved")
+    # Уведомление юзеру — тот же текст «Подписка готова!», что шлёт
+    # do_create_paid_sub; ссылка — показная, через sub.drbl.tech.
+    notified = False
+    if bot is not None:
+        from config import sub_url_for_display
+        sub_link = sub_url_for_display(res["sub_url"])
+        notified = await _notify_request_user(
+            bot, tg_id,
+            "🎉 <b>Подписка готова!</b>\n\n"
+            f"<blockquote>📅 Действует до: <b>{res['expire'][:16]}</b></blockquote>\n\n"
+            "🔑 <b>Ссылка для подключения</b>\n"
+            f"<code>{sub_link}</code>\n\n"
+            "<i>Нажмите на ссылку — она скопируется — и вставьте её в INCY.</i>")
+    # Реферальный бонус — та же _process_referral_bonus, что в ТГ после
+    # одобрения; сбой бонуса не отменяет выданную подписку, только
+    # фиксируется в ответе.
+    bonus_error = None
+    if bot is not None:
+        try:
+            from types import SimpleNamespace
+            from paidsub.handlers import _process_referral_bonus
+            await _process_referral_bonus(tg_id, SimpleNamespace(bot=bot))
+        except Exception as ex:
+            logging.error("админка: request approve bonus %s: %s", tg_id, ex)
+            bonus_error = f"{type(ex).__name__}: {ex}"
+    await _audit(actor, "sub_request_approve",
+                 f"tg_id: {tg_id}, sub_id: {res['sub_id']}")
+    out = {"ok": True, "notified": notified,
+           "subscription": {"id": res["sub_id"], "email": res["email"],
+                            "expire": res["expire"]}}
+    if bonus_error:
+        out["referral_bonus_error"] = bonus_error
+    return web.json_response(out)
+
+
+async def _notify_request_user(bot, tg_id: int, text: str) -> bool:
+    """Уведомление юзеру в Telegram. False — бота нет или отправка не
+    прошла; действие при этом уже выполнено и не откатывается."""
+    if bot is None:
+        return False
+    try:
+        await bot.send_message(chat_id=tg_id, text=text, parse_mode="HTML")
+    except Exception as ex:
+        logging.error("админка: request notify %s: %s", tg_id, ex)
+        return False
+    return True
+
+
 # ── Подписки: действия ─────────────────────────────────────────────────────
 
 async def subs_list(request):
@@ -769,6 +900,11 @@ def register(app) -> None:
     app.router.add_patch("/subs/presets", subs_presets_patch)
     app.router.add_post("/subs/bulk/{kind}", subs_bulk)
     app.router.add_post("/subs/lte/check-now", lte_check_now)
+    app.router.add_get("/subs/requests", subs_requests_list)
+    app.router.add_post("/subs/requests/{tg_id}/approve",
+                        lambda req: _subs_request_action(req, "approve"))
+    app.router.add_post("/subs/requests/{tg_id}/reject",
+                        lambda req: _subs_request_action(req, "reject"))
     app.router.add_get("/subs", subs_list)
     app.router.add_get("/admin-subs", admin_subs_list)
     app.router.add_post("/admin-subs", admin_sub_create)

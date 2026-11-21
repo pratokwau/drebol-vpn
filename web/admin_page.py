@@ -350,6 +350,11 @@ label.chk input{width:auto;margin:0}
 
       <!-- Подписки -->
       <section id="sec-subs" class="page hidden">
+        <div class="card"><h2>📥 Заявки на подписку</h2><p class="sub">Люди без подписки, которые попросили доступ. Одобрение выдаёт пробный период по пресетам, как кнопка ✅ в ТГ, и уведомляет человека в Telegram. Отклонение — тоже с уведомлением. Оба действия — с подтверждением.</p>
+          <div class="btnrow"><button id="btn-requests" class="ghost">Обновить</button></div>
+          <div id="requests-table"></div>
+          <div id="requests-out"></div>
+        </div>
         <div class="card"><h2>Платные подписки</h2><p class="sub">Все платные подписки. Нажми на строку, чтобы открыть и поменять параметры — изменения сразу уходят в базу бота и в панель Remnawave. Удаление и перевыпуск — с подтверждением.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <input id="subs-q" placeholder="Поиск: имя, @username, email, tg_id" style="flex:1;min-width:200px">
@@ -1365,7 +1370,44 @@ $("subs-table").addEventListener("click", function(e){
   if (tr) openSubEditor(parseInt(tr.dataset.subId, 10));
 });
 document.querySelector('[data-nav="subs"]').addEventListener("click", function(){
-  if (!subsLoaded) { subsLoaded = true; loadSubs(1); }
+  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); }
+});
+
+/* --- Заявки на подписку --- */
+async function loadRequests(){
+  let r;
+  try { r = await api("/subs/requests"); }
+  catch(e) { $("requests-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("requests-table", r.data); return; }
+  const items = r.data.requests || [];
+  if (!items.length) { $("requests-table").innerHTML = '<div class="empty"><span class="big">📥</span>Ждущих заявок нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Человек</th><th>TG ID</th><th>Заявка</th><th></th></tr></thead><tbody>';
+  items.forEach(function(it){
+    const name = esc(it.first_name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "");
+    h += '<tr><td>' + name + '</td><td class="mono">' + it.tg_id + '</td><td class="mono">' + fmtDate(it.created_at) + '</td>'
+      + '<td style="white-space:nowrap"><button class="ghost" data-req-act="approve" data-req-tg="' + it.tg_id + '">✅ Одобрить</button> <button class="ghost" data-req-act="reject" data-req-tg="' + it.tg_id + '">❌ Отклонить</button></td></tr>';
+  });
+  $("requests-table").innerHTML = h + '</tbody></table></div>';
+}
+$("btn-requests").onclick = loadRequests;
+$("requests-table").addEventListener("click", async function(e){
+  const btn = e.target.closest("button[data-req-act]");
+  if (!btn || btn.disabled) return;
+  const tgId = btn.dataset.reqTg, act = btn.dataset.reqAct;
+  btn.disabled = true;
+  try {
+    const r = await postConfirm("/subs/requests/" + tgId + "/" + act, {});
+    if (r.status === 0) return; // отмена подтверждения
+    if (r.status !== 200) { renderOut("requests-out", r.data); return; }
+    if (r.data.already_has_sub) { toast("У человека уже есть подписка", "warn"); }
+    else if (act === "approve") { toast("Триал выдан: " + (r.data.subscription ? r.data.subscription.email : tgId), "ok"); }
+    else { toast("Заявка отклонена", "ok"); }
+    if (r.data.notified === false) { $("requests-out").innerHTML = '<p class="err">Уведомление в Telegram не дошло — проверь, что бот запущен и человек его не заблокировал.</p>'; }
+    else { $("requests-out").innerHTML = ""; }
+    if (r.data.referral_bonus_error) { $("requests-out").innerHTML = '<p class="err">Реферальный бонус не начислился: ' + esc(r.data.referral_bonus_error) + '</p>'; }
+    loadRequests();
+    if (subsLoaded) loadSubs(subsPage);
+  } finally { btn.disabled = false; }
 });
 
 /* --- Редактор записи (drawer) --- */
