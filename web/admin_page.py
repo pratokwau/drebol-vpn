@@ -486,6 +486,11 @@ label.chk input{width:auto;margin:0}
           <h3>Хосты</h3>
           <div id="hosts-table"></div>
         </div>
+        <div class="card"><h2>🏷 Теги подписчиков</h2><p class="sub">Тег стоит у клиента в панели и показывает статус человека. Счётчики — по данным бота. «Применить ко всем» приведёт теги в панели к этим статусам; дальше бот обновляет тег сам при смене статуса: оплата, выдача, истечение, бан и разбан. Применение — только Mark, с подтверждением.</p>
+          <div class="btnrow"><button id="btn-tags" class="ghost">Обновить счётчики</button><button id="btn-tags-apply">Применить ко всем</button></div>
+          <div id="tags-table"></div>
+          <div id="tags-out"></div>
+        </div>
         <div class="card" id="panel-profile-card"><h2>Редактор инбаунда</h2><p class="sub">Меняются только заполненные поля. Приватные ключи и shortId здесь не трогаются.</p>
           <input id="pf-uuid" placeholder="UUID профиля">
           <div class="btnrow"><button id="btn-pf-load" class="ghost">Показать профиль</button></div>
@@ -2111,7 +2116,44 @@ async function loadPanel(){
 }
 $("btn-panel").onclick = loadPanel;
 document.querySelector('[data-nav="panel"]').addEventListener("click", function(){
-  if (!panelLoaded) { panelLoaded = true; loadPanel(); }
+  if (!panelLoaded) { panelLoaded = true; loadPanel(); loadTags(); }
+});
+/* --- Теги подписчиков в панели --- */
+const TAG_ORDER = ["BANNED", "TRIAL", "PAID", "ADMIN", "EXPIRED"];
+async function loadTags(){
+  let r;
+  try { r = await api("/panel/tags"); }
+  catch(e) { $("tags-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("tags-table", r.data); return; }
+  const counts = r.data.counts || {}, labels = r.data.labels || {};
+  let h = '<div class="tblwrap"><table><thead><tr><th>Тег</th><th class="num">Людей</th></tr></thead><tbody>';
+  TAG_ORDER.forEach(function(t){
+    h += '<tr><td>' + esc(labels[t] || t) + '</td><td class="num">' + (counts[t] == null ? "—" : counts[t]) + '</td></tr>';
+  });
+  h += '<tr><td><b>Всего</b></td><td class="num"><b>' + (counts.total == null ? "—" : counts.total) + '</b></td></tr>';
+  h += '</tbody></table></div>';
+  $("tags-table").innerHTML = h;
+}
+$("btn-tags").onclick = loadTags;
+$("btn-tags-apply").onclick = withSpin($("btn-tags-apply"), async function(){
+  const r = await postConfirm("/panel/tags/apply", {});
+  if (r.status !== 200) { renderOut("tags-out", r.data); return; }
+  const rep = r.data.report || {}, counts = rep.counts || {};
+  let h = '<div class="tblwrap"><table><thead><tr><th>Итог прогона</th><th class="num"></th></tr></thead><tbody>';
+  h += '<tr><td>Обработано людей</td><td class="num">' + (rep.people == null ? "—" : rep.people) + '</td></tr>';
+  TAG_ORDER.forEach(function(t){
+    h += '<tr><td>' + esc(t) + '</td><td class="num">' + (counts[t] == null ? "—" : counts[t]) + '</td></tr>';
+  });
+  h += '<tr><td>Клиентов обновлено</td><td class="num">' + (rep.updated == null ? "—" : rep.updated) + '</td></tr>';
+  h += '<tr><td>Без изменений</td><td class="num">' + (rep.unchanged == null ? "—" : rep.unchanged) + '</td></tr>';
+  h += '<tr><td>Ошибок</td><td class="num">' + (rep.errors == null ? "—" : rep.errors) + '</td></tr>';
+  h += '</tbody></table></div>';
+  if (rep.error_samples && rep.error_samples.length) {
+    h += '<p class="err">Первые ошибки: ' + esc(rep.error_samples.join("; ")) + '</p>';
+  }
+  $("tags-out").innerHTML = h;
+  toast("Теги применены", "ok");
+  loadTags();
 });
 $("btn-yandex").onclick = async function(){ const r = await api("/yandex"); renderOut("panel-out", r.data); };
 /* --- Основные ссылки: справка по адресам проекта ---

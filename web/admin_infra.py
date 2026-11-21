@@ -32,6 +32,7 @@ from handlers import morning as morning_mod
 from handlers import netcheck as netcheck_mod
 from services import globalping as gp_mod
 from services import panel as panel_mod
+from services import panel_tags as tags_mod
 from services import remnawave as rw_mod
 from web import site_deploy as site_mod
 from web.admin_api import (
@@ -227,6 +228,57 @@ async def panel_sync_settings_get(request):
     return web.json_response({"settings": _panel_sync_settings_snapshot()})
 
 
+# ── Теги подписчиков в панели ────────────────────────────────────────────────
+
+async def panel_tags_get(request):
+    """Счётчики тегов подписчиков — по данным бота, без запросов в панель.
+    Только чтение. Паритет с «🏷 Теги подписчиков» в ТГ-меню Remnawave."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    try:
+        counts = await tags_mod.tag_counters()
+    except Exception as ex:
+        logging.error("админка: panel_tags_get: %s", ex)
+        return _json_error("tags_failed", 502)
+    return web.json_response({"counts": counts, "labels": tags_mod.TAG_LABELS})
+
+
+async def panel_tags_apply(request):
+    """Применить теги всем подписчикам (как «🏷 Применить ко всем» в ТГ).
+    Только Mark, с подтверждением: массовая правка клиентов панели."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        return confirm_needed_response(
+            issue_confirm(actor, "panel_tags_apply", {},
+                          "Применить теги всем подписчикам в панели?"),
+            "Применить теги всем подписчикам в панели?")
+    payload = take_confirm(actor, token, "panel_tags_apply")
+    if payload is None:
+        return _json_error("bad_confirm", 403)
+    try:
+        res = await tags_mod.apply_all_tags()
+    except Exception as ex:
+        logging.error("админка: panel_tags_apply: %s", ex)
+        return _json_error("tags_failed", 502)
+    report = dict(res)
+    report["error_samples"] = [_scrub(str(s))
+                               for s in (res.get("error_samples") or [])]
+    await _audit(actor, "panel_tags_apply",
+                 f"people={res.get('people', 0)} "
+                 f"updated={res.get('updated', 0)} "
+                 f"errors={res.get('errors', 0)}")
+    return web.json_response({"ok": True, "report": report})
+
+
 # ── Логи ─────────────────────────────────────────────────────────────────────
 
 # Человеческие подписи действий веб-админки (в журнале они admin:<имя>)
@@ -256,6 +308,7 @@ _ADMIN_LABELS = {
     "panel_settings": "⚙️ Настройки панели", "panel_settings_test": "🔌 Проверка панели",
     "links_update": "🔗 Основные ссылки",
     "panel_sync": "🔄 Синхронизация с панелью", "panel_sync_settings": "🔄 Настройки синхронизации",
+    "panel_tags_apply": "🏷 Применил теги всем",
     "payment_refund": "💸 Оформил возврат", "platega_update": "💳 Настройки Platega",
     "promo_batch": "🎁 Пакетная раздача промокодов", "promo_create": "🎁 Создал промокод",
     "promo_delete": "🗑 Удалил промокод", "promo_toggle": "🎁 Вкл/выкл промокода",
@@ -2231,6 +2284,8 @@ def register(app) -> None:
     app.router.add_get("/nodes/{node_id}/users", node_users)
     app.router.add_post("/panel-sync", panel_sync_run)
     app.router.add_get("/panel-sync/settings", panel_sync_settings_get)
+    app.router.add_get("/panel/tags", panel_tags_get)
+    app.router.add_post("/panel/tags/apply", panel_tags_apply)
     app.router.add_get("/logs", logs_get)
     app.router.add_get("/logs/export", logs_export)
     app.router.add_post("/logs/purge", logs_purge)
