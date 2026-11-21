@@ -219,6 +219,12 @@ async def profile(tg_id: int) -> dict:
     from core.database import get_login_info
     login_email, has_password = await get_login_info(tg_id)
     out["login"] = {"email": login_email or "", "has_password": bool(has_password)}
+    # Ссылка на бота поддержки — чтобы из кабинета было куда обратиться
+    try:
+        from handlers.support import support_bot_url
+        out["support_url"] = support_bot_url()
+    except Exception:
+        out["support_url"] = ""
     # Рефералка не зависит от подписки: её видно и без неё
     try:
         from paidsub.storage import get_referral_stats
@@ -714,6 +720,47 @@ def build_app():
                         if pending and pending[8] else None),
         })
 
+    async def promo_apply(request):
+        """Ввод промокода в кабинете — та же валидация, что в боте.
+        Код сохраняется как pending: скидку подхватит _renew_quote,
+        а при оплате промокод отметится использованным, как в боте."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from features.blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        code = str(body.get("code") or "").strip()
+        if not code or len(code) > 64:
+            return web.json_response({"error": "bad_code"}, status=400)
+        from paidsub.handlers import validate_promo
+        from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if not row:
+            return web.json_response({"error": "no_sub"}, status=404)
+        promo, err = await validate_promo(code, tg_id)
+        if not promo:
+            return web.json_response(
+                {"error": "promo_invalid", "message": err or ""}, status=422)
+        await update_paid_sub_field(row[0], "pending_promo", promo[1])
+        return web.json_response(
+            {"ok": True, "code": promo[1], "percent": int(promo[2])})
+
+    async def promo_remove(request):
+        """Снять висящий промокод, чтобы продление считалось без скидки."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from paidsub.storage import get_paid_sub_by_tg_id, update_paid_sub_field
+        row = await get_paid_sub_by_tg_id(tg_id)
+        if row:
+            await update_paid_sub_field(row[0], "pending_promo", None)
+        return web.json_response({"ok": True})
+
     async def renew(request):
         """Создаёт счёт за продление — тот же счёт Platega, что и в боте.
         Повторное нажатие на тот же тариф не плодит счета: возвращается
@@ -927,6 +974,8 @@ def build_app():
     app.router.add_post("/api/device/delete", device_delete)
     app.router.add_post("/api/reissue", reissue)
     app.router.add_get("/api/renew-options", renew_options)
+    app.router.add_post("/api/promo/apply", promo_apply)
+    app.router.add_post("/api/promo/remove", promo_remove)
     app.router.add_post("/api/renew", renew)
     app.router.add_get("/api/payment", payment_status)
     app.router.add_post("/api/webhooks/platega", platega_webhook)

@@ -899,6 +899,7 @@ body.tg-fullscreen .tabs { top:96px; }
 
    out.push('<div class="stack" style="margin-top:6px">' +
             '<button class="btn btn-ghost" type="button" onclick="load()">' + ICON.refresh + "Обновить данные</button>" +
+            (p.support_url ? '<a class="btn btn-ghost" href="' + esc(p.support_url) + '">🛟 Поддержка</a>' : "") +
             '<a class="btn btn-ghost" href="' + botUrl() + '">' +
             ICON.tg + "Открыть бота</a></div>");
    document.getElementById("body").innerHTML = '<div class="tabs" id="tabs" role="tablist"></div><div class="breadcrumb" id="breadcrumb"></div>' + out.join("");
@@ -1155,7 +1156,13 @@ body.tg-fullscreen .tabs { top:96px; }
      var html = "";
      if (d.promo) {
        html += '<p class="card-sub">🎟 Промокод ' + esc(d.promo.code) + " (−" +
-               esc(d.promo.percent) + "%) уже учтён в цене.</p>";
+               esc(d.promo.percent) + "%) уже учтён в цене. " +
+               '<a href="#" onclick="removePromo();return false" style="color:var(--ink)">Убрать</a></p>';
+     } else {
+       html += '<div style="display:flex;gap:8px;align-items:flex-end;margin:4px 0 10px">' +
+               '<label class="field" style="flex:1;margin:0">Промокод' +
+               '<input type="text" id="promo-input" placeholder="Введите код" autocomplete="off"></label>' +
+               '<button class="btn btn-ghost" type="button" onclick="applyPromo()">Применить</button></div>';
      }
      if (d.devices && d.devices.count && d.devices.price) {
        html += '<p class="card-sub">В цену включены ваши места: ' + esc(d.devices.count) +
@@ -1183,6 +1190,32 @@ body.tg-fullscreen .tabs { top:96px; }
    }).catch(function () {
      body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
    });
+ }
+ // Промокод при продлении: валидация и скидка — те же, что в боте;
+ // применённый код становится pending и учитывается в ценах тарифов.
+ function applyPromo() {
+   var inp = document.getElementById("promo-input");
+   var code = inp ? inp.value.trim() : "";
+   if (!code) { toast("Введите промокод"); return; }
+   api("/api/promo/apply", {method: "POST", body: JSON.stringify({code: code})})
+     .then(function (r) {
+       if (r.status === 200) {
+         toast("Промокод применён: −" + r.data.percent + "%");
+         haptic();
+         loadRenew();
+         return;
+       }
+       haptic("error");
+       var msg = (r.data && r.data.message)
+         ? String(r.data.message).replace(/^❌\s*/, "") : "Промокод не подошёл.";
+       toast(msg);
+     })
+     .catch(function () { haptic("error"); toast("Не получилось — попробуйте позже."); });
+ }
+ function removePromo() {
+   api("/api/promo/remove", {method: "POST", body: "{}"})
+     .then(function () { toast("Промокод убран"); loadRenew(); })
+     .catch(function () { loadRenew(); });
  }
  function renewPay(tariffId) {
    var body = document.getElementById("renew-body");
