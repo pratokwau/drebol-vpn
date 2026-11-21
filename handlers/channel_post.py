@@ -162,7 +162,7 @@ def _menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✍️ Новый пост", callback_data="chpost_new")],
         [InlineKeyboardButton("✒️ Подпись", callback_data="chpost_sign_view")],
-        [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
+        [InlineKeyboardButton("◀️ Канал", callback_data="channel_menu")],
     ])
 
 
