@@ -55,8 +55,8 @@ def channel_target(cfg: dict | None = None):
         except (TypeError, ValueError):
             pass
     from core.subscription import extract_channel_username
-    username = extract_channel_username(cfg.get("channel_url") or "")
-    return f"@{username}" if username else None
+    # extract_channel_username возвращает уже с «@» — второй не добавляем
+    return extract_channel_username(cfg.get("channel_url") or "")
 
 
 def get_signature() -> str:
