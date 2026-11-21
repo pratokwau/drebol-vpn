@@ -2380,23 +2380,6 @@ def pay_redirect_urls() -> dict:
     }
 
 
-def doc_page_urls() -> dict:
-    """Адреса документов Сервиса на сайте.
-
-    Пусто, если домен не задан.
-    """
-    base = site_url().rstrip("/")
-    if not base:
-        return {}
-    return {
-        "privacy": f"{base}/privacy/",
-        "terms": f"{base}/terms/",
-        "refund": f"{base}/refund/",
-        "rules": f"{base}/rules/",
-        "consent": f"{base}/consent/",
-    }
-
-
 def doc_url(kind: str) -> str:
     """Действующая ссылка на документ Сервиса.
 
