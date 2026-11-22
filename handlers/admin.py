@@ -86,16 +86,18 @@ async def handle_dashboard(query):
     panel = await count_panel_clients()
     if panel.get("success"):
         p_total, p_paid, p_other = panel["total"], panel["paid"], panel["other"]
-        if p_total == db_all and p_paid == db_paid:
+        p_service = panel.get("service", 0)
+        if p_paid == db_paid and p_other == db_admin:
             sync_line = "✅ База и панель совпадают"
         else:
             sync_line = (
                 f"⚠️ Расхождение: платных {p_paid} vs {db_paid} · "
                 f"прочих {p_other} vs {db_admin}"
             )
+        service_note = f" · служебных {p_service}" if p_service else ""
         panel_block = (
             "🖥 <b>Панель</b>\n<blockquote>"
-            f"Клиентов в панели: <b>{p_total}</b>  (платных {p_paid} · прочих {p_other})\n"
+            f"Клиентов в панели: <b>{p_total}</b>  (платных {p_paid} · прочих {p_other}{service_note})\n"
             f"Записей в базе: <b>{db_all}</b>  (платных {db_paid} · админских {db_admin})\n"
             f"{sync_line}</blockquote>\n\n"
         )

@@ -477,8 +477,12 @@ async def count_panel_clients() -> dict:
     users = await rw.all_users()
     names = {u.get("username") for u in users if u.get("username")}
     paid = sum(1 for n in names if n.startswith("paid_"))
+    # Служебные клиенты мостов (bridge-ro/fi/se/de): живут только в панели,
+    # записей в базе бота у них нет и быть не должно — в сверку не идут.
+    service = sum(1 for n in names if n.startswith("bridge-"))
     total = len(names)
-    return {"success": True, "total": total, "paid": paid, "other": total - paid}
+    return {"success": True, "total": total, "paid": paid,
+            "other": total - paid - service, "service": service}
 
 
 async def get_client_states() -> dict:
