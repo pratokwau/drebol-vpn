@@ -825,6 +825,15 @@ label.chk input{width:auto;margin:0}
           <button id="btn-ss-save" class="ghost">Сохранить настройки поддержки</button>
           <div id="ss-out"></div>
         </div>
+        <div class="card"><h2>🤖 Бот поддержки</h2><p class="sub">Второй бот, который ведёт темы обращений. Токен берётся у @BotFather — после сохранения сервис бота перезапускается сам. Сам токен нигде не показывается.</p>
+          <div id="sb-status" class="mut"></div>
+          <div id="sb-stats" class="mut"></div>
+          <div id="sb-form">
+            <input id="sb-token" type="password" placeholder="токен бота из @BotFather" autocomplete="off">
+            <div class="btnrow"><button id="btn-sb-save" class="ghost">Сохранить токен</button></div>
+          </div>
+          <div id="sb-out"></div>
+        </div>
       </section>
 
       <!-- Настройки -->
@@ -3209,6 +3218,15 @@ async function loadSupportSettings(){
   const st = r.data.settings || {};
   $("ss-group").value = st.support_group_id || "";
   $("ss-log").value = st.log_channel_id || "";
+  const sb = $("sb-status");
+  if (sb) {
+    sb.innerHTML = st.token_set
+      ? "Токен задан" + (st.support_bot_username ? " — <b>@" + esc(st.support_bot_username) + "</b>" : "")
+      : "Токен не задан — бот поддержки не запущен";
+    const s = st.stats || {};
+    $("sb-stats").textContent = "📊 Открытых тем: " + (s.open_topics || 0) + " · новых вчера: " + (s.new_yesterday || 0) + " · закрыто всего: " + (s.closed_total || 0);
+    if (!st.is_mark) $("sb-form").innerHTML = '<p class="mut">Токен меняет только Mark.</p>';
+  }
 }
 $("btn-ss-save").onclick = async function(){
   const r = await api("/support/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
@@ -3217,6 +3235,17 @@ $("btn-ss-save").onclick = async function(){
   if (r.status === 200) { toast("Настройки поддержки сохранены", "ok"); $("ss-out").innerHTML = ""; loadSupportSettings(); }
   else renderOut("ss-out", r.data);
 };
+$("btn-sb-save").onclick = withSpin($("btn-sb-save"), async function(){
+  const r = await postConfirm("/support/token", {token: $("sb-token").value});
+  if (r.status === 200) {
+    toast("Токен бота поддержки сохранён", "ok");
+    $("sb-token").value = "";
+    $("sb-out").innerHTML = r.data.service_ok
+      ? "✅ Сервис drebol-support-bot запущен"
+      : '<p class="err">⚠️ Сервис не запустился сам: ' + esc(r.data.service_detail || "ошибка") + ". Запусти вручную: systemctl restart drebol-support-bot.</p>";
+    loadSupportSettings();
+  } else if (r.status) renderOut("sb-out", r.data);
+});
 $("btn-helper-add").onclick = async function(){
   const r = await api("/helpers/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({tg_id: parseInt($("helper-tg").value || "0", 10)})});

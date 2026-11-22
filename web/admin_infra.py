@@ -18,6 +18,7 @@ import base64
 import copy
 import logging
 import os
+import re
 import subprocess
 from datetime import datetime
 from types import SimpleNamespace
@@ -329,6 +330,7 @@ _ADMIN_LABELS = {
     "subs_presets_update": "⚙️ Пресеты подписок",
     "support_close": "💬 Закрыл обращение", "support_reply": "💬 Ответил в поддержке",
     "support_settings": "💬 Настройки поддержки",
+    "support_token": "🤖 Токен бота поддержки",
     "tariff_create": "🏷 Создал тариф", "tariff_delete": "🗑 Удалил тариф",
     "tariff_update": "🏷 Изменил тариф",
     "user_dm": "✉️ Написал пользователю", "user_gift": "🎁 Подарил подписку",
@@ -1944,12 +1946,31 @@ def _support_settings_snapshot() -> dict:
     }
 
 
+async def _support_settings_full(actor) -> dict:
+    """Снапшот экрана поддержки — как handle_support_group_settings
+    в ТГ: группа, лог-канал, токен (только факт + юзернейм, сам
+    токен никогда не возвращается) и статистика support_stats."""
+    from config import load_config
+    from core.database import support_stats
+    cfg = load_config()
+    try:
+        stats = await support_stats()
+    except Exception:
+        stats = {"open_topics": 0, "new_yesterday": 0, "closed_total": 0}
+    snap = _support_settings_snapshot()
+    snap["token_set"] = bool(cfg.get("support_bot_token"))
+    snap["support_bot_username"] = cfg.get("support_bot_username") or None
+    snap["stats"] = stats
+    snap["is_mark"] = bool(require_mark(actor))
+    return snap
+
+
 async def support_settings_get(request):
     try:
-        await _require_actor(request)
+        actor = await _require_actor(request)
     except Exception:
         return _json_error("no_session", 401)
-    return web.json_response({"settings": _support_settings_snapshot()})
+    return web.json_response({"settings": await _support_settings_full(actor)})
 
 
 async def support_settings_patch(request):
@@ -1980,6 +2001,97 @@ async def support_settings_patch(request):
                  "keys: " + ", ".join(sorted(clean)))
     return web.json_response({"ok": True,
                               "settings": _support_settings_snapshot()})
+
+
+# ── Токен бота поддержки ─────────────────────────────────────────────────────
+
+_SUPPORT_TOKEN_RE = re.compile(r"\d{5,}:[A-Za-z0-9_-]{30,}")
+
+
+async def _support_bot_username(token: str):
+    """Юзернейм бота по токену — как в handlers/messages.py
+    (AWAITING_SUPPORT_TOKEN): getMe, None если Telegram не ответил."""
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession() as _s:
+            async with _s.get(
+                    f"https://api.telegram.org/bot{token}/getMe",
+                    timeout=aiohttp.ClientTimeout(total=15)) as _r:
+                _d = await _r.json()
+                if _d.get("ok"):
+                    return _d["result"].get("username")
+    except Exception:
+        return None
+    return None
+
+
+async def support_token_set(request):
+    """Сохранить токен бота поддержки (как ввод токена в ТГ-админке).
+    Только Mark: смена токена переводит поддержку на другого бота
+    и перезапускает сервис drebol-support-bot.
+    Подтверждение: первый POST валидирует токен и узнаёт юзернейм
+    через getMe, второй (с confirm_token) сохраняет и запускает
+    сервис. Токен в confirm-payload не хранится — второй запрос
+    присылает его заново в теле и валидируется повторно; в ответ,
+    логи и аудит попадает только юзернейм, никогда сам токен."""
+    from config import atomic_update
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    body = await _json_body(request)
+    raw = body.get("token")
+    if not isinstance(raw, str) or not _SUPPORT_TOKEN_RE.fullmatch(raw.strip()):
+        return _json_error("bad_token")
+    token = raw.strip()
+    confirm_token = body.get("confirm_token") or ""
+    if not confirm_token:
+        username = await _support_bot_username(token)
+        if username:
+            summary = (f"Сохранить токен бота поддержки @{username}? "
+                       "Сервис drebol-support-bot перезапустится.")
+        else:
+            summary = ("Токен похож на настоящий, но Telegram не подтвердил "
+                       "юзернейм (не ответил). Сохранить всё равно? Сервис "
+                       "drebol-support-bot перезапустится.")
+        return confirm_needed_response(
+            issue_confirm(actor, "support_token", {}, summary), summary)
+    if take_confirm(actor, confirm_token, "support_token") is None:
+        return _json_error("bad_confirm", 403)
+    username = await _support_bot_username(token)
+
+    def _apply(cfg):
+        cfg["support_bot_token"] = token
+        if username:
+            cfg["support_bot_username"] = username
+    atomic_update(_apply)
+    # Сначала сохранить, потом запускать: сервис читает токен из
+    # config.json при старте — как в handlers/messages.py.
+    ok, detail = True, "active"
+    try:
+        from services.support_service import ensure_support_bot_running
+        ok, detail = await ensure_support_bot_running()
+    except Exception as ex:
+        ok, detail = False, f"{type(ex).__name__}: {ex}"
+    bot = get_bot()
+    if bot is not None:
+        try:
+            from core.log_channel import send_log
+            await send_log(bot, "🤖 Бот поддержки: токен сохранён"
+                           + (f" (@{username})" if username else "")
+                           + (" — сервис запущен" if ok
+                              else " — сервис НЕ запустился"))
+        except Exception as ex:
+            logging.error("админка: support_token send_log: %s", ex)
+    await _audit(actor, "support_token",
+                 f"username=@{username}" if username else "username=?")
+    snap = await _support_settings_full(actor)
+    return web.json_response({
+        "ok": True, "service_ok": bool(ok),
+        "service_detail": "" if ok else str(detail),
+        "settings": snap})
 
 
 # ── Техработы и функции ──────────────────────────────────────────────────────
@@ -2502,6 +2614,7 @@ def register(app) -> None:
     app.router.add_post("/panel/settings/test", panel_settings_test)
     app.router.add_get("/support/settings", support_settings_get)
     app.router.add_patch("/support/settings", support_settings_patch)
+    app.router.add_post("/support/token", support_token_set)
     app.router.add_post("/git-update", git_update)
     app.router.add_get("/backup/export", backup_export)
     app.router.add_post("/backup/restore", backup_restore)
