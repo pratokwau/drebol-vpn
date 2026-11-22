@@ -472,6 +472,23 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-bc-preview" class="ghost">Предпросмотр</button><button id="btn-bc-send">Отправить</button></div>
           <div id="bc-out" class="mut"></div>
         </div>
+        <div class="card"><h2>📢 Пост в ТГ-канал</h2><p class="sub">Публикация в канал — как кнопка «Пост в ТГК» в админке бота: текст с подписью, фото и кнопки из меню /start. Сначала предпросмотр, потом публикация с подтверждением.</p>
+          <div id="ch-status" class="mut">Загрузка…</div>
+          <textarea id="ch-text" placeholder="текст поста (HTML: b, i, a href, code, blockquote)"></textarea>
+          <label>Фото (необязательно, до 10 МБ каждое — можно несколько; альбом из 2+ фото уйдёт без кнопок)</label>
+          <input id="ch-photo" type="file" accept="image/*" multiple>
+          <div class="btnrow"><button id="btn-ch-upload" class="ghost">Загрузить фото</button><span id="ch-photo-msg" class="mut"></span></div>
+          <div id="ch-photos" class="mut"></div>
+          <label class="chk"><input id="ch-use-sign" type="checkbox" checked> Добавлять подпись к посту</label>
+          <div id="ch-buttons"></div>
+          <div class="btnrow"><button id="btn-ch-preview" class="ghost">👀 Предпросмотр</button><button id="btn-ch-publish">🚀 Опубликовать</button></div>
+          <div id="ch-out" class="mut"></div>
+          <h3>Подпись к постам</h3>
+          <p class="sub">Дописывается в конец каждого поста. Та же подпись, что в админке бота.</p>
+          <textarea id="ch-sign" placeholder="текст подписи (HTML)"></textarea>
+          <div class="btnrow"><button id="btn-ch-sign-save" class="ghost">Сохранить подпись</button><button id="btn-ch-sign-del" class="danger">Убрать подпись</button></div>
+          <div id="ch-sign-out" class="mut"></div>
+        </div>
       </section>
 
       <!-- Промокоды -->
@@ -2027,6 +2044,92 @@ $("btn-bc-send").onclick = async function(){
   $("bc-out").textContent = r.status === 200 ? "Рассылка запущена" : ("Ошибка: " + (r.data.error || r.status));
   if (r.status === 200) { bcPhoto = ""; toast("Рассылка запущена", "ok"); }
 };
+/* --- Пост в ТГ-канал --- */
+let chPhotos = [], chButtonsSel = [], chButtonsDef = [], channelLoaded = false;
+function chPayload(){
+  return {text: $("ch-text").value, photos: chPhotos.slice(),
+    buttons: chButtonsSel.slice(), use_sign: $("ch-use-sign").checked};
+}
+function renderChPhotos(){
+  $("ch-photos").innerHTML = chPhotos.length ? chPhotos.map(function(fid, i){
+    return '<div>🖼 Фото ' + (i + 1) + ' <span class="mono">' + esc(fid.slice(0, 12)) + '…</span> <button class="ghost" data-ch-del="' + i + '">✕</button></div>';
+  }).join("") : "";
+  $("ch-photos").querySelectorAll("[data-ch-del]").forEach(function(b){
+    b.onclick = function(){ chPhotos.splice(parseInt(b.dataset.chDel, 10), 1); renderChPhotos(); };
+  });
+}
+async function loadChannel(){
+  let r;
+  try { r = await api("/channel"); }
+  catch(e) { $("ch-status").textContent = "Ошибка загрузки"; return; }
+  if (r.status !== 200) { $("ch-status").textContent = "Ошибка: " + (r.data.error || r.status); return; }
+  const d = r.data;
+  $("ch-status").innerHTML = d.channel
+    ? ("Канал: <b>" + esc(d.channel) + "</b>" + (d.signature_plain ? " · подпись: <i>" + esc(d.signature_plain.slice(0, 80)) + "</i>" : " · подпись не задана"))
+    : "⚠️ Канал не настроен — задайте ссылку на канал в Настройках (channel_url).";
+  $("ch-sign").value = d.signature || "";
+  chButtonsDef = d.buttons || [];
+  let h = "";
+  chButtonsDef.forEach(function(b){
+    h += '<label class="chk"><input type="checkbox" data-ch-btn="' + esc(b.key) + '"' + (chButtonsSel.indexOf(b.key) >= 0 ? " checked" : "") + '> ' + esc(b.label) + '</label>';
+  });
+  $("ch-buttons").innerHTML = h || "";
+  $("ch-buttons").querySelectorAll("[data-ch-btn]").forEach(function(cb){
+    cb.onchange = function(){
+      const k = cb.dataset.chBtn;
+      if (cb.checked) { if (chButtonsSel.indexOf(k) < 0) chButtonsSel.push(k); }
+      else chButtonsSel = chButtonsSel.filter(function(x){ return x !== k; });
+    };
+  });
+}
+document.querySelector('[data-nav="broadcast"]').addEventListener("click", function(){
+  if (!channelLoaded) { channelLoaded = true; loadChannel(); }
+});
+$("btn-ch-upload").onclick = withSpin($("btn-ch-upload"), async function(){
+  const files = $("ch-photo").files;
+  if (!files.length) { $("ch-photo-msg").textContent = "Выберите файл"; return; }
+  let ok = 0, lastErr = "";
+  for (let i = 0; i < files.length; i++) {
+    const fd = new FormData(); fd.append("photo", files[i]);
+    const r = await fetch(API + "/channel/post/upload", {method: "POST", credentials: "same-origin", headers: {"X-CSRF-Token": csrf()}, body: fd});
+    let data = {}; try { data = await r.json(); } catch(e) {}
+    if (r.status === 200 && data.photo_file_id) { chPhotos.push(data.photo_file_id); ok++; }
+    else lastErr = data.error || r.status;
+  }
+  renderChPhotos();
+  $("ch-photo-msg").textContent = ok ? ("Загружено фото: " + ok + (lastErr ? (" · ошибка: " + lastErr) : "")) : ("Ошибка: " + lastErr);
+});
+$("btn-ch-preview").onclick = withSpin($("btn-ch-preview"), async function(){
+  const r = await api("/channel/post/preview", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(chPayload())});
+  if (r.status !== 200) { $("ch-out").textContent = "Ошибка: " + (r.data.error || r.status); return; }
+  const d = r.data;
+  let h = "Фото: " + d.photos + " · кнопок: " + (d.buttons || []).length + " · подпись: " + (d.signature_on ? "да" : "нет");
+  if (d.album) h += "\n⚠️ Альбом из нескольких фото — кнопки в канал не попадут.";
+  if (d.caption_split) h += "\n⚠️ Текст длиннее подписи к фото — уйдёт отдельным сообщением после фото.";
+  h += "\n\n" + d.text;
+  if (d.preview_sent) h += "\n\n✅ Предпросмотр отправлен вам в Telegram.";
+  else if (d.preview_error) h += "\n\n⚠️ Живой предпросмотр не отправлен: " + d.preview_error;
+  $("ch-out").innerText = h;
+});
+$("btn-ch-publish").onclick = withSpin($("btn-ch-publish"), async function(){
+  const r = await postConfirm("/channel/post/publish", chPayload());
+  if (r.status === 200) {
+    $("ch-out").textContent = "✅ Пост опубликован в канале " + (r.data.channel || "");
+    chPhotos = []; renderChPhotos(); toast("Пост опубликован", "ok");
+  } else if (r.status !== 0) {
+    $("ch-out").textContent = "Ошибка: " + (r.data.error || r.status) + (r.data.details ? (" — " + r.data.details) : "");
+  }
+});
+$("btn-ch-sign-save").onclick = withSpin($("btn-ch-sign-save"), async function(){
+  const r = await api("/channel/signature", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({signature: $("ch-sign").value})});
+  if (r.status === 200) { $("ch-sign-out").textContent = "Подпись сохранена"; loadChannel(); }
+  else $("ch-sign-out").textContent = "Ошибка: " + (r.data.error || r.status);
+});
+$("btn-ch-sign-del").onclick = withSpin($("btn-ch-sign-del"), async function(){
+  const r = await api("/channel/signature", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({signature: ""})});
+  if (r.status === 200) { $("ch-sign").value = ""; $("ch-sign-out").textContent = "Подпись убрана"; loadChannel(); }
+  else $("ch-sign-out").textContent = "Ошибка: " + (r.data.error || r.status);
+});
 /* --- Промокоды: список + редактор --- */
 let promosLoaded = false;
 async function loadPromos(){

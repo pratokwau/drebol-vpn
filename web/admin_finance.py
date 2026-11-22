@@ -855,13 +855,14 @@ async def server_mark(request):
 MAX_BROADCAST_PHOTO_BYTES = 10 * 1024 * 1024
 
 
-async def broadcast_upload(request):
-    """Загрузка фото для рассылки: multipart/form-data, поле "photo".
+async def _upload_photo(request, audit_action):
+    """Загрузка фото: multipart/form-data, поле "photo".
 
     Фото заливается ботом самому себе (ADMIN_ID) — Telegram отдаёт
-    file_id, который UI потом передаёт в /broadcast/preview и
-    /broadcast/send как body.photo. Сам файл нигде не хранится:
-    после получения file_id байты выбрасываются."""
+    file_id, который UI потом передаёт в preview/send как body.photo.
+    Сам файл нигде не хранится: после получения file_id байты
+    выбрасываются. audit_action — имя действия для журнала
+    (broadcast_photo_upload / channel_photo_upload)."""
     from aiohttp import web
     from config import ADMIN_ID
     actor, err = await _admin._require_mutation(request)
@@ -916,11 +917,16 @@ async def broadcast_upload(request):
                                   "details": "no photo in reply"}, status=502)
     # В журнал — только размер и первые 8 символов file_id:
     # полный file_id в логах не нужен, а по префиксу фото находится.
-    await _admin._audit(actor, "broadcast_photo_upload",
+    await _admin._audit(actor, audit_action,
                         f"photo {len(data)} bytes, file_id {file_id[:8]}…")
     return web.json_response({"ok": True, "photo_file_id": file_id,
                               "width": getattr(largest, "width", None),
                               "height": getattr(largest, "height", None)})
+
+
+async def broadcast_upload(request):
+    """Загрузка фото для рассылки — см. _upload_photo."""
+    return await _upload_photo(request, "broadcast_photo_upload")
 
 
 async def broadcast_preview(request):
@@ -981,6 +987,206 @@ async def broadcast_send(request):
                         f"segment {payload['segment']}: sent {ok}, fail {fail}")
     return web.json_response({"ok": True, "segment": payload["segment"],
                               "sent": ok, "failed": fail})
+
+
+# ── Пост в ТГ-канал ──────────────────────────────────────────────────────────
+
+# Паритет с ТГ-админкой (handlers/channel_post.py): тот же состав поста
+# (текст + подпись channel_signature, 1 фото подписью / альбом,
+# кнопки из меню /start диплинками ch_*) и та же отправка через
+# handlers.channel_post._deliver. Отличия веба: черновик живёт во фронте
+# (а не в user_data), а живой предпросмотр уходит в Telegram только
+# Марку — у Muse-аккаунта нет tg_id, ему отдаётся сухой рендер.
+
+
+def _channel_post_payload(body: dict):
+    """Проверяет тело поста в канал. Возвращает (data, error_response)."""
+    from aiohttp import web
+    from handlers.channel_post import MENU_BUTTONS
+    text = body.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return None, web.json_response({"error": "empty_text"}, status=400)
+    if len(text) > 4096:
+        return None, web.json_response({"error": "text_too_long"}, status=400)
+    photos = body.get("photos") or []
+    if not isinstance(photos, list) or not all(
+            isinstance(p, str) and p for p in photos):
+        return None, web.json_response({"error": "bad_photos"}, status=400)
+    if len(photos) > 10:
+        return None, web.json_response({"error": "too_many_photos"},
+                                       status=400)
+    buttons = body.get("buttons") or []
+    if not isinstance(buttons, list) or not all(
+            isinstance(b, str) and b in MENU_BUTTONS for b in buttons):
+        return None, web.json_response({"error": "bad_buttons"}, status=400)
+    use_sign = body.get("use_sign", True)
+    if not isinstance(use_sign, bool):
+        return None, web.json_response({"error": "bad_use_sign"}, status=400)
+    return {"text": text, "photos": list(photos),
+            "buttons": list(dict.fromkeys(buttons)),
+            "use_sign": use_sign}, None
+
+
+def _channel_ctx(data: dict):
+    """user_data-контекст для handlers.channel_post._deliver:
+    та же форма, что у ТГ-флоу (ключи chpost_*)."""
+    return SimpleNamespace(user_data={
+        "chpost_text": data["text"],
+        "chpost_photos": list(data["photos"]),
+        "chpost_sel": list(data["buttons"]),
+        "chpost_use_sign": data["use_sign"],
+    })
+
+
+async def channel_get(request):
+    """Канал, подпись и кнопки меню — для экрана поста."""
+    from aiohttp import web
+    from config import load_config
+    from handlers.channel_post import (
+        MENU_BUTTONS, MENU_LAYOUT, channel_target, get_signature,
+    )
+    _, err = await _actor_or_401(request)
+    if err is not None:
+        return err
+    cfg = load_config()
+    sign = get_signature()
+    return web.json_response({
+        "channel": channel_target(cfg),
+        "channel_url": cfg.get("channel_url") or "",
+        "signature": sign,
+        "signature_plain": re.sub(r"<[^>]+>", "", sign).strip(),
+        "buttons": [{"key": k, "label": MENU_BUTTONS[k]}
+                    for row in MENU_LAYOUT for k in row],
+        "layout": MENU_LAYOUT,
+    })
+
+
+async def channel_signature_set(request):
+    """Задать или убрать подпись к постам (пустая строка — убрать).
+    Тот же ключ channel_signature, что и в ТГ-админке."""
+    from aiohttp import web
+    from config import atomic_update
+    actor, err = await _admin._require_mutation(request)
+    if err is not None:
+        return err
+    body = await _body(request)
+    sign = body.get("signature")
+    if sign is None:
+        sign = ""
+    if not isinstance(sign, str):
+        return web.json_response({"error": "bad_signature"}, status=400)
+    if len(sign) > 4096:
+        return web.json_response({"error": "signature_too_long"}, status=400)
+    if sign.strip():
+        atomic_update(lambda cfg: cfg.__setitem__("channel_signature", sign))
+    else:
+        atomic_update(lambda cfg: cfg.pop("channel_signature", None))
+    await _admin._audit(actor, "channel_signature",
+                        "set" if sign.strip() else "clear")
+    return web.json_response({"ok": True,
+                              "signature": sign if sign.strip() else ""})
+
+
+async def channel_post_upload(request):
+    """Загрузка фото для поста в канал — см. _upload_photo.
+    Фронт зовёт по разу на файл и собирает file_id в черновик."""
+    return await _upload_photo(request, "channel_photo_upload")
+
+
+async def channel_post_preview(request):
+    """Предпросмотр: сухой рендер (финальный текст с подписью,
+    кнопки, предупреждения про альбом и длинный текст) и, если
+    актёр — Mark, живая доставка того же поста ему в Telegram
+    тем же _deliver, что уйдёт в канал. Ошибка живой доставки
+    не роняет ответ: сухой рендер всё равно возвращается,
+    а preview_error объясняет, что не так (чаще всего — битая
+    HTML-разметка)."""
+    from aiohttp import web
+    from handlers.broadcast import CAPTION_LIMIT
+    from handlers.channel_post import _final_text, get_signature
+    actor, err = await _actor_or_401(request)
+    if err is not None:
+        return err
+    body = await _body(request)
+    data, berr = _channel_post_payload(body)
+    if berr is not None:
+        return berr
+    ctx = _channel_ctx(data)
+    final = _final_text(ctx)
+    if len(final) > 4096:
+        return web.json_response({"error": "text_too_long"}, status=400)
+    sign = get_signature()
+    out = {"text": final, "photos": len(data["photos"]),
+           "buttons": data["buttons"],
+           "album": len(data["photos"]) > 1,
+           "caption_split": bool(data["photos"]) and len(final) > CAPTION_LIMIT,
+           "signature_on": bool(sign) and data["use_sign"],
+           "preview_sent": False, "preview_error": None}
+    if actor["kind"] == "mark" and actor.get("tg_id"):
+        bot = _admin.get_bot()
+        if bot is None:
+            out["preview_error"] = "no_bot"
+        else:
+            try:
+                from handlers.channel_post import _deliver
+                await _deliver(bot, actor["tg_id"], ctx)
+                out["preview_sent"] = True
+            except Exception as ex:
+                out["preview_error"] = str(ex)[:200]
+    return web.json_response(out)
+
+
+async def channel_post_publish(request):
+    """Публикация в канал: двухшаговое подтверждение, потом
+    _deliver тем же ботом, что и у ТГ-админки, и запись в лог-канал.
+    При ошибке Telegram черновик не теряется: форма остаётся во
+    фронте, публикацию можно повторить (новый confirm_token)."""
+    from aiohttp import web
+    from handlers.channel_post import _final_text, channel_target
+    actor, err = await _admin._require_mutation(request)
+    if err is not None:
+        return err
+    body = await _body(request)
+    token = body.get("confirm_token") or ""
+    if not token:
+        data, berr = _channel_post_payload(body)
+        if berr is not None:
+            return berr
+        final = _final_text(_channel_ctx(data))
+        if len(final) > 4096:
+            return web.json_response({"error": "text_too_long"}, status=400)
+        target = channel_target()
+        if not target:
+            return web.json_response({"error": "no_channel"}, status=409)
+        summary = (f"Пост в канал {target}: текст {len(final)} симв., "
+                   f"фото: {len(data['photos'])}, "
+                   f"кнопок: {len(data['buttons'])}")
+        if len(data["photos"]) > 1 and data["buttons"]:
+            summary += " (альбом — кнопки не попадут в канал)"
+        token = _admin.issue_confirm(actor, "channel_post_send", data,
+                                     summary)
+        return _admin.confirm_needed_response(token, summary)
+    payload = _admin.take_confirm(actor, token, "channel_post_send")
+    if not payload:
+        return web.json_response({"error": "bad_confirm"}, status=400)
+    bot = _admin.get_bot()
+    if bot is None:
+        return web.json_response({"error": "no_bot"}, status=503)
+    target = channel_target()
+    if not target:
+        return web.json_response({"error": "no_channel"}, status=409)
+    try:
+        from handlers.channel_post import _deliver
+        await _deliver(bot, target, _channel_ctx(payload))
+    except Exception as ex:
+        return web.json_response({"error": "telegram_error",
+                                  "details": str(ex)[:200]}, status=502)
+    from core.log_channel import send_log
+    await send_log(bot, f"📣 Опубликован пост в канал {target}")
+    await _admin._audit(actor, "channel_post_send",
+                        f"channel {target}: photos {len(payload['photos'])}, "
+                        f"buttons {len(payload['buttons'])}")
+    return web.json_response({"ok": True, "channel": str(target)})
 
 
 # ── Platega ──────────────────────────────────────────────────────────────────
@@ -1088,6 +1294,11 @@ def register(app):
     app.router.add_post("/broadcast/upload", broadcast_upload)
     app.router.add_post("/broadcast/preview", broadcast_preview)
     app.router.add_post("/broadcast/send", broadcast_send)
+    app.router.add_get("/channel", channel_get)
+    app.router.add_post("/channel/signature", channel_signature_set)
+    app.router.add_post("/channel/post/upload", channel_post_upload)
+    app.router.add_post("/channel/post/preview", channel_post_preview)
+    app.router.add_post("/channel/post/publish", channel_post_publish)
     app.router.add_get("/platega", platega_get)
     app.router.add_patch("/platega", platega_patch)
     logging.info("админка: маршруты фазы 2 (финансы, рассылка) зарегистрированы")
