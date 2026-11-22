@@ -195,6 +195,11 @@ label.chk input{width:auto;margin:0}
 .sublink{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sublink .mono{word-break:break-all;flex:1;min-width:200px}
 
+/* --- Консоль серверов (xterm) --- */
+#console-term{background:#0A0A0C;border:1px solid var(--line);border-radius:14px;padding:8px;height:480px;overflow:hidden}
+#console-term .xterm{height:100%}
+#console-pubkey{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+
 /* --- Скелетоны загрузки --- */
 .skel{border-radius:8px;background:linear-gradient(90deg,rgba(255,255,255,.05) 25%,rgba(255,255,255,.11) 50%,rgba(255,255,255,.05) 75%);background-size:200% 100%;animation:shimmer 1.2s linear infinite}
 @media (max-width:900px){
@@ -258,6 +263,7 @@ label.chk input{width:auto;margin:0}
       <div class="nav-group">Инфраструктура</div>
       <button class="nav-item" data-nav="panel"><span class="ic">🖥️</span>Панель Remnawave</button>
       <button class="nav-item" data-nav="nodes"><span class="ic">🌐</span>Узлы</button>
+      <button class="nav-item" data-nav="console"><span class="ic">⌨️</span>Консоль</button>
       <button class="nav-item" data-nav="logs"><span class="ic">📜</span>Логи</button>
       <button class="nav-item" data-nav="sync"><span class="ic">⏰</span>Синхронизация</button>
       <button class="nav-item" data-nav="netcheck"><span class="ic">📡</span>Проверка операторов</button>
@@ -808,6 +814,24 @@ label.chk input{width:auto;margin:0}
         </div>
       </section>
 
+      <!-- Консоль серверов -->
+      <section id="sec-console" class="page hidden">
+        <div class="card"><h2>🖥 Консоль серверов</h2><p class="sub">Веб-терминал: подключение к серверам проекта прямо из админки. Доступ — Mark и Muse. Одна активная сессия на аккаунт (новая вытесняет старую), простой — 10 минут, предел сессии — 60 минут. Все подключения пишутся в журнал действий.</p>
+          <div id="console-status" class="mut">Загрузка…</div>
+          <div id="console-servers" class="btnrow" style="margin-top:10px"></div>
+          <div id="console-pubkey-box" class="hidden">
+            <h3>Ключ консоли (только Mark)</h3>
+            <p class="sub">Добавь этот публичный ключ в authorized_keys на каждом сервере — без него SSH не пустит. Ключ создаётся на главном сервере при первом открытии раздела и не меняется.</p>
+            <textarea id="console-pubkey" readonly rows="3"></textarea>
+            <div class="btnrow"><button id="btn-console-pubkey-copy" class="ghost">Скопировать ключ</button></div>
+          </div>
+        </div>
+        <div class="card hidden" id="console-term-card"><h2 id="console-term-title">Терминал</h2>
+          <div class="btnrow"><button id="btn-console-close" class="danger">Отключиться</button><span id="console-term-state" class="mut"></span></div>
+          <div id="console-term"></div>
+        </div>
+      </section>
+
       <!-- Поддержка -->
       <section id="sec-support" class="page hidden">
         <div class="card"><h2>Открытые обращения</h2><p class="sub">Темы в группе поддержки. Ответ уходит юзеру тем же путём, что и ответ из группы.</p>
@@ -892,7 +916,7 @@ label.chk input{width:auto;margin:0}
 </div>
 <script>
 const API = "/api/admin";
-const SECTION_TITLES = {overview:"Обзор", users:"Пользователи", subs:"Подписки", finance:"Финансы", payments:"Оплаты", broadcast:"Рассылка", retention:"Напоминания и возврат", promos:"Промокоды", tariffs:"Тарифы", panel:"Панель Remnawave", nodes:"Узлы", logs:"Логи", sync:"Синхронизация", netcheck:"Проверка операторов", site:"Сайт", backup:"Бэкап", maintenance:"Техработы и функции", support:"Поддержка", settings:"Настройки"};
+const SECTION_TITLES = {overview:"Обзор", users:"Пользователи", subs:"Подписки", finance:"Финансы", payments:"Оплаты", broadcast:"Рассылка", retention:"Напоминания и возврат", promos:"Промокоды", tariffs:"Тарифы", panel:"Панель Remnawave", nodes:"Узлы", console:"Консоль серверов", logs:"Логи", sync:"Синхронизация", netcheck:"Проверка операторов", site:"Сайт", backup:"Бэкап", maintenance:"Техработы и функции", support:"Поддержка", settings:"Настройки"};
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function fmtNum(n){ if (n == null || n === "") return "—"; const v = Number(n); if (isNaN(v)) return esc(n); return v.toLocaleString("ru-RU"); }
@@ -3419,6 +3443,133 @@ async function loadConnectHelp(){
   });
 }
 $("btn-ch-show").onclick = function(){ loadConnectHelp(); };
+
+/* --- Консоль серверов: xterm.js с CDN + WebSocket в PTY --- */
+let consoleLoaded = false;
+let consoleLibs = null;
+let consoleWS = null;
+let consoleTerm = null;
+let consoleFit = null;
+
+function consoleLibsLoad(){
+  if (consoleLibs) return consoleLibs;
+  consoleLibs = new Promise(function(resolve, reject){
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css";
+    document.head.appendChild(css);
+    function loadScript(src, next){
+      const s = document.createElement("script");
+      s.src = src;
+      s.onload = next;
+      s.onerror = function(){ reject(new Error("cdn")); };
+      document.head.appendChild(s);
+    }
+    loadScript("https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js", function(){
+      loadScript("https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js", function(){
+        if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") reject(new Error("cdn"));
+        else resolve();
+      });
+    });
+  });
+  return consoleLibs;
+}
+
+async function loadConsole(){
+  let r;
+  try { r = await api("/console/servers"); }
+  catch(e) { $("console-status").textContent = "Ошибка загрузки"; return; }
+  if (r.status !== 200) { $("console-status").textContent = "Ошибка: " + (r.data.error || r.status); return; }
+  if (!r.data.enabled) {
+    $("console-status").textContent = "Консоль выключена настройкой console_enabled в конфиге бота.";
+    $("console-servers").innerHTML = "";
+    return;
+  }
+  $("console-status").textContent = "Выбери сервер — терминал откроется здесь же. Для главного сервера — локальная оболочка, для остальных — SSH с главного.";
+  const host = $("console-servers");
+  host.innerHTML = "";
+  (r.data.servers || []).forEach(function(s){
+    const b = document.createElement("button");
+    b.className = "ghost";
+    b.textContent = s.name;
+    b.title = s.target || "";
+    b.onclick = function(){ openConsole(s); };
+    host.appendChild(b);
+  });
+  // Публичный ключ — только Mark; у Muse эндпоинт отвечает 403, блок не показываем.
+  const pk = await api("/console/pubkey");
+  if (pk.status === 200 && pk.data.pubkey) {
+    show("console-pubkey-box", true);
+    $("console-pubkey").value = pk.data.pubkey;
+  }
+}
+
+function closeConsole(){
+  if (consoleWS) { try { consoleWS.close(); } catch(e) {} consoleWS = null; }
+  if (consoleTerm) { try { consoleTerm.dispose(); } catch(e) {} consoleTerm = null; consoleFit = null; }
+  show("console-term-card", false);
+  $("console-term-state").textContent = "";
+}
+
+async function openConsole(srv){
+  closeConsole();
+  show("console-term-card", true);
+  $("console-term-title").textContent = "Терминал — " + srv.name;
+  $("console-term-state").textContent = "Подключение…";
+  try { await consoleLibsLoad(); }
+  catch(e) {
+    $("console-term-state").textContent = "Не удалось загрузить терминал: CDN xterm.js недоступен. Проверь сеть и открой раздел заново.";
+    return;
+  }
+  const term = new Terminal({cursorBlink: true, fontSize: 13,
+    fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+    theme: {background: "#0A0A0C", foreground: "#E8EAED"}});
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  $("console-term").innerHTML = "";
+  term.open($("console-term"));
+  try { fit.fit(); } catch(e) {}
+  consoleTerm = term; consoleFit = fit;
+  const proto = location.protocol === "https:" ? "wss://" : "ws://";
+  const ws = new WebSocket(proto + location.host + API + "/console/ws?server=" + encodeURIComponent(srv.id));
+  ws.binaryType = "arraybuffer";
+  consoleWS = ws;
+  ws.onopen = function(){
+    $("console-term-state").textContent = "Подключено · " + (srv.target || "");
+    try { ws.send(JSON.stringify({type: "resize", cols: term.cols, rows: term.rows})); } catch(e) {}
+    term.focus();
+  };
+  ws.onmessage = function(ev){
+    if (ev.data instanceof ArrayBuffer) term.write(new Uint8Array(ev.data));
+    else term.write(String(ev.data));
+  };
+  ws.onclose = function(){
+    $("console-term-state").textContent = "Отключено";
+    if (consoleWS === ws) consoleWS = null;
+  };
+  ws.onerror = function(){ $("console-term-state").textContent = "Ошибка соединения"; };
+  term.onData(function(d){
+    if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(d));
+  });
+  term.onResize(function(size){
+    if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: "resize", cols: size.cols, rows: size.rows}));
+  });
+}
+document.querySelector('[data-nav="console"]').addEventListener("click", function(){
+  if (!consoleLoaded) { consoleLoaded = true; loadConsole(); }
+});
+$("btn-console-close").onclick = function(){ closeConsole(); toast("Консоль отключена"); };
+$("btn-console-pubkey-copy").onclick = function(){
+  const ta = $("console-pubkey");
+  ta.select();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(function(){ toast("Ключ скопирован", "ok"); });
+  } else {
+    document.execCommand("copy");
+    toast("Ключ скопирован", "ok");
+  }
+};
+window.addEventListener("resize", function(){ if (consoleFit) { try { consoleFit.fit(); } catch(e) {} } });
 
 (function init(){
   const params = new URLSearchParams(location.search);

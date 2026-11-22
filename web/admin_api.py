@@ -842,4 +842,7 @@ def build_admin_app():
     _register_users(app)
     from web.admin_finance import register as _register_finance
     _register_finance(app)
+    # Консоль серверов и токен-вход Muse (web/admin_console.py).
+    from web.admin_console import register as _register_console
+    _register_console(app)
     return app

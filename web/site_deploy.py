@@ -2315,6 +2315,27 @@ chmod 755 {WEB_ROOT}
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 30s;
+    }}
+    # Веб-консоль админки: WebSocket в PTY — нужен Upgrade и длинный
+    # таймаут (сессия живёт до часа), отдельным локейшеном, чтобы
+    # обычный /api/admin/ не менять.
+    location /api/admin/console/ {{
+        proxy_pass http://{upstream}/api/admin/console/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3700s;
+    }}
+    # Токен-вход Muse: чистый /admin/ на сайте статический, а эта
+    # ссылка должна доезжать до API-сервера.
+    location = /admin/muse-login {{
+        proxy_pass http://{upstream}/admin/muse-login;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }}"""
         install = f"""set -e
 mv /tmp/drebol_index.html {WEB_ROOT}/index.html

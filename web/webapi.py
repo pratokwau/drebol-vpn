@@ -1082,6 +1082,10 @@ def build_app():
     from web.admin_infra import register as _register_admin_infra
     _register_admin_infra(admin_app)
     app.add_subapp("/api/admin", admin_app)
+    # Токен-вход Muse по секретной ссылке — ДО хвостового /admin/{tail:.*},
+    # иначе страница админки перехватит адрес.
+    from web.admin_console import register_top as _register_console_top
+    _register_console_top(app)
     app.router.add_get("/admin/", admin_page_handler)
     app.router.add_get("/admin/{tail:.*}", admin_page_handler)
     app.router.add_get("/api/health", health)
