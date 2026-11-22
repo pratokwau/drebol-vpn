@@ -452,9 +452,12 @@ label.chk input{width:auto;margin:0}
       <section id="sec-payments" class="page hidden">
         <div class="card"><h2>Оплаты</h2><p class="sub">Счета платёжной системы. Нажми на строку, чтобы открыть карточку. Возврат — с подтверждением, повторный возврат невозможен.</p>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <select id="pay-status" style="width:auto;min-width:170px"><option value="">Все статусы</option><option value="paid">Оплаченные</option><option value="pending">Ожидают</option><option value="refunded">Возвращённые</option><option value="failed">Неудачные</option></select>
+            <select id="pay-status" style="width:auto;min-width:170px"><option value="">Все статусы</option><option value="paid">Оплаченные</option><option value="pending">Ожидают</option><option value="refunds">Возвращённые</option><option value="failed">Неудачные</option></select>
+            <select id="pay-provider" style="width:auto;min-width:150px"><option value="">Все провайдеры</option></select>
+            <input id="pay-q" type="search" placeholder="Имя, @username, TG ID или № счёта" style="flex:1;min-width:200px">
             <button id="btn-payments">Показать оплаты</button>
           </div>
+          <div id="payments-summary" class="mut" style="margin-top:8px"></div>
           <div id="payments-out"></div>
           <div class="btnrow"><button id="btn-payments-prev" class="ghost">← Назад</button><span id="payments-page-label" class="mut"></span><button id="btn-payments-next" class="ghost">Вперёд →</button></div>
         </div>
@@ -2037,18 +2040,37 @@ async function openServerEditor(sid){
 let paymentsLoaded = false;
 const PAY_LABELS = {paid: "Оплачено", pending: "Ожидает", refunded: "Возвращён", failed: "Неудачный", expired: "Истёк", canceled: "Отменён", cancelled: "Отменён"};
 const PROVIDER_LABELS = {platega: "Platega", anore: "Anore", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта", manual: "Вручную"};
-let paymentsPage = 1, paymentsTotalPages = 1;
+let paymentsPage = 1, paymentsTotalPages = 1, paymentsQTimer = null;
 async function loadPayments(page){
   paymentsPage = page || 1;
   const st = $("pay-status").value;
+  const prov = $("pay-provider").value;
+  const q = $("pay-q").value.trim();
+  let url = "/payments?status=" + (st || "all") + "&page=" + paymentsPage;
+  if (prov) url += "&provider=" + encodeURIComponent(prov);
+  if (q) url += "&q=" + encodeURIComponent(q);
   let r;
-  try { r = await api("/payments?status=" + (st || "all") + "&page=" + paymentsPage); }
+  try { r = await api(url); }
   catch(e) { $("payments-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("payments-out", r.data); return; }
   paymentsTotalPages = r.data.total_pages || 1;
   paymentsPage = r.data.page || paymentsPage;
   $("payments-page-label").textContent = "Стр. " + paymentsPage + " из " + paymentsTotalPages;
   show("btn-payments-prev", paymentsPage > 1); show("btn-payments-next", paymentsPage < paymentsTotalPages);
+  $("payments-summary").textContent = "Найдено " + (r.data.total || 0) + " · на сумму " + fmtMoney(r.data.total_amount || 0);
+  // селект провайдеров — со счётчиками в текущей выборке; выбранный
+  // провайдер держим в списке, даже если под текущий статус у него
+  // ноль счетов, чтобы фильтр не сбрасывался молча
+  const provs = r.data.providers || [];
+  const cur = prov;
+  let opts = '<option value="">Все провайдеры</option>';
+  if (cur && !provs.some(function(p){ return p.provider === cur; })) {
+    opts += '<option value="' + esc(cur) + '" selected>' + esc(PROVIDER_LABELS[cur] || cur) + ' (0)</option>';
+  }
+  provs.forEach(function(p){
+    opts += '<option value="' + esc(p.provider) + '"' + (p.provider === cur ? ' selected' : '') + '>' + esc(PROVIDER_LABELS[p.provider] || p.provider) + ' (' + p.count + ')</option>';
+  });
+  $("pay-provider").innerHTML = opts;
   const items = r.data.payments || [];
   if (!items.length) { $("payments-out").innerHTML = '<div class="empty"><span class="big">🔍</span>Оплат не найдено</div>'; return; }
   let h = '<div class="tblwrap"><table><thead><tr><th>ID</th><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата</th><th>Провайдер</th></tr></thead><tbody>';
@@ -2063,6 +2085,14 @@ async function loadPayments(page){
 }
 $("btn-payments").onclick = function(){ loadPayments(1); };
 $("pay-status").onchange = function(){ loadPayments(1); };
+$("pay-provider").onchange = function(){ loadPayments(1); };
+$("pay-q").addEventListener("input", function(){
+  clearTimeout(paymentsQTimer);
+  paymentsQTimer = setTimeout(function(){ loadPayments(1); }, 500);
+});
+$("pay-q").addEventListener("keydown", function(e){
+  if (e.key === "Enter") { clearTimeout(paymentsQTimer); loadPayments(1); }
+});
 $("btn-payments-prev").onclick = function(){ if (paymentsPage > 1) loadPayments(paymentsPage - 1); };
 $("btn-payments-next").onclick = function(){ if (paymentsPage < paymentsTotalPages) loadPayments(paymentsPage + 1); };
 document.querySelector('[data-nav="payments"]').addEventListener("click", function(){

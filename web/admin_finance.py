@@ -174,9 +174,119 @@ def _broadcast_payload(body: dict):
 
 # ── Платежи ──────────────────────────────────────────────────────────────────
 
+# Отображение фильтра статуса в WHERE — то же, что в
+# core.database.list_payments. Запрос живёт здесь, а не в core:
+# core/database.py — вне web/, а прецедент локального SQL в вебе уже
+# есть (обогащение в admin_users.py, проход 7).
+_PAYMENT_STATUS_WHERE = {
+    "paid": "p.status = 'paid'",
+    "pending": "p.status = 'pending'",
+    "failed": "p.status IN ('canceled','expired','error')",
+    "refunds": "p.status IN ('refunded','refund_pending','chargebacked')",
+    "all": "",
+}
+
+_PAYMENT_LIST_COLS = (
+    "p.id, p.tg_id, p.provider, p.amount, p.status,"
+    " datetime(COALESCE(p.paid_at, p.created_at), 'localtime') AS ts,"
+    " u.first_name, u.username, p.promo_code, p.period_seconds"
+)
+
+_PAYMENTS_PER_PAGE = 25
+
+
+def _payments_where(status: str, provider, q: str, text_ids=None):
+    """(where_sql, params): общий фильтр списка оплат. q — TG ID или
+    ID счёта (только цифры); text_ids — ID счетов, чьё имя/username
+    содержит текстовый запрос (см. _search_payment_ids)."""
+    clauses, params = [], []
+    sw = _PAYMENT_STATUS_WHERE[status]
+    if sw:
+        clauses.append(sw)
+    if provider:
+        clauses.append("p.provider = ?")
+        params.append(provider)
+    if text_ids is not None:
+        if text_ids:
+            clauses.append(
+                "p.id IN (" + ",".join("?" * len(text_ids)) + ")")
+            params.extend(text_ids)
+        else:
+            clauses.append("1 = 0")
+    elif q:
+        clauses.append("(p.tg_id = ? OR p.id = ?)")
+        params.extend([int(q), int(q)])
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    return where, params
+
+
+async def _search_payment_ids(q: str) -> list:
+    """ID счетов, у которых имя или username содержит q. Поиск — в
+    Python с casefold, как search_paid_subs в ТГ: SQL LIKE в SQLite
+    нечувствителен к регистру только для ASCII, и «иван» не нашёл бы
+    «Иван». Запрос лёгкий — только три маленькие колонки."""
+    from core.database import DB_PATH
+    import aiosqlite
+    needle = q.casefold()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+                "SELECT p.id, u.first_name, u.username FROM payments p "
+                "LEFT JOIN users u ON u.id = p.tg_id") as cur:
+            rows = await cur.fetchall()
+    return [r[0] for r in rows
+            if needle in (r[1] or "").casefold()
+            or needle in (r[2] or "").casefold()]
+
+
+async def _list_payments_filtered(page: int, status: str, provider, q: str):
+    """Страница оплат + счётчики: те же колонки и порядок, что
+    core.database.list_payments, плюс фильтры по провайдеру и поиску.
+    Возвращает dict: rows, total_pages, total, total_amount,
+    providers (провайдеры со счётчиками в выборке без учёта фильтра
+    по провайдеру) и all_providers (все провайдеры в таблице —
+    для проверки значения provider)."""
+    from core.database import DB_PATH
+    import aiosqlite
+    q = (q or "").strip()
+    if q.startswith("@"):
+        q = q[1:].strip()
+    numeric = q.isdigit() and len(q) <= 18
+    text_ids = None
+    if q and not numeric:
+        text_ids = await _search_payment_ids(q)
+    where, params = _payments_where(status, provider,
+                                     q if numeric else "", text_ids)
+    where_np, params_np = _payments_where(status, None,
+                                           q if numeric else "", text_ids)
+    offset = (page - 1) * _PAYMENTS_PER_PAGE
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+                "SELECT COUNT(*), COALESCE(SUM(p.amount), 0) FROM payments p "
+                f"LEFT JOIN users u ON u.id = p.tg_id {where}", params) as cur:
+            total, total_amount = await cur.fetchone()
+        async with db.execute(
+                f"SELECT {_PAYMENT_LIST_COLS} FROM payments p "
+                f"LEFT JOIN users u ON u.id = p.tg_id {where} "
+                f"ORDER BY p.id DESC LIMIT ? OFFSET ?",
+                params + [_PAYMENTS_PER_PAGE, offset]) as cur:
+            rows = await cur.fetchall()
+        async with db.execute(
+                "SELECT p.provider, COUNT(*) FROM payments p "
+                f"LEFT JOIN users u ON u.id = p.tg_id {where_np} "
+                "GROUP BY p.provider ORDER BY 2 DESC, 1",
+                params_np) as cur:
+            providers = await cur.fetchall()
+        async with db.execute(
+                "SELECT DISTINCT provider FROM payments") as cur:
+            all_providers = [r[0] for r in await cur.fetchall()]
+    total_pages = max(1, (total + _PAYMENTS_PER_PAGE - 1) // _PAYMENTS_PER_PAGE)
+    return {"rows": rows, "total_pages": total_pages, "total": total,
+            "total_amount": total_amount, "providers": providers,
+            "all_providers": all_providers}
+
+
 async def payments_list(request):
     from aiohttp import web
-    from core.database import list_payments
     _, err = await _actor_or_401(request)
     if err is not None:
         return err
@@ -184,17 +294,25 @@ async def payments_list(request):
     # статусы», а прежний дефолт "paid" молча прятал остальные счета
     # (оплата висела в карточке юзера, но в списке её не было).
     status = request.query.get("status") or "all"
-    if status not in ("paid", "pending", "failed", "refunds", "all"):
+    if status not in _PAYMENT_STATUS_WHERE:
         return web.json_response({"error": "bad_status"}, status=400)
     try:
         page = int(request.query.get("page") or 1)
     except ValueError:
         return web.json_response({"error": "bad_page"}, status=400)
     page = max(1, page)
-    rows, total_pages = await list_payments(page, status)
-    return web.json_response({"payments": [_payment_list_row(r) for r in rows],
-                              "page": page, "total_pages": total_pages,
-                              "status": status})
+    provider = (request.query.get("provider") or "").strip()
+    q = request.query.get("q") or ""
+    res = await _list_payments_filtered(page, status, provider or None, q)
+    if provider and provider not in res["all_providers"]:
+        return web.json_response({"error": "bad_provider"}, status=400)
+    return web.json_response(
+        {"payments": [_payment_list_row(r) for r in res["rows"]],
+         "page": page, "total_pages": res["total_pages"],
+         "status": status, "provider": provider, "q": q.strip(),
+         "total": res["total"], "total_amount": res["total_amount"],
+         "providers": [{"provider": p, "count": c}
+                       for p, c in res["providers"]]})
 
 
 async def payment_detail(request):
