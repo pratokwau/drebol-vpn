@@ -876,7 +876,67 @@ async def admin_sub_devices_clear(request):
     return await _sub_device_mutation(request, "sub_devices_clear", "admin")
 
 
+# Вкладки массовых действий — те же 6, что в ТГ
+# (BULK_SCOPES в paidsub/handlers.py, экран handle_paid_bulk_menu).
+# Иконки и подписи — из PAID_TABS в paidsub/keyboards.py.
+_BULK_SCOPES = ("all", "active", "trial", "paying", "soon", "expired")
+_BULK_SCOPE_LABELS = {
+    "all": ("📋", "Все"),
+    "active": ("🟢", "Активные"),
+    "trial": ("🆓", "Пробные"),
+    "paying": ("💳", "Платящие"),
+    "soon": ("⏳", "Скоро кончатся"),
+    "expired": ("🔴", "Истёкшие"),
+}
+
+
+def _bulk_scope_label(scope: str) -> str:
+    icon, label = _BULK_SCOPE_LABELS.get(scope, ("📋", "Все"))
+    return f"{icon} {label}"
+
+
+def _coerce_int(value, default=None):
+    """int из тела запроса: число, строка цифр или None → default."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return default
+
+
+async def bulk_scopes(request):
+    """Счётчики вкладок массовых действий — те же, что в меню ТГ
+    (paid_counts из paidsub/storage.py). Только чтение."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from paidsub.storage import paid_counts
+    counts = await paid_counts()
+    return web.json_response({
+        "counts": {k: counts.get(k, 0) for k in _BULK_SCOPES},
+        "scopes": [{"key": k, "label": _BULK_SCOPE_LABELS[k][1],
+                    "icon": _BULK_SCOPE_LABELS[k][0]}
+                   for k in _BULK_SCOPES],
+    })
+
+
 async def subs_bulk(request):
+    """Массовые действия по платным подпискам — паритет с ТГ
+    (handle_paid_bulk_menu / handle_paid_bulk_apply /
+    handle_paid_bulk_limits_apply в paidsub/handlers.py):
+    выборка — одна из вкладок BULK_SCOPES, счётчики — paid_counts.
+    Действие затрагивает только выборку: scope != "all" → only_ids
+    через all_paid_subs(scope), как в ТГ. Сдвиг срока: направление
+    "extend"/"reduce" (или ±1) и секунды > 0 — раньше фронт слал
+    direction строкой, а сервис ждёт int, и «Продлить всем» всегда
+    падало в bad_params. Лимиты: kind_limit только "hwid"/"lte"
+    (значение "traffic" раньше давало KeyError → 500)."""
     from aiohttp import web
     actor, err = await _require_mutation(request)
     if err is not None:
@@ -885,12 +945,51 @@ async def subs_bulk(request):
     kind = str(request.match_info.get("kind") or "")
     if kind not in ("extend", "limits", "lte"):
         return web.json_response({"error": "bad_action"}, status=400)
+    scope = str(body.get("scope") or "all").strip()
+    if scope not in _BULK_SCOPES:
+        return web.json_response({"error": "bad_scope"}, status=400)
+    # Параметры проверяем ДО подтверждения, чтобы в диалог не уходил
+    # заведомо невалидный запрос.
+    if kind == "extend":
+        seconds = _coerce_int(body.get("seconds"))
+        if seconds is None:
+            days = _coerce_int(body.get("days"), 0)
+            seconds = abs(days) * 86400
+            direction = -1 if days < 0 else 1
+        else:
+            direction = body.get("direction")
+            if isinstance(direction, str):
+                direction = {"extend": 1, "reduce": -1}.get(direction)
+            direction = _coerce_int(direction)
+            if direction not in (1, -1):
+                direction = 1
+            seconds = abs(seconds)
+        if seconds <= 0:
+            return web.json_response({"error": "bad_params",
+                                      "details": "seconds must be > 0"},
+                                     status=400)
+    else:
+        kind_limit = "lte" if kind == "lte" else str(
+            body.get("kind_limit") or "hwid")
+        if kind_limit not in ("hwid", "lte"):
+            return web.json_response({"error": "bad_params",
+                                      "details": "bad kind_limit"},
+                                     status=400)
+        value = _coerce_int(body.get("value"))
+        if body.get("value") is not None and value is None:
+            return web.json_response({"error": "bad_params",
+                                      "details": "value must be int"},
+                                     status=400)
     token = str(body.get("confirm_token") or "")
     if not token:
-        summary = {"extend": "Массовый сдвиг сроков",
-                   "limits": "Массовая смена лимитов",
-                   "lte": "Массовая смена LTE-лимита"}.get(
-                       kind, "Массовое действие по подпискам")
+        from paidsub.storage import paid_counts
+        count = (await paid_counts()).get(scope, 0)
+        base = {"extend": "Массовый сдвиг сроков",
+                "limits": "Массовая смена лимитов",
+                "lte": "Массовая смена LTE-лимита"}.get(
+                    kind, "Массовое действие по подпискам")
+        summary = (f"{base} · выборка: {_bulk_scope_label(scope)} — "
+                   f"{count} подп.")
         tok = issue_confirm(actor, f"sub_bulk_{kind}", {"body": body},
                             summary)
         return confirm_needed_response(tok, summary)
@@ -898,30 +997,51 @@ async def subs_bulk(request):
     if payload is None:
         return web.json_response({"error": "bad_confirm"}, status=403)
     body = payload.get("body") or {}
+    # scope перепроверяем из подтверждённого тела — токен привязан
+    # к исходному запросу, но защита от подмены не помешает.
+    scope = str(body.get("scope") or "all").strip()
+    if scope not in _BULK_SCOPES:
+        return web.json_response({"error": "bad_scope"}, status=400)
     svc = _service()
-    # Массовые действия в paidsub/service.py — глобальные, по всем
-    # платным подпискам: bulk_extend(seconds, direction),
-    # bulk_set_limits(kind_limit, value). LTE — тот же bulk_set_limits,
-    # что и в ТГ (handle_paid_bulk_limits_apply), только в базе бота.
+    only_ids = None
+    if scope != "all":
+        from paidsub.storage import all_paid_subs
+        only_ids = [r[0] for r in await all_paid_subs(scope)]
     try:
         if kind == "extend":
-            seconds = body.get("seconds")
+            seconds = _coerce_int(body.get("seconds"))
             if seconds is None:
-                seconds = int(body.get("days") or 0) * 86400
-            res = await svc.bulk_extend(int(seconds),
-                                        str(body.get("direction") or "extend"))
+                days = _coerce_int(body.get("days"), 0)
+                seconds = abs(days) * 86400
+                direction = -1 if days < 0 else 1
+            else:
+                direction = body.get("direction")
+                if isinstance(direction, str):
+                    direction = {"extend": 1, "reduce": -1}.get(direction)
+                direction = _coerce_int(direction)
+                if direction not in (1, -1):
+                    direction = 1
+                seconds = abs(seconds)
+            res = await svc.bulk_extend(seconds, direction,
+                                        only_ids=only_ids)
         elif kind == "lte":
-            res = await svc.bulk_set_limits("lte", body.get("value"))
-        else:
             res = await svc.bulk_set_limits(
-                str(body.get("kind_limit") or "hwid"),
-                body.get("value"))
+                "lte", _coerce_int(body.get("value")),
+                only_ids=only_ids)
+        else:
+            kind_limit = str(body.get("kind_limit") or "hwid")
+            if kind_limit not in ("hwid", "lte"):
+                kind_limit = "hwid"
+            res = await svc.bulk_set_limits(
+                kind_limit, _coerce_int(body.get("value")),
+                only_ids=only_ids)
     except (TypeError, ValueError) as ex:
         return web.json_response({"error": "bad_params", "details": str(ex)},
                                  status=400)
     await _audit(actor, f"subs_bulk_{kind}",
-                 f"updated: {res.get('updated')}")
-    return web.json_response({"ok": True, "result": res})
+                 f"scope={scope} updated: {res.get('updated')}")
+    return web.json_response({"ok": True, "result": res,
+                              "scope": scope})
 
 
 async def lte_check_now(request):
@@ -1208,6 +1328,7 @@ def register(app) -> None:
     # /subs/presets и /subs/bulk/* в хендлеры подписок.
     app.router.add_get("/subs/presets", subs_presets_get)
     app.router.add_patch("/subs/presets", subs_presets_patch)
+    app.router.add_get("/subs/bulk/scopes", bulk_scopes)
     app.router.add_post("/subs/bulk/{kind}", subs_bulk)
     app.router.add_post("/subs/lte/check-now", lte_check_now)
     app.router.add_get("/subs/requests", subs_requests_list)

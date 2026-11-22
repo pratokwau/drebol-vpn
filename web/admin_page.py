@@ -376,12 +376,14 @@ label.chk input{width:auto;margin:0}
             <button id="btn-subs-next" class="ghost">Вперёд →</button>
           </div>
         </div>
-        <div class="card"><h2>Массовые действия</h2><p class="sub">Применяются ко всем активным платным подпискам.</p>
-          <select id="bulk-kind"><option value="extend">Продлить всем</option><option value="limits">Сменить лимиты всем</option><option value="lte">Сменить LTE всем</option></select>
+        <div class="card"><h2>Массовые действия</h2><p class="sub">Действие применится ко всей выбранной вкладке сразу — как в ТГ (Массовые действия).</p>
+          <div class="btnrow" id="bulk-tabs" style="flex-wrap:wrap"></div>
+          <div id="bulk-scope-info" class="mut" style="margin:4px 0 8px"></div>
+          <select id="bulk-kind"><option value="extend">Сдвинуть срок</option><option value="limits">Сменить лимиты</option><option value="lte">Сменить LTE</option></select>
           <input id="bulk-days" type="number" placeholder="дней (+ продлить / − сократить)">
           <input id="bulk-value" type="number" placeholder="значение лимита, ГБ">
-          <select id="bulk-kind-limit"><option value="">лимит: трафик</option><option value="hwid">лимит: устройства</option><option value="lte">лимит: LTE</option></select>
-          <button id="btn-bulk">Применить ко всем</button>
+          <select id="bulk-kind-limit"><option value="hwid">лимит: устройства</option><option value="lte">лимит: LTE</option></select>
+          <button id="btn-bulk">Применить к выборке</button>
           <div id="bulk-out"></div>
         </div>
         <div class="card"><h2>Пресеты подписок</h2><p class="sub">Значения по умолчанию для новых платных подписок.</p>
@@ -1401,7 +1403,7 @@ $("subs-table").addEventListener("click", function(e){
   if (tr) openSubEditor(parseInt(tr.dataset.subId, 10));
 });
 document.querySelector('[data-nav="subs"]').addEventListener("click", function(){
-  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); }
+  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); loadBulkScopes(); }
 });
 
 /* --- Админские подписки: список с вкладками --- */
@@ -1695,13 +1697,38 @@ async function subEditorAction(a){
     if (subsCurrentKind === "admin") loadAdminSubs(asubPage);
   }
 }
+/* --- Массовые действия: вкладки как в ТГ (BULK_SCOPES) --- */
+let bulkScope = "all", bulkCounts = {};
+const BULK_TABS = {all: ["📋", "Все"], active: ["🟢", "Активные"], trial: ["🆓", "Пробные"], paying: ["💳", "Платящие"], soon: ["⏳", "Скоро кончатся"], expired: ["🔴", "Истёкшие"]};
+function renderBulkTabs(){
+  $("bulk-tabs").innerHTML = Object.keys(BULK_TABS).map(function(k){
+    const c = bulkCounts[k];
+    return '<button class="ghost' + (k === bulkScope ? " active" : "") + '" data-bulk-tab="' + k + '">' + BULK_TABS[k][0] + " " + BULK_TABS[k][1] + (c == null ? "" : " · " + c) + "</button>";
+  }).join("");
+  const c = bulkCounts[bulkScope];
+  $("bulk-scope-info").textContent = "Выборка: " + BULK_TABS[bulkScope][0] + " " + BULK_TABS[bulkScope][1] + (c == null ? "" : " — подписок: " + c) + ". Действие применится ко всей выборке сразу.";
+}
+async function loadBulkScopes(){
+  try {
+    const r = await api("/subs/bulk/scopes");
+    if (r.status === 200 && r.data.counts) bulkCounts = r.data.counts;
+  } catch(e) {}
+  renderBulkTabs();
+}
+$("bulk-tabs").addEventListener("click", function(e){
+  const b = e.target.closest("button[data-bulk-tab]");
+  if (!b) return;
+  bulkScope = b.dataset.bulkTab;
+  renderBulkTabs();
+});
 $("btn-bulk").onclick = async function(){
   const kind = $("bulk-kind").value;
-  const body = {};
+  const body = {scope: bulkScope};
   if (kind === "extend") { body.days = parseInt($("bulk-days").value || "0", 10); body.direction = body.days >= 0 ? "extend" : "reduce"; }
   else { body.value = parseInt($("bulk-value").value || "0", 10); body.kind_limit = $("bulk-kind-limit").value || "hwid"; }
   const r = await postConfirm("/subs/bulk/" + kind, body);
   renderOut("bulk-out", r.data);
+  if (r.status === 200) loadBulkScopes();
 };
 $("btn-presets").onclick = async function(){
   const r = await api("/subs/presets");
