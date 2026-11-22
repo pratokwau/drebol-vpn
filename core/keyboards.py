@@ -68,7 +68,7 @@ def admin_keyboard() -> InlineKeyboardMarkup:
 
     # Кнопки сгруппированы по смыслу и стоят парами — так вся админка
     # помещается на один экран телефона без прокрутки. Все кнопки —
-    # в два столбца, одиночных рядов нет (кроме «Назад» внизу).
+    # в два столбца, одиночных рядов нет (кроме «Синхронизации» и «Назад»).
     return InlineKeyboardMarkup([
         # сводка и деньги
         [b("📊 Статистика", "dashboard"), b("💰 Финансы", "pay_provider_menu")],
@@ -83,9 +83,10 @@ def admin_keyboard() -> InlineKeyboardMarkup:
         [b("⛔ Чёрный список", "bl_menu"), b("🕵 Повторные триалы", "fraud_menu")],
         # инфраструктура
         [b("🖥 Панель и узлы", "rw_menu"), b("🌐 Веб-доступ", "web_menu")],
-        [b("💾 Бэкап и перенос", "backup_menu"), b("📄 Документы", "documents_menu")],
-        [b("🛟 Поддержка и логи", "support_group_settings"), b(mnt_label, "mnt_menu")],
-        [b("🔄 Обновиться с GitHub", "git_update"), b(f"⏰ Синхронизация · {sync_time}", "morning_menu")],
+        [b("☁️ Yandex Cloud", "yc_menu"), b("💾 Бэкап и перенос", "backup_menu")],
+        [b("📄 Документы", "documents_menu"), b("🛟 Поддержка и логи", "support_group_settings")],
+        [b(mnt_label, "mnt_menu"), b("🔄 Обновиться с GitHub", "git_update")],
+        [b(f"⏰ Синхронизация · {sync_time}", "morning_menu")],
         [b("◀️ Назад", "back_start")],
     ])
 

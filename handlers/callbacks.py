@@ -49,6 +49,9 @@ from features.backup import (
     handle_backup_menu, handle_backup_export, handle_backup_import,
     handle_backup_apply,
 )
+from handlers.yandex_cloud import (
+    handle_yc_menu, handle_yc_resources, handle_yc_dns, handle_yc_billing,
+)
 from web.site_deploy import (
     handle_site_menu, handle_site_server, handle_site_domain,
     handle_site_deploy, handle_site_cert, handle_site_delete,
@@ -579,6 +582,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "rw_cdn_guide":
         # Старая кнопка «Инструкция: CDN» — ведёт на настройку зеркала.
         await handle_rw_yandex_sub(query, context)
+    elif data == "yc_menu":
+        await handle_yc_menu(query, context)
+    elif data == "yc_resources":
+        await handle_yc_resources(query, context)
+    elif data == "yc_dns":
+        await handle_yc_dns(query, context)
+    elif data == "yc_billing":
+        await handle_yc_billing(query, context)
     elif data == "rw_downtime":
         await handle_downtime_menu(query, context)
     elif data == "rw_url":
