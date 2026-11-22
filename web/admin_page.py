@@ -263,6 +263,7 @@ label.chk input{width:auto;margin:0}
       <button class="nav-item" data-nav="netcheck"><span class="ic">📡</span>Проверка операторов</button>
       <button class="nav-item" data-nav="site"><span class="ic">🌍</span>Сайт</button>
       <button class="nav-item" data-nav="backup"><span class="ic">💾</span>Бэкап</button>
+      <button class="nav-item" data-nav="maintenance"><span class="ic">🛠️</span>Техработы</button>
       <div class="nav-group">Люди</div>
       <button class="nav-item" data-nav="support"><span class="ic">🛟</span>Поддержка</button>
       <button class="nav-item" data-nav="settings"><span class="ic">⚙️</span>Настройки</button>
@@ -783,6 +784,26 @@ label.chk input{width:auto;margin:0}
         </div>
       </section>
 
+      <!-- Техработы и функции -->
+      <section id="sec-maintenance" class="page hidden">
+        <div class="card"><h2>🛠 Техработы</h2><p class="sub">Когда техработы включены, бот закрыт для пользователей — админ работает как обычно. Оплаты, сроки подписок и мониторинг продолжают работать. Переключение — только Mark, с подтверждением.</p>
+          <div id="mnt-status" class="mut">Загрузка…</div>
+          <div id="mnt-readonly" class="mut hidden">Только Mark может менять техработы — у вас доступ только для чтения.</div>
+          <div class="btnrow"><button id="btn-mnt-toggle">Включить техработы</button></div>
+          <div id="mnt-toggle-out" class="mut"></div>
+          <h3>Что увидят пользователи</h3>
+          <div id="mnt-text-preview" class="mut"></div>
+          <label>Текст сообщения (HTML: b, i, a href, code, blockquote; пусто или «-» — вернуть стандартный)</label>
+          <textarea id="mnt-text" placeholder="текст на время техработ"></textarea>
+          <div class="btnrow"><button id="btn-mnt-text-save" class="ghost">Сохранить текст</button><button id="btn-mnt-text-reset" class="ghost">Вернуть стандартный</button></div>
+          <div id="mnt-text-out" class="mut"></div>
+        </div>
+        <div class="card"><h2>⚙️ Функции</h2><p class="sub">Отдельные функции можно выключить, не останавливая остальное: например, выдачу триалов или поддержку. Нажми на функцию, чтобы выключить или включить её.</p>
+          <div id="mnt-features"></div>
+          <div id="mnt-features-out" class="mut"></div>
+        </div>
+      </section>
+
       <!-- Поддержка -->
       <section id="sec-support" class="page hidden">
         <div class="card"><h2>Открытые обращения</h2><p class="sub">Темы в группе поддержки. Ответ уходит юзеру тем же путём, что и ответ из группы.</p>
@@ -858,7 +879,7 @@ label.chk input{width:auto;margin:0}
 </div>
 <script>
 const API = "/api/admin";
-const SECTION_TITLES = {overview:"Обзор", users:"Пользователи", subs:"Подписки", finance:"Финансы", payments:"Оплаты", broadcast:"Рассылка", retention:"Напоминания и возврат", promos:"Промокоды", tariffs:"Тарифы", panel:"Панель Remnawave", nodes:"Узлы", logs:"Логи", sync:"Синхронизация", netcheck:"Проверка операторов", site:"Сайт", backup:"Бэкап", support:"Поддержка", settings:"Настройки"};
+const SECTION_TITLES = {overview:"Обзор", users:"Пользователи", subs:"Подписки", finance:"Финансы", payments:"Оплаты", broadcast:"Рассылка", retention:"Напоминания и возврат", promos:"Промокоды", tariffs:"Тарифы", panel:"Панель Remnawave", nodes:"Узлы", logs:"Логи", sync:"Синхронизация", netcheck:"Проверка операторов", site:"Сайт", backup:"Бэкап", maintenance:"Техработы и функции", support:"Поддержка", settings:"Настройки"};
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function fmtNum(n){ if (n == null || n === "") return "—"; const v = Number(n); if (isNaN(v)) return esc(n); return v.toLocaleString("ru-RU"); }
@@ -1164,8 +1185,8 @@ $("btn-quick-deploy").onclick = withSpin($("btn-quick-deploy"), async function()
   $("quick-upd-msg").textContent = r.status === 200 ? "Сайт развёрнут." : ("Ошибка: " + (r.data.error || r.status));
   if (r.status === 200) toast("Сайт развёрнут", "ok");
 });
-const EDITABLE = ["channel_url","force_subscribe","sub_link_domain","paid_trial_period","paid_preset_hwid","paid_preset_traffic","paid_preset_lte","referral_bonus","referral_invited_bonus","maintenance_enabled","maintenance_text","device_price","device_max_extra"];
-const SETTINGS_LABELS = {channel_url: "Ссылка на канал", force_subscribe: "Обязательная подписка на канал", sub_link_domain: "Домен ссылки подписки", paid_trial_period: "Триал, дней", paid_preset_hwid: "Лимит устройств в подписке", paid_preset_traffic: "Лимит трафика, ГБ (0 — безлимит)", paid_preset_lte: "Лимит LTE, ГБ", referral_bonus: "Бонус пригласившему, дней", referral_invited_bonus: "Бонус приглашённому, дней", maintenance_enabled: "Режим техработ включён", maintenance_text: "Текст на время техработ", device_price: "Цена доп. устройства, ₽", device_max_extra: "Максимум доп. устройств"};
+const EDITABLE = ["channel_url","force_subscribe","sub_link_domain","paid_trial_period","paid_preset_hwid","paid_preset_traffic","paid_preset_lte","referral_bonus","referral_invited_bonus","device_price","device_max_extra"];
+const SETTINGS_LABELS = {channel_url: "Ссылка на канал", force_subscribe: "Обязательная подписка на канал", sub_link_domain: "Домен ссылки подписки", paid_trial_period: "Триал, дней", paid_preset_hwid: "Лимит устройств в подписке", paid_preset_traffic: "Лимит трафика, ГБ (0 — безлимит)", paid_preset_lte: "Лимит LTE, ГБ", referral_bonus: "Бонус пригласившему, дней", referral_invited_bonus: "Бонус приглашённому, дней", device_price: "Цена доп. устройства, ₽", device_max_extra: "Максимум доп. устройств"};
 const SETTINGS_DAY_KEYS = ["paid_trial_period", "referral_bonus", "referral_invited_bonus"];
 async function loadSettings(){
   const r = await api("/settings");
@@ -2214,6 +2235,57 @@ $("btn-ret-winback-test").onclick = withSpin($("btn-ret-winback-test"), async fu
   if (r.status === 200) { $("ret-winback-out").textContent = "Пример письма отправлен вам в Telegram (промокод " + (r.data.code || "") + ")"; toast("Пример отправлен", "ok"); }
   else $("ret-winback-out").textContent = retErr(r);
 });
+
+/* --- Техработы и функции: как mnt_menu в ТГ --- */
+let maintenanceLoaded = false;
+function renderMaintenance(d){
+  $("mnt-status").innerHTML = d.maintenance_enabled ? '<span class="pill bad">техработы включены — бот закрыт для пользователей</span>' : '<span class="pill ok">техработы выключены</span>';
+  $("btn-mnt-toggle").textContent = d.maintenance_enabled ? "Выключить техработы" : "Включить техработы";
+  // Предпросмотр — тот же текст, что увидят пользователи (HTML из ТГ).
+  $("mnt-text-preview").innerHTML = d.maintenance_text || "";
+  // В поле — только свой текст; стандартный не подставляем, иначе
+  // сохранение перепишет его как свой.
+  if (document.activeElement !== $("mnt-text")) $("mnt-text").value = d.text_custom ? d.maintenance_text : "";
+  show("mnt-readonly", !d.is_mark);
+  show("btn-mnt-toggle", !!d.is_mark);
+  show("btn-mnt-text-save", !!d.is_mark);
+  show("btn-mnt-text-reset", !!d.is_mark);
+  $("mnt-text").disabled = !d.is_mark;
+  const host = $("mnt-features");
+  host.innerHTML = (d.features || []).map(function(f){
+    return '<div class="btnrow" style="align-items:center"><span style="flex:1">' + (f.enabled ? "✅ " : "⏸ ") + esc(f.emoji) + " " + esc(f.name) + '</span>' +
+      '<button class="ghost" data-mnt-feature="' + esc(f.key) + '"' + (d.is_mark ? "" : " disabled") + '>' + (f.enabled ? "Выключить" : "Включить") + '</button></div>';
+  }).join("");
+  host.querySelectorAll("[data-mnt-feature]").forEach(function(b){
+    b.onclick = withSpin(b, async function(){
+      const r = await api("/maintenance/feature", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({key: b.dataset.mntFeature})});
+      if (r.status === 200) { toast("Функция переключена", "ok"); loadMaintenance(); }
+      else $("mnt-features-out").textContent = "Ошибка: " + (r.data.error || r.status) + (r.data.details ? " — " + r.data.details : "");
+    });
+  });
+}
+async function loadMaintenance(){
+  let r;
+  try { r = await api("/maintenance"); }
+  catch(e) { $("mnt-status").textContent = "Ошибка загрузки"; return; }
+  if (r.status !== 200) { $("mnt-status").textContent = "Ошибка: " + (r.data.error || r.status); return; }
+  renderMaintenance(r.data);
+}
+document.querySelector('[data-nav="maintenance"]').addEventListener("click", function(){
+  if (!maintenanceLoaded) { maintenanceLoaded = true; loadMaintenance(); }
+});
+$("btn-mnt-toggle").onclick = withSpin($("btn-mnt-toggle"), async function(){
+  const r = await postConfirm("/maintenance/toggle", {});
+  if (r.status === 200) { $("mnt-toggle-out").textContent = ""; toast(r.data.maintenance_enabled ? "Техработы включены" : "Техработы выключены", "ok"); loadMaintenance(); }
+  else if (r.status !== 0) $("mnt-toggle-out").textContent = "Ошибка: " + (r.data.error || r.status);
+});
+async function saveMaintenanceText(text){
+  const r = await api("/maintenance/text", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({text: text})});
+  if (r.status === 200) { $("mnt-text-out").textContent = "Сохранено — предпросмотр отправлен вам в Telegram"; toast("Текст техработ сохранён", "ok"); loadMaintenance(); }
+  else $("mnt-text-out").textContent = "Ошибка: " + (r.data.error || r.status) + (r.data.details ? " — " + r.data.details : "");
+}
+$("btn-mnt-text-save").onclick = withSpin($("btn-mnt-text-save"), async function(){ await saveMaintenanceText($("mnt-text").value); });
+$("btn-mnt-text-reset").onclick = withSpin($("btn-mnt-text-reset"), async function(){ await saveMaintenanceText("-"); });
 $("btn-ch-upload").onclick = withSpin($("btn-ch-upload"), async function(){
   const files = $("ch-photo").files;
   if (!files.length) { $("ch-photo-msg").textContent = "Выберите файл"; return; }

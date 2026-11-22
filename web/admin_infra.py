@@ -303,6 +303,8 @@ _ADMIN_LABELS = {
     "jobs_run_now": "▶️ Запустил фоновую задачу", "jobs_run_now_failed": "⚠️ Фоновая задача упала",
     "logs_purge": "🧹 Очистил старые логи", "lte_check_now": "📶 Ручная проверка LTE",
     "morning_run_now": "🌅 Запустил утреннюю сводку", "morning_update": "🌅 Настройки утренней сводки",
+    "maintenance_feature": "🛠 Функция вкл/выкл", "maintenance_text": "🛠 Текст техработ",
+    "maintenance_toggle": "🛠 Техработы вкл/выкл",
     "muse_account_create": "👤 Создал Muse-аккаунт", "muse_account_direct": "👤 Muse-аккаунт напрямую",
     "netcheck_run": "📡 Запустил проверку операторов",
     "panel_host_create": "➕ Создал хост в панели", "panel_host_delete": "🗑 Удалил хост в панели",
@@ -1980,6 +1982,179 @@ async def support_settings_patch(request):
                               "settings": _support_settings_snapshot()})
 
 
+# ── Техработы и функции ──────────────────────────────────────────────────────
+
+_MAINTENANCE_TEXT_MAX = 3500
+
+
+def _maintenance_snapshot(actor) -> dict:
+    """Состояние экрана «Техработы и функции» — как mnt_menu в ТГ
+    (core/maintenance.py): переключатель техработ, текст для
+    пользователей и тумблеры функций из features_off."""
+    from config import load_config
+    from core import maintenance as mnt_mod
+    cfg = load_config()
+    off = set(cfg.get("features_off") or [])
+    return {
+        "maintenance_enabled": bool(cfg.get("maintenance_enabled", False)),
+        "maintenance_text": mnt_mod.maintenance_text(),
+        "text_custom": bool(cfg.get("maintenance_text")),
+        "features": [
+            {"key": key, "emoji": emoji, "name": name,
+             "enabled": key not in off}
+            for key, (emoji, name, _cbs) in mnt_mod.FEATURES.items()
+        ],
+        "is_mark": bool(require_mark(actor)),
+    }
+
+
+async def maintenance_get(request):
+    try:
+        actor = await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    return web.json_response(_maintenance_snapshot(actor))
+
+
+async def maintenance_toggle(request):
+    """Включить/выключить техработы (как mnt_toggle в ТГ).
+    Только Mark, с подтверждением: закрывает бота для пользователей."""
+    from config import atomic_update, load_config
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    enabled = bool(load_config().get("maintenance_enabled", False))
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        summary = ("Выключить техработы? Бот снова откроется для "
+                   "пользователей." if enabled else
+                   "Включить техработы? Бот закроется для пользователей.")
+        return confirm_needed_response(
+            issue_confirm(actor, "maintenance_toggle", {}, summary),
+            summary)
+    payload = take_confirm(actor, token, "maintenance_toggle")
+    if payload is None:
+        return _json_error("bad_confirm", 403)
+
+    def _apply(cfg):
+        cfg["maintenance_enabled"] = not bool(
+            cfg.get("maintenance_enabled", False))
+    atomic_update(_apply)
+    now_on = bool(load_config().get("maintenance_enabled", False))
+    bot = get_bot()
+    if bot is not None:
+        try:
+            from core.log_channel import send_log
+            await send_log(bot, "🛠 Техработы включены" if now_on
+                           else "✅ Техработы выключены")
+        except Exception as ex:
+            logging.error("админка: maintenance_toggle send_log: %s", ex)
+    await _audit(actor, "maintenance_toggle",
+                 "on" if now_on else "off")
+    return web.json_response({"ok": True,
+                              **_maintenance_snapshot(actor)})
+
+
+async def maintenance_feature(request):
+    """Выключить/включить одну функцию (как mnt_feature:key в ТГ).
+    Только Mark, без подтверждения — как promo_toggle."""
+    from config import atomic_update, load_config
+    from core import maintenance as mnt_mod
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    body = await _json_body(request)
+    key = str(body.get("key") or "")
+    if key not in mnt_mod.FEATURES:
+        return _json_error("bad_feature")
+    # Тот же путь, что handle_feature_toggle в core/maintenance.py:
+    # features_off — отсортированный список выключенных ключей.
+    off = set(load_config().get("features_off") or [])
+    now_off = key not in off
+    if now_off:
+        off.add(key)
+    else:
+        off.discard(key)
+
+    def _apply(cfg):
+        cfg["features_off"] = sorted(off)
+    atomic_update(_apply)
+    name = mnt_mod.FEATURES[key][1]
+    bot = get_bot()
+    if bot is not None:
+        try:
+            from core.log_channel import send_log
+            await send_log(bot, f"⏸ Выключена функция «{name}»" if now_off
+                           else f"▶️ Включена функция «{name}»")
+        except Exception as ex:
+            logging.error("админка: maintenance_feature send_log: %s", ex)
+    await _audit(actor, "maintenance_feature",
+                 f"{key}={'off' if now_off else 'on'}")
+    return web.json_response({"ok": True,
+                              **_maintenance_snapshot(actor)})
+
+
+async def maintenance_text(request):
+    """Текст техработ (как apply_maintenance_text в ТГ): «-» или пусто —
+    вернуть стандартный; иначе разметка проверяется предпросмотром
+    Марку в Telegram — битая разметка не сохраняется. Только Mark."""
+    from config import atomic_update
+    from core import maintenance as mnt_mod
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    body = await _json_body(request)
+    raw = body.get("text")
+    if raw is None or not isinstance(raw, str):
+        return _json_error("bad_text")
+    raw = raw.strip()
+    if raw == "" or raw == "-":
+        new = None
+    else:
+        if len(raw) > _MAINTENANCE_TEXT_MAX:
+            return _json_error("bad_text")
+        new = raw
+    bot = get_bot()
+    if bot is None:
+        return _json_error("no_bot", 503)
+    tg_id = actor.get("tg_id")
+    if not tg_id:
+        return _json_error("mark_only", 403)
+    # Предпросмотр — та же проверка, что в ТГ: Telegram должен принять
+    # разметку, иначе текст не сохраняется.
+    try:
+        await bot.send_message(
+            chat_id=tg_id,
+            text=(f"✅ <b>{'Вернул стандартный текст' if new is None else 'Текст сохранён'}</b>\n"
+                  f"<i>Так его увидят пользователи:</i>\n\n"
+                  f"{new or mnt_mod.DEFAULT_TEXT}"),
+            parse_mode="HTML")
+    except Exception as ex:
+        return web.json_response(
+            {"error": "bad_html", "details": str(ex)[:200]}, status=400)
+
+    def _apply(cfg):
+        if new is None:
+            cfg.pop("maintenance_text", None)
+        else:
+            cfg["maintenance_text"] = new
+    atomic_update(_apply)
+    await _audit(actor, "maintenance_text",
+                 "reset" if new is None else f"len={len(new)}")
+    return web.json_response({"ok": True,
+                              **_maintenance_snapshot(actor)})
+
+
 # ── Помощники: добавление, права, удаление (Mark-only) ───────────────────────
 
 async def helpers_add(request):
@@ -2297,6 +2472,10 @@ def register(app) -> None:
     app.router.add_get("/morning", morning_get)
     app.router.add_patch("/morning", morning_patch)
     app.router.add_post("/morning/run-now", morning_run_now)
+    app.router.add_get("/maintenance", maintenance_get)
+    app.router.add_post("/maintenance/toggle", maintenance_toggle)
+    app.router.add_post("/maintenance/feature", maintenance_feature)
+    app.router.add_post("/maintenance/text", maintenance_text)
     app.router.add_get("/netcheck", netcheck_get)
     app.router.add_post("/netcheck/run", netcheck_run)
     app.router.add_get("/links", links_get)
