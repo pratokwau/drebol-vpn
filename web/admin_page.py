@@ -279,7 +279,8 @@ label.chk input{width:auto;margin:0}
       <!-- Обзор -->
       <section id="sec-overview" class="page">
         <div id="stats" class="grid"></div>
-        <div class="card"><h2>Выручка и новые юзеры — 30 дней</h2><p class="sub">Выручка — нетто: оплаченные счета минус возвраты. Наведи курсор на столбец или точку — увидишь дату и значение.</p>
+        <div class="card"><h2 id="chart-period-title">Выручка и новые юзеры — 30 дней</h2><p class="sub">Выручка — нетто: оплаченные счета минус возвраты. Наведи курсор на столбец или точку — увидишь дату и значение.</p>
+          <div class="btnrow" id="chart-period" style="margin-bottom:10px"><button class="ghost" data-days="7">7 дней</button><button class="ghost active" data-days="30">30 дней</button></div>
           <div class="chartgrid">
             <div><h3 style="margin-top:0">Выручка по дням</h3><div id="chart-revenue"></div></div>
             <div><h3 style="margin-top:0">Новые юзеры по дням</h3><div id="chart-users"></div></div>
@@ -1133,6 +1134,7 @@ async function loadExpiring(){
   const r = await api("/dashboard/expiring");
   if (r.status !== 200) { $("expiring-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   const items = r.data.items || [];
+  expiringCount = items.length;
   const kpi = $("kpi-expiring");
   if (kpi) kpi.textContent = fmtNum(items.length);
   if (!items.length) { $("expiring-out").innerHTML = '<div class="empty"><span class="big">✅</span>В ближайшие 3 дня ничего не истекает</div>'; return; }
@@ -1142,35 +1144,58 @@ async function loadExpiring(){
       return '<tr><td>' + name + '</td><td><span class="mono">#' + it.sub_id + '</span></td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td>' + pill(statusRu(it.status)) + '</td><td><button class="ghost" data-open-sub="' + it.sub_id + '">Открыть</button></td></tr>';
     }).join("") + "</tbody></table></div>";
 }
-async function loadDashboard(){
-  const r = await api("/dashboard");
-  if (r.status !== 200) return;
-  const s = r.data.stats || {};
-  const m = r.data.money || {};
-  const today = m.today || [0, 0], month = m.month || [0, 0];
+let chartDays = 30, dashStats = null, dashMoney = null, expiringCount = null;
+function renderStats(){
+  const s = dashStats || {};
+  const m = dashMoney || {};
+  const today = m.today || [0, 0];
+  // Период графиков — тот же переключатель 7/30 дней, что в ТГ
+  // (handle_payment_stats): неделя и месяц уже есть в payments_summary.
+  const period = chartDays === 7 ? (m.week || [0, 0]) : (m.month || [0, 0]);
   const cells = [
     ["Выручка сегодня", fmtMoney(today[1]), "оплат: " + fmtNum(today[0])],
-    ["Выручка за 30 дней", fmtMoney(month[1]), "оплат: " + fmtNum(month[0])],
+    ["Выручка за " + chartDays + " дней", fmtMoney(period[1]), "оплат: " + fmtNum(period[0])],
     ["Активных подписок", fmtNum(s.paid_active), "платящих: " + fmtNum(s.paying_active)],
     ["Новых сегодня", "+" + fmtNum(s.users_today || 0), "за неделю: +" + fmtNum(s.users_week || 0)],
     ["Пользователей", fmtNum(s.users_total), "платили: " + fmtNum(m.payers || 0)],
-    ["Истекает ≤ 3 дней", '<span id="kpi-expiring">…</span>', ""]
+    ["Истекает ≤ 3 дней", '<span id="kpi-expiring">' + (expiringCount == null ? "…" : fmtNum(expiringCount)) + "</span>", ""]
   ];
   $("stats").innerHTML = cells.map(function(c){
     return '<div class="stat"><b>' + c[1] + '</b><span>' + c[0] + "</span>" + (c[2] ? "<small>" + c[2] + "</small>" : "") + "</div>";
   }).join("");
+}
+async function loadCharts(){
+  const rs = await api("/dashboard/series?days=" + chartDays);
+  if (rs.status !== 200) return;
+  const d = rs.data || {};
+  $("chart-revenue").innerHTML = barChart(d.revenue || [], function(v){ return fmtMoney(v); });
+  $("chart-users").innerHTML = lineChart(d.users || []);
+  $("chart-status").innerHTML = donutChart((d.by_status || []).map(function(x){ return {label: statusRu(x.status), count: x.count}; }));
+  $("chart-term").innerHTML = hbars((d.by_term || []).map(function(x){ return {label: x.term_days ? fmtDays(x.term_days * 86400) : "Триал", count: x.count}; }));
+  const t = $("chart-period-title");
+  if (t) t.textContent = "Выручка и новые юзеры — " + chartDays + " дней";
+}
+$("chart-period").addEventListener("click", function(e){
+  const b = e.target.closest("button[data-days]");
+  if (!b) return;
+  const d = parseInt(b.dataset.days, 10);
+  if (d === chartDays) return;
+  chartDays = d;
+  document.querySelectorAll("#chart-period button[data-days]").forEach(function(x){ x.classList.toggle("active", x === b); });
+  renderStats();
+  loadCharts();
+});
+async function loadDashboard(){
+  const r = await api("/dashboard");
+  if (r.status !== 200) return;
+  dashStats = r.data.stats || {};
+  dashMoney = r.data.money || {};
+  renderStats();
   const p = r.data.panel || {};
   $("panel-line").textContent = p.success ?
     ("Панель: клиентов " + fmtNum(p.total) + " (платных " + fmtNum(p.paid) + ")") :
     "Панель недоступна — сверка не выполнена";
-  const rs = await api("/dashboard/series");
-  if (rs.status === 200) {
-    const d = rs.data || {};
-    $("chart-revenue").innerHTML = barChart(d.revenue || [], function(v){ return fmtMoney(v); });
-    $("chart-users").innerHTML = lineChart(d.users || []);
-    $("chart-status").innerHTML = donutChart((d.by_status || []).map(function(x){ return {label: statusRu(x.status), count: x.count}; }));
-    $("chart-term").innerHTML = hbars((d.by_term || []).map(function(x){ return {label: x.term_days ? fmtDays(x.term_days * 86400) : "Триал", count: x.count}; }));
-  }
+  await loadCharts();
   paidPage = 0;
   loadPaid(1);
   loadExpiring();

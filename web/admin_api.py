@@ -573,6 +573,10 @@ async def dashboard_series(request):
         days = int(request.query.get("days") or 30)
     except ValueError:
         return web.json_response({"error": "bad_days"}, status=400)
+    # Период графиков — только 7/30 дней, как переключатель
+    # «📅 За 7/30 дн.» в ТГ (handle_payment_stats).
+    if days not in (7, 30):
+        return web.json_response({"error": "bad_days"}, status=400)
     return web.json_response(await _series(days))
 
 
