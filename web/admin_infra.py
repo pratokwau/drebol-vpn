@@ -317,6 +317,7 @@ _ADMIN_LABELS = {
     "promo_delete": "🗑 Удалил промокод", "promo_toggle": "🎁 Вкл/выкл промокода",
     "promo_update": "🎁 Изменил промокод",
     "reconcile_fix": "🧾 Исправил расхождения сверки", "reconcile_run": "🧾 Запустил сверку",
+    "remind_test": "📨 Пример напоминания", "retention_update": "🔔 Настройки напоминаний и возврата",
     "server_create": "➕ Добавил сервер в расходы", "server_delete": "🗑 Удалил сервер из расходов",
     "server_mark": "✅ Отметил оплату сервера", "server_update": "✏️ Изменил сервер в расходах",
     "settings_update": "⚙️ Изменил настройки",
@@ -339,6 +340,7 @@ _ADMIN_LABELS = {
     "sub_trial": "🎁 Изменил триал подписки",
     "subs_bulk_extend": "📦 Массовый сдвиг сроков", "subs_bulk_limits": "📦 Массовые лимиты",
     "subs_bulk_lte": "📦 Массовый LTE",
+    "winback_test": "🎯 Пример письма возврата",
 }
 
 

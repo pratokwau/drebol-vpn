@@ -259,10 +259,26 @@ def validate_settings_patch(patch: dict):
                 clean[key] = list(value)
         elif key in _STR_KEYS:
             if key.startswith("remind_quiet_"):
-                if not isinstance(value, str) or (value and not _is_time(value)):
-                    errors.append(f"{key} must be HH:MM or empty")
+                # Тихие часы хранятся целыми часами 0–23 — так пишет ТГ
+                # (handlers/messages.py) и так их читают in_quiet_hours
+                # и экран ТГ (int() от значения). Строка «23:00» и
+                # пустая строка роняли бы их с ValueError, поэтому
+                # принимаем int-час, «HH:MM» (нормализуем в час) и
+                # пустое/None — выключено.
+                if value is None or value == "":
+                    clean[key] = None
+                elif isinstance(value, bool):
+                    errors.append(f"{key} must be an hour 0-23, HH:MM or empty")
+                elif isinstance(value, int):
+                    if not 0 <= value <= 23:
+                        errors.append(f"{key} must be an hour 0-23, HH:MM or empty")
+                    else:
+                        clean[key] = value
+                elif isinstance(value, str) and _is_time(value):
+                    from handlers.morning import parse_time
+                    clean[key] = parse_time(value)[0]
                 else:
-                    clean[key] = value
+                    errors.append(f"{key} must be an hour 0-23, HH:MM or empty")
             elif not isinstance(value, str):
                 errors.append(f"{key} must be a string")
             else:

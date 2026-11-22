@@ -252,6 +252,7 @@ label.chk input{width:auto;margin:0}
       <button class="nav-item" data-nav="finance"><span class="ic">💰</span>Финансы</button>
       <button class="nav-item" data-nav="payments"><span class="ic">🧾</span>Оплаты</button>
       <button class="nav-item" data-nav="broadcast"><span class="ic">📣</span>Рассылка</button>
+      <button class="nav-item" data-nav="retention"><span class="ic">🔔</span>Напоминания и возврат</button>
       <button class="nav-item" data-nav="promos"><span class="ic">🏷️</span>Промокоды</button>
       <button class="nav-item" data-nav="tariffs"><span class="ic">💲</span>Тарифы</button>
       <div class="nav-group">Инфраструктура</div>
@@ -488,6 +489,37 @@ label.chk input{width:auto;margin:0}
           <textarea id="ch-sign" placeholder="текст подписи (HTML)"></textarea>
           <div class="btnrow"><button id="btn-ch-sign-save" class="ghost">Сохранить подпись</button><button id="btn-ch-sign-del" class="danger">Убрать подпись</button></div>
           <div id="ch-sign-out" class="mut"></div>
+        </div>
+      </section>
+
+      <!-- Напоминания и возврат -->
+      <section id="sec-retention" class="page hidden">
+        <div class="card"><h2>⏰ Напоминания о конце подписки</h2><p class="sub">Бот заранее пишет, что срок подходит к концу, и зовёт продлить — остаток при оплате не сгорает. Каждое напоминание уходит один раз за период, продление сбрасывает счёт. Срок — «3 дня», «12 часов» или «0» (выключено).</p>
+          <div id="ret-remind-status" class="mut">Загрузка…</div>
+          <div id="ret-remind-stats" class="mut"></div>
+          <label class="chk"><input id="ret-remind-enabled" type="checkbox"> Напоминания включены</label>
+          <label class="chk"><input id="ret-remind-trials" type="checkbox"> Писать пробным подпискам</label>
+          <label>Первое напоминание<input id="ret-remind-first" placeholder="напр. 3 дня"></label>
+          <label>Второе напоминание<input id="ret-remind-second" placeholder="напр. 1 день"></label>
+          <label>Третье напоминание<input id="ret-remind-third" placeholder="напр. 12 часов"></label>
+          <label>Тихие часы — с (час, 0–23)<input id="ret-remind-quiet-from" type="number" min="0" max="23" placeholder="23"></label>
+          <label>Тихие часы — до (час, 0–23)<input id="ret-remind-quiet-to" type="number" min="0" max="23" placeholder="9"></label>
+          <p class="sub">В тихие часы бот не пишет — отправит, когда окно закончится. Оба поля пустые — тихих часов нет.</p>
+          <div class="btnrow"><button id="btn-ret-remind-save">Сохранить напоминания</button><button id="btn-ret-remind-test" class="ghost hidden">📨 Прислать пример</button></div>
+          <div id="ret-remind-out" class="mut"></div>
+        </div>
+        <div class="card"><h2>🎯 Возврат ушедших</h2><p class="sub">Бот пишет тем, у кого подписка закончилась, и даёт личный промокод с коротким сроком. Людям из чёрного списка не пишет.</p>
+          <div id="ret-winback-status" class="mut">Загрузка…</div>
+          <div id="ret-winback-stats" class="mut"></div>
+          <label class="chk"><input id="ret-winback-enabled" type="checkbox"> Возврат включён</label>
+          <label class="chk"><input id="ret-winback-paid-only" type="checkbox"> Только тем, кто платил</label>
+          <label>Первая волна — через дней<input id="ret-winback-days" type="number" min="1" placeholder="3"></label>
+          <label>Скидка первой волны, %<input id="ret-winback-percent" type="number" min="1" max="100" placeholder="20"></label>
+          <label>Вторая волна — через дней (0 — выключена)<input id="ret-winback-days2" type="number" min="0" placeholder="0"></label>
+          <label>Скидка второй волны, %<input id="ret-winback-percent2" type="number" min="1" max="100" placeholder="35"></label>
+          <label>Промокод живёт, дней<input id="ret-winback-life" type="number" min="1" placeholder="3"></label>
+          <div class="btnrow"><button id="btn-ret-winback-save">Сохранить возврат</button><button id="btn-ret-winback-test" class="ghost hidden">📨 Прислать пример</button></div>
+          <div id="ret-winback-out" class="mut"></div>
         </div>
       </section>
 
@@ -826,7 +858,7 @@ label.chk input{width:auto;margin:0}
 </div>
 <script>
 const API = "/api/admin";
-const SECTION_TITLES = {overview:"Обзор", users:"Пользователи", subs:"Подписки", finance:"Финансы", payments:"Оплаты", broadcast:"Рассылка", promos:"Промокоды", tariffs:"Тарифы", panel:"Панель Remnawave", nodes:"Узлы", logs:"Логи", sync:"Синхронизация", netcheck:"Проверка операторов", site:"Сайт", backup:"Бэкап", support:"Поддержка", settings:"Настройки"};
+const SECTION_TITLES = {overview:"Обзор", users:"Пользователи", subs:"Подписки", finance:"Финансы", payments:"Оплаты", broadcast:"Рассылка", retention:"Напоминания и возврат", promos:"Промокоды", tariffs:"Тарифы", panel:"Панель Remnawave", nodes:"Узлы", logs:"Логи", sync:"Синхронизация", netcheck:"Проверка операторов", site:"Сайт", backup:"Бэкап", support:"Поддержка", settings:"Настройки"};
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function fmtNum(n){ if (n == null || n === "") return "—"; const v = Number(n); if (isNaN(v)) return esc(n); return v.toLocaleString("ru-RU"); }
@@ -2084,6 +2116,103 @@ async function loadChannel(){
 }
 document.querySelector('[data-nav="broadcast"]').addEventListener("click", function(){
   if (!channelLoaded) { channelLoaded = true; loadChannel(); }
+});
+/* --- Напоминания и возврат --- */
+let retentionLoaded = false;
+function pluralRu(n, forms){
+  n = Math.abs(Math.round(n));
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return n + " " + forms[0];
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return n + " " + forms[1];
+  return n + " " + forms[2];
+}
+function durText(sec){
+  sec = Math.round(sec || 0);
+  if (!sec) return "0";
+  if (sec % 86400 === 0) return pluralRu(sec / 86400, ["день", "дня", "дней"]);
+  if (sec % 3600 === 0) return pluralRu(sec / 3600, ["час", "часа", "часов"]);
+  if (sec % 60 === 0) return pluralRu(sec / 60, ["минута", "минуты", "минут"]);
+  return String(sec);
+}
+function retErr(r){
+  let s = "Ошибка: " + (r.data.error || r.status);
+  if (r.data.details && r.data.details.length) s += " — " + r.data.details.join("; ");
+  return s;
+}
+async function loadRetention(){
+  let r;
+  try { r = await api("/retention"); }
+  catch(e) { $("ret-remind-status").textContent = "Ошибка загрузки"; return; }
+  if (r.status !== 200) { $("ret-remind-status").textContent = "Ошибка: " + (r.data.error || r.status); return; }
+  const d = r.data, rem = d.remind || {}, wb = d.winback || {};
+  $("ret-remind-status").innerHTML = rem.enabled ? '<span class="pill ok">включены</span>' : '<span class="pill bad">выключены</span>';
+  const rs = d.remind_stats || {};
+  $("ret-remind-stats").textContent = "За 30 дней: отправлено " + fmtNum(rs.sent) + " · людям " + fmtNum(rs.people) + " · заплатили после напоминания " + fmtNum(rs.paid) + " (" + fmtNum(rs.percent) + "%)";
+  $("ret-remind-enabled").checked = !!rem.enabled;
+  $("ret-remind-trials").checked = !!rem.trials;
+  $("ret-remind-first").value = durText(rem.first);
+  $("ret-remind-second").value = durText(rem.second);
+  $("ret-remind-third").value = durText(rem.third);
+  $("ret-remind-quiet-from").value = (rem.quiet_from == null ? "" : rem.quiet_from);
+  $("ret-remind-quiet-to").value = (rem.quiet_to == null ? "" : rem.quiet_to);
+  $("ret-winback-status").innerHTML = wb.enabled ? '<span class="pill ok">включён</span>' : '<span class="pill bad">выключен</span>';
+  const ws = d.winback_stats || {};
+  $("ret-winback-stats").textContent = "Отправлено писем " + fmtNum(ws.sent) + " · людям " + fmtNum(ws.people) + " · промокод применили " + fmtNum(ws.used) + " · вернулись и заплатили " + fmtNum(ws.returned) + " (" + fmtNum(ws.percent) + "%)";
+  $("ret-winback-enabled").checked = !!wb.enabled;
+  $("ret-winback-paid-only").checked = !!wb.paid_only;
+  $("ret-winback-days").value = wb.days;
+  $("ret-winback-percent").value = wb.percent;
+  $("ret-winback-days2").value = wb.days2;
+  $("ret-winback-percent2").value = wb.percent2;
+  $("ret-winback-life").value = wb.life_days;
+  show("btn-ret-remind-test", !!d.is_mark);
+  show("btn-ret-winback-test", !!d.is_mark);
+}
+document.querySelector('[data-nav="retention"]').addEventListener("click", function(){
+  if (!retentionLoaded) { retentionLoaded = true; loadRetention(); }
+});
+$("btn-ret-remind-save").onclick = withSpin($("btn-ret-remind-save"), async function(){
+  const r = await api("/retention/save", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({
+    remind_enabled: $("ret-remind-enabled").checked,
+    remind_trials: $("ret-remind-trials").checked,
+    remind_first: $("ret-remind-first").value,
+    remind_second: $("ret-remind-second").value,
+    remind_third: $("ret-remind-third").value,
+    remind_quiet_from: $("ret-remind-quiet-from").value,
+    remind_quiet_to: $("ret-remind-quiet-to").value})});
+  if (r.status === 200) { $("ret-remind-out").textContent = "Сохранено"; toast("Напоминания сохранены", "ok"); loadRetention(); }
+  else $("ret-remind-out").textContent = retErr(r);
+});
+$("btn-ret-remind-test").onclick = withSpin($("btn-ret-remind-test"), async function(){
+  const r = await api("/retention/remind/test", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: "{}"});
+  if (r.status === 200) { $("ret-remind-out").textContent = "Пример отправлен вам в Telegram"; toast("Пример отправлен", "ok"); }
+  else $("ret-remind-out").textContent = retErr(r);
+});
+function retInt(id, min, max){
+  const v = parseInt($(id).value, 10);
+  if (isNaN(v) || v < min || (max != null && v > max)) { $(id).focus(); return null; }
+  return v;
+}
+$("btn-ret-winback-save").onclick = withSpin($("btn-ret-winback-save"), async function(){
+  const days = retInt("ret-winback-days", 1, null), pct = retInt("ret-winback-percent", 1, 100),
+        days2 = retInt("ret-winback-days2", 0, null), pct2 = retInt("ret-winback-percent2", 1, 100),
+        life = retInt("ret-winback-life", 1, null);
+  if (days == null || pct == null || days2 == null || pct2 == null || life == null) {
+    $("ret-winback-out").textContent = "Проверьте числа: дни ≥ 1, скидки 1–100, вторая волна 0 — выключена";
+    return;
+  }
+  const r = await api("/retention/save", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({
+    winback_enabled: $("ret-winback-enabled").checked,
+    winback_paid_only: $("ret-winback-paid-only").checked,
+    winback_days: days, winback_percent: pct, winback_days2: days2,
+    winback_percent2: pct2, winback_life_days: life})});
+  if (r.status === 200) { $("ret-winback-out").textContent = "Сохранено"; toast("Возврат сохранён", "ok"); loadRetention(); }
+  else $("ret-winback-out").textContent = retErr(r);
+});
+$("btn-ret-winback-test").onclick = withSpin($("btn-ret-winback-test"), async function(){
+  const r = await api("/retention/winback/test", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: "{}"});
+  if (r.status === 200) { $("ret-winback-out").textContent = "Пример письма отправлен вам в Telegram (промокод " + (r.data.code || "") + ")"; toast("Пример отправлен", "ok"); }
+  else $("ret-winback-out").textContent = retErr(r);
 });
 $("btn-ch-upload").onclick = withSpin($("btn-ch-upload"), async function(){
   const files = $("ch-photo").files;

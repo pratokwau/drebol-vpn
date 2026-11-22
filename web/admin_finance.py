@@ -1189,6 +1189,253 @@ async def channel_post_publish(request):
     return web.json_response({"ok": True, "channel": str(target)})
 
 
+# ── Напоминания и возврат (удержание) ─────────────────────────────────────────
+
+# Те же ключи и та же семантика, что в ТГ-админке: напоминания —
+# handlers/admin.py handle_remind_settings, возврат — features/winback.py.
+_REMIND_KEYS = ("remind_enabled", "remind_first", "remind_second",
+                "remind_third", "remind_trials", "remind_quiet_from",
+                "remind_quiet_to")
+_WINBACK_KEYS = ("winback_enabled", "winback_days", "winback_percent",
+                 "winback_days2", "winback_percent2", "winback_life_days",
+                 "winback_paid_only")
+_RETENTION_KEYS = _REMIND_KEYS + _WINBACK_KEYS
+# Напоминание дальше года до конца подписки бессмысленно; ТГ такой
+# границы не ставит, но и срок длиннее года туда никто не вводит.
+_REMIND_MAX_SECONDS = 366 * 86400
+
+
+def _parse_remind_seconds(value):
+    """Срок напоминания: int секунд, строка «3 дня»/«12 часов» (тот же
+    parse_duration, что в ТГ) или 0/«выкл» — выключено. Возвращает
+    секунды или None, если не разобрать."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 0 <= value <= _REMIND_MAX_SECONDS else None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("0", "выкл", "нет", "off", ""):
+            return 0
+        from paidsub.time_parser import parse_duration
+        seconds = parse_duration(text)
+        if seconds is None or not 0 <= seconds <= _REMIND_MAX_SECONDS:
+            return None
+        return seconds
+    return None
+
+
+def _parse_quiet_hour(value):
+    """Тихий час: int 0–23, «HH:MM» (как раньше принимал веб) или
+    пустое/None — выключено. Возвращает (ok, hour|None)."""
+    if value is None or value == "":
+        return True, None
+    if isinstance(value, bool):
+        return False, None
+    if isinstance(value, int):
+        return (0 <= value <= 23), (value if 0 <= value <= 23 else None)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit() and 0 <= int(text) <= 23:
+            return True, int(text)
+        from handlers.morning import parse_time
+        parsed = parse_time(text)
+        if parsed is not None:
+            return True, parsed[0]
+    return False, None
+
+
+def _quiet_hour_stored(value):
+    """Час из config как есть: int от ТГ, «HH:MM» от старого веба,
+    мусор — None (экран его покажет как «выключено»)."""
+    ok, hour = _parse_quiet_hour(value)
+    return hour if ok else None
+
+
+def _retention_payload(actor):
+    """Текущие настройки + статистика — то же, что показывают экраны ТГ."""
+    from config import load_config
+    from core.database import remind_stats, winback_stats
+    from features.winback import settings as _winback_settings
+    cfg = load_config()
+    remind = {
+        "enabled": bool(cfg.get("remind_enabled", True)),
+        "first": int(cfg.get("remind_first", 3 * 86400) or 0),
+        "second": int(cfg.get("remind_second", 86400) or 0),
+        "third": int(cfg.get("remind_third", 0) or 0),
+        "trials": bool(cfg.get("remind_trials", True)),
+        "quiet_from": _quiet_hour_stored(cfg.get("remind_quiet_from")),
+        "quiet_to": _quiet_hour_stored(cfg.get("remind_quiet_to")),
+    }
+    return {
+        "remind": remind,
+        "winback": _winback_settings(),
+        "is_mark": actor["kind"] == "mark",
+    }
+
+
+async def retention_get(request):
+    """Настройки напоминаний и возврата + итоги за 30 дней."""
+    from aiohttp import web
+    from core.database import remind_stats, winback_stats
+    actor, err = await _actor_or_401(request)
+    if err is not None:
+        return err
+    out = _retention_payload(actor)
+    out["remind_stats"] = await remind_stats(30)
+    out["winback_stats"] = await winback_stats()
+    return web.json_response(out)
+
+
+async def retention_save(request):
+    """Сохранить настройки напоминаний и/или возврата.
+
+    Границы — как ввод в ТГ (handlers/messages.py): дни winback ≥ 1,
+    скидки 1–100, вторая волна 0 — выключена, срок промокода ≥ 1;
+    напоминания — секунды или «3 дня»/«12 часов», 0 — выключено;
+    тихие часы — оба часа или оба выключены. Частичное сохранение:
+    карточка шлёт только свои ключи."""
+    from aiohttp import web
+    from config import atomic_update, load_config
+    actor, err = await _admin._require_mutation(request)
+    if err is not None:
+        return err
+    body = await _body(request)
+    if not body:
+        return web.json_response({"error": "no_fields"}, status=400)
+    clean, errors = {}, []
+    for key, value in body.items():
+        if key not in _RETENTION_KEYS:
+            errors.append(f"unknown key: {key}")
+            continue
+        if key in ("remind_enabled", "remind_trials", "winback_enabled",
+                   "winback_paid_only"):
+            if not isinstance(value, bool):
+                errors.append(f"{key} must be bool")
+            else:
+                clean[key] = value
+        elif key in ("remind_first", "remind_second", "remind_third"):
+            seconds = _parse_remind_seconds(value)
+            if seconds is None:
+                errors.append(f"{key} must be seconds or a duration "
+                              f"like '3 дня' (0 — off)")
+            else:
+                clean[key] = seconds
+        elif key in ("remind_quiet_from", "remind_quiet_to"):
+            ok, hour = _parse_quiet_hour(value)
+            if not ok:
+                errors.append(f"{key} must be an hour 0-23 or empty")
+            else:
+                clean[key] = hour
+        elif key in ("winback_days", "winback_life_days"):
+            if not _is_int(value) or value < 1:
+                errors.append(f"{key} must be an int >= 1")
+            else:
+                clean[key] = value
+        elif key == "winback_days2":
+            if not _is_int(value) or value < 0:
+                errors.append("winback_days2 must be an int >= 0 "
+                              "(0 — second wave off)")
+            else:
+                clean[key] = value
+        elif key in ("winback_percent", "winback_percent2"):
+            if not _is_int(value) or not 1 <= value <= 100:
+                errors.append(f"{key} must be an int 1-100")
+            else:
+                clean[key] = value
+    if errors:
+        return web.json_response({"error": "bad_value", "details": errors},
+                                 status=400)
+    # Тихие часы — только парой: один час без второго бот не понимает
+    # (in_quiet_hours требует оба). Считаем итоговую пару: новые
+    # значения поверх сохранённых.
+    cfg = load_config()
+    q_from = clean.get("remind_quiet_from",
+                       _quiet_hour_stored(cfg.get("remind_quiet_from")))
+    q_to = clean.get("remind_quiet_to",
+                     _quiet_hour_stored(cfg.get("remind_quiet_to")))
+    if (q_from is None) != (q_to is None):
+        return web.json_response(
+            {"error": "bad_value",
+             "details": ["quiet hours need both from and to, or neither"]},
+            status=400)
+    if clean:
+        def _apply(c):
+            c.update(clean)
+        atomic_update(_apply)
+    await _admin._audit(actor, "retention_update",
+                        "keys: " + ", ".join(sorted(clean)))
+    from core.database import remind_stats, winback_stats
+    out = _retention_payload(actor)
+    out["remind_stats"] = await remind_stats(30)
+    out["winback_stats"] = await winback_stats()
+    return web.json_response({"ok": True, **out})
+
+
+async def retention_remind_test(request):
+    """Пример напоминания Марку в Telegram — тот же текст и та же
+    кнопка, что в ТГ (handle_remind_test). Только Mark: у Muse нет
+    tg_id, а письмо адресовано конкретному человеку."""
+    from aiohttp import web
+    from config import load_config
+    from paidsub.time_parser import fmt_duration_precise
+    actor, err = await _admin._require_mutation(request)
+    if err is not None:
+        return err
+    if actor["kind"] != "mark" or not actor.get("tg_id"):
+        return web.json_response({"error": "mark_only"}, status=403)
+    bot = _admin.get_bot()
+    if bot is None:
+        return web.json_response({"error": "no_bot"}, status=503)
+    cfg = load_config()
+    left = int(cfg.get("remind_first", 3 * 86400) or 86400)
+    try:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        await bot.send_message(
+            chat_id=actor["tg_id"],
+            text=("⏳ <b>Подписка скоро закончится</b>\n\n"
+                  f"<blockquote>Осталось: <b>{fmt_duration_precise(left)}</b></blockquote>\n\n"
+                  "<i>Продлите сейчас — оставшиеся дни не сгорят, а прибавятся.</i>\n\n"
+                  "— — —\n<i>Это пример, так его увидит клиент.</i>"),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 Продлить подписку",
+                                      callback_data="renew_sub")]]),
+        )
+    except Exception as ex:
+        return web.json_response({"error": "telegram_error",
+                                  "details": str(ex)[:200]}, status=502)
+    await _admin._audit(actor, "remind_test", "")
+    return web.json_response({"ok": True})
+
+
+async def retention_winback_test(request):
+    """Пример письма возврата Марку — та же _send_wave первой волны,
+    что в ТГ (handle_winback_test): личный промокод BACK<tg_id> и
+    текст письма. Только Mark. Волна в winback_sent НЕ отмечается —
+    тест не подавляет настоящие письма клиентам."""
+    from aiohttp import web
+    from features.winback import _send_wave
+    from features.winback import settings as _winback_settings
+    actor, err = await _admin._require_mutation(request)
+    if err is not None:
+        return err
+    if actor["kind"] != "mark" or not actor.get("tg_id"):
+        return web.json_response({"error": "mark_only"}, status=403)
+    bot = _admin.get_bot()
+    if bot is None:
+        return web.json_response({"error": "no_bot"}, status=503)
+    s = _winback_settings()
+    try:
+        code = await _send_wave(bot, actor["tg_id"], 1,
+                                s["percent"], s["life_days"])
+    except Exception as ex:
+        return web.json_response({"error": "telegram_error",
+                                  "details": str(ex)[:200]}, status=502)
+    await _admin._audit(actor, "winback_test", f"code {code}")
+    return web.json_response({"ok": True, "code": code})
+
+
 # ── Platega ──────────────────────────────────────────────────────────────────
 
 async def platega_get(request):
@@ -1299,6 +1546,10 @@ def register(app):
     app.router.add_post("/channel/post/upload", channel_post_upload)
     app.router.add_post("/channel/post/preview", channel_post_preview)
     app.router.add_post("/channel/post/publish", channel_post_publish)
+    app.router.add_get("/retention", retention_get)
+    app.router.add_post("/retention/save", retention_save)
+    app.router.add_post("/retention/remind/test", retention_remind_test)
+    app.router.add_post("/retention/winback/test", retention_winback_test)
     app.router.add_get("/platega", platega_get)
     app.router.add_patch("/platega", platega_patch)
     logging.info("админка: маршруты фазы 2 (финансы, рассылка) зарегистрированы")
