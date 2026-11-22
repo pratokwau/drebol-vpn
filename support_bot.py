@@ -36,9 +36,100 @@ def _topic_name(first_name, username, tg_id: str) -> str:
     return label[:120]
 
 
+_MARK_OPEN = "❗️ "
+_MARK_CLOSED = "✅ "
+_MARKS = ("❗️", "✅")
+
+
+def _marked_name(base: str, status: str) -> str:
+    """Имя темы с отметкой статуса: ❗️ — тикет открыт, ✅ — закрыт.
+
+    Отметка — префикс названия: иконку темы боту Telegram ставить не даёт
+    (только кастомные эмодзи из фиксированного набора), а префикс в списке
+    тем выглядит так же и меняется через editForumTopic.
+    """
+    name = (base or "").strip()
+    changed = True
+    while changed:
+        changed = False
+        for m in _MARKS:
+            if name.startswith(m):
+                name = name[len(m):].lstrip()
+                changed = True
+    mark = _MARK_CLOSED if status == "closed" else _MARK_OPEN
+    return (mark + name)[:128]
+
+
+async def _get_topic_row(user_id: int):
+    """(topic_id, group_id, status, topic_name) из support_topics."""
+    import aiosqlite
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        cur = await conn.execute(
+            "SELECT topic_id, group_id, status, topic_name "
+            "FROM support_topics WHERE user_id = ?", (user_id,))
+        return await cur.fetchone()
+
+
+async def _set_topic_name(user_id: int, name: str) -> None:
+    import aiosqlite
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        await conn.execute(
+            "UPDATE support_topics SET topic_name = ? WHERE user_id = ?",
+            (name, user_id))
+        await conn.commit()
+
+
+async def _sync_topic_mark(bot, user_id: int) -> None:
+    """Привести отметку в названии темы к текущему статусу тикета."""
+    row = await _get_topic_row(user_id)
+    if not row:
+        return
+    topic_id, group_id, status, topic_name = row
+    base = topic_name
+    if not base:
+        # У старых тем имя в базе не сохранилось — собрать заново.
+        import aiosqlite
+        async with aiosqlite.connect(db.DB_PATH) as conn:
+            cur = await conn.execute(
+                "SELECT first_name, username FROM users WHERE id = ?",
+                (user_id,))
+            urow = await cur.fetchone()
+        base = (_topic_name(urow[0], urow[1], user_id) if urow
+                else str(user_id))
+    new_name = _marked_name(base, status)
+    if topic_name == new_name:
+        return
+    try:
+        await bot.edit_forum_topic(
+            chat_id=int(group_id), message_thread_id=int(topic_id),
+            name=new_name)
+    except Exception as e:
+        log.warning("edit_forum_topic %s failed: %s", user_id, e)
+        return
+    await _set_topic_name(user_id, new_name)
+
+
+async def _backfill_topic_marks(app) -> None:
+    """Стартовая сверка: отметки статуса на всех существующих темах."""
+    import aiosqlite
+    async with aiosqlite.connect(db.DB_PATH) as conn:
+        cur = await conn.execute("SELECT user_id FROM support_topics")
+        rows = await cur.fetchall()
+    renamed = 0
+    for (user_id,) in rows:
+        before = await _get_topic_row(user_id)
+        await _sync_topic_mark(app.bot, user_id)
+        after = await _get_topic_row(user_id)
+        if before and after and before[3] != after[3]:
+            renamed += 1
+        await asyncio.sleep(0.05)
+    log.info("topic marks backfill: renamed %s of %s", renamed, len(rows))
+
+
 async def _create_topic(bot, user, group_id) -> int | None:
     """Создать юзеру новую тему в группе и записать её в базу."""
-    topic_name = _topic_name(user.first_name, user.username, user.id)
+    topic_name = _marked_name(
+        _topic_name(user.first_name, user.username, user.id), "open")
     try:
         topic = await bot.create_forum_topic(
             chat_id=group_id, name=topic_name)
@@ -75,6 +166,7 @@ async def _ensure_topic(bot, user) -> int | None:
     if row and int(row[1]) == int(group_id):
         if row[2] != "open":
             await db.set_support_topic_status(user.id, "open")
+            await _sync_topic_mark(bot, user.id)
             try:
                 await bot.send_message(
                     chat_id=group_id, message_thread_id=int(row[0]),
@@ -215,11 +307,13 @@ async def cmd_close(update: Update, context) -> None:
     if row and row[2] == "closed":
         # Повторный /close: пользователю «закрыто» второй раз не шлём,
         # отвечаем только сюда, в тему.
+        await _sync_topic_mark(context.bot, user_id)
         await msg.reply_text(
             "ℹ️ Обращение уже закрыто — повторно пользователю ничего "
             "не отправлено.")
         return
     await db.set_support_topic_status(user_id, "closed")
+    await _sync_topic_mark(context.bot, user_id)
     try:
         await context.bot.send_message(
             chat_id=user_id,
@@ -241,7 +335,8 @@ def main() -> None:
               "Создай бота у @BotFather и впиши токен в config.json "
               "(ключ support_bot_token).")
         sys.exit(1)
-    app = Application.builder().token(token).build()
+    app = (Application.builder().token(token)
+           .post_init(_backfill_topic_marks).build())
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("close", cmd_close))
     # личка: любое сообщение — обращение
