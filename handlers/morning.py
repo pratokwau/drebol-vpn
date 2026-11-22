@@ -38,6 +38,9 @@ DEFAULTS = {
     "site_sync": True,
     "server_reminder": True,
     "healthcheck": True,
+    # Вотчер новых устройств в подписках (services.device_watch):
+    # уведомление владельцу, когда в его подписке появляется новый HWID.
+    "device_watch": True,
     # Свежий полный бэкап файлом следом за сводкой — чтобы актуальный
     # слепок бота всегда лежал у владельца под рукой.
     "backup": True,
@@ -419,6 +422,7 @@ async def handle_morning_menu(query,
         f"🚫 Синхронизация ЧС: <b>{_toggle_label(cfg['blacklist_sync'])}</b>",
         f"🌐 Автообновление сайта: <b>{_toggle_label(cfg['site_sync'])}</b>",
         f"💓 Проверка здоровья: <b>{_toggle_label(cfg['healthcheck'])}</b>",
+        f"📱 Новые устройства: <b>{_toggle_label(cfg.get('device_watch', True))}</b>",
         f"🔔 Алерты о падениях: <b>{_toggle_label(cfg['alerts'])}</b>",
         "",
         "<i>Сводка приходит тебе в личку. Проверка операторов — только "
@@ -458,6 +462,9 @@ async def handle_morning_menu(query,
             f"💓 Здоровье: {_toggle_label(cfg['healthcheck'])}",
             callback_data="morning_toggle:healthcheck")],
         [InlineKeyboardButton(
+            f"📱 Устройства: {_toggle_label(cfg.get('device_watch', True))}",
+            callback_data="morning_toggle:device_watch")],
+        [InlineKeyboardButton(
             f"🔔 Алерты: {_toggle_label(cfg['alerts'])}",
             callback_data="morning_toggle:alerts")],
         [InlineKeyboardButton("▶️ Запустить сейчас",
@@ -476,7 +483,7 @@ async def handle_morning_toggle(query, context: ContextTypes.DEFAULT_TYPE,
     if key not in ("enabled", "reconcile", "netcheck", "alerts",
                    "support_topics", "blacklist_sync",
                    "site_sync", "server_reminder", "healthcheck", "backup",
-                   "tags"):
+                   "tags", "device_watch"):
         return
     cfg = get_morning_cfg()
     save_morning_cfg({key: not cfg.get(key, True)})

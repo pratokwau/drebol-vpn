@@ -78,6 +78,14 @@ async def post_init(app: Application):
         from paidsub.handlers import lte_fallback_tick
         app.job_queue.run_repeating(lte_fallback_tick, interval=1800, first=300)
 
+        # Новые устройства в подписках: раз в 10 минут сверяем HWID из
+        # панели со снимком и пишем владельцу о новых. Это НЕ полная
+        # синхронизация (она по-прежнему только вручную) — один узкий
+        # запрос устройств по подписке, по прямому заказу владельца.
+        from services.device_watch import device_watch_tick
+        app.job_queue.run_repeating(
+            _gated(device_watch_tick, "device_watch"), interval=600, first=660)
+
         async def _healthcheck_job(ctx):
             """Следит за панелью, выдачей подписок и узлами.
 
