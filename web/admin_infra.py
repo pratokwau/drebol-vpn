@@ -380,6 +380,60 @@ def _error_row(row) -> dict:
             "tg_id": row[6]}
 
 
+# Области ленты — те же 6 вкладок, что FEED_TITLES в handlers/control.py
+# («Ошибки» — отдельный kind, а не scope). Виды действий — LOG_KIND_LABELS там же.
+LOG_SCOPES = ("all", "important", "admin", "helpers", "subs")
+LOG_KINDS = ("cb", "cmd", "msg", "ev")
+
+
+def _is_date(value: str) -> bool:
+    try:
+        from datetime import date as _date
+        _date.fromisoformat(value)
+        return len(value) == 10
+    except ValueError:
+        return False
+
+
+def _logs_filters(request):
+    """Валидация фильтров ленты. Возвращает (params, error_response):
+    params — scope/filter_kind/user_id/date_from/date_to."""
+    scope = request.query.get("scope") or "all"
+    if scope not in LOG_SCOPES:
+        return None, _json_error("bad_scope", 400)
+    filter_kind = request.query.get("filter_kind") or None
+    if filter_kind is not None and filter_kind not in LOG_KINDS:
+        return None, _json_error("bad_kind", 400)
+    user_raw = request.query.get("user_id") or None
+    user_id = None
+    if user_raw is not None:
+        try:
+            user_id = int(user_raw)
+        except (TypeError, ValueError):
+            return None, _json_error("bad_user", 400)
+    date_from = request.query.get("date_from") or None
+    date_to = request.query.get("date_to") or None
+    for d in (date_from, date_to):
+        if d is not None and not _is_date(d):
+            return None, _json_error("bad_date", 400)
+    return {"scope": scope, "filter_kind": filter_kind, "user_id": user_id,
+            "date_from": date_from, "date_to": date_to}, None
+
+
+def _history_row(row) -> dict:
+    """Строка истории подписок: та же форма, что _activity_row, подпись —
+    HIST_LABELS, как в ТГ-ленте _subs_feed."""
+    details = _scrub(str(row[3] or ""))
+    try:
+        from handlers.control import HIST_LABELS
+        label = HIST_LABELS.get(row[2]) or ("• " + str(row[2] or ""))
+    except Exception:
+        label = str(row[2] or "")
+    return {"id": row[0], "tg_id": row[1], "action": row[2],
+            "label": label, "details": details, "time": str(row[4] or ""),
+            "first_name": row[5] or "", "username": row[6] or ""}
+
+
 async def logs_get(request):
     try:
         await _require_actor(request)
@@ -391,40 +445,48 @@ async def logs_get(request):
     per_page = min(100, max(1, _int_query(request, "per_page", 15)))
     if kind == "errors":
         rows, pages = await list_errors(page, per_page)
-        return web.json_response({"kind": "errors", "page": page,
-                                  "pages": pages,
+        return web.json_response({"kind": "errors", "scope": "errors",
+                                  "page": page, "pages": pages,
                                   "rows": [_error_row(r) for r in rows]})
-    scope = request.query.get("scope") or "all"
-    user_id = request.query.get("user_id")
+    if kind != "activity":
+        return _json_error("bad_kind", 400)
+    params, err = _logs_filters(request)
+    if err is not None:
+        return err
+    scope = params["scope"]
+    if scope == "subs":
+        # Как в ТГ-ленте: на вкладке подписок фильтры человека/вида/дат
+        # не действуют — история подписок живёт отдельно от activity_log.
+        from paidsub.storage import list_history
+        rows, pages = await list_history(page, per_page)
+        return web.json_response({"kind": "activity", "scope": "subs",
+                                  "page": page, "pages": pages,
+                                  "rows": [_history_row(r) for r in rows]})
     if scope == "all":
         # list_activity("all") отдаёт только не-админские строки, а
         # scope="admin" — только админские: «все» — это их слияние.
         rows_a, _ = await list_activity(
-            "admin", 1, 5000, user_id=int(user_id) if user_id else None,
-            kind=request.query.get("filter_kind") or None,
-            date_from=request.query.get("date_from") or None,
-            date_to=request.query.get("date_to") or None)
+            "admin", 1, 5000, user_id=params["user_id"],
+            kind=params["filter_kind"],
+            date_from=params["date_from"], date_to=params["date_to"])
         rows_b, _ = await list_activity(
-            "all", 1, 5000, user_id=int(user_id) if user_id else None,
-            kind=request.query.get("filter_kind") or None,
-            date_from=request.query.get("date_from") or None,
-            date_to=request.query.get("date_to") or None)
+            "all", 1, 5000, user_id=params["user_id"],
+            kind=params["filter_kind"],
+            date_from=params["date_from"], date_to=params["date_to"])
         merged = sorted(rows_a + rows_b, key=lambda r: r[0], reverse=True)
         total = len(merged)
         pages = max(1, (total + per_page - 1) // per_page)
         page = min(page, pages)
         rows = merged[(page - 1) * per_page: page * per_page]
-        return web.json_response({"kind": "activity", "page": page,
-                                  "pages": pages,
+        return web.json_response({"kind": "activity", "scope": "all",
+                                  "page": page, "pages": pages,
                                   "rows": [_activity_row(r) for r in rows]})
     rows, pages = await list_activity(
-        scope, page, per_page,
-        user_id=int(user_id) if user_id else None,
-        kind=request.query.get("filter_kind") or None,
-        date_from=request.query.get("date_from") or None,
-        date_to=request.query.get("date_to") or None)
-    return web.json_response({"kind": "activity", "page": page,
-                              "pages": pages,
+        scope, page, per_page, user_id=params["user_id"],
+        kind=params["filter_kind"],
+        date_from=params["date_from"], date_to=params["date_to"])
+    return web.json_response({"kind": "activity", "scope": scope,
+                              "page": page, "pages": pages,
                               "rows": [_activity_row(r) for r in rows]})
 
 
@@ -442,17 +504,102 @@ async def logs_export(request):
         rows, _pages = await list_errors(1, EXPORT_MAX_ROWS)
         blob = _export_rows_to_csv(rows, "errors")
         fname = f"drebol-logs-errors-{today}.csv"
+    elif kind != "activity":
+        return _json_error("bad_kind", 400)
     else:
-        # Как в logs_get: «все» — слияние админских и обычных строк.
-        rows_a, _ = await list_activity("admin", 1, EXPORT_MAX_ROWS)
-        rows_b, _ = await list_activity("all", 1, EXPORT_MAX_ROWS)
-        rows = sorted(rows_a + rows_b, key=lambda r: r[0], reverse=True)
-        blob = _export_rows_to_csv(rows, "activity")
-        fname = f"drebol-logs-activity-{today}.csv"
+        params, err = _logs_filters(request)
+        if err is not None:
+            return err
+        scope = params["scope"]
+        if scope == "subs":
+            from paidsub.storage import list_history
+            rows, _pages = await list_history(1, EXPORT_MAX_ROWS)
+            blob = _export_rows_to_csv(rows, "activity")
+            fname = f"drebol-logs-subs-{today}.csv"
+        elif scope == "all":
+            # Как в logs_get: «все» — слияние админских и обычных строк.
+            rows_a, _ = await list_activity(
+                "admin", 1, EXPORT_MAX_ROWS, user_id=params["user_id"],
+                kind=params["filter_kind"],
+                date_from=params["date_from"], date_to=params["date_to"])
+            rows_b, _ = await list_activity(
+                "all", 1, EXPORT_MAX_ROWS, user_id=params["user_id"],
+                kind=params["filter_kind"],
+                date_from=params["date_from"], date_to=params["date_to"])
+            rows = sorted(rows_a + rows_b, key=lambda r: r[0], reverse=True)
+            blob = _export_rows_to_csv(rows, "activity")
+            fname = f"drebol-logs-activity-{today}.csv"
+        else:
+            rows, _pages = await list_activity(
+                scope, 1, EXPORT_MAX_ROWS, user_id=params["user_id"],
+                kind=params["filter_kind"],
+                date_from=params["date_from"], date_to=params["date_to"])
+            blob = _export_rows_to_csv(rows, "activity")
+            fname = f"drebol-logs-{scope}-{today}.csv"
     text = _scrub(blob.decode("utf-8", "replace"))
     return web.Response(
         text=text, content_type="text/csv", charset="utf-8",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+async def _logs_entry_id(request):
+    """id записи из пути. Возвращает (id, error_response)."""
+    try:
+        return int(request.match_info.get("entry_id") or ""), None
+    except (TypeError, ValueError):
+        return None, _json_error("bad_id", 400)
+
+
+async def logs_activity_entry(request):
+    """Подробности записи журнала действий — как /a123 в ТГ-ленте."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    entry_id, err = await _logs_entry_id(request)
+    if err is not None:
+        return err
+    from core.database import get_activity_entry
+    row = await get_activity_entry(entry_id)
+    if row is None:
+        return _json_error("not_found", 404)
+    return web.json_response({"kind": "activity", "entry": _activity_row(row)})
+
+
+async def logs_error_entry(request):
+    """Подробности записи журнала ошибок — как /e123 в ТГ-ленте."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    entry_id, err = await _logs_entry_id(request)
+    if err is not None:
+        return err
+    from core.database import get_error_entry
+    row = await get_error_entry(entry_id)
+    if row is None:
+        return _json_error("not_found", 404)
+    return web.json_response({"kind": "errors", "entry": _error_row(row)})
+
+
+async def logs_history_entry(request):
+    """Подробности записи истории подписок — как /h123 в ТГ-ленте."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    entry_id, err = await _logs_entry_id(request)
+    if err is not None:
+        return err
+    from paidsub.storage import get_history_entry
+    row = await get_history_entry(entry_id)
+    if row is None:
+        return _json_error("not_found", 404)
+    from core.database import get_user_info
+    u = await get_user_info(row[1]) if row[1] else None
+    full = (row[0], row[1], row[2], row[3], row[4],
+            u[1] if u else None, u[2] if u else None)
+    return web.json_response({"kind": "activity", "entry": _history_row(full)})
 
 
 async def logs_purge(request):
@@ -2580,6 +2727,9 @@ def register(app) -> None:
     app.router.add_post("/panel/tags/apply", panel_tags_apply)
     app.router.add_get("/logs", logs_get)
     app.router.add_get("/logs/export", logs_export)
+    app.router.add_get("/logs/activity/{entry_id}", logs_activity_entry)
+    app.router.add_get("/logs/errors/{entry_id}", logs_error_entry)
+    app.router.add_get("/logs/history/{entry_id}", logs_history_entry)
     app.router.add_post("/logs/purge", logs_purge)
     app.router.add_get("/morning", morning_get)
     app.router.add_patch("/morning", morning_patch)

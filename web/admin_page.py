@@ -696,11 +696,15 @@ label.chk input{width:auto;margin:0}
       <!-- Логи -->
       <section id="sec-logs" class="page hidden">
         <div class="card"><h2>Журнал действий и ошибок</h2><p class="sub">Аудит всех действий админов — и в ТГ, и в вебе — в одной ленте. Секреты в журнал не попадают.</p>
-          <select id="logs-kind"><option value="activity">Действия</option><option value="errors">Ошибки</option></select>
-          <input id="logs-user" type="number" placeholder="tg_id (необязательно)">
-          <input id="logs-from" placeholder="с даты, напр. 2026-11-01">
-          <input id="logs-to" placeholder="по дату, напр. 2026-11-15">
-          <div class="btnrow"><button id="btn-logs">Показать журнал</button><a id="btn-logs-export" href="/api/admin/logs/export?kind=activity"><button type="button" class="ghost">Скачать CSV</button></a><button id="btn-logs-purge" class="danger">Очистить старые записи</button></div>
+          <div class="btnrow" id="logs-tabs" style="flex-wrap:wrap"></div>
+          <div class="btnrow" id="logs-filters" style="flex-wrap:wrap">
+            <select id="logs-kind-filter"><option value="">Вид действия: все</option><option value="cb">Кнопки</option><option value="cmd">Команды</option><option value="msg">Сообщения</option><option value="ev">События</option></select>
+            <select id="logs-date"><option value="">Дата: все</option><option value="today">Сегодня</option><option value="yesterday">Вчера</option><option value="week">7 дней</option></select>
+            <input id="logs-user" type="number" placeholder="tg_id (необязательно)">
+            <input id="logs-from" placeholder="с даты, напр. 2026-11-01">
+            <input id="logs-to" placeholder="по дату, напр. 2026-11-15">
+          </div>
+          <div class="btnrow"><button id="btn-logs">Показать журнал</button><a id="btn-logs-export" href="/api/admin/logs/export?kind=activity"><button type="button" class="ghost">Скачать CSV</button></a><button id="btn-logs-reset" class="ghost" type="button">Сбросить фильтры</button><button id="btn-logs-purge" class="danger">Очистить старые записи</button></div>
           <div id="logs-out"></div>
           <div class="btnrow"><button id="btn-logs-prev" class="ghost">← Назад</button><span id="logs-page-label" class="mut"></span><button id="btn-logs-next" class="ghost">Вперёд →</button></div>
         </div>
@@ -2916,15 +2920,45 @@ let logsLoaded = false;
 document.querySelector('[data-nav="logs"]').addEventListener("click", function(){
   if (!logsLoaded) { logsLoaded = true; $("btn-logs").click(); }
 });
-let logsPage = 1, logsPages = 1;
+/* Вкладки ленты — те же 6, что FEED_TITLES в handlers/control.py. */
+const LOGS_TABS = {all: "📜 Лента действий", important: "⭐ Важные события", admin: "⚙️ Аудит админки", helpers: "👥 Помощники", subs: "💳 История подписок", errors: "🚨 Ошибки"};
+let logsScope = "all", logsPage = 1, logsPages = 1;
+function logsDates(){
+  /* Быстрые даты как LOG_DATE_LABELS в ТГ: today/yesterday/week. */
+  const d = $("logs-date").value;
+  const now = new Date();
+  const iso = function(dt){ return dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0"); };
+  if (d === "today") return [iso(now), iso(now)];
+  if (d === "yesterday") { const y = new Date(now); y.setDate(y.getDate() - 1); return [iso(y), iso(y)]; }
+  if (d === "week") { const w = new Date(now); w.setDate(w.getDate() - 6); return [iso(w), iso(now)]; }
+  return [$("logs-from").value.trim(), $("logs-to").value.trim()];
+}
+function renderLogsTabs(){
+  $("logs-tabs").innerHTML = Object.keys(LOGS_TABS).map(function(k){
+    return '<button class="ghost' + (k === logsScope ? " active" : "") + '" data-logs-tab="' + k + '">' + LOGS_TABS[k] + "</button>";
+  }).join("");
+  /* Как в ТГ: фильтры действуют только на вкладках ленты, не на подписках и ошибках. */
+  show("logs-filters", logsScope !== "subs" && logsScope !== "errors");
+}
+function logsParams(forExport){
+  const p = [];
+  if (!forExport) { p.push("page=" + logsPage); p.push("per_page=25"); }
+  if (logsScope === "errors") { p.push("kind=errors"); return p; }
+  p.push("kind=activity");
+  p.push("scope=" + logsScope);
+  if (logsScope === "subs") return p;
+  const fk = $("logs-kind-filter").value; if (fk) p.push("filter_kind=" + fk);
+  const u = $("logs-user").value.trim(); if (u) p.push("user_id=" + encodeURIComponent(u));
+  const df = logsDates();
+  if (df[0]) p.push("date_from=" + encodeURIComponent(df[0]));
+  if (df[1]) p.push("date_to=" + encodeURIComponent(df[1]));
+  return p;
+}
 async function loadLogs(page){
   logsPage = page || 1;
-  let q = "?kind=" + $("logs-kind").value + "&page=" + logsPage + "&per_page=25";
-  const u = $("logs-user").value.trim(); if (u) q += "&user_id=" + u;
-  const f = $("logs-from").value.trim(); if (f) q += "&date_from=" + encodeURIComponent(f);
-  const t = $("logs-to").value.trim(); if (t) q += "&date_to=" + encodeURIComponent(t);
+  renderLogsTabs();
   let r;
-  try { r = await api("/logs" + q); }
+  try { r = await api("/logs?" + logsParams(false).join("&")); }
   catch(e) { $("logs-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("logs-out", r.data); return; }
   logsPages = r.data.pages || 1; logsPage = r.data.page || logsPage;
@@ -2936,23 +2970,80 @@ async function loadLogs(page){
   if (r.data.kind === "errors") {
     h = '<div class="tblwrap"><table><thead><tr><th>Время (МСК)</th><th>Источник</th><th>Уровень</th><th>Сообщение</th><th>Детали</th></tr></thead><tbody>';
     rows.forEach(function(it){
-      h += '<tr><td class="mono">' + fmtDate(it.time) + '</td><td>' + esc(it.source || "") + '</td><td>' + pill(it.level || "") + '</td><td>' + esc(it.message || "") + '</td><td class="trunc" title="' + esc(it.details || "") + '">' + esc(it.details || "") + "</td></tr>";
+      h += '<tr data-log-id="' + it.id + '"><td class="mono">' + fmtDate(it.time) + '</td><td>' + esc(it.source || "") + '</td><td>' + pill(it.level || "") + '</td><td>' + esc(it.message || "") + '</td><td class="trunc" title="' + esc(it.details || "") + '">' + esc(it.details || "") + "</td></tr>";
     });
   } else {
     h = '<div class="tblwrap"><table><thead><tr><th>Время (МСК)</th><th>Пользователь</th><th>Действие</th><th>Детали</th></tr></thead><tbody>';
     rows.forEach(function(it){
       const who = it.tg_id ? (esc(it.first_name || "") + (it.username ? ' <span class="mut">@' + esc(it.username) + "</span>" : "") + ' <span class="mono small">#' + it.tg_id + "</span>") : '<span class="mut">система</span>';
-      h += '<tr><td class="mono">' + fmtDate(it.time) + "</td><td>" + who + '</td><td title="' + esc(it.action || "") + '">' + esc(it.label || it.action || "") + '</td><td class="trunc" title="' + esc(it.details || "") + '">' + esc(it.details || "") + "</td></tr>";
+      h += '<tr data-log-id="' + it.id + '"><td class="mono">' + fmtDate(it.time) + "</td><td>" + who + '</td><td title="' + esc(it.action || "") + '">' + esc(it.label || it.action || "") + '</td><td class="trunc" title="' + esc(it.details || "") + '">' + esc(it.details || "") + "</td></tr>";
     });
   }
   $("logs-out").innerHTML = h + "</tbody></table></div>";
 }
+async function openLogEntry(entryId){
+  /* Подробности записи — как /a123, /e123 и /h123 в ТГ-ленте. */
+  const ep = logsScope === "errors" ? "errors" : logsScope === "subs" ? "history" : "activity";
+  $("drawer-title").textContent = "Запись #" + entryId;
+  $("drawer-sub").textContent = "Загрузка…";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  let r;
+  try { r = await api("/logs/" + ep + "/" + entryId); }
+  catch(e) { $("drawer-body").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">' + esc((r.data && r.data.error) || "Ошибка загрузки") + "</p>"; return; }
+  const it = r.data.entry || {};
+  $("drawer-sub").textContent = fmtDate(it.time);
+  let h = "<dl>";
+  if (ep === "errors") {
+    h += kvRow("Источник", esc(it.source || ""));
+    h += kvRow("Уровень", pill(it.level || ""));
+    h += kvRow("Сообщение", esc(it.message || ""));
+    if (it.tg_id) h += kvRow("tg_id", '<span class="mono">' + it.tg_id + "</span>");
+  } else {
+    const who = it.tg_id ? (esc(it.first_name || "") + (it.username ? " @" + esc(it.username) : "") + " #" + it.tg_id) : "система";
+    h += kvRow("Пользователь", who);
+    h += kvRow("Действие", esc(it.label || it.action || ""));
+    h += kvRow("Код", '<span class="mono">' + esc(it.action || "") + "</span>");
+  }
+  h += "</dl>";
+  if (it.details) h += '<h3>Подробности</h3><pre class="mono" style="white-space:pre-wrap;word-break:break-word">' + esc(it.details) + "</pre>";
+  $("drawer-body").innerHTML = h;
+  if (it.tg_id) {
+    $("drawer-foot").innerHTML = '<button class="ghost" id="btn-log-entry-user">👤 Профиль</button>';
+    $("btn-log-entry-user").onclick = function(){ closeDrawer(); openUserEditor(it.tg_id); };
+  }
+}
 $("btn-logs").onclick = function(){ loadLogs(1); };
-$("logs-kind").onchange = function(){ loadLogs(1); };
+$("logs-tabs").addEventListener("click", function(e){
+  const b = e.target.closest("button[data-logs-tab]");
+  if (!b) return;
+  logsScope = b.dataset.logsTab;
+  loadLogs(1);
+});
+$("logs-kind-filter").onchange = function(){ loadLogs(1); };
+$("logs-date").onchange = function(){ loadLogs(1); };
+$("logs-from").oninput = function(){ $("logs-date").value = ""; };
+$("logs-to").oninput = function(){ $("logs-date").value = ""; };
+$("logs-user").addEventListener("keydown", function(e){ if (e.key === "Enter") loadLogs(1); });
 $("btn-logs-prev").onclick = function(){ if (logsPage > 1) loadLogs(logsPage - 1); };
 $("btn-logs-next").onclick = function(){ if (logsPage < logsPages) loadLogs(logsPage + 1); };
+$("logs-out").addEventListener("click", function(e){
+  const tr = e.target.closest("tr[data-log-id]");
+  if (tr) openLogEntry(parseInt(tr.dataset.logId, 10));
+});
+$("btn-logs-reset").onclick = function(){
+  logsScope = "all";
+  $("logs-kind-filter").value = "";
+  $("logs-date").value = "";
+  $("logs-user").value = "";
+  $("logs-from").value = "";
+  $("logs-to").value = "";
+  loadLogs(1);
+};
 $("btn-logs-export").onclick = function(){
-  $("btn-logs-export").href = "/api/admin/logs/export?kind=" + $("logs-kind").value;
+  $("btn-logs-export").href = "/api/admin/logs/export?" + logsParams(true).join("&");
 };
 $("btn-logs-purge").onclick = async function(){
   const r = await postConfirm("/logs/purge", {});
