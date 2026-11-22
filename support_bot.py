@@ -211,6 +211,14 @@ async def cmd_close(update: Update, context) -> None:
     user_id = await db.get_user_by_topic(msg.message_thread_id, int(group_id))
     if not user_id:
         return
+    row = await db.get_support_topic(user_id)
+    if row and row[2] == "closed":
+        # Повторный /close: пользователю «закрыто» второй раз не шлём,
+        # отвечаем только сюда, в тему.
+        await msg.reply_text(
+            "ℹ️ Обращение уже закрыто — повторно пользователю ничего "
+            "не отправлено.")
+        return
     await db.set_support_topic_status(user_id, "closed")
     try:
         await context.bot.send_message(
