@@ -131,25 +131,102 @@ async def users_recent(request):
          "last_seen": str(r[3] or "")} for r in rows]})
 
 
+# Вкладки и сортировки списка пользователей — тот же паттерн, что у
+# платных подписок (вкладки по статусу последней платной подписки).
+_USERS_SCOPES = ("all", "active", "expired", "none")
+_USERS_SORTS = ("new", "name", "id")
+_USERS_PER_PAGE = 25
+
+# Последний статус платной подписки юзера (NULL — подписки не было).
+# В paid_subs на практике только active/expired (renewal мигрирует
+# в active при старте, frozen — состояние панели, не статус строки).
+_LATEST_SUB_STATUS = ("(SELECT status FROM paid_subs p WHERE p.tg_id = u.id "
+                      "ORDER BY p.id DESC LIMIT 1)")
+
+
+async def _users_counts() -> dict:
+    """Счётчики вкладок списка пользователей — по последнему статусу
+    платной подписки (глобальные, без учёта поиска — как paid_counts)."""
+    from core.database import DB_PATH
+    import aiosqlite
+    counts = {"all": 0, "active": 0, "expired": 0, "none": 0}
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT COALESCE(" + _LATEST_SUB_STATUS + ", 'none'), COUNT(*) "
+            "FROM users u GROUP BY 1") as cur:
+            async for st, n in cur:
+                counts["all"] += n
+                if st in counts:
+                    counts[st] += n
+    return counts
+
+
 async def users_list(request):
-    """Все пользователи: список с поиском, страницы. Клик по строке —
-    карточка юзера (openUserEditor)."""
+    """Все пользователи: вкладки по статусу подписки, сортировка, поиск,
+    страницы. Клик по строке — карточка юзера (openUserEditor).
+    Запрос — локально через aiosqlite: те же колонки и то же WHERE поиска,
+    что core.admin_list_users (core не трогается — прецедент subs_list)."""
     from aiohttp import web
     try:
         await _require_actor(request)
     except Exception:
         return web.json_response({"error": "no_session"}, status=401)
-    from core.database import admin_list_users
+    from core.database import DB_PATH
+    import aiosqlite
     try:
         page = int(request.query.get("page") or 1)
     except ValueError:
         return web.json_response({"error": "bad_page"}, status=400)
+    scope = (request.query.get("scope") or "all").strip()
+    if scope not in _USERS_SCOPES:
+        return web.json_response({"error": "bad_scope"}, status=400)
+    sort = (request.query.get("sort") or "new").strip()
+    if sort not in _USERS_SORTS:
+        return web.json_response({"error": "bad_sort"}, status=400)
     q = (request.query.get("q") or "").strip()
-    rows, total_pages = await admin_list_users(page, 25, q)
+    where = ""
+    params: list = []
+    if q:
+        like = f"%{q.lower()}%"
+        # Скобки вокруг OR-условий обязательны: иначе добавленный следом
+        # AND scope (AND связывает сильнее OR) применился бы только
+        # к последней ветке EXISTS.
+        where = """WHERE (CAST(u.id AS TEXT) LIKE ?
+               OR lower(u.username) LIKE ?
+               OR lower(u.first_name) LIKE ?
+               OR EXISTS (SELECT 1 FROM paid_subs p
+                          WHERE p.tg_id = u.id AND lower(p.email) LIKE ?))"""
+        params = [like, like, like, like]
+    if scope == "active":
+        where += (" AND " if where else "WHERE ") + _LATEST_SUB_STATUS + " = 'active'"
+    elif scope == "expired":
+        where += (" AND " if where else "WHERE ") + _LATEST_SUB_STATUS + " = 'expired'"
+    elif scope == "none":
+        where += (" AND " if where else "WHERE ") + "NOT EXISTS (SELECT 1 FROM paid_subs p WHERE p.tg_id = u.id)"
+    order = {"new": "ORDER BY u.created_at DESC, u.id DESC",
+             "name": "ORDER BY lower(u.first_name) ASC, lower(u.username) ASC, u.id ASC",
+             "id": "ORDER BY u.id DESC"}[sort]
+    cols = """u.id, u.first_name, u.username,
+              (SELECT status FROM paid_subs p WHERE p.tg_id = u.id
+               ORDER BY p.id DESC LIMIT 1), u.created_at"""
+    per_page = _USERS_PER_PAGE
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+                f"SELECT COUNT(*) FROM users u {where}", params) as cur:
+            total = (await cur.fetchone())[0]
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        page = max(1, min(page, total_pages))
+        offset = (page - 1) * per_page
+        async with db.execute(
+                f"SELECT {cols} FROM users u {where} {order} "
+                "LIMIT ? OFFSET ?", (*params, per_page, offset)) as cur:
+            rows = await cur.fetchall()
+    counts = await _users_counts()
     return web.json_response({"users": [
         {"tg_id": r[0], "first_name": r[1], "username": r[2],
          "sub_status": r[3], "created_at": str(r[4] or "")} for r in rows],
-        "page": max(1, page), "total_pages": total_pages})
+        "page": page, "total_pages": total_pages, "total": total,
+        "scope": scope, "sort": sort, "counts": counts})
 
 
 async def user_profile(request):

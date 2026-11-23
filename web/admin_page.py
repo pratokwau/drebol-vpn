@@ -322,8 +322,16 @@ label.chk input{width:auto;margin:0}
 
       <!-- Пользователи -->
       <section id="sec-users" class="page hidden">
-        <div class="card"><h2>Пользователи</h2><p class="sub">Все пользователи. Нажми на строку, чтобы открыть карточку. Поиск — по ID, @username, имени или email.</p>
-          <input id="q-user" placeholder="Поиск: имя, @username, email, tg_id" style="flex:1;min-width:200px">
+        <div class="card"><h2>Пользователи</h2><p class="sub">Все пользователи. Нажми на строку, чтобы открыть карточку. Поиск — по ID, @username, имени или email. Вкладки — по статусу последней платной подписки.</p>
+          <div class="btnrow" id="users-tabs" style="flex-wrap:wrap"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input id="q-user" placeholder="Поиск: имя, @username, email, tg_id" style="flex:1;min-width:200px">
+            <select id="users-sort" style="width:auto;min-width:150px">
+              <option value="new">Новые сверху</option>
+              <option value="name">По имени</option>
+              <option value="id">По TG ID</option>
+            </select>
+          </div>
           <div class="btnrow"><button id="btn-find">Найти</button><button id="btn-recent" class="ghost">Недавние</button><button id="btn-users-prev" class="ghost">← Назад</button><button id="btn-users-next" class="ghost">Вперёд →</button><span id="users-page-label" class="mut"></span></div>
           <div id="users-out"></div>
         </div>
@@ -1343,17 +1351,24 @@ function renderUsersTable(host, rows, dateLabel){
     tr.onclick = function(){ openUserEditor(parseInt(tr.dataset.tg, 10)); };
   });
 }
-let usersPage = 1, usersTotalPages = 1, usersLoaded = false;
+let usersPage = 1, usersTotalPages = 1, usersLoaded = false, usersScope = "all";
+const USERS_TABS = {all: ["📋", "Все"], active: ["🟢", "Активна"], expired: ["🔴", "Истекла"], none: ["⚪", "Без подписки"]};
 async function loadUsers(page){
   usersPage = page;
   const q = $("q-user").value.trim();
+  const sort = $("users-sort").value;
   $("users-out").innerHTML = '<div class="skel" style="height:18px;width:90%;margin-bottom:8px"></div><div class="skel" style="height:18px;width:70%;margin-bottom:8px"></div><div class="skel" style="height:120px"></div>';
   let r;
-  try { r = await api("/users/list?page=" + page + (q ? "&q=" + encodeURIComponent(q) : "")); }
+  try { r = await api("/users/list?page=" + page + "&scope=" + usersScope + "&sort=" + sort + (q ? "&q=" + encodeURIComponent(q) : "")); }
   catch(e) { $("users-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("users-out", r.data); return; }
   usersTotalPages = r.data.total_pages || 1;
   $("users-page-label").textContent = "Стр. " + r.data.page + " из " + usersTotalPages;
+  const counts = r.data.counts || {};
+  $("users-tabs").innerHTML = Object.keys(USERS_TABS).map(function(k){
+    const c = counts[k];
+    return '<button class="ghost' + (k === usersScope ? " active" : "") + '" data-users-tab="' + k + '">' + USERS_TABS[k][0] + " " + USERS_TABS[k][1] + (c == null ? "" : " · " + c) + "</button>";
+  }).join("");
   const rows = (r.data.users || []).map(function(u){
     return {tg_id: u.tg_id, name: u.first_name || "", username: u.username || "", sub: u.sub_status || "", date: u.created_at || ""};
   });
@@ -1361,6 +1376,13 @@ async function loadUsers(page){
 }
 $("btn-find").onclick = withSpin($("btn-find"), async function(){ loadUsers(1); });
 $("q-user").addEventListener("keydown", function(e){ if (e.key === "Enter") loadUsers(1); });
+$("users-sort").onchange = function(){ loadUsers(1); };
+$("users-tabs").addEventListener("click", function(e){
+  const b = e.target.closest("button[data-users-tab]");
+  if (!b) return;
+  usersScope = b.dataset.usersTab;
+  loadUsers(1);
+});
 $("btn-users-prev").onclick = function(){ if (usersPage > 1) loadUsers(usersPage - 1); };
 $("btn-users-next").onclick = function(){ if (usersPage < usersTotalPages) loadUsers(usersPage + 1); };
 document.querySelector('[data-nav="users"]').addEventListener("click", function(){
