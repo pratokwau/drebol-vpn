@@ -2501,11 +2501,11 @@ $("btn-ch-preview").onclick = withSpin($("btn-ch-preview"), async function(){
   if (r.status !== 200) { $("ch-out").textContent = "Ошибка: " + (r.data.error || r.status); return; }
   const d = r.data;
   let h = "Фото: " + d.photos + " · кнопок: " + (d.buttons || []).length + " · подпись: " + (d.signature_on ? "да" : "нет");
-  if (d.album) h += "\n⚠️ Альбом из нескольких фото — кнопки в канал не попадут.";
-  if (d.caption_split) h += "\n⚠️ Текст длиннее подписи к фото — уйдёт отдельным сообщением после фото.";
-  h += "\n\n" + d.text;
-  if (d.preview_sent) h += "\n\n✅ Предпросмотр отправлен вам в Telegram.";
-  else if (d.preview_error) h += "\n\n⚠️ Живой предпросмотр не отправлен: " + d.preview_error;
+  if (d.album) h += "\\n⚠️ Альбом из нескольких фото — кнопки в канал не попадут.";
+  if (d.caption_split) h += "\\n⚠️ Текст длиннее подписи к фото — уйдёт отдельным сообщением после фото.";
+  h += "\\n\\n" + d.text;
+  if (d.preview_sent) h += "\\n\\n✅ Предпросмотр отправлен вам в Telegram.";
+  else if (d.preview_error) h += "\\n\\n⚠️ Живой предпросмотр не отправлен: " + d.preview_error;
   $("ch-out").innerText = h;
 });
 $("btn-ch-publish").onclick = withSpin($("btn-ch-publish"), async function(){
@@ -2642,7 +2642,7 @@ $("btn-give").onclick = withSpin($("btn-give"), async function(){
   if (!rw) { toast("Выбери награду или укажи свою величину", "err"); return; }
   const r = await postConfirm("/promos/give", {target: target, kind: rw.kind, value: rw.value});
   if (r.status === 200) {
-    let msg = "✅ Промокод <span class=\"mono\">" + esc(r.data.code || "") + "</span> выдан";
+    let msg = "✅ Промокод <span class=\\"mono\\">" + esc(r.data.code || "") + "</span> выдан";
     if (!r.data.delivered) msg += "<br>⚠️ Сообщение не доставлено — возможно, бот заблокирован";
     $("give-out").innerHTML = "<p>" + msg + "</p>";
     toast("Промокод выдан", "ok");
@@ -3129,10 +3129,10 @@ async function loadSnapshot(){
   if (r.status !== 200 || !r.data.ok) { $("nodes-snapshot").innerHTML = '<p class="err">Сводка недоступна</p>'; return; }
   const d = r.data;
   if (!d.snapshot_ok || !d.items.length) { $("nodes-snapshot").innerHTML = '<p class="mut">Сводка за всё время пока недоступна — счётчики панели пусты.</p>'; return; }
-  let h = "<h3>За всё время</h3><p>Всего по всем клиентам: <b>" + fmtGB(d.total_bytes) + "</b> · клиентов: <b>" + fmtNum(d.users) + "</b></p><p class=\"mut small\">Счётчики панели с последнего сброса.</p>";
+  let h = "<h3>За всё время</h3><p>Всего по всем клиентам: <b>" + fmtGB(d.total_bytes) + "</b> · клиентов: <b>" + fmtNum(d.users) + "</b></p><p class=\\"mut small\\">Счётчики панели с последнего сброса.</p>";
   h += '<div class="tblwrap"><table><thead><tr><th>#</th><th>Пользователь</th><th>Трафик</th></tr></thead><tbody>';
   d.items.forEach(function(it, i){
-    h += "<tr><td class=\"num\">" + (i + 1) + "</td><td>" + usageLabelHTML(it.label) + '</td><td class="num">' + fmtGB(it.bytes) + "</td></tr>";
+    h += "<tr><td class=\\"num\\">" + (i + 1) + "</td><td>" + usageLabelHTML(it.label) + '</td><td class="num">' + fmtGB(it.bytes) + "</td></tr>";
   });
   $("nodes-snapshot").innerHTML = h + "</tbody></table></div>";
 }
@@ -3156,11 +3156,11 @@ async function loadUsage(page){
   h += '<div class="tblwrap"><table><thead><tr><th>#</th><th>Пользователь</th><th>Трафик</th></tr></thead><tbody>';
   d.items.forEach(function(it, i){
     const n = (d.page - 1) * 20 + i + 1;
-    h += "<tr><td class=\"num\">" + n + "</td><td>" + usageLabelHTML(it.label) + '</td><td class="num">' + fmtGB(it.bytes) + "</td></tr>";
+    h += "<tr><td class=\\"num\\">" + n + "</td><td>" + usageLabelHTML(it.label) + '</td><td class="num">' + fmtGB(it.bytes) + "</td></tr>";
   });
   h += "</tbody></table></div>";
   if (d.total_pages > 1) {
-    h += '<div class="btnrow"><button class="ghost" id="usage-prev"' + (d.page <= 1 ? " disabled" : "") + ">◀️</button><span class=\"mut\">" + d.page + " / " + d.total_pages + "</span><button class=\"ghost\" id=\"usage-next\"" + (d.page >= d.total_pages ? " disabled" : "") + ">▶️</button></div>";
+    h += '<div class="btnrow"><button class="ghost" id="usage-prev"' + (d.page <= 1 ? " disabled" : "") + ">◀️</button><span class=\\"mut\\">" + d.page + " / " + d.total_pages + "</span><button class=\\"ghost\\" id=\\"usage-next\\"" + (d.page >= d.total_pages ? " disabled" : "") + ">▶️</button></div>";
   }
   $("nodes-usage").innerHTML = h;
   const prev = $("usage-prev"), next = $("usage-next");
