@@ -198,23 +198,49 @@ async def user_profile(request):
     return web.json_response(out)
 
 
+# Вкладки активности пользователя — те же 3, что USER_TABS
+# в handlers/control.py (handle_user_activity).
+USER_ACTIVITY_SCOPES = ("all", "important", "subs")
+
+
 async def user_activity(request):
     from aiohttp import web
     try:
         await _require_actor(request)
     except Exception:
         return web.json_response({"error": "no_session"}, status=401)
-    from core.database import list_activity
     try:
         tg_id = int(request.match_info["tg_id"])
         page = max(1, int(request.query.get("page", "1")))
     except (KeyError, ValueError):
         return web.json_response({"error": "bad_id"}, status=400)
-    rows, pages = await list_activity(user_id=tg_id, page=page)
-    return web.json_response({"activity": [
-        {"id": r[0], "tg_id": r[1], "action": r[2], "details": r[3],
-         "time": r[4], "first_name": r[5], "username": r[6]} for r in rows],
-        "page": page, "pages": pages})
+    scope = request.query.get("scope") or "all"
+    if scope not in USER_ACTIVITY_SCOPES:
+        return web.json_response({"error": "bad_scope"}, status=400)
+    # Строки — тем же форматированием, что лента логов
+    # (_activity_row/_history_row из admin_infra): подпись действия
+    # и обрезанные детали вместо сырых кодов.
+    from web.admin_infra import _activity_row, _history_row
+
+    async def _fetch(pg):
+        if scope == "subs":
+            # Как в ТГ: история подписок живёт отдельно от activity_log.
+            from paidsub.storage import get_user_history
+            rows, pgs = await get_user_history(tg_id, pg, 15)
+            return [_history_row((r[0], r[1], r[2], r[3], r[4], "", ""))
+                    for r in rows], pgs
+        from core.database import list_activity
+        key = f"user_important:{tg_id}" if scope == "important" else f"user:{tg_id}"
+        rows, pgs = await list_activity(key, pg, 15)
+        return [_activity_row(r) for r in rows], pgs
+
+    out, pages = await _fetch(page)
+    if page > pages:
+        # Кламп как в ТГ (page ≤ total_pages): перечитать последнюю.
+        page = pages
+        out, pages = await _fetch(page)
+    return web.json_response({"activity": out, "page": page,
+                              "pages": pages, "scope": scope})
 
 
 # ── DM и подарок ───────────────────────────────────────────────────────────

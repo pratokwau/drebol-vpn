@@ -1407,12 +1407,44 @@ async function openUserEditor(tgId){
     });
     h += '</tbody></table></div>';
   }
+  h += '<h3>📜 Активность</h3><p class="sub">Что человек делал в боте — те же вкладки, что «📜 Его действия» в ТГ. Нажми на строку, чтобы открыть подробности записи.</p><div class="btnrow" id="user-act-tabs" style="flex-wrap:wrap"></div><div id="user-act-out"></div>'
+     + '<div class="btnrow" style="margin-top:8px;align-items:center"><button id="btn-user-act-prev" class="ghost">← Назад</button><span class="mut" id="user-act-page-label"></span><button id="btn-user-act-next" class="ghost">Вперёд →</button></div>';
   $("drawer-body").innerHTML = h;
   $("drawer-foot").innerHTML = '<button class="ghost" id="ed-user-dm">Написать</button><button class="ghost" id="ed-user-gift">Подарить подписку</button>' + (d.subscription ? '<button class="ghost" id="ed-user-sub">Открыть подписку</button>' : "");
   $("ed-user-dm").onclick = function(){ closeDrawer(); showSection("users"); $("dm-id").value = tgId; $("dm-text").focus(); window.scrollTo(0, 0); };
   $("ed-user-gift").onclick = function(){ closeDrawer(); showSection("users"); $("gift-tg").value = tgId; $("gift-amount").focus(); window.scrollTo(0, 0); };
   const sb = $("ed-user-sub");
   if (sb) sb.onclick = function(){ openSubEditor(d.subscription.id); };
+  loadUserActivity(tgId, "all", 1);
+}
+/* Активность одного пользователя — вкладки как USER_TABS в ТГ
+   (handle_user_activity): всё / важное (только события ev:) /
+   подписка (история подписок). */
+let userActTg = 0, userActScope = "all", userActPage = 1, userActPages = 1;
+const USER_ACT_TABS = [["all", "📜 Всё"], ["important", "⭐ Важное"], ["subs", "💳 Подписка"]];
+async function loadUserActivity(tgId, scope, page){
+  userActTg = tgId; userActScope = scope; userActPage = page;
+  const out = $("user-act-out"); if (!out) return;
+  out.innerHTML = '<p class="mut">Загрузка…</p>';
+  let r;
+  try { r = await api("/users/" + tgId + "/activity?scope=" + scope + "&page=" + page); }
+  catch(e) { out.innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("user-act-out", r.data); return; }
+  userActPages = r.data.pages || 1; userActPage = r.data.page || page;
+  const tabs = $("user-act-tabs");
+  if (tabs) tabs.innerHTML = USER_ACT_TABS.map(function(t){
+    return '<button type="button" class="' + (t[0] === userActScope ? "" : "ghost") + '" data-user-act-tab="' + t[0] + '">' + t[1] + "</button>";
+  }).join("");
+  $("user-act-page-label").textContent = "Стр. " + userActPage + " из " + userActPages;
+  show("btn-user-act-prev", userActPage > 1); show("btn-user-act-next", userActPage < userActPages);
+  const rows = r.data.activity || [];
+  if (!rows.length) { out.innerHTML = '<div class="empty">Записей пока нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Время (МСК)</th><th>Действие</th><th>Детали</th></tr></thead><tbody>';
+  rows.forEach(function(it){
+    const ep = userActScope === "subs" ? "history" : "activity";
+    h += '<tr data-user-act-id="' + it.id + '" data-user-act-ep="' + ep + '"><td class="mono">' + fmtDate(it.time) + '</td><td title="' + esc(it.action || "") + '">' + esc(it.label || it.action || "") + '</td><td class="trunc" title="' + esc(it.details || "") + '">' + esc(it.details || "") + "</td></tr>";
+  });
+  out.innerHTML = h + "</tbody></table></div>";
 }
 $("btn-dm").onclick = withSpin($("btn-dm"), async function(){
   const r = await api("/users/" + $("dm-id").value + "/dm",
@@ -2981,9 +3013,11 @@ async function loadLogs(page){
   }
   $("logs-out").innerHTML = h + "</tbody></table></div>";
 }
-async function openLogEntry(entryId){
-  /* Подробности записи — как /a123, /e123 и /h123 в ТГ-ленте. */
-  const ep = logsScope === "errors" ? "errors" : logsScope === "subs" ? "history" : "activity";
+async function openLogEntry(entryId, epOverride){
+  /* Подробности записи — как /a123, /e123 и /h123 в ТГ-ленте.
+     epOverride — явный вид записи (из карточки пользователя),
+     иначе — по текущей вкладке ленты. */
+  const ep = epOverride || (logsScope === "errors" ? "errors" : logsScope === "subs" ? "history" : "activity");
   $("drawer-title").textContent = "Запись #" + entryId;
   $("drawer-sub").textContent = "Загрузка…";
   $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
@@ -3032,6 +3066,18 @@ $("btn-logs-next").onclick = function(){ if (logsPage < logsPages) loadLogs(logs
 $("logs-out").addEventListener("click", function(e){
   const tr = e.target.closest("tr[data-log-id]");
   if (tr) openLogEntry(parseInt(tr.dataset.logId, 10));
+});
+/* Делегирование кликов по активности в карточке пользователя:
+   вкладки, пагинация и подробности записи (как /a123 и /h123 в ТГ).
+   Слушатель один на стабильный drawer-body — его содержимое
+   перерисовывается при каждом открытии карточки. */
+$("drawer-body").addEventListener("click", function(e){
+  const tab = e.target.closest("button[data-user-act-tab]");
+  if (tab) { loadUserActivity(userActTg, tab.dataset.userActTab, 1); return; }
+  if (e.target.closest("#btn-user-act-prev")) { if (userActPage > 1) loadUserActivity(userActTg, userActScope, userActPage - 1); return; }
+  if (e.target.closest("#btn-user-act-next")) { if (userActPage < userActPages) loadUserActivity(userActTg, userActScope, userActPage + 1); return; }
+  const tr = e.target.closest("tr[data-user-act-id]");
+  if (tr) openLogEntry(parseInt(tr.dataset.userActId, 10), tr.dataset.userActEp);
 });
 $("btn-logs-reset").onclick = function(){
   logsScope = "all";
