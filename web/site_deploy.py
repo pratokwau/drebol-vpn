@@ -1103,7 +1103,7 @@ body.tg-fullscreen .tabs { top:96px; }
          box.innerHTML = '<div id="devbuy-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
            esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — места добавятся сами, " +
            "обычно в течение минуты.</p>" +
-           '<button class="btn btn-main" type="button" onclick="openPay(devPayUrl)">Оплатить</button></div>';
+           '<button class="btn btn-main" type="button" onclick="openPay(devPayUrl)">Оплатить</button>' + '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
        }
        openPay(r.data.url);
        devPoll(r.data.payment_id, 90);
@@ -1363,7 +1363,7 @@ body.tg-fullscreen .tabs { top:96px; }
        body.innerHTML = '<div id="renew-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
          esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — подтверждение придёт само, " +
          "обычно в течение минуты.</p>" +
-         '<button class="btn btn-main" type="button" onclick="openPay(renewPayUrl)">Оплатить</button></div>';
+         '<button class="btn btn-main" type="button" onclick="openPay(renewPayUrl)">Оплатить</button>' + '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
        openPay(r.data.url);
        pollPayment(r.data.payment_id, 90);
      })

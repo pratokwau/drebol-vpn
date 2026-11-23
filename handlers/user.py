@@ -14,6 +14,18 @@ def _pay_urls() -> dict:
         return {}
 
 
+
+def _pay_consent_line() -> str:
+    """Строка согласия с документами для экранов оплаты (ссылки кликабельны)."""
+    from web.site_deploy import doc_url
+    terms = doc_url("terms")
+    privacy = doc_url("privacy")
+    if terms and privacy:
+        return ("<i>Оплачивая, вы соглашаетесь с "
+                f'<a href="{terms}">Пользовательским соглашением</a> и '
+                f'<a href="{privacy}">Политикой конфиденциальности</a></i>')
+    return "<i>Оплачивая, вы соглашаетесь с документами сервиса — они в разделе «О сервисе».</i>"
+
 def _support_row() -> list:
     """Ряд с кнопкой поддержки: ссылка на аккаунт или переписка в боте."""
     from handlers.support import support_row
@@ -648,7 +660,7 @@ async def handle_tariff_pick(query, context, tariff_id: int = 0, devices=None):
     lines = ([f"💳 <b>{fmt_duration(pay_seconds)}</b>", "",
               "<blockquote>" + "\n".join(card) + "</blockquote>", ""]
              + lines + ([""] if lines else [])
-             + [total_line])
+             + [total_line, "", _pay_consent_line()])
 
     kb.append(promo_btn)
     kb.append([InlineKeyboardButton(f"💳 Оплатить {total} ₽",
@@ -985,7 +997,7 @@ async def _send_invoice(query, url: str, price: int,
         "🧾 <b>Счёт готов</b>\n\n"
         f"<blockquote>💰 Сумма: <b>{price} ₽</b>"
         + (f"\n📦 {what}" if what else "") + "</blockquote>\n\n"
-        f"<i>{tail}</i>",
+        f"<i>{tail}</i>\n\n" + _pay_consent_line(),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(f"💳 Оплатить {price} ₽", url=url)],
@@ -1053,9 +1065,6 @@ async def handle_about(query):
     from web.site_deploy import doc_url
     privacy_url = doc_url("privacy")
     terms_url = doc_url("terms")
-    refund_url = doc_url("refund")
-    rules_url = doc_url("rules")
-    consent_url = doc_url("consent")
 
     lines = [
         "📕 <b>О сервисе</b>",
@@ -1072,12 +1081,6 @@ async def handle_about(query):
         docs.append(f'<a href="{privacy_url}">Политика конфиденциальности</a>')
     if terms_url:
         docs.append(f'<a href="{terms_url}">Пользовательское соглашение</a>')
-    if refund_url:
-        docs.append(f'<a href="{refund_url}">Политика возврата</a>')
-    if rules_url:
-        docs.append(f'<a href="{rules_url}">Правила использования</a>')
-    if consent_url:
-        docs.append(f'<a href="{consent_url}">Согласие на обработку данных</a>')
     if docs:
         lines += ["", "📄 " + "  ·  ".join(docs)]
 
@@ -1633,7 +1636,7 @@ async def handle_dev_buy(query, context, count: int):
         "🧾 <b>Счёт готов</b>\n\n"
         f"<blockquote>💰 Сумма: <b>{amount} ₽</b>\n"
         f"📱 Устройств: <b>+{count}</b></blockquote>\n\n"
-        "<i>Оплатите по кнопке ниже — места добавятся сами.</i>",
+        "<i>Оплатите по кнопке ниже — места добавятся сами.</i>\n\n" + _pay_consent_line(),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton(f"💳 Оплатить {amount} ₽", url=result["url"])],
