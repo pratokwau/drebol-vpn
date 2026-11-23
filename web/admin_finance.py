@@ -17,6 +17,7 @@ platega_secret и прочие ключи — только запись, в от
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timedelta
@@ -886,6 +887,188 @@ async def promo_find(request):
                               "q": q.strip()})
 
 
+# ── Выдача промокодов ────────────────────────────────────────────────────────
+
+# Паритет с ТГ-админкой (features/promos.py handle_promo_give_* и
+# handle_promo_seg_*): личный код человеку и раздача кодов сегменту.
+# Награда — те же пресеты PRESETS и те же границы, что _value_from_text
+# (percent 1–100, days 1–365); код живёт VALID_DAYS дней, одно применение,
+# привязан к владельцу; отправка — тот же give_to_user, пропуск админа
+# и ЧС — тот же _skip_ids, пауза между отправками — SEND_PAUSE.
+
+
+async def promo_give_meta(request):
+    """Пресеты награды и сегменты со счётчиками — для экрана выдачи."""
+    from aiohttp import web
+    from core.database import get_users_by_segment
+    from features.promos import PRESETS, SEGMENTS, VALID_DAYS, _skip_ids
+    _, err = await _actor_or_401(request)
+    if err is not None:
+        return err
+    segments = []
+    for key, label in SEGMENTS.items():
+        ids = await get_users_by_segment(key)
+        skipped = await _skip_ids(ids)
+        segments.append({"key": key, "label": label,
+                         "recipients": len(ids) - len(skipped),
+                         "skipped": len(skipped)})
+    return web.json_response({
+        "presets": [{"kind": k, "value": v} for k, v in PRESETS],
+        "valid_days": VALID_DAYS, "segments": segments})
+
+
+async def _resolve_give_target(raw):
+    """target из тела → (tg_id, user_row|None, error). TG ID числом —
+    как в ТГ: человека может не быть в базе, код всё равно выдаётся
+    (доставка покажет delivered=False); @username/имя — только точное
+    совпадение, иначе user_not_found."""
+    from core.database import get_user_info, search_users
+    if _is_int(raw):
+        return raw, await get_user_info(raw), None
+    if isinstance(raw, str):
+        text = raw.strip().lstrip("@")
+        if text.isdigit():
+            tg_id = int(text)
+            return tg_id, await get_user_info(tg_id), None
+        if not text:
+            return None, None, "empty_target"
+        rows = await search_users(text, 12)
+        needle = text.lower()
+        for row in rows:
+            if (row[2] or "").lower() == needle:
+                return row[0], (row[0], row[1], row[2]), None
+        return None, None, "user_not_found"
+    return None, None, "bad_target"
+
+
+async def promo_give(request):
+    """Выдать личный промокод человеку — двухшаговое подтверждение."""
+    from aiohttp import web
+    from features.promos import VALID_DAYS, give_to_user, reward_label, reward_text
+    actor, err = await _admin._require_mutation(request)
+    if err is not None:
+        return err
+    body = await _body(request)
+    kind, value, rerr = _parse_reward(body)
+    if rerr:
+        return web.json_response({"error": rerr}, status=400)
+    tg_id, user, terr = await _resolve_give_target(body.get("target"))
+    if terr:
+        status = 404 if terr == "user_not_found" else 400
+        return web.json_response({"error": terr}, status=status)
+    token = body.get("confirm_token")
+    if not token:
+        from core.database import format_client
+        from paidsub.storage import get_paid_sub_by_tg_id
+        who = format_client(user[1] if user else None,
+                            user[2] if user else None, tg_id, html=False)
+        sub = await get_paid_sub_by_tg_id(tg_id)
+        if sub:
+            status = {"active": "активна", "expired": "истекла"}.get(sub[11], sub[11])
+            sub_line = f"Подписка: {status}, до {sub[6]}"
+        else:
+            sub_line = "Подписки нет — подарочные дни начислить будет некуда"
+        summary = (f"Выдать промокод {who}?\nНаграда: {reward_text(kind, value)}\n"
+                   f"{sub_line}\nКод действует {VALID_DAYS} дней, одно применение, "
+                   "только у этого человека. Бот сразу отправит ему код сообщением.")
+        payload = {"tg_id": tg_id, "kind": kind, "value": value}
+        return _admin.confirm_needed_response(
+            _admin.issue_confirm(actor, "promo_give", payload, summary), summary)
+    payload = _admin.take_confirm(actor, token, "promo_give")
+    if not payload:
+        return web.json_response({"error": "bad_confirm"}, status=400)
+    bot = _admin.get_bot()
+    if bot is None:
+        return web.json_response({"error": "no_bot"}, status=503)
+    res = await give_to_user(bot, payload["tg_id"], payload["kind"], payload["value"])
+    if not res.get("ok"):
+        return web.json_response({"error": "give_failed",
+                                  "details": str(res.get("error") or "")}, status=502)
+    try:
+        from core.database import format_client, get_user_info
+        from core.log_channel import send_log
+        u = await get_user_info(payload["tg_id"])
+        who = format_client(u[1] if u else None, u[2] if u else None,
+                            payload["tg_id"])
+        await send_log(bot, f"🎁 Выдан промокод {res['code']} "
+                            f"({reward_label(payload['kind'], payload['value'])}) · {who}")
+    except Exception as ex:
+        logging.error("админка: promo_give send_log: %s", ex)
+    await _admin._audit(actor, "promo_give",
+                        f"code {res['code']} → {payload['tg_id']} "
+                        f"{reward_label(payload['kind'], payload['value'])}, "
+                        f"delivered {res['delivered']}")
+    return web.json_response({"ok": True, "code": res["code"],
+                              "delivered": res["delivered"],
+                              "tg_id": payload["tg_id"],
+                              "kind": payload["kind"], "value": payload["value"]})
+
+
+async def promo_segment(request):
+    """Раздать личные промокоды сегменту — двухшаговое подтверждение."""
+    from aiohttp import web
+    from features.promos import (
+        SEGMENTS, SEND_PAUSE, VALID_DAYS, _skip_ids, give_to_user,
+        reward_label, reward_text,
+    )
+    actor, err = await _admin._require_mutation(request)
+    if err is not None:
+        return err
+    body = await _body(request)
+    segment = body.get("segment") or "all"
+    if segment not in SEGMENTS:
+        return web.json_response({"error": "bad_segment"}, status=400)
+    kind, value, rerr = _parse_reward(body)
+    if rerr:
+        return web.json_response({"error": rerr}, status=400)
+    token = body.get("confirm_token")
+    if not token:
+        from core.database import get_users_by_segment
+        ids = await get_users_by_segment(segment)
+        skipped = await _skip_ids(ids)
+        summary = (f"Раздать промокоды: {SEGMENTS[segment]}?\n"
+                   f"Награда: {reward_text(kind, value)}\n"
+                   f"Получат код: {len(ids) - len(skipped)}"
+                   + (f"\nПропустим (бан, ЧС): {len(skipped)}" if skipped else "")
+                   + f"\nКоды действуют {VALID_DAYS} дней, каждый на одно применение.")
+        payload = {"segment": segment, "kind": kind, "value": value}
+        return _admin.confirm_needed_response(
+            _admin.issue_confirm(actor, "promo_seg", payload, summary), summary)
+    payload = _admin.take_confirm(actor, token, "promo_seg")
+    if not payload:
+        return web.json_response({"error": "bad_confirm"}, status=400)
+    bot = _admin.get_bot()
+    if bot is None:
+        return web.json_response({"error": "no_bot"}, status=503)
+    from core.database import get_users_by_segment
+    ids = await get_users_by_segment(payload["segment"])
+    skip = await _skip_ids(ids)
+    targets = [i for i in ids if i not in skip]
+    sent = failed = 0
+    for tg_id in targets:
+        res = await give_to_user(bot, tg_id, payload["kind"], payload["value"],
+                                 source="segment",
+                                 note=f"Раздача: {SEGMENTS[payload['segment']]}")
+        if res.get("ok") and res.get("delivered"):
+            sent += 1
+        else:
+            failed += 1
+        await asyncio.sleep(SEND_PAUSE)
+    try:
+        from core.log_channel import send_log
+        await send_log(bot, f"📤 Раздача промокодов ({SEGMENTS[payload['segment']]}, "
+                            f"{reward_label(payload['kind'], payload['value'])}): "
+                            f"доставлено {sent}, не дошло {failed}")
+    except Exception as ex:
+        logging.error("админка: promo_seg send_log: %s", ex)
+    await _admin._audit(actor, "promo_seg",
+                        f"segment {payload['segment']}: sent {sent}, "
+                        f"failed {failed}, skipped {len(skip)}")
+    return web.json_response({"ok": True, "segment": payload["segment"],
+                              "sent": sent, "failed": failed,
+                              "skipped": len(skip)})
+
+
 # ── Серверы (расходы) ────────────────────────────────────────────────────────
 
 async def servers_list(request):
@@ -1705,6 +1888,9 @@ def register(app):
     app.router.add_post("/promos", promo_create)
     app.router.add_get("/promos/find", promo_find)
     app.router.add_post("/promos/batch", promo_batch)
+    app.router.add_get("/promos/give", promo_give_meta)
+    app.router.add_post("/promos/give", promo_give)
+    app.router.add_post("/promos/segment", promo_segment)
     app.router.add_get("/promos/{code}", promo_detail)
     app.router.add_post("/promos/{code}/toggle", promo_toggle)
     app.router.add_patch("/promos/{code}", promo_patch)

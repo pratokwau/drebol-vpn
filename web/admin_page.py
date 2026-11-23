@@ -559,6 +559,20 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-pr-batch" class="ghost">Сгенерировать пачку</button></div>
           <div id="promos-out"></div>
         </div>
+        <div class="card"><h2>🎁 Выдать промокод</h2><p class="sub">Личный код для одного человека: действует 14 дней, одно применение, работает только у него. Бот сразу отправит ему код сообщением. Награда — как в ТГ: пресеты или своя величина («35» — скидка 35%, «10 дней» — дни в подарок).</p>
+          <input id="give-target" placeholder="TG ID или @username">
+          <div class="btnrow" id="give-presets" style="flex-wrap:wrap"></div>
+          <input id="give-custom" placeholder="своя величина: 35 или 10 дней (необязательно)">
+          <div class="btnrow"><button id="btn-give">Выдать промокод</button></div>
+          <div id="give-out"></div>
+        </div>
+        <div class="card"><h2>📤 Раздать сегменту</h2><p class="sub">Каждый получит свой личный код — переслать его другому не выйдет. Админ и люди из чёрного списка пропускаются. Отправка идёт с паузами, как в ТГ.</p>
+          <label>Кому<select id="seg-select"></select></label>
+          <div class="btnrow" id="seg-presets" style="flex-wrap:wrap"></div>
+          <input id="seg-custom" placeholder="своя величина: 35 или 10 дней (необязательно)">
+          <div class="btnrow"><button id="btn-seg">Раздать промокоды</button></div>
+          <div id="seg-out"></div>
+        </div>
       </section>
 
       <!-- Тарифы -->
@@ -1436,9 +1450,10 @@ async function openUserEditor(tgId){
   h += '<h3>📜 Активность</h3><p class="sub">Что человек делал в боте — те же вкладки, что «📜 Его действия» в ТГ. Нажми на строку, чтобы открыть подробности записи.</p><div class="btnrow" id="user-act-tabs" style="flex-wrap:wrap"></div><div id="user-act-out"></div>'
      + '<div class="btnrow" style="margin-top:8px;align-items:center"><button id="btn-user-act-prev" class="ghost">← Назад</button><span class="mut" id="user-act-page-label"></span><button id="btn-user-act-next" class="ghost">Вперёд →</button></div>';
   $("drawer-body").innerHTML = h;
-  $("drawer-foot").innerHTML = '<button class="ghost" id="ed-user-dm">Написать</button><button class="ghost" id="ed-user-gift">Подарить подписку</button>' + (d.subscription ? '<button class="ghost" id="ed-user-sub">Открыть подписку</button>' : "");
+  $("drawer-foot").innerHTML = '<button class="ghost" id="ed-user-dm">Написать</button><button class="ghost" id="ed-user-gift">Подарить подписку</button><button class="ghost" id="ed-user-promo">🎁 Промокод</button>' + (d.subscription ? '<button class="ghost" id="ed-user-sub">Открыть подписку</button>' : "");
   $("ed-user-dm").onclick = function(){ closeDrawer(); showSection("users"); $("dm-id").value = tgId; $("dm-text").focus(); window.scrollTo(0, 0); };
   $("ed-user-gift").onclick = function(){ closeDrawer(); showSection("users"); $("gift-tg").value = tgId; $("gift-amount").focus(); window.scrollTo(0, 0); };
+  $("ed-user-promo").onclick = function(){ closeDrawer(); showSection("promos"); loadGiveMeta(); $("give-target").value = tgId; $("give-target").focus(); window.scrollTo(0, 0); };
   const sb = $("ed-user-sub");
   if (sb) sb.onclick = function(){ openSubEditor(d.subscription.id); };
   loadUserActivity(tgId, "all", 1);
@@ -2539,6 +2554,7 @@ async function loadPromos(){
 $("btn-promos").onclick = function(){ loadPromos(); };
 document.querySelector('[data-nav="promos"]').addEventListener("click", function(){
   if (!promosLoaded) { promosLoaded = true; loadPromos(); }
+  loadGiveMeta();
 });
 function promoReward(){
   return {kind: $("pr-kind").value, value: parseInt($("pr-value").value || "0", 10)};
@@ -2567,6 +2583,86 @@ $("btn-pr-batch").onclick = withSpin($("btn-pr-batch"), async function(){
     body: JSON.stringify({count: parseInt($("pr-count").value || "10", 10), kind: rw.kind, value: rw.value})});
   if (r.status === 200) { toast("Пачка промокодов создана", "ok"); loadPromos(); }
   else renderOut("promos-out", r.data);
+});
+/* --- Промокоды: выдача личного кода и раздача сегменту --- */
+/* Паритет с ТГ (features/promos.py handle_promo_give_*, handle_promo_seg_*):
+   те же пресеты награды, та же своя величина («35» — скидка, «10 дней» —
+   дни), тот же confirm-гейт перед выдачей. */
+let giveMeta = null, givePicker = null, segPicker = null;
+function parseCustomReward(raw){
+  const low = (raw || "").trim().toLowerCase();
+  const digits = low.replace(/[^0-9]/g, "");
+  if (!digits) return null;
+  const value = parseInt(digits, 10);
+  const kind = (low.indexOf("дн") !== -1 || low.indexOf("day") !== -1) ? "days" : "percent";
+  if (kind === "percent" && (value < 1 || value > 100)) return null;
+  if (kind === "days" && (value < 1 || value > 365)) return null;
+  return {kind: kind, value: value};
+}
+function makeRewardPicker(boxId, customId, presets){
+  const box = $(boxId);
+  let sel = null;
+  box.innerHTML = presets.map(function(p, i){
+    const label = p.kind === "days" ? "+" + p.value + " дн." : "−" + p.value + "%";
+    return '<button type="button" class="ghost" data-rw-idx="' + i + '">' + label + "</button>";
+  }).join("");
+  box.querySelectorAll("button[data-rw-idx]").forEach(function(b){
+    b.onclick = function(){
+      sel = presets[parseInt(b.dataset.rwIdx, 10)];
+      $(customId).value = "";
+      box.querySelectorAll("button").forEach(function(x){ x.className = "ghost"; });
+      b.className = "";
+    };
+  });
+  return {get: function(){
+    const custom = $(customId).value.trim();
+    if (custom) return parseCustomReward(custom);
+    return sel;
+  }};
+}
+async function loadGiveMeta(){
+  if (giveMeta) return giveMeta;
+  let r;
+  try { r = await api("/promos/give"); }
+  catch(e) { return null; }
+  if (r.status !== 200) return null;
+  giveMeta = r.data;
+  $("seg-select").innerHTML = (giveMeta.segments || []).map(function(s){
+    return '<option value="' + esc(s.key) + '">' + esc(s.label) + " · " + s.recipients + "</option>";
+  }).join("");
+  givePicker = makeRewardPicker("give-presets", "give-custom", giveMeta.presets || []);
+  segPicker = makeRewardPicker("seg-presets", "seg-custom", giveMeta.presets || []);
+  return giveMeta;
+}
+$("btn-give").onclick = withSpin($("btn-give"), async function(){
+  const target = $("give-target").value.trim();
+  if (!target) { toast("Укажи TG ID или @username", "err"); return; }
+  if (!givePicker) await loadGiveMeta();
+  const rw = givePicker ? givePicker.get() : null;
+  if (!rw) { toast("Выбери награду или укажи свою величину", "err"); return; }
+  const r = await postConfirm("/promos/give", {target: target, kind: rw.kind, value: rw.value});
+  if (r.status === 200) {
+    let msg = "✅ Промокод <span class=\"mono\">" + esc(r.data.code || "") + "</span> выдан";
+    if (!r.data.delivered) msg += "<br>⚠️ Сообщение не доставлено — возможно, бот заблокирован";
+    $("give-out").innerHTML = "<p>" + msg + "</p>";
+    toast("Промокод выдан", "ok");
+  } else if (r.status !== 0) {
+    renderOut("give-out", r.data);
+  }
+});
+$("btn-seg").onclick = withSpin($("btn-seg"), async function(){
+  if (!segPicker) await loadGiveMeta();
+  const rw = segPicker ? segPicker.get() : null;
+  if (!rw) { toast("Выбери награду или укажи свою величину", "err"); return; }
+  const r = await postConfirm("/promos/segment", {segment: $("seg-select").value, kind: rw.kind, value: rw.value});
+  if (r.status === 200) {
+    $("seg-out").innerHTML = "<p>✅ Раздача закончена: доставлено <b>" + r.data.sent + "</b>"
+      + (r.data.failed ? ", не дошло <b>" + r.data.failed + "</b>" : "")
+      + (r.data.skipped ? ", пропущено <b>" + r.data.skipped + "</b>" : "") + "</p>";
+    toast("Промокоды розданы", "ok");
+  } else if (r.status !== 0) {
+    renderOut("seg-out", r.data);
+  }
 });
 async function openPromoEditor(code){
   code = (code || "").toUpperCase();
