@@ -173,21 +173,232 @@ async def panel_view(request):
     })
 
 
+# ── Трафик по узлам: паритет с экраном «Трафик» в ТГ ─────────────────────────
+# (services/remnawave.py handle_rw_usage / handle_rw_usage_node /
+# handle_rw_usage_all): те же периоды, та же сортировка по убыванию ГБ,
+# те же подписи имён из базы, пагинация 20/стр. Периоды считает тот же
+# rw_mod.resolve_usage_period, что в ТГ; подписи — структурированным
+# JSON, а не HTML-строками _resolve_usage_labels.
+
+_USAGE_PERIODS = ("month", "prev", "7d", "30d", "90d", "custom")
+_USAGE_PAGE_SIZE = 20
+
+
+def _usage_period(request):
+    """Период из query -> (start, end, label, code) или (None, error).
+
+    period=month/prev/7d/30d/90d — пресеты как в ТГ; period=custom или
+    явные start/end без period — свой диапазон YYYY-MM-DD; пусто —
+    текущий месяц (как раньше)."""
+    code = (request.query.get("period") or "").strip()
+    start = (request.query.get("start") or "").strip()
+    end = (request.query.get("end") or "").strip()
+    if code and code not in _USAGE_PERIODS:
+        return None, _json_error("bad_period", 400)
+    if code == "custom" or (not code and (start or end)):
+        if not start or not end:
+            return None, _json_error("bad_range", 400)
+        try:
+            d0 = datetime.strptime(start, "%Y-%m-%d").date()
+            d1 = datetime.strptime(end, "%Y-%m-%d").date()
+        except ValueError:
+            return None, _json_error("bad_date", 400)
+        if d0 > d1:
+            return None, _json_error("bad_range", 400)
+        return (start, end, rw_mod._period_label(start, end),
+                "custom"), None
+    ctx = SimpleNamespace(user_data={"rw_usage_period": code or "month"})
+    start, end, label, code = rw_mod.resolve_usage_period(ctx)
+    return (start, end, label, code), None
+
+
+def _panel_tg_id(panel_username: str):
+    """TG ID, зашитый в имя панели — та же регулярка, что в ТГ
+    (_panel_tg_id в services/remnawave.py)."""
+    m = re.match(r"^(?:paid_)?(\d+)(?:_|$)", panel_username or "")
+    return int(m.group(1)) if m else None
+
+
+async def _usage_labels(panel_usernames: list) -> dict:
+    """Имя панели -> {name, tg_username, tg_id, expire, in_db}.
+
+    Та же трёхпутевая привязка к базе, что _resolve_usage_labels в ТГ:
+    email подписки равен имени панели; TG ID из самого имени; имя панели
+    как @username. Не нашёлся нигде — in_db False, чтобы такие клиенты
+    были видны, а не молча терялись."""
+    labels = {u: {"username": u, "name": None, "tg_username": None,
+                  "tg_id": None, "expire": None, "in_db": False}
+              for u in panel_usernames}
+    if not panel_usernames:
+        return labels
+    try:
+        import core.database as db
+    except Exception:
+        return labels
+    try:
+        by_email = await db.users_by_emails(list(panel_usernames))
+    except Exception:
+        by_email = {}
+    resolved = {}
+    parsed_ids = {}
+    for un in panel_usernames:
+        if un in by_email:
+            tg_id, fn, db_un = by_email[un]
+            resolved[un] = (tg_id, fn, db_un)
+        else:
+            tg_id = _panel_tg_id(un)
+            if tg_id:
+                parsed_ids[un] = tg_id
+            else:
+                try:
+                    row = await db.find_user_by_username(un)
+                except Exception:
+                    row = None
+                if row:
+                    resolved[un] = (row[0], row[1], row[2])
+    tg_ids = [tg for tg, _, _ in resolved.values() if tg]
+    tg_ids += list(parsed_ids.values())
+    try:
+        by_id = await db.users_by_ids(tg_ids) if tg_ids else {}
+    except Exception:
+        by_id = {}
+    try:
+        subs = await db.subs_by_tg_ids(tg_ids) if tg_ids else {}
+    except Exception:
+        subs = {}
+    for un in panel_usernames:
+        if un in resolved:
+            tg_id, fn, db_un = resolved[un]
+        elif un in parsed_ids:
+            tg_id = parsed_ids[un]
+            fn, db_un = by_id.get(tg_id, (None, None))
+        else:
+            continue
+        if tg_id is None:
+            continue
+        sub = subs.get(tg_id) or {}
+        labels[un] = {"username": un, "name": fn, "tg_username": db_un,
+                      "tg_id": tg_id, "expire": sub.get("expire"),
+                      "in_db": True}
+    return labels
+
+
+def _usage_page(items, page):
+    """Пагинация как в ТГ (_PAGE_SIZE=20): (страница, всего страниц)."""
+    total_pages = max(1, (len(items) + _USAGE_PAGE_SIZE - 1)
+                      // _USAGE_PAGE_SIZE)
+    page = min(max(1, page), total_pages)
+    start = (page - 1) * _USAGE_PAGE_SIZE
+    return items[start:start + _USAGE_PAGE_SIZE], page, total_pages
+
+
+async def _usage_response(node, period, items, page):
+    """Общий ответ трафика: итог + страница с подписями."""
+    start, end, label, code = period
+    total_bytes = sum(total for _, total in items)
+    page_items, page, total_pages = _usage_page(items, page)
+    labels = await _usage_labels([u for u, _ in page_items])
+    return {
+        "ok": True, "node": node, "start": start, "end": end,
+        "period": label, "code": code,
+        "total_bytes": total_bytes, "users": len(items),
+        "page": page, "total_pages": total_pages,
+        "items": [{"username": u, "bytes": b, "label": labels[u]}
+                  for u, b in page_items],
+    }
+
+
+def _usage_panel_failed(node, period, error):
+    """Панель не ответила: ok False, а не 500 — как panel_view."""
+    start, end, label, code = period
+    return web.json_response({
+        "ok": False, "node": node, "start": start, "end": end,
+        "period": label, "code": code, "error": "panel_failed",
+        "detail": str(error)[:300] if error else "",
+    })
+
+
 async def node_users(request):
+    """Трафик одной ноды за период — как экран «Трафик» в ТГ."""
     try:
         await _require_actor(request)
     except Exception:
         return _json_error("no_session", 401)
     node_id = request.match_info.get("node_id") or ""
-    start = request.query.get("start") or ""
-    end = request.query.get("end") or ""
-    if not start or not end:
-        d_start, d_end, _label = rw_mod.current_month_dates()
-        start = start or d_start
-        end = end or d_end
-    res = await rw_mod.node_users_usage(node_id, start, end)
-    return web.json_response({"node": node_id, "start": start, "end": end,
-                              "usage": res})
+    period, err = _usage_period(request)
+    if err is not None:
+        return err
+    start, end, _label, _code = period
+    try:
+        res = await rw_mod.node_users_usage(node_id, start, end)
+    except Exception as ex:
+        logging.error("админка: node_users_usage: %s", ex)
+        res = {"ok": False, "error": "panel_failed"}
+    if not res.get("ok"):
+        return _usage_panel_failed(node_id, period, res.get("error"))
+    items = rw_mod._usage_items(res.get("data"))
+    return web.json_response(await _usage_response(
+        node_id, period, items, _int_query(request, "page", 1)))
+
+
+async def nodes_usage(request):
+    """Трафик суммарно по всем узлам за период — «Все ноды» в ТГ."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    period, err = _usage_period(request)
+    if err is not None:
+        return err
+    start, end, _label, _code = period
+    try:
+        nodes_res = await rw_mod.nodes()
+    except Exception as ex:
+        logging.error("админка: nodes_usage nodes: %s", ex)
+        nodes_res = {"ok": False, "error": "panel_failed"}
+    if not nodes_res.get("ok"):
+        return _usage_panel_failed("all", period, nodes_res.get("error"))
+    parsed = rw_mod._parse_nodes(nodes_res.get("data"))
+    if not parsed:
+        return web.json_response(await _usage_response(
+            "all", period, [], _int_query(request, "page", 1)))
+    try:
+        res = await rw_mod.nodes_users_usage(
+            [n["uuid"] for n in parsed], start, end)
+    except Exception as ex:
+        logging.error("админка: nodes_users_usage: %s", ex)
+        res = {"ok": False, "error": "panel_failed"}
+    if not res.get("ok"):
+        return _usage_panel_failed("all", period, res.get("error"))
+    items = rw_mod._usage_items(res.get("data"))
+    return web.json_response(await _usage_response(
+        "all", period, items, _int_query(request, "page", 1)))
+
+
+async def usage_snapshot(request):
+    """Сводка за всё время: счётчики панели с последнего сброса + топ-10 —
+    тот же блок, что в начале экрана «Трафик» в ТГ."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    try:
+        snap = await panel_mod.get_traffic_snapshot()
+    except Exception as ex:
+        logging.error("админка: traffic_snapshot: %s", ex)
+        snap = {}
+    clients = (snap or {}).get("clients") or {}
+    total = sum(up + down for up, down in clients.values())
+    top = sorted(clients.items(),
+                 key=lambda kv: kv[1][0] + kv[1][1], reverse=True)[:10]
+    labels = await _usage_labels([e for e, _ in top])
+    return web.json_response({
+        "ok": True,
+        "snapshot_ok": bool((snap or {}).get("ok")) and bool(clients),
+        "total_bytes": total, "users": len(clients),
+        "items": [{"username": e, "bytes": up + down, "label": labels[e]}
+                  for e, (up, down) in top],
+    })
 
 
 # ── Синхронизация с панелью ──────────────────────────────────────────────────
@@ -2720,6 +2931,8 @@ def register(app) -> None:
     app.router.add_get("/nodes", nodes)
     app.router.add_get("/squads", squads)
     app.router.add_get("/panel", panel_view)
+    app.router.add_get("/nodes/usage", nodes_usage)
+    app.router.add_get("/nodes/usage/snapshot", usage_snapshot)
     app.router.add_get("/nodes/{node_id}/users", node_users)
     app.router.add_post("/panel-sync", panel_sync_run)
     app.router.add_get("/panel-sync/settings", panel_sync_settings_get)

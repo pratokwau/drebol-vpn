@@ -618,10 +618,13 @@ label.chk input{width:auto;margin:0}
         <div class="card"><h2>Узлы и здоровье</h2><p class="sub">Живой статус нод, панели и сайта подписки. Нажми на строку ноды, чтобы посмотреть её трафик.</p>
           <div class="btnrow"><button id="btn-nodes">Здоровье узлов</button><button id="btn-squads" class="ghost">Сквады</button><button id="btn-links-nodes" class="ghost">🔗 Основные ссылки</button></div>
           <div id="nodes-table"></div>
-          <input id="node-id" placeholder="UUID ноды — или клик по строке таблицы">
-          <input id="node-start" placeholder="с даты, напр. 2026-11-01 (пусто — 30 дней назад)">
-          <input id="node-end" placeholder="по дату, напр. 2026-11-15 (пусто — сегодня)">
-          <div class="btnrow"><button id="btn-node-users" class="ghost">Трафик ноды</button></div>
+          <div id="nodes-snapshot"></div>
+          <h3>Трафик</h3>
+          <p class="sub">Потребление пользователей по узлам за период — как экран «Трафик» в боте.</p>
+          <div class="btnrow" id="usage-period"></div>
+          <div class="btnrow hidden" id="usage-custom"><input id="node-start" type="date"><input id="node-end" type="date"><button id="btn-usage-custom" class="ghost">Показать</button></div>
+          <div class="btnrow"><button id="btn-usage-all" class="ghost">Все ноды</button></div>
+          <div id="nodes-usage"></div>
           <div id="nodes-out"></div>
         </div>
         <div class="card" id="yandex-cdn-doc"><h2>Yandex Cloud CDN перед нодами</h2><p class="sub">Инструкция: сертификат, дубликат ноды, CDN-ресурс, хост в панели. Источник — INSTRUCTION.md, карточка пересобирается скриптом build_admin_html.py.</p>
@@ -2903,12 +2906,12 @@ async function loadNodes(){
   nodes.forEach(function(n){
     const alive = n.isConnected && n.isXrayRunning !== false;
     const st = n.isDisabled ? "Выключена" : alive ? "Онлайн" : "Офлайн";
-    h += '<tr data-uuid="' + esc(n.uuid || "") + '"><td>' + esc(n.name || n.address || "") + '</td><td class="mono">' + esc(n.address || "") + '</td><td>' + statusPill(n.isDisabled ? "disabled" : alive ? "online" : "offline", st) + '</td><td class="num">' + (n.usersOnline == null ? "—" : n.usersOnline) + '</td></tr>';
+    h += '<tr data-uuid="' + esc(n.uuid || "") + '" data-name="' + esc(n.name || n.address || "") + '"><td>' + esc(n.name || n.address || "") + '</td><td class="mono">' + esc(n.address || "") + '</td><td>' + statusPill(n.isDisabled ? "disabled" : alive ? "online" : "offline", st) + '</td><td class="num">' + (n.usersOnline == null ? "—" : n.usersOnline) + '</td></tr>';
   });
   h += '</tbody></table></div>';
   $("nodes-table").innerHTML = h;
   $("nodes-table").querySelectorAll("tr[data-uuid]").forEach(function(tr){
-    tr.onclick = function(){ $("node-id").value = tr.dataset.uuid; loadNodeUsers(); };
+    tr.onclick = function(){ usageNode = tr.dataset.uuid; usageNodeName = tr.dataset.name || tr.dataset.uuid; loadUsage(1); };
   });
 }
 document.querySelector('[data-nav="nodes"]').addEventListener("click", function(){
@@ -2917,6 +2920,7 @@ document.querySelector('[data-nav="nodes"]').addEventListener("click", function(
     $("nodes-table").innerHTML = '<div class="skel" style="height:120px"></div>';
     $("nodes-out").innerHTML = '<div class="skel" style="height:80px"></div>';
     loadNodes(); $("btn-nodes").click();
+    renderUsagePeriods(); loadSnapshot(); loadUsage(1);
   }
 });
 async function loadHealth(){
@@ -2960,15 +2964,84 @@ async function loadSquads(){
   $("nodes-out").innerHTML = h + "</tbody></table></div>";
 }
 $("btn-squads").onclick = function(){ loadSquads(); };
-async function loadNodeUsers(){
-  let q = "";
-  const s = $("node-start").value.trim(), e = $("node-end").value.trim();
-  if (s) q += (q ? "&" : "?") + "start=" + encodeURIComponent(s);
-  if (e) q += (q ? "&" : "?") + "end=" + encodeURIComponent(e);
-  const r = await api("/nodes/" + $("node-id").value + "/users" + q);
-  renderOut("nodes-out", r.data);
+/* --- Трафик по узлам: те же периоды и подписи, что в ТГ (handle_rw_usage). --- */
+const USAGE_PERIODS = {month: "Текущий месяц", prev: "Прошлый месяц", "7d": "Последние 7 дней", "30d": "Последние 30 дней", "90d": "Последние 90 дней", custom: "Свой период…"};
+let usagePeriod = "month", usagePage = 1, usageNode = "all", usageNodeName = "Все ноды";
+function fmtGB(b){ if (b == null) return "—"; return (Number(b) / 1073741824).toFixed(2) + " ГБ"; }
+function fmtExpire(s){
+  if (!s) return "";
+  const d = String(s).slice(0, 10).split("-");
+  return d.length === 3 ? d[2] + "." + d[1] + "." + d[0] : String(s).slice(0, 10);
 }
-$("btn-node-users").onclick = loadNodeUsers;
+function usageLabelHTML(l){
+  if (!l) return "";
+  const head = [l.name, l.tg_username ? "@" + l.tg_username : null].filter(Boolean).join(" ");
+  let h = head ? esc(head) + " · " : "";
+  h += '<code class="mono">' + esc(l.tg_id != null ? l.tg_id : l.username) + "</code>";
+  if (l.in_db && l.expire) h += " · до " + esc(fmtExpire(l.expire));
+  if (!l.in_db) h += ' · <i class="mut">нет в базе</i>';
+  return h;
+}
+function renderUsagePeriods(){
+  $("usage-period").innerHTML = Object.keys(USAGE_PERIODS).map(function(k){
+    return '<button class="ghost' + (k === usagePeriod ? " active" : "") + '" data-usage-period="' + k + '">' + USAGE_PERIODS[k] + "</button>";
+  }).join("");
+  $("usage-period").querySelectorAll("[data-usage-period]").forEach(function(b){
+    b.onclick = function(){
+      usagePeriod = b.dataset.usagePeriod;
+      show("usage-custom", usagePeriod === "custom");
+      renderUsagePeriods();
+      if (usagePeriod !== "custom") loadUsage(1);
+    };
+  });
+}
+async function loadSnapshot(){
+  let r;
+  try { r = await api("/nodes/usage/snapshot"); }
+  catch(e) { $("nodes-snapshot").innerHTML = '<p class="err">Ошибка загрузки сводки</p>'; return; }
+  if (r.status !== 200 || !r.data.ok) { $("nodes-snapshot").innerHTML = '<p class="err">Сводка недоступна</p>'; return; }
+  const d = r.data;
+  if (!d.snapshot_ok || !d.items.length) { $("nodes-snapshot").innerHTML = '<p class="mut">Сводка за всё время пока недоступна — счётчики панели пусты.</p>'; return; }
+  let h = "<h3>За всё время</h3><p>Всего по всем клиентам: <b>" + fmtGB(d.total_bytes) + "</b> · клиентов: <b>" + fmtNum(d.users) + "</b></p><p class=\"mut small\">Счётчики панели с последнего сброса.</p>";
+  h += '<div class="tblwrap"><table><thead><tr><th>#</th><th>Пользователь</th><th>Трафик</th></tr></thead><tbody>';
+  d.items.forEach(function(it, i){
+    h += "<tr><td class=\"num\">" + (i + 1) + "</td><td>" + usageLabelHTML(it.label) + '</td><td class="num">' + fmtGB(it.bytes) + "</td></tr>";
+  });
+  $("nodes-snapshot").innerHTML = h + "</tbody></table></div>";
+}
+async function loadUsage(page){
+  usagePage = page || 1;
+  let q = "period=" + encodeURIComponent(usagePeriod) + "&page=" + usagePage;
+  if (usagePeriod === "custom") {
+    const s = $("node-start").value, e = $("node-end").value;
+    if (!s || !e) { $("nodes-usage").innerHTML = '<p class="err">Выбери обе даты периода</p>'; return; }
+    q += "&start=" + encodeURIComponent(s) + "&end=" + encodeURIComponent(e);
+  }
+  const path = usageNode === "all" ? "/nodes/usage?" + q : "/nodes/" + encodeURIComponent(usageNode) + "/users?" + q;
+  let r;
+  try { r = await api(path); }
+  catch(e) { $("nodes-usage").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200 || !r.data.ok) { $("nodes-usage").innerHTML = '<p class="err">' + esc((r.data && r.data.error) || "Панель недоступна") + "</p>"; return; }
+  const d = r.data;
+  let h = "<h3>" + esc(usageNodeName) + ' — <span class="mut">' + esc(d.period || "") + "</span></h3>";
+  h += "<p>Всего: <b>" + fmtGB(d.total_bytes) + "</b> · пользователей: <b>" + fmtNum(d.users) + "</b></p>";
+  if (!d.items.length) { $("nodes-usage").innerHTML = h + '<div class="empty">За этот период трафика пока нет</div>'; return; }
+  h += '<div class="tblwrap"><table><thead><tr><th>#</th><th>Пользователь</th><th>Трафик</th></tr></thead><tbody>';
+  d.items.forEach(function(it, i){
+    const n = (d.page - 1) * 20 + i + 1;
+    h += "<tr><td class=\"num\">" + n + "</td><td>" + usageLabelHTML(it.label) + '</td><td class="num">' + fmtGB(it.bytes) + "</td></tr>";
+  });
+  h += "</tbody></table></div>";
+  if (d.total_pages > 1) {
+    h += '<div class="btnrow"><button class="ghost" id="usage-prev"' + (d.page <= 1 ? " disabled" : "") + ">◀️</button><span class=\"mut\">" + d.page + " / " + d.total_pages + "</span><button class=\"ghost\" id=\"usage-next\"" + (d.page >= d.total_pages ? " disabled" : "") + ">▶️</button></div>";
+  }
+  $("nodes-usage").innerHTML = h;
+  const prev = $("usage-prev"), next = $("usage-next");
+  if (prev) prev.onclick = function(){ loadUsage(d.page - 1); };
+  if (next) next.onclick = function(){ loadUsage(d.page + 1); };
+}
+$("btn-usage-all").onclick = function(){ usageNode = "all"; usageNodeName = "Все ноды"; loadUsage(1); };
+$("btn-usage-custom").onclick = function(){ loadUsage(1); };
 
 /* --- Логи, синхронизация, операторы, сайт, бэкап --- */
 let logsLoaded = false;
