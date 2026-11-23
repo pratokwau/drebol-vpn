@@ -728,10 +728,11 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-psync">Запустить полную синхронизацию</button><button id="btn-psync-set" class="ghost">Последний отчёт</button></div>
           <div id="psync-out"></div>
         </div>
-        <div class="card"><h2>Утренняя сводка 09:00</h2><p class="sub">Что входит в ежедневную сводку и во сколько она приходит.</p>
+        <div class="card"><h2>Утренняя сводка 09:00</h2><p class="sub">Что входит в ежедневную сводку, какие фоновые задачи работают, и во сколько приходит сводка. Галочки — те же тумблеры, что в ТГ на экране «⏰ Синхронизация».</p>
           <div class="btnrow"><button id="btn-morning">Показать настройки</button><button id="btn-morning-run">Запустить сводку сейчас</button></div>
           <input id="mor-time" placeholder="время, напр. 09:00 (пусто — не менять)">
           <label><input id="mor-enabled" type="checkbox"> сводка включена</label>
+          <div id="morning-toggles"></div>
           <div class="btnrow"><button id="btn-morning-save" class="ghost">Сохранить</button></div>
           <div id="morning-out"></div>
         </div>
@@ -3194,7 +3195,19 @@ async function loadSyncSettings(){
   $("psync-out").innerHTML = h;
 }
 $("btn-psync-set").onclick = function(){ loadSyncSettings(); };
-const MORNING_TOGGLES = {reconcile: "Сверка с Platega", netcheck: "Проверка операторов", alerts: "Алерты о проблемах", support_topics: "Темы поддержки", blacklist_sync: "Синхронизация ЧС", site_sync: "Синхронизация сайта", server_reminder: "Напоминания об оплате серверов", healthcheck: "Проверка здоровья", backup: "Бэкап файлом со сводкой"};
+// Тумблеры утренней сводки — те же 12, что в ТГ (handle_morning_menu):
+// «enabled» — отдельный чекбокс mor-enabled, остальные — здесь, двумя
+// группами как в ТГ: ежедневно в это время / фоновые проверки.
+const MORNING_TOGGLES = {reconcile: "🔍 Сверка с Platega", netcheck: "🌐 Проверка операторов", support_topics: "👥 Темы поддержки", server_reminder: "🖥 Напоминание о серверах", backup: "💾 Бэкап со сводкой", tags: "🏷 Теги панели со сводкой"};
+const MORNING_TOGGLES_BG = {blacklist_sync: "🚫 Синхронизация ЧС", site_sync: "🌐 Автообновление сайта", healthcheck: "💓 Проверка здоровья", device_watch: "📱 Новые устройства", alerts: "🔔 Алерты о падениях"};
+function morningTogglesHtml(m, map){
+  let h = "";
+  Object.keys(map).forEach(function(k){
+    // Отсутствующий ключ — как в ТГ job_enabled(key, True): включён.
+    h += '<label class="chk"><input type="checkbox" class="mor-tgl" data-k="' + k + '"' + (m[k] !== false ? " checked" : "") + "> " + map[k] + "</label>";
+  });
+  return h;
+}
 async function loadMorning(){
   const r = await api("/morning");
   if (r.status !== 200) { renderOut("morning-out", r.data); return; }
@@ -3204,12 +3217,10 @@ async function loadMorning(){
   let h = '<dl class="kv">';
   h += kvRow("Время сводки", esc(m.time || "—") + " (МСК)");
   h += kvRow("Сводка", m.enabled ? '<span class="pill ok">Включена</span>' : '<span class="pill bad">Выключена</span>');
-  Object.keys(MORNING_TOGGLES).forEach(function(k){
-    if (k in m) h += kvRow(MORNING_TOGGLES[k], m[k] ? '<span class="pill ok">Вкл</span>' : '<span class="pill bad">Выкл</span>');
-  });
   h += kvRow("Проверка операторов: раз в (дней)", String(m.netcheck_days != null ? m.netcheck_days : "—"));
   h += kvRow("Проверка операторов: последний запуск", m.netcheck_last_run ? fmtDate(m.netcheck_last_run) : "ещё не запускалась");
   $("morning-out").innerHTML = h + "</dl>";
+  $("morning-toggles").innerHTML = '<h3>Ежедневно в это время</h3><div class="chkgrid">' + morningTogglesHtml(m, MORNING_TOGGLES) + '</div><h3>Фоновые проверки (на своих интервалах)</h3><div class="chkgrid">' + morningTogglesHtml(m, MORNING_TOGGLES_BG) + "</div>";
 }
 $("btn-morning").onclick = function(){ loadMorning(); };
 $("btn-morning-run").onclick = async function(){
@@ -3222,6 +3233,9 @@ $("btn-morning-save").onclick = async function(){
   const t = $("mor-time").value.trim();
   if (t) body.morning_sync.time = t;
   body.morning_sync.enabled = $("mor-enabled").checked;
+  document.querySelectorAll(".mor-tgl").forEach(function(cb){
+    body.morning_sync[cb.dataset.k] = cb.checked;
+  });
   const r = await api("/morning", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
   if (r.status === 200) { toast("Настройки сводки сохранены", "ok"); loadMorning(); }
   else renderOut("morning-out", r.data);

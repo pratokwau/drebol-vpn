@@ -72,10 +72,14 @@ _URL_KEYS = {
     "rules_url", "consent_url",
 }
 _STR_KEYS = {"maintenance_text", "remind_quiet_from", "remind_quiet_to"}
+# Тумблеры утренней сводки — те же ключи, что в handlers/morning.py
+# DEFAULTS (handle_morning_toggle): tags и device_watch — тоже здесь.
+# panel_sync сюда не входит: синхронизация с панелью только вручную,
+# get_morning_cfg этот ключ выбрасывает, запись была бы тихим no-op.
 _MORNING_BOOL = {
     "enabled", "reconcile", "netcheck", "alerts", "support_topics",
-    "panel_sync", "blacklist_sync", "site_sync", "server_reminder",
-    "healthcheck", "backup",
+    "blacklist_sync", "site_sync", "server_reminder",
+    "healthcheck", "backup", "tags", "device_watch",
 }
 _NETCHECK_KEYS = {"domains", "operators", "netcheck_days", "netcheck_last_run"}
 
