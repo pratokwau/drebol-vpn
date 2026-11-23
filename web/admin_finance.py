@@ -1069,6 +1069,74 @@ async def promo_segment(request):
                               "skipped": len(skip)})
 
 
+async def promo_income(request):
+    """Что принесли промокоды — паритет с ТГ (features/promos.py
+    handle_promo_income + шапка handle_promo_menu).
+
+    Та же сводка раздела (promo_stats), плюс по каждому коду: награда,
+    применений, оплат и сумма (promo_income_all, топ-30 по сумме)
+    и число мёртвых кодов без применений для чистки.
+    """
+    from aiohttp import web
+    from features.promos import reward_label
+    from paidsub.storage import promo_dead_ids, promo_income_all, promo_stats
+    _, err = await _actor_or_401(request)
+    if err is not None:
+        return err
+    stats = await promo_stats()
+    rows = await promo_income_all()
+    items = []
+    total_pays = total_sum = 0
+    for code, kind, percent, days, uses, pays, amount in rows:
+        total_pays += pays or 0
+        total_sum += amount or 0
+        items.append({"code": code,
+                      "reward": reward_label(kind or "percent",
+                                             days if kind == "days" else percent),
+                      "uses": uses or 0, "pays": pays or 0,
+                      "amount": amount or 0})
+    return web.json_response({
+        "stats": stats, "items": items,
+        "total_pays": total_pays, "total_sum": total_sum,
+        "dead_count": len(await promo_dead_ids()),
+    })
+
+
+async def promo_clean(request):
+    """Убрать мёртвые промокоды — паритет с ТГ (handle_promo_clean/_do).
+
+    Мёртвые — выключенные и просроченные коды, которыми ни разу
+    не воспользовались (promo_dead_ids); коды с применениями остаются.
+    Двухшаговое подтверждение, как у удаления промокода.
+    """
+    from aiohttp import web
+    from paidsub.storage import promo_clean_dead, promo_dead_ids
+    actor, err = await _admin._require_mutation(request)
+    if err is not None:
+        return err
+    body = await _body(request)
+    token = body.get("confirm_token") or ""
+    if not token:
+        ids = await promo_dead_ids()
+        if not ids:
+            return web.json_response({"error": "dead_empty"}, status=409)
+        summary = (f"Убрать мёртвые коды?\n\nПод нож пойдут {len(ids)} кодов: "
+                   "выключенные и просроченные, которыми ни разу "
+                   "не воспользовались.\n\nКоды с применениями останутся — "
+                   "по ним считается статистика.")
+        payload = {"dead": len(ids)}
+        return _admin.confirm_needed_response(
+            _admin.issue_confirm(actor, "promo_clean", payload, summary),
+            summary)
+    payload = _admin.take_confirm(actor, token, "promo_clean")
+    if not payload:
+        return web.json_response({"error": "bad_confirm"}, status=400)
+    gone = await promo_clean_dead()
+    await _admin._audit(actor, "promo_clean",
+                        f"removed {gone} (requested {payload.get('dead')})")
+    return web.json_response({"ok": True, "removed": gone})
+
+
 # ── Серверы (расходы) ────────────────────────────────────────────────────────
 
 async def servers_list(request):
@@ -1891,6 +1959,8 @@ def register(app):
     app.router.add_get("/promos/give", promo_give_meta)
     app.router.add_post("/promos/give", promo_give)
     app.router.add_post("/promos/segment", promo_segment)
+    app.router.add_get("/promos/income", promo_income)
+    app.router.add_post("/promos/clean", promo_clean)
     app.router.add_get("/promos/{code}", promo_detail)
     app.router.add_post("/promos/{code}/toggle", promo_toggle)
     app.router.add_patch("/promos/{code}", promo_patch)

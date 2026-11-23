@@ -573,6 +573,10 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-seg">Раздать промокоды</button></div>
           <div id="seg-out"></div>
         </div>
+        <div class="card"><h2>📊 Что принесли промокоды</h2><p class="sub">Сколько оплат прошло с промокодами и на какую сумму. Сумма — то, что реально заплатили со скидкой. Подарочные дни денег не приносят, они держат людей.</p>
+          <div class="btnrow"><button id="btn-promo-income" class="ghost">Показать доход</button></div>
+          <div id="promo-income-out"></div>
+        </div>
       </section>
 
       <!-- Тарифы -->
@@ -2664,6 +2668,51 @@ $("btn-seg").onclick = withSpin($("btn-seg"), async function(){
     renderOut("seg-out", r.data);
   }
 });
+/* Паритет с ТГ (features/promos.py handle_promo_income,
+   handle_promo_clean/_do): та же сводка раздела и те же итоги по кодам,
+   чистка мёртвых — с подтверждением. */
+async function loadPromoIncome(){
+  let r;
+  try { r = await api("/promos/income"); }
+  catch(e) { $("promo-income-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("promo-income-out", r.data); return; }
+  const d = r.data, st = d.stats || {};
+  let h = '<dl class="kv">'
+    + kvRow("🎫 Всего кодов", fmtNum(st.total))
+    + kvRow("🟢 Активных", fmtNum(st.active))
+    + kvRow("🎯 Личных", fmtNum(st.personal))
+    + kvRow("🙋 Применений", fmtNum(st.uses))
+    + kvRow("Применений за 30 дней", fmtNum(st.uses_30d))
+    + kvRow("💰 Оплат с кодом", fmtNum(st.pays) + " на " + fmtMoney(st.revenue))
+    + "</dl>";
+  const items = d.items || [];
+  if (!items.length) {
+    h += '<p class="mut">Пока ни одного применения.</p>';
+  } else {
+    h += '<div class="tblwrap"><table><thead><tr><th>Код</th><th>Награда</th><th class="num">Применён</th><th class="num">Оплат</th><th class="num">Сумма</th></tr></thead><tbody>';
+    items.forEach(function(it){
+      h += '<tr><td><span class="mono">' + esc(it.code) + '</span></td><td>' + esc(it.reward) + '</td><td class="num">' + fmtNum(it.uses) + '</td><td class="num">' + fmtNum(it.pays) + '</td><td class="num">' + fmtMoney(it.amount) + "</td></tr>";
+    });
+    h += "</tbody></table></div>";
+    if (d.total_pays) h += "<p>💰 Итого с промокодами: <b>" + fmtNum(d.total_pays) + "</b> оплат на <b>" + fmtMoney(d.total_sum) + "</b></p>";
+  }
+  const dead = d.dead_count || 0;
+  h += '<p class="mut">🧹 Мёртвых кодов без применений: <b>' + fmtNum(dead) + "</b> — выключенные и просроченные, которыми ни разу не воспользовались.</p>";
+  h += '<div class="btnrow"><button id="btn-promo-clean"' + (dead ? "" : " disabled") + ">🧹 Убрать мёртвые</button></div>";
+  $("promo-income-out").innerHTML = h;
+  const cleanBtn = $("btn-promo-clean");
+  if (cleanBtn) cleanBtn.onclick = withSpin(cleanBtn, async function(){
+    const r2 = await postConfirm("/promos/clean", {});
+    if (r2.status === 200) {
+      toast("Убрано кодов: " + r2.data.removed, "ok");
+      loadPromoIncome();
+      if (promosLoaded) loadPromos();
+    } else if (r2.status !== 0) {
+      renderOut("promo-income-out", r2.data);
+    }
+  });
+}
+$("btn-promo-income").onclick = withSpin($("btn-promo-income"), loadPromoIncome);
 async function openPromoEditor(code){
   code = (code || "").toUpperCase();
   $("drawer-title").textContent = "Промокод " + code;
