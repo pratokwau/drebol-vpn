@@ -357,11 +357,10 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-bl-add" class="ghost">Добавить в ЧС</button><button id="btn-bl-stop" class="ghost">Остановить подписку</button><button id="btn-bl-readd" class="ghost">Вернуть из ЧС</button></div>
           <div id="bl-out"></div>
         </div>
-        <div class="card"><h2>Повторные триалы</h2><p class="sub">Пары аккаунтов, которые, возможно, берут триал повторно.</p>
-          <div class="btnrow"><button id="btn-fraud" class="ghost">Показать пары</button><button id="btn-fraud-scan" class="ghost">Запустить скан</button></div>
-          <input id="fraud-a" type="number" placeholder="tg_id первого аккаунта пары">
-          <input id="fraud-b" type="number" placeholder="tg_id второго аккаунта пары (other_tg)">
-          <button id="btn-fraud-stop" class="ghost">Остановить пару</button>
+        <div class="card"><h2>Повторные триалы</h2><p class="sub">Пары аккаунтов, которые, возможно, берут триал повторно. Нажми на строку, чтобы разобрать находку.</p>
+          <div id="fraud-stats"></div>
+          <div class="btnrow"><button id="btn-fraud" class="ghost">Показать пары</button><button id="btn-fraud-scan" class="ghost">Запустить скан</button><button id="btn-fraud-toggle" class="ghost hidden">Слежка: …</button><button id="btn-fraud-ip" class="ghost hidden">Адрес как улика: …</button></div>
+          <div id="fraud-tabs" class="btnrow"></div>
           <div id="fraud-out"></div>
         </div>
       </section>
@@ -1535,29 +1534,132 @@ $("btn-bl-readd").onclick = async function(){
     {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
   renderOut("bl-out", r.data);
 };
-$("btn-fraud").onclick = async function(){
-  const r = await api("/fraud");
+let fraudStatus = "new", fraudIsMark = false;
+const FRAUD_TABS = [["new", "🆕 Новые"], ["blocked", "⛔ Блок"], ["ignored", "🙈 Не фрод"], ["all", "📚 Все"]];
+const FRAUD_STATUS_LABEL = {new: "🆕 не разобрано", ignored: "🙈 не фрод", blocked: "⛔ блокировка"};
+async function loadFraud(){
+  const r = await api("/fraud?status=" + fraudStatus);
   if (r.status !== 200) { renderOut("fraud-out", r.data); return; }
-  const rows = r.data.pairs || [];
+  const d = r.data, st = d.stats || {};
+  fraudIsMark = !!d.is_mark;
+  let h = '<dl class="kv">';
+  h += kvRow("Слежка", d.enabled ? "🟢 включена" : "🔴 выключена");
+  h += kvRow("Устройств запомнено", String(st.devices != null ? st.devices : "—"));
+  h += kvRow("Адресов запомнено", String(st.ips != null ? st.ips : "—"));
+  h += kvRow("Находок всего", String(st.pairs != null ? st.pairs : "—"));
+  h += kvRow("Не разобрано", String(st.new != null ? st.new : "—"));
+  h += kvRow("Похожи на абуз (50+ баллов)", String(st.abuse != null ? st.abuse : "—"));
+  h += kvRow("Закончились блокировкой", String(st.blocked != null ? st.blocked : "—"));
+  h += kvRow("Отмечено «не фрод»", String(st.ignored != null ? st.ignored : "—"));
+  if (st.clusters) h += kvRow("Устройств на трёх и более аккаунтах", String(st.clusters));
+  h += '</dl>';
+  $("fraud-stats").innerHTML = h;
+  show("btn-fraud-toggle", fraudIsMark);
+  show("btn-fraud-ip", fraudIsMark);
+  $("btn-fraud-toggle").textContent = d.enabled ? "🔴 Выключить слежку" : "🟢 Включить слежку";
+  $("btn-fraud-ip").textContent = "🌐 Адрес как улика: " + (d.use_ip ? "да" : "нет");
+  $("fraud-tabs").innerHTML = FRAUD_TABS.map(function(t){
+    return '<button type="button" class="' + (t[0] === fraudStatus ? "" : "ghost") + '" data-fraud-tab="' + t[0] + '">' + (t[0] === fraudStatus ? "• " : "") + t[1] + "</button>";
+  }).join("");
+  $("fraud-tabs").querySelectorAll("[data-fraud-tab]").forEach(function(b){
+    b.onclick = function(){ fraudStatus = b.dataset.fraudTab; loadFraud(); };
+  });
+  const rows = d.pairs || [];
   if (!rows.length) { $("fraud-out").innerHTML = '<div class="empty">Подозрительных пар нет</div>'; return; }
-  let h = '<div class="tblwrap"><table><thead><tr><th>Аккаунт A</th><th>Аккаунт B</th><th>Совпадение</th><th>Статус</th></tr></thead><tbody>';
+  let t = '<div class="tblwrap"><table><thead><tr><th>Аккаунт A</th><th>Аккаунт B</th><th>Совпадение</th><th>Баллы</th><th>Статус</th></tr></thead><tbody>';
   rows.forEach(function(p){
-    h += '<tr data-a="' + p.tg_a + '" data-b="' + p.tg_b + '"><td class="mono">' + p.tg_a + '</td><td class="mono">' + p.tg_b + '</td><td>' + esc(p.kind + ": " + p.value) + '</td><td>' + statusPill(p.status, p.status) + '</td></tr>';
+    t += '<tr data-a="' + p.tg_a + '" data-b="' + p.tg_b + '"><td class="mono">' + p.tg_a + '</td><td class="mono">' + p.tg_b + '</td><td>' + esc(p.kind + ": " + p.value) + '</td><td><b>' + (p.score || 0) + '</b></td><td>' + esc(FRAUD_STATUS_LABEL[p.status] || p.status) + '</td></tr>';
   });
-  h += '</tbody></table></div>';
-  $("fraud-out").innerHTML = h;
+  t += '</tbody></table></div>';
+  $("fraud-out").innerHTML = t;
   $("fraud-out").querySelectorAll("tr[data-a]").forEach(function(tr){
-    tr.onclick = function(){ $("fraud-a").value = tr.dataset.a; $("fraud-b").value = tr.dataset.b; };
+    tr.onclick = function(){ openFraudPair(parseInt(tr.dataset.a, 10), parseInt(tr.dataset.b, 10)); };
   });
-};
+}
+$("btn-fraud").onclick = async function(){ loadFraud(); };
 $("btn-fraud-scan").onclick = withSpin($("btn-fraud-scan"), async function(){
   const r = await postConfirm("/fraud/scan", {});
   renderOut("fraud-out", r.data);
+  if (r.status === 200) loadFraud();
 });
-$("btn-fraud-stop").onclick = async function(){
-  const r = await postConfirm("/fraud/" + $("fraud-a").value + "/stop", {other_tg: parseInt($("fraud-b").value || "0", 10)});
-  renderOut("fraud-out", r.data);
-};
+$("btn-fraud-toggle").onclick = withSpin($("btn-fraud-toggle"), async function(){
+  const r = await postConfirm("/fraud/toggle", {});
+  if (r.status === 200) { toast("Слежка " + (r.data.enabled ? "включена" : "выключена"), "ok"); loadFraud(); }
+  else renderOut("fraud-out", r.data);
+});
+$("btn-fraud-ip").onclick = withSpin($("btn-fraud-ip"), async function(){
+  const r = await postConfirm("/fraud/ip-toggle", {});
+  if (r.status === 200) { toast("Адрес как улика: " + (r.data.enabled ? "да" : "нет"), "ok"); loadFraud(); }
+  else renderOut("fraud-out", r.data);
+});
+let fraudPairA = 0, fraudPairB = 0;
+async function openFraudPair(a, b){
+  fraudPairA = a; fraudPairB = b;
+  $("drawer-title").textContent = "🕵 Находка";
+  $("drawer-sub").textContent = "Загрузка…";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  let r;
+  try { r = await api("/fraud/pair?a=" + a + "&b=" + b); }
+  catch(e) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить находку</p>'; return; }
+  if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Находка не найдена</p>'; return; }
+  const d = r.data, p = d.pair;
+  $("drawer-sub").textContent = p.verdict + " · " + p.score + " баллов · " + (FRAUD_STATUS_LABEL[p.status] || p.status) + " · " + fmtDate(p.created_at);
+  let h = "";
+  d.who.forEach(function(w, i){
+    h += '<h3>' + (i === 0 ? "👤 Первый" : "👤 Второй") + '</h3><dl class="kv">';
+    h += kvRow("Имя", esc(w.name || "—") + (w.username ? " · @" + esc(w.username) : "") + ' · <span class="mono">' + w.tg_id + '</span>');
+    h += kvRow("Подписка", w.sub ? (esc(w.sub.kind) + ", " + esc(w.sub.status) + (w.sub.until ? ", до " + esc(w.sub.until) : "")) : "нет");
+    h += kvRow("Отпечатки", "устройств: " + w.hwid + " · адресов: " + w.ip);
+    h += '</dl>';
+  });
+  h += '<h3>Улики</h3><dl class="kv">';
+  d.evidence.forEach(function(e){
+    h += kvRow(e.label, "+" + e.weight + ' · <span class="mono">' + esc(e.value) + '</span>');
+  });
+  h += '</dl>';
+  const cl = d.cluster || {};
+  if (cl.first_seen) h += '<dl class="kv">' + kvRow("Впервые", '<span class="mono">' + fmtDate(cl.first_seen) + '</span>') + kvRow("Последний раз", '<span class="mono">' + fmtDate(cl.last_seen) + '</span>') + '</dl>';
+  if (cl.others_count) {
+    h += '<p class="mut">👥 Тот же отпечаток ещё у <b>' + cl.others_count + '</b>: ' + cl.others.map(function(o){ return esc(o.name || ("#" + o.tg_id)) + (o.username ? " @" + esc(o.username) : ""); }).join(", ") + '</p>';
+  }
+  if (d.weak_only) h += '<p class="mut">⚠️ Сильной улики (устройства) нет: адрес и прочее по отдельности слабы, смотри на сумму.</p>';
+  $("drawer-body").innerHTML = h;
+  let foot = '<button class="ghost" id="fp-recheck">🔄 Перепроверить пару</button>';
+  if (p.status !== "ignored") foot += '<button class="ghost" id="fp-ignore">🙈 Не фрод</button>';
+  d.who.forEach(function(w, i){
+    foot += '<button class="ghost" id="fp-user-' + i + '">👤 ' + (i === 0 ? "Первый" : "Второй") + '</button>';
+    if (w.can_stop) foot += '<button class="danger" id="fp-stop-' + i + '">🚫 Закрыть триал ' + (i === 0 ? "первому" : "второму") + '</button>';
+    foot += '<button class="ghost" id="fp-bl-' + i + '">⛔ В ЧС ' + (i === 0 ? "первого" : "второго") + '</button>';
+  });
+  $("drawer-foot").innerHTML = foot;
+  $("fp-recheck").onclick = withSpin($("fp-recheck"), async function(){
+    const rr = await api("/fraud/" + fraudPairA + "/" + fraudPairB + "/recheck", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+    if (rr.status === 200) { toast("Перепроверил: " + rr.data.score + " баллов — " + rr.data.verdict, "ok"); openFraudPair(fraudPairA, fraudPairB); loadFraud(); }
+    else toast("Ошибка: " + (rr.data.error || rr.status), "err");
+  });
+  const ign = $("fp-ignore");
+  if (ign) ign.onclick = withSpin(ign, async function(){
+    const rr = await api("/fraud/" + fraudPairA + "/" + fraudPairB + "/ignore", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+    if (rr.status === 200) { toast("Больше про эту пару не напомню", "ok"); openFraudPair(fraudPairA, fraudPairB); loadFraud(); }
+    else toast("Ошибка: " + (rr.data.error || rr.status), "err");
+  });
+  d.who.forEach(function(w, i){
+    $("fp-user-" + i).onclick = function(){ openUserEditor(w.tg_id); };
+    const stopBtn = $("fp-stop-" + i);
+    if (stopBtn) stopBtn.onclick = withSpin(stopBtn, async function(){
+      const rr = await postConfirm("/fraud/" + w.tg_id + "/stop", {other_tg: (i === 0 ? fraudPairB : fraudPairA)});
+      if (rr.status === 200) { toast("Триал закрыт" + (rr.data.trouble ? " · " + rr.data.trouble : ""), "ok"); openFraudPair(fraudPairA, fraudPairB); loadFraud(); }
+      else toast("Ошибка: " + (rr.data.error || rr.status), "err");
+    });
+    $("fp-bl-" + i).onclick = withSpin($("fp-bl-" + i), async function(){
+      const rr = await api("/blacklist/add", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({tg_id: w.tg_id, reason: "Повторный триал (антифрод)"})});
+      if (rr.status === 200) toast("Внесён в чёрный список", "ok");
+      else toast("Ошибка: " + (rr.data.error || rr.status), "err");
+    });
+  });
+}
 
 /* --- Подписки: список + редактор --- */
 let subsPage = 1, subsTotalPages = 1, subsLoaded = false, subsCurrentId = null, subsCurrentKind = "paid", subsScope = "all";

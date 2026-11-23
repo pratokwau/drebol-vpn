@@ -508,6 +508,10 @@ _ADMIN_LABELS = {
     "channel_signature": "✒️ Подпись к постам в канал",
     "connect_help_update": "❓ Обновил помощь при подключении",
     "fraud_scan": "🕵 Ручная проверка антифрода", "fraud_stop": "🚫 Закрыл триал за повтор",
+    "fraud_toggle": "🕵 Слежка за повторными триалами вкл/выкл",
+    "fraud_ip_toggle": "🕵 Адрес как улика антифрода вкл/выкл",
+    "fraud_ignore": "🙈 Находка антифрода — не фрод",
+    "fraud_recheck": "🕵 Перепроверил пару антифрода",
     "git_update": "⬆️ Обновление с GitHub", "git_update_failed": "⚠️ Обновление с GitHub не удалось",
     "helpers_add": "👥 Добавил помощника", "helpers_delete": "👥 Удалил помощника",
     "helper_invite": "📩 Приглашение в группу поддержки",
@@ -1506,20 +1510,218 @@ async def blacklist_readd(request):
 
 async def fraud_get(request):
     try:
-        await _require_actor(request)
+        actor = await _require_actor(request)
     except Exception:
         return _json_error("no_session", 401)
+    from config import load_config
     from core.database import fraud_stats, list_fraud_pairs
     status = request.query.get("status") or None
-    if status not in (None, "new", "ignored", "blocked"):
+    if status not in (None, "new", "ignored", "blocked", "all"):
+        return _json_error("bad_status", 400)
+    if status == "all":
         status = None
     rows = await list_fraud_pairs(status, limit=15)
+    cfg = load_config()
     return web.json_response({
+        "enabled": bool(cfg.get("fraud_enabled", True)),
+        "use_ip": bool(cfg.get("fraud_use_ip", True)),
+        "is_mark": bool(require_mark(actor)),
         "stats": await fraud_stats(),
         "pairs": [{"tg_a": r[0], "tg_b": r[1], "kind": r[2],
                    "value": str(r[3])[:40], "status": r[4],
-                   "created_at": str(r[5] or "")} for r in rows],
+                   "created_at": str(r[5] or ""), "score": r[6] or 0}
+                  for r in rows],
     })
+
+
+async def _fraud_toggle_core(request, key: str, action: str, label: str):
+    """Тумблер из handle_fraud_menu в ТГ (fraud_toggle / fraud_ip_toggle):
+    только Mark, с подтверждением, тот же ключ config.json."""
+    from config import atomic_update, load_config
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    enabled = bool(load_config().get(key, True))
+    body = await _json_body(request)
+    token = body.get("token") or body.get("confirm_token")
+    if not token:
+        summary = (f"Выключить: {label}?" if enabled else
+                   f"Включить: {label}?")
+        return confirm_needed_response(
+            issue_confirm(actor, action, {}, summary),
+            summary)
+    payload = take_confirm(actor, token, action)
+    if payload is None:
+        return _json_error("bad_confirm", 403)
+
+    def _apply(cfg):
+        cfg[key] = not bool(cfg.get(key, True))
+    atomic_update(_apply)
+    now_on = bool(load_config().get(key, True))
+    bot = get_bot()
+    if bot is not None:
+        try:
+            from core.log_channel import send_log
+            await send_log(bot, f"🕵 {label}: "
+                           f"{'включено' if now_on else 'выключено'}")
+        except Exception as ex:
+            logging.error("админка: %s send_log: %s", action, ex)
+    await _audit(actor, action, "on" if now_on else "off")
+    return web.json_response({"ok": True, "enabled": now_on})
+
+
+async def fraud_toggle(request):
+    """Слежка за повторными триалами вкл/выкл — как fraud_toggle в ТГ."""
+    return await _fraud_toggle_core(
+        request, "fraud_enabled", "fraud_toggle",
+        "слежка за повторными триалами")
+
+
+async def fraud_ip_toggle(request):
+    """Адрес как улика вкл/выкл — как fraud_ip_toggle в ТГ."""
+    return await _fraud_toggle_core(
+        request, "fraud_use_ip", "fraud_ip_toggle",
+        "адрес как улика антифрода")
+
+
+def _fraud_who(tg_id: int, info, sub_row, marks: dict) -> dict:
+    """Справка о человеке — те же поля, что who_line в features/fraud.py,
+    только структурой, а не HTML-строкой."""
+    name, username = None, None
+    if info:
+        name = info[1] if len(info) > 1 else None
+        username = info[2] if len(info) > 2 else None
+    sub = None
+    can_stop = False
+    if sub_row:
+        status = sub_row[11] if len(sub_row) > 11 else "active"
+        renewed = sub_row[12] if len(sub_row) > 12 else 0
+        sub = {"kind": "платная" if renewed else "пробная",
+               "status": status,
+               "until": str(sub_row[6])[:16] if len(sub_row) > 6 else None}
+        # закрыть триал предлагаем только тому, кто ещё ни разу не платил
+        # и чей триал не истёк — то же условие, что handle_fraud_pair
+        can_stop = bool(not renewed and status != "expired")
+    return {"tg_id": tg_id, "name": name, "username": username, "sub": sub,
+            "hwid": int(marks.get("hwid") or 0),
+            "ip": int(marks.get("ip") or 0), "can_stop": can_stop}
+
+
+async def fraud_pair(request):
+    """Карточка находки — как handle_fraud_pair в ТГ: кто эти двое,
+    что совпало (улики с весами), кластер отпечатка, вердикт."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    try:
+        a = int(request.query.get("a") or 0)
+        b = int(request.query.get("b") or 0)
+    except (TypeError, ValueError):
+        a = b = 0
+    if not a or not b or a == b:
+        return _json_error("bad_request", 400)
+    from core.database import (
+        fingerprint_cluster, get_fraud_evidence, get_fraud_pair,
+        get_user_info, user_fingerprint_stats,
+    )
+    from paidsub.storage import get_paid_sub_by_tg_id
+    pair = await get_fraud_pair(a, b)
+    if not pair:
+        return _json_error("pair_not_found", 404)
+    tg_a, tg_b, kind, value, status, created = pair[:6]
+    score = pair[6] if len(pair) > 6 else 0
+    evidence = await get_fraud_evidence(tg_a, tg_b)
+    ev_rows = [{"kind": ek,
+                "label": fraud_mod._KIND_LABEL.get(ek, f"🔎 {ek}"),
+                "value": str(ev)[:40], "weight": int(ew or 0)}
+               for ek, ev, ew, _ec in evidence]
+    if not ev_rows:
+        ev_rows = [{"kind": kind,
+                    "label": fraud_mod._KIND_LABEL.get(kind, f"🔎 {kind}"),
+                    "value": str(value)[:40], "weight": 0}]
+    cluster = await fingerprint_cluster(kind, value)
+    others = [c for c in cluster if c[0] not in (tg_a, tg_b)]
+    first_seen = min((c[2] for c in cluster if c[2]), default=None)
+    last_seen = max((c[3] for c in cluster if c[3]), default=None)
+    other_rows = []
+    for tg_id, _email, _f, _l in others[:4]:
+        u = await get_user_info(tg_id)
+        other_rows.append({"tg_id": tg_id,
+                           "name": u[1] if u and len(u) > 1 else None,
+                           "username": u[2] if u and len(u) > 2 else None})
+    who = []
+    for tg_id in (tg_a, tg_b):
+        who.append(_fraud_who(
+            tg_id, await get_user_info(tg_id),
+            await get_paid_sub_by_tg_id(tg_id),
+            await user_fingerprint_stats(tg_id)))
+    has_ip = any(e["kind"] == "ip" for e in ev_rows)
+    has_hwid = any(e["kind"] == "hwid" for e in ev_rows)
+    return web.json_response({
+        "pair": {"tg_a": tg_a, "tg_b": tg_b, "kind": kind,
+                 "value": str(value)[:40], "status": status,
+                 "created_at": str(created or "")[:16],
+                 "score": score or 0,
+                 "verdict": fraud_mod.verdict(score or 0)},
+        "evidence": ev_rows,
+        "cluster": {"first_seen": str(first_seen)[:16] if first_seen else None,
+                    "last_seen": str(last_seen)[:16] if last_seen else None,
+                    "others": other_rows, "others_count": len(others)},
+        "who": who,
+        # сильной улики (устройства) нет: адрес и прочее по отдельности
+        # слабы — то же предупреждение, что handle_fraud_pair
+        "weak_only": bool(has_ip and not has_hwid),
+    })
+
+
+async def fraud_ignore(request):
+    """«Не фрод — больше не спрашивать» — как handle_fraud_ok в ТГ."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    try:
+        a = int(request.match_info.get("a") or 0)
+        b = int(request.match_info.get("b") or 0)
+    except (TypeError, ValueError):
+        a = b = 0
+    if not a or not b or a == b:
+        return _json_error("bad_request", 400)
+    from core.database import get_fraud_pair, ignore_fraud_pair
+    if not await get_fraud_pair(a, b):
+        return _json_error("pair_not_found", 404)
+    await ignore_fraud_pair(a, b)
+    await _audit(actor, "fraud_ignore", f"{a}<->{b}")
+    return web.json_response({"ok": True})
+
+
+async def fraud_recheck(request):
+    """Полная пересверка пары — как handle_fraud_recheck в ТГ:
+    тот же apply_evaluation (улики, балл, алерт админу при росте)."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    try:
+        a = int(request.match_info.get("a") or 0)
+        b = int(request.match_info.get("b") or 0)
+    except (TypeError, ValueError):
+        a = b = 0
+    if not a or not b or a == b:
+        return _json_error("bad_request", 400)
+    from core.database import get_fraud_pair
+    if not await get_fraud_pair(a, b):
+        return _json_error("pair_not_found", 404)
+    bot = get_bot()
+    if bot is None:
+        return _json_error("no_bot", 503)
+    context = SimpleNamespace(bot=bot, application=_admin_application)
+    score = await fraud_mod.apply_evaluation(context, a, b)
+    await _audit(actor, "fraud_recheck", f"{a}<->{b} score={score}")
+    return web.json_response({"ok": True, "score": score,
+                              "verdict": fraud_mod.verdict(score)})
 
 
 async def fraud_scan(request):
@@ -2993,6 +3195,11 @@ def register(app) -> None:
     app.router.add_post("/blacklist/{tg_id}/stop", blacklist_stop)
     app.router.add_post("/blacklist/{tg_id}/readd", blacklist_readd)
     app.router.add_get("/fraud", fraud_get)
+    app.router.add_get("/fraud/pair", fraud_pair)
+    app.router.add_post("/fraud/toggle", fraud_toggle)
+    app.router.add_post("/fraud/ip-toggle", fraud_ip_toggle)
+    app.router.add_post("/fraud/{a}/{b}/ignore", fraud_ignore)
+    app.router.add_post("/fraud/{a}/{b}/recheck", fraud_recheck)
     app.router.add_post("/fraud/scan", fraud_scan)
     app.router.add_post("/fraud/{tg_id}/stop", fraud_stop)
     app.router.add_get("/support/topics", support_topics)
