@@ -2210,11 +2210,42 @@ async function openPaymentEditor(pid){
   if (p.pay_url) h += kvRow("Ссылка на оплату", '<a href="' + esc(p.pay_url) + '" target="_blank" rel="noopener">открыть</a>');
   if (p.error) h += kvRow("Ошибка", esc(p.error));
   h += '</dl>';
+  if (p.provider === "platega" && p.external_id) {
+    h += '<div class="btnrow" style="margin-top:12px"><button id="ed-pay-check" class="ghost">🔍 Проверить в Platega</button></div>';
+    h += '<div id="ed-pay-platega" style="margin-top:8px"></div>';
+  }
   if (p.status === "paid") {
     h += '<label><input id="ed-pay-revoke" type="checkbox"> отозвать подписку при возврате</label>';
     h += '<p class="mut" id="ed-pay-msg" style="margin-top:10px"></p>';
   }
   $("drawer-body").innerHTML = h;
+  const chkBtn = $("ed-pay-check");
+  if (chkBtn) {
+    chkBtn.onclick = withSpin(chkBtn, async function(){
+      const box = $("ed-pay-platega");
+      if (box) box.innerHTML = '<p class="mut">Запрашиваю счёт в Platega…</p>';
+      let rr;
+      try { rr = await api("/payments/" + pid + "/platega"); }
+      catch(e) { if (box) box.innerHTML = '<p class="err">Не удалось проверить счёт</p>'; return; }
+      if (!box) return;
+      if (rr.status !== 200) {
+        const d = rr.data || {};
+        box.innerHTML = '<p class="err">' + esc(d.error === "platega_not_found" ? "Счёт не найден в Platega" : "Platega не ответила: " + (d.details || d.error || rr.status)) + '</p>';
+        return;
+      }
+      const d = rr.data || {}, live = d.live || {}, bot = d.bot || {};
+      let hh = '<dl class="kv">';
+      hh += kvRow("Статус в Platega", esc(live.status_label || live.status || ""));
+      hh += kvRow("Сумма в Platega", fmtMoney(live.amount));
+      hh += kvRow("Оплачен в Platega", live.paid ? "да" : "нет");
+      if (live.method) hh += kvRow("Способ", esc(live.method));
+      if (live.payload) hh += kvRow("Заказ", '<span class="mono">' + esc(String(live.payload)) + '</span>');
+      hh += kvRow("Начисление", d.credited ? "✅ записано в журнале" : "— нет записи");
+      hh += '</dl>';
+      if (!d.match) hh += '<p style="color:var(--warn);margin-top:10px">Статусы расходятся: в базе бота — ' + esc(PAY_LABELS[bot.status] || bot.status || "") + ', в Platega — ' + esc(live.status_label || live.status || "") + '. Сверьте в «Финансах» → «Сверка».</p>';
+      box.innerHTML = hh;
+    });
+  }
   if (p.status === "paid") {
     $("drawer-foot").innerHTML = '<button class="danger" id="ed-pay-refund">Вернуть оплату</button>';
     $("ed-pay-refund").onclick = withSpin($("ed-pay-refund"), async function(){

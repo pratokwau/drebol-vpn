@@ -331,6 +331,64 @@ async def payment_detail(request):
     return web.json_response({"payment": _payment_full_row(p, partial, refunded_at)})
 
 
+# Лейблы живого статуса — те же, что _PLATEGA_STATUS_LABEL
+# в handlers/payprovider.py (handle_platega_payment).
+_PLATEGA_STATUS_LABEL = {
+    "paid": "✅ оплачен",
+    "pending": "⏳ ожидает оплаты",
+    "canceled": "❌ отменён",
+    "chargebacked": "↩️ возврат",
+    "partially_refunded": "↩️ частично возвращён",
+}
+
+
+async def payment_platega_check(request):
+    """Живой статус счёта в Platega — паритет с ТГ handle_platega_payment:
+    статус/сумма/оплачен/способ/заказ из API + начисление из журнала
+    и сравнение со статусом в базе бота. Только чтение, аудита нет."""
+    from aiohttp import web
+    from core.database import get_payment_credit, get_payment_full
+    import services.platega_api as pg
+    _, err = await _actor_or_401(request)
+    if err is not None:
+        return err
+    pid = _int_id(request.match_info.get("pid"))
+    if pid is None:
+        return web.json_response({"error": "bad_id"}, status=400)
+    p = await get_payment_full(pid)
+    if not p:
+        return web.json_response({"error": "no_payment"}, status=404)
+    (_id, _tg, provider, ext_id, amount, _period, _promo,
+     status, _url, _err, _created, _paid, _fn, _un) = p
+    if provider != "platega" or not ext_id:
+        return web.json_response({"error": "not_platega"}, status=409)
+    r = await pg.get_status(ext_id)
+    if not r.get("ok"):
+        if r.get("not_found"):
+            return web.json_response({"error": "platega_not_found"},
+                                     status=404)
+        return web.json_response({"error": "platega_error",
+                                  "details": r.get("error")}, status=502)
+    raw = r.get("raw") or {}
+    method = pg.PAYMENT_METHODS.get(raw.get("paymentMethod"),
+                                    raw.get("paymentMethod") or "")
+    credit = await get_payment_credit(pid)
+    live_status = r.get("status")
+    return web.json_response({
+        "payment_id": pid,
+        "live": {"status": live_status,
+                 "status_label": _PLATEGA_STATUS_LABEL.get(live_status,
+                                                           live_status),
+                 "platega_status": r.get("platega_status"),
+                 "amount": r.get("amount"),
+                 "paid": bool(r.get("paid")),
+                 "method": method if isinstance(method, str) else str(method),
+                 "payload": r.get("payload") or ""},
+        "bot": {"status": status, "amount": amount, "external_id": ext_id},
+        "credited": bool(credit),
+        "match": live_status == status})
+
+
 async def payment_refund(request):
     """Возврат платежа: двухшаговое подтверждение, потом возврат
     в Platega и finalize_refund(). Идемпотентно: повторный вызов
@@ -1631,6 +1689,7 @@ def register(app):
     в web/webapi.py (как и маршруты фазы 1 в build_admin_app)."""
     app.router.add_get("/payments", payments_list)
     app.router.add_get("/payments/{pid}", payment_detail)
+    app.router.add_get("/payments/{pid}/platega", payment_platega_check)
     app.router.add_post("/payments/{pid}/refund", payment_refund)
     app.router.add_get("/finance", finance_hub)
     app.router.add_post("/reconcile/run", reconcile_run)
