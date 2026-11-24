@@ -48,6 +48,11 @@ DEFAULTS = {
     # следом за сводкой (заодно выравнивает ЧС из общего списка, у
     # которого нет точечных событий по людям).
     "tags": True,
+    # Ники и описания клиентов в панели — актуализация полным прогоном
+    # следом за тегами (прямой заказ владельца 2026-11-24: описания сами
+    # не обновляются, а ручной запуск забывается). Полная синхронизация
+    # с панелью по-прежнему только вручную — это один узкий шаг.
+    "names": True,
 }
 
 _FALL_LABELS = {
@@ -388,6 +393,28 @@ async def morning_sync_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             pass
 
+    if cfg.get("names", True):
+        # Ники и описания в панели — полным прогоном следом за тегами.
+        # Свежие username/first_name берутся напрямую из Telegram;
+        # кого Telegram не отдал, того не трогаем (как в ручном запуске).
+        # Ошибка прогона ничего не роняет: сводка, бэкап и теги уже ушли.
+        try:
+            from services.panel import (refresh_panel_descriptions,
+                                        tg_chat_resolver)
+            res = await refresh_panel_descriptions(
+                resolve_chat=await tg_chat_resolver(context.bot))
+            errors = res.get("errors") or []
+            text = ("👤 <b>Ники в панели актуализированы</b>\n\n"
+                    f"<blockquote>Подписок проверено: {res['checked']}\n"
+                    f"Описаний обновлено: {res['updated']}"
+                    + (f"\n⚠️ Не удалось проверить: {len(errors)}"
+                       if errors else "")
+                    + "</blockquote>")
+            await context.bot.send_message(
+                chat_id=ADMIN_ID, text=text, parse_mode="HTML")
+        except Exception:
+            pass
+
 
 def _toggle_label(on: bool) -> str:
     return "✅ вкл" if on else "❌ выкл"
@@ -416,6 +443,7 @@ async def handle_morning_menu(query,
         f"🖥 Напоминание о серверах: <b>{_toggle_label(cfg['server_reminder'])}</b>",
         f"💾 Бэкап со сводкой: <b>{_toggle_label(cfg.get('backup', True))}</b>",
         f"🏷 Теги панели со сводкой: <b>{_toggle_label(cfg.get('tags', True))}</b>",
+        f"👤 Ники в панели со сводкой: <b>{_toggle_label(cfg.get('names', True))}</b>",
         "",
         "<b>Фоновые проверки (на своих интервалах):</b>",
         "🔄 Синхронизация с панелью: <b>только вручную</b> (кнопка в Remnawave → Синхронизация)",
@@ -453,6 +481,9 @@ async def handle_morning_menu(query,
             f"🏷 Теги: {_toggle_label(cfg.get('tags', True))}",
             callback_data="morning_toggle:tags")],
         [InlineKeyboardButton(
+            f"👤 Ники: {_toggle_label(cfg.get('names', True))}",
+            callback_data="morning_toggle:names")],
+        [InlineKeyboardButton(
             f"🚫 ЧС: {_toggle_label(cfg['blacklist_sync'])}",
             callback_data="morning_toggle:blacklist_sync")],
         [InlineKeyboardButton(
@@ -483,7 +514,7 @@ async def handle_morning_toggle(query, context: ContextTypes.DEFAULT_TYPE,
     if key not in ("enabled", "reconcile", "netcheck", "alerts",
                    "support_topics", "blacklist_sync",
                    "site_sync", "server_reminder", "healthcheck", "backup",
-                   "tags", "device_watch"):
+                   "tags", "device_watch", "names"):
         return
     cfg = get_morning_cfg()
     save_morning_cfg({key: not cfg.get(key, True)})

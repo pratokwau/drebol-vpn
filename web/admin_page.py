@@ -3685,7 +3685,7 @@ $("btn-psync-set").onclick = function(){ loadSyncSettings(); };
 // Тумблеры утренней сводки — те же 12, что в ТГ (handle_morning_menu):
 // «enabled» — отдельный чекбокс mor-enabled, остальные — здесь, двумя
 // группами как в ТГ: ежедневно в это время / фоновые проверки.
-const MORNING_TOGGLES = {reconcile: "🔍 Сверка с Platega", netcheck: "🌐 Проверка операторов", support_topics: "👥 Темы поддержки", server_reminder: "🖥 Напоминание о серверах", backup: "💾 Бэкап со сводкой", tags: "🏷 Теги панели со сводкой"};
+const MORNING_TOGGLES = {reconcile: "🔍 Сверка с Platega", netcheck: "🌐 Проверка операторов", support_topics: "👥 Темы поддержки", server_reminder: "🖥 Напоминание о серверах", backup: "💾 Бэкап со сводкой", tags: "🏷 Теги панели со сводкой", names: "👤 Ники в панели со сводкой"};
 const MORNING_TOGGLES_BG = {blacklist_sync: "🚫 Синхронизация ЧС", site_sync: "🌐 Автообновление сайта", healthcheck: "💓 Проверка здоровья", device_watch: "📱 Новые устройства", alerts: "🔔 Алерты о падениях"};
 function morningTogglesHtml(m, map){
   let h = "";

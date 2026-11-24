@@ -79,7 +79,7 @@ _STR_KEYS = {"maintenance_text", "remind_quiet_from", "remind_quiet_to"}
 _MORNING_BOOL = {
     "enabled", "reconcile", "netcheck", "alerts", "support_topics",
     "blacklist_sync", "site_sync", "server_reminder",
-    "healthcheck", "backup", "tags", "device_watch",
+    "healthcheck", "backup", "tags", "device_watch", "names",
 }
 _NETCHECK_KEYS = {"domains", "operators", "netcheck_days", "netcheck_last_run"}
 
