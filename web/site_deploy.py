@@ -846,6 +846,10 @@ body.tg-fullscreen .tabs { top:96px; }
    out.push('<div data-sec="sub"><div class="card" id="renew-card">' + title("card", "Продление") +
             '<div id="renew-body"><p class="card-sub">Загружаем тарифы…</p></div></div></div>');
 
+   // Подарок: оплатить подписку другу — как кнопка «🎁 Подарить» в боте
+   out.push('<div data-sec="sub"><div class="card" id="gift-card">' + title("card", "Подарить подписку") +
+            '<div id="gift-body"><p class="card-sub">Загружаем тарифы…</p></div></div></div>');
+
    // Детали подписки: что не влезло в главную карточку
    var details = [row("Продлений", esc(s.renewed))];
    if (s.created_at) { details.push(row("Подписка с", esc(fmtDate(s.created_at)))); }
@@ -1200,6 +1204,7 @@ body.tg-fullscreen .tabs { top:96px; }
      };
    }
    if (document.getElementById("renew-card")) { loadRenew(); }
+   if (document.getElementById("gift-card")) { loadGift(); }
 
    // Профиль: смена почты и пароля — формы перерисовываются при каждой
    // загрузке, поэтому привязка здесь же, после каждой отрисовки.
@@ -1402,6 +1407,159 @@ body.tg-fullscreen .tabs { top:96px; }
      renewTimer = setTimeout(function () { pollPayment(id, tries - 1); }, 10000);
    }).catch(function () {
      renewTimer = setTimeout(function () { pollPayment(id, tries - 1); }, 10000);
+   });
+ }
+
+ // Подарок подписки: тарифы, получатель, счёт — как в боте.
+ // Подтверждение приходит колбэком Platega, а опрос — страховка:
+ // страница опрашивает статус счёта каждые 10 секунд, пока ждёт.
+ var giftTariffs = {};
+ var giftTariff = null;
+ var giftRcpt = null;
+ var giftPayUrl = "";
+ function loadGift() {
+   var body = document.getElementById("gift-body");
+   if (!body) { return; }
+   giftTariffs = {}; giftTariff = null; giftRcpt = null; giftPayUrl = "";
+   api("/api/gift-options").then(function (r) {
+     if (r.status !== 200 || !r.data.tariffs) {
+       body.innerHTML = '<p class="card-sub">Подарок сейчас недоступен. ' +
+                        "Попробуйте позже или подарите в боте.</p>";
+       return;
+     }
+     var d = r.data;
+     var html = '<p class="card-sub">🎁 Выберите срок — оплатите вы, а подписка ' +
+                "откроется у друга сразу после оплаты.</p>";
+     if (d.promo) {
+       html += '<p class="card-sub">🎟 Промокод ' + esc(d.promo.code) + " (−" +
+               esc(d.promo.percent) + "%) уже учтён в цене.</p>";
+     }
+     html += '<div class="tariffs">';
+     d.tariffs.forEach(function (t) {
+       giftTariffs[t.id] = t;
+       html += '<button class="tariff" type="button" onclick="giftPick(' +
+               t.id + ')"><span><span class="t-per">' + esc(t.period) + '</span>' +
+               '<span class="t-sub">подарок другу</span></span>' +
+               '<span class="t-price">' + esc(fmtMoney(t.price)) + "</span></button>";
+     });
+     html += "</div>";
+     body.innerHTML = html;
+   }).catch(function () {
+     body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
+   });
+ }
+ function giftPick(id) {
+   var t = giftTariffs[id];
+   if (!t) { return; }
+   giftTariff = t; giftRcpt = null;
+   var body = document.getElementById("gift-body");
+   if (!body) { return; }
+   body.innerHTML = '<p class="card-sub">🎁 <b style="color:var(--ink)">' + esc(t.period) +
+     " — " + esc(fmtMoney(t.price)) + "</b></p>" +
+     '<div style="display:flex;gap:8px;align-items:flex-end;margin:4px 0 10px">' +
+     '<label class="field" style="flex:1;margin:0">Кому дарим' +
+     '<input type="text" id="gift-target" placeholder="@ник друга или TG ID" autocomplete="off"></label>' +
+     '<button class="btn btn-ghost" type="button" onclick="resolveGift()">Найти</button></div>' +
+     '<div id="gift-confirm"></div>' +
+     '<p class="card-sub"><a href="#" onclick="loadGift();return false" style="color:var(--ink)">← Выбрать другой срок</a></p>';
+   var inp = document.getElementById("gift-target");
+   if (inp) { inp.focus(); }
+ }
+ function resolveGift() {
+   var inp = document.getElementById("gift-target");
+   var target = inp ? inp.value.trim() : "";
+   var box = document.getElementById("gift-confirm");
+   if (!target || !giftTariff) { return; }
+   if (box) { box.innerHTML = '<p class="card-sub">Ищем…</p>'; }
+   api("/api/gift/resolve", {method: "POST", body: JSON.stringify({target: target})})
+     .then(function (r) {
+       if (r.status !== 200) {
+         var msg = "Не нашли такого пользователя — проверьте ник и попробуйте ещё раз.";
+         if (r.data && r.data.error === "self_gift") { msg = "Себе дарить не нужно — это обычное продление."; }
+         else if (r.data && r.data.error === "blocked") { msg = "Этому человеку подарить нельзя — он в чёрном списке сервиса."; }
+         else if (r.data && r.data.error === "no_bot") { msg = "Не получилось проверить ник — попробуйте TG ID или позже."; }
+         else if (r.data && r.data.error === "bad_target") { msg = "Пришлите @ник или TG ID."; }
+         if (box) { box.innerHTML = '<p class="card-sub">' + msg + "</p>"; }
+         haptic("error");
+         return;
+       }
+       giftRcpt = r.data;
+       var h = '<p class="card-sub">🎁 <b>Подарок для ' + esc(r.data.display) + "</b></p>" +
+         '<p class="card-sub">⏱ Срок: <b style="color:var(--ink)">' + esc(giftTariff.period) +
+         "</b> · 💵 Цена: <b style=\"color:var(--ink)\">" + esc(fmtMoney(giftTariff.price)) + "</b></p>";
+       if (r.data.has_sub && r.data.sub_until) {
+         h += '<p class="card-sub">У друга уже есть подписка до ' + esc(r.data.sub_until) +
+              " — срок прибавится к ней.</p>";
+       } else {
+         h += '<p class="card-sub">Если друг ещё не запускал бота, после оплаты ' +
+              "пришлите ему ссылку сами — она будет у вас на экране.</p>";
+       }
+       h += '<div class="stack"><button class="btn btn-main" type="button" onclick="giftPay()">💳 Оплатить ' +
+            esc(fmtMoney(giftTariff.price)) + "</button></div>";
+       if (box) { box.innerHTML = h; }
+     })
+     .catch(function () {
+       if (box) { box.innerHTML = '<p class="card-sub">Не получилось — попробуйте позже.</p>'; }
+     });
+ }
+ function giftPay() {
+   var body = document.getElementById("gift-body");
+   if (!body || !giftTariff || !giftRcpt) { return; }
+   body.innerHTML = '<p class="card-sub">Создаём счёт…</p>';
+   api("/api/gift", {method: "POST", body: JSON.stringify({tariff_id: giftTariff.id, tg_id: giftRcpt.tg_id})})
+     .then(function (r) {
+       if (r.status !== 200 || !r.data.url) {
+         var msg = "Не получилось создать счёт. Попробуйте позже.";
+         if (r.data.error === "bad_tariff") { msg = "Тариф больше недоступен."; }
+         else if (r.data.error === "pay_unavailable") { msg = "Оплата временно недоступна."; }
+         else if (r.data.error === "blocked_recipient") { msg = "Этому человеку подарить нельзя — он в чёрном списке сервиса."; }
+         body.innerHTML = '<p class="card-sub">' + msg + '</p>' +
+           '<button class="btn btn-ghost" type="button" onclick="loadGift()">Попробовать ещё раз</button>';
+         return;
+       }
+       giftPayUrl = r.data.url;
+       body.innerHTML = '<div id="gift-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
+         esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — подписка откроется у друга, " +
+         "обычно в течение минуты.</p>" +
+         '<button class="btn btn-main" type="button" onclick="openPay(giftPayUrl)">Оплатить</button>' + '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
+       openPay(r.data.url);
+       pollGift(r.data.payment_id, 90);
+     })
+     .catch(function () {
+       body.innerHTML = '<p class="card-sub">Не получилось создать счёт. Попробуйте позже.</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="loadGift()">Попробовать ещё раз</button>';
+     });
+ }
+ function pollGift(id, tries) {
+   stopRenewPoll();
+   api("/api/payment?id=" + id).then(function (r) {
+     var box = document.getElementById("gift-wait");
+     if (r.status !== 200) {
+       if (box) { box.innerHTML = '<p class="card-sub">Не удалось проверить статус. Попробуйте позже.</p>'; }
+       return;
+     }
+     var st = r.data.status;
+     if (st === "paid" || st === "refund_pending") {
+       if (box) { box.innerHTML = '<p class="card-sub">✅ Оплата прошла! Подписка откроется у друга — ему придёт сообщение от бота.</p>'; }
+       toast("Подарок оплачен"); haptic();
+       load();
+       return;
+     }
+     if (st === "canceled" || st === "cancelled" || st === "expired" || st === "error" ||
+         st === "refunded" || st === "chargebacked") {
+       if (box) { box.innerHTML = '<p class="card-sub">Счёт не оплачен. Создайте новый счёт.</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="loadGift()">К подаркам</button>'; }
+       return;
+     }
+     if (tries <= 0) {
+       if (box) { box.innerHTML = '<p class="card-sub">Пока не оплачено. Если вы уже оплатили, ' +
+         'подождите немного и нажмите «Проверить».</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="pollGift(' + id + ', 90)">Проверить</button>'; }
+       return;
+     }
+     renewTimer = setTimeout(function () { pollGift(id, tries - 1); }, 10000);
+   }).catch(function () {
+     renewTimer = setTimeout(function () { pollGift(id, tries - 1); }, 10000);
    });
  }
 

@@ -13,11 +13,11 @@
 
 Кабинет показывает срок, трафик, LTE, устройства, платежи и рефералку.
 Действия — те же, что уже есть в боте для самого человека: отключить
-своё устройство, перевыпустить свой ключ и продлить подписку. Продление
-идёт через тот же счёт Platega, что и в боте, а подтверждение — колбэком
-Platega на /api/webhooks/platega, опрос статусов фоновой задачей бота —
-страховка. После оплаты Platega возвращает человека по редиректу из
-счёта (страницы /pay/* на сайте).
+своё устройство, перевыпустить свой ключ, продлить подписку и подарить
+подписку другу. Продление и подарок идут через тот же счёт Platega,
+что и в боте, а подтверждение — колбэком Platega на /api/webhooks/platega,
+опрос статусов фоновой задачей бота — страховка. После оплаты Platega
+возвращает человека по редиректу из счёта (страницы /pay/* на сайте).
 """
 
 from __future__ import annotations
@@ -385,6 +385,84 @@ async def _renew_quote(tg_id: int, tariff: tuple) -> dict:
             "kind": "period_dev" if dev_price else "period", "extra": devices,
             "dev_price": dev_price, "promo_code": promo_code,
             "promo_percent": promo_percent}
+
+
+async def _gift_quote(tg_id: int, tariff: tuple) -> dict:
+    """Цена подарка — как в боте (handle_pay_invoice с gift_tg_id):
+    тариф минус висящий промокод дарителя, без устройств: подарок —
+    только срок, места друг докупит себе сам."""
+    from paidsub.handlers import apply_discount, validate_promo
+    from paidsub.time_parser import fmt_duration
+    from paidsub.storage import get_pending_promo
+    base_price = int(tariff[3])
+    promo_code = None
+    promo_percent = 0
+    pending = await get_pending_promo(tg_id)
+    if pending:
+        promo, _err = await validate_promo(pending, tg_id)
+        if promo:
+            promo_code = promo[1]
+            promo_percent = int(promo[2])
+            base_price = apply_discount(base_price, promo[2])
+    return {"price": base_price, "seconds": int(tariff[2]),
+            "name": fmt_duration(int(tariff[2])),
+            "promo_code": promo_code, "promo_percent": promo_percent}
+
+
+async def _resolve_gift_recipient(giver_tg_id: int, target) -> dict:
+    """Получатель подарка — те же правила, что apply_gift_user в ТГ:
+    цифры — TG ID как есть (имя из базы, если человек известен —
+    так на экране подтверждения видно, кому даришь), @ник — через бота,
+    а если бота нет под рукой — по базе (find_user_by_username,
+    без учёта регистра).
+    Возвращает {"tg_id", "display", "has_sub", "sub_until"}.
+    ValueError: bad_target / self_gift / blocked / user_not_found / no_bot.
+    Срок действующей подписки друга — expire_date (индекс 6 выборки
+    get_paid_sub_by_tg_id); в ТГ здесь же по ошибке берётся индекс 3
+    (uuid) — в кабинете показывается настоящий срок."""
+    from core.database import find_user_by_username, get_user_info
+    from features.blacklist import is_blacklisted
+    from paidsub.storage import get_paid_sub_by_tg_id
+    raw = str(target or "").strip().lstrip("@")
+    tg_id = None
+    display = None
+    if not raw:
+        raise ValueError("bad_target")
+    if raw.isdigit():
+        tg_id = int(raw)
+        display = f"id{tg_id}"
+        u = await get_user_info(tg_id)
+        if u and u[2]:
+            display = f"@{u[2]}"
+        elif u and u[1]:
+            display = u[1]
+    else:
+        chat = None
+        if _bot is not None:
+            try:
+                chat = await _bot.get_chat("@" + raw)
+            except Exception:
+                chat = None
+        if chat is not None:
+            tg_id = chat.id
+            display = (f"@{chat.username}" if getattr(chat, "username", None)
+                       else (chat.first_name or f"id{tg_id}"))
+        else:
+            u = await find_user_by_username(raw)
+            if u is None:
+                if _bot is None:
+                    raise ValueError("no_bot")
+                raise ValueError("user_not_found")
+            tg_id = int(u[0])
+            display = (f"@{u[2]}" if u[2] else (u[1] or f"id{tg_id}"))
+    if tg_id == giver_tg_id:
+        raise ValueError("self_gift")
+    if await is_blacklisted(tg_id):
+        raise ValueError("blocked")
+    row = await get_paid_sub_by_tg_id(tg_id)
+    return {"tg_id": tg_id, "display": display,
+            "has_sub": bool(row),
+            "sub_until": str(row[6])[:16] if row and row[6] else None}
 
 
 # ── Сервер ───────────────────────────────────────────────────────────────────
@@ -882,6 +960,137 @@ def build_app():
         return web.json_response({"payment_id": pid, "url": res["url"],
                                   "amount": q["price"]})
 
+    async def gift_options(request):
+        """Тарифы для подарка — те же, что в боте на экране gift_pick:
+        срок и цена со скидкой висящего промокода дарителя, без устройств.
+        Своя подписка для подарка не нужна, как и в боте."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from features.blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        from core.database import list_tariffs
+        from paidsub.time_parser import fmt_duration
+        tariffs = await list_tariffs(only_active=True)
+        if not tariffs:
+            return web.json_response({"error": "no_tariffs"}, status=409)
+        out = []
+        promo = None
+        for t in tariffs:
+            q = await _gift_quote(tg_id, t)
+            if promo is None and q["promo_code"]:
+                promo = {"code": q["promo_code"],
+                         "percent": q["promo_percent"]}
+            out.append({"id": t[0], "name": fmt_duration(q["seconds"]),
+                        "period": fmt_duration(q["seconds"]),
+                        "price": q["price"]})
+        return web.json_response({"tariffs": out, "promo": promo})
+
+    async def gift_resolve(request):
+        """Получатель подарка — проверка, как в боте перед оплатой:
+        @ник или TG ID, себе и людям из ЧС дарить нельзя."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from features.blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        try:
+            res = await _resolve_gift_recipient(tg_id, body.get("target"))
+        except ValueError as ex:
+            code = str(ex)
+            status = {"bad_target": 400, "self_gift": 400,
+                      "user_not_found": 404, "blocked": 403,
+                      "no_bot": 503}.get(code, 400)
+            return web.json_response({"error": code}, status=status)
+        return web.json_response(res)
+
+    async def gift(request):
+        """Счёт за подарок — тот же счёт Platega, что в боте
+        (handle_pay_invoice с gift_tg_id): платит даритель, подписка
+        откроется у получателя, подтверждение — тем же вебхуком, его
+        код не трогается. Повторное нажатие на тот же тариф и того же
+        получателя не плодит счета: возвращается уже созданная ссылка."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            tariff_id = int(body.get("tariff_id") or 0)
+            gift_tg = int(body.get("tg_id") or 0)
+        except (TypeError, ValueError):
+            return web.json_response({"error": "bad_params"}, status=400)
+        from features.blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        if not gift_tg or gift_tg == tg_id:
+            return web.json_response({"error": "self_gift"}, status=400)
+        if await is_blacklisted(gift_tg):
+            return web.json_response({"error": "blocked_recipient"}, status=403)
+        from core.database import (add_payment, get_active_payment, get_tariff,
+                              get_user_info, set_payment_external_id,
+                              set_payment_status)
+        import services.platega_api as pg
+        tariff = await get_tariff(tariff_id) if tariff_id else None
+        if not tariff or not tariff[4]:
+            return web.json_response({"error": "bad_tariff"}, status=400)
+        if not pg.is_configured():
+            return web.json_response({"error": "pay_unavailable"}, status=503)
+        q = await _gift_quote(tg_id, tariff)
+        existing = await get_active_payment(tg_id, "platega")
+        if (existing and existing[4] == q["price"]
+                and existing[5] == q["seconds"] and existing[8]
+                and (len(existing) < 12 or existing[11] == 0)
+                and (len(existing) < 13 or (existing[12] or 0) == gift_tg)):
+            return web.json_response({"payment_id": existing[0],
+                                      "url": existing[8],
+                                      "amount": existing[4], "reused": True})
+        user = await get_user_info(tg_id)
+        # Имя получателя — только для описания счёта, как gift_name в боте.
+        try:
+            rcpt = await _resolve_gift_recipient(tg_id, gift_tg)
+            gift_name = rcpt["display"]
+        except ValueError:
+            gift_name = f"id{gift_tg}"
+        from web.site_deploy import pay_redirect_urls
+        urls = pay_redirect_urls()
+        cabinet_url = ""
+        try:
+            from web import site_deploy as site
+            cabinet_url = (site.cabinet_link() or "") + "/payments"
+        except Exception:
+            cabinet_url = ""
+        # строку создаём ДО запроса к платёжке: её id едет в payload,
+        # а по payload колбэк находит счёт обратно
+        pid = await add_payment(
+            tg_id, "platega", None, q["price"], q["seconds"],
+            "", promo_code=q["promo_code"], kind="period", extra=0,
+            gift_tg_id=gift_tg)
+        res = await pg.create_payment(
+            amount=q["price"],
+            description=f"Подписка Drebol VPN · 🎁 Подарок для {gift_name}",
+            tg_id=tg_id, username=user[2] if user else None,
+            order_id=f"drebol-{pid}",
+            success_url=urls.get("success") or cabinet_url or None,
+            fail_url=urls.get("fail") or cabinet_url or None,
+            back_url=urls.get("back") or cabinet_url or None)
+        if not res.get("ok"):
+            logging.error("кабинет: счёт Platega за подарок не создан для %s: %s",
+                          tg_id, res.get("error"))
+            await set_payment_status(pid, "error", res.get("error"))
+            return web.json_response({"error": "pay_failed"}, status=502)
+        await set_payment_external_id(pid, res["payment_id"], res["url"])
+        return web.json_response({"payment_id": pid, "url": res["url"],
+                                  "amount": q["price"]})
+
     async def devices_buy(request):
         """Докупка мест для устройств отдельным счётом — как кнопка
         «Добавить место» в боте: платёж kind="devices", подтверждение
@@ -1105,6 +1314,9 @@ def build_app():
     app.router.add_post("/api/promo/apply", promo_apply)
     app.router.add_post("/api/promo/remove", promo_remove)
     app.router.add_post("/api/renew", renew)
+    app.router.add_get("/api/gift-options", gift_options)
+    app.router.add_post("/api/gift/resolve", gift_resolve)
+    app.router.add_post("/api/gift", gift)
     app.router.add_post("/api/devices/buy", devices_buy)
     app.router.add_get("/api/payment", payment_status)
     app.router.add_post("/api/webhooks/platega", platega_webhook)
