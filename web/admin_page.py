@@ -443,11 +443,12 @@ label.chk input{width:auto;margin:0}
           <div id="finance-out"></div>
         </div>
         <div class="card"><h2>Платёжная система — Platega</h2><p class="sub">Секретный ключ и Merchant ID — только для записи, в ответе они не показываются.</p>
-          <div class="btnrow"><button id="btn-platega" class="ghost">Показать состояние</button></div>
+          <div class="btnrow"><button id="btn-platega" class="ghost">Показать состояние</button><button id="btn-platega-settings" class="ghost">🏬 Настройки Platega</button></div>
           <input id="pl-merchant" placeholder="Merchant ID">
           <input id="pl-secret" type="password" placeholder="API-ключ (секрет, только запись)" autocomplete="off">
           <button id="btn-platega-save">Сохранить</button>
           <div id="platega-out"></div>
+          <div id="platega-settings-out"></div>
         </div>
         <div class="card"><h2>Сверка с Platega</h2><p class="sub">Проверяет счета за 60 дней. «Исправить» меняет только денежные поля — сроки подписок не трогает.</p>
           <div class="btnrow"><button id="btn-reconcile">Запустить сверку</button><button id="btn-reconcile-fix" class="ghost">Исправить расхождения</button></div>
@@ -2178,7 +2179,45 @@ $("btn-servers").onclick = function(){
   if (el) el.scrollIntoView({behavior: "smooth", block: "start"});
 };
 $("fin-period").addEventListener("change", function(){ loadFinance(); loadServers(); });
-$("btn-platega").onclick = async function(){ const r = await api("/platega"); renderOut("platega-out", r.data); };
+function fmtUsdt(n){ if (n == null || n === "") return "—"; return fmtNum(n) + " USDT"; }
+function renderPlatega(d){
+  if (!d || d.error) { renderOut("platega-out", d); return; }
+  let h = "";
+  h += kvRow("Приём платежей", "Platega");
+  h += kvRow("Настроена", d.configured ? "да" : "нет — заполните Merchant ID и API ключ");
+  h += kvRow("Merchant ID", '<span class="mono">' + esc(d.merchant || "не задан") + "</span>");
+  h += kvRow("API ключ задан", d.secret_set ? "да" : "нет");
+  if (d.configured) {
+    const t = d.test || {};
+    if (t.ok) h += kvRow("Подключение", "✅ работает — " + esc(t.message || "ключи приняты"));
+    else h += '<p class="err">❌ Подключение не работает: ' + esc(t.error || "неизвестная ошибка") + "</p>";
+    const b = d.balance || {};
+    if (b.ok) {
+      h += kvRow("Баланс, рубли", fmtMoney(b.rub) + (b.frozen_rub != null ? " · заморожено " + fmtMoney(b.frozen_rub) : ""));
+      h += kvRow("Баланс, USDT", fmtUsdt(b.usdt) + (b.frozen_usdt != null ? " · заморожено " + fmtUsdt(b.frozen_usdt) : ""));
+    } else if (b.error) {
+      h += '<p class="err">💰 Баланс не получен: ' + esc(b.error) + "</p>";
+    }
+  }
+  $("platega-out").innerHTML = h;
+}
+async function loadPlatega(){ const r = await api("/platega"); renderPlatega(r.data); }
+function renderPlategaSettings(d){
+  if (!d || d.error) { renderOut("platega-settings-out", d); return; }
+  let h = "";
+  if (d.note) h += '<p class="mut">' + esc(d.note) + "</p>";
+  h += kvRow("Merchant ID", '<span class="mono">' + esc(d.merchant || "не задан") + "</span>");
+  h += kvRow("Способы оплаты", esc(d.methods || ""));
+  h += kvRow("После оплаты", '<a href="' + esc(d.success_url) + '" target="_blank" rel="noopener">' + esc(d.success_url) + "</a>");
+  h += kvRow("При неуспехе", '<a href="' + esc(d.fail_url) + '" target="_blank" rel="noopener">' + esc(d.fail_url) + "</a>");
+  h += kvRow("Кнопка «вернуться»", '<a href="' + esc(d.back_url) + '" target="_blank" rel="noopener">' + esc(d.back_url) + "</a>");
+  h += kvRow("Колбэк (Callback URL)", '<a href="' + esc(d.callback_url) + '" target="_blank" rel="noopener">' + esc(d.callback_url) + "</a>");
+  h += kvRow("Логотип формы", '<a href="' + esc(d.logo_url) + '" target="_blank" rel="noopener">' + esc(d.logo_url) + "</a>");
+  h += '<div class="btnrow" style="margin-top:10px"><a class="ghost btnlike" href="' + esc(d.cabinet_url) + '" target="_blank" rel="noopener">🌐 Открыть кабинет Platega</a></div>';
+  $("platega-settings-out").innerHTML = h;
+}
+$("btn-platega").onclick = async function(){ await loadPlatega(); };
+$("btn-platega-settings").onclick = async function(){ const r = await api("/platega/settings"); renderPlategaSettings(r.data); };
 $("btn-platega-save").onclick = withSpin($("btn-platega-save"), async function(){
   const body = {};
   const m = $("pl-merchant").value.trim();
@@ -2186,8 +2225,8 @@ $("btn-platega-save").onclick = withSpin($("btn-platega-save"), async function()
   if (m) body.platega_merchant_id = m;
   if (s) body.platega_secret = s;
   const r = await api("/platega", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
-  renderOut("platega-out", r.data);
-  if (r.status === 200) { $("pl-secret").value = ""; toast("Данные Platega сохранены", "ok"); }
+  if (r.status === 200) { $("pl-secret").value = ""; toast("Данные Platega сохранены", "ok"); await loadPlatega(); }
+  else renderOut("platega-out", r.data);
 });
 let lastReconcile = null;
 $("btn-reconcile").onclick = withSpin($("btn-reconcile"), async function(){

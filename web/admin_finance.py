@@ -1994,6 +1994,38 @@ async def platega_patch(request):
                               "secret_set": bool(cfg.get("platega_secret"))})
 
 
+async def platega_settings(request):
+    """Справка «Настройки Platega» — паритет с ТГ handle_platega_settings:
+    те же строки и URL, только чтение. Секреты — никогда: Merchant ID
+    только маской, API ключ не возвращается вообще. База URL — адрес
+    сайта из site_url(), фолбэк — литерал из ТГ."""
+    from aiohttp import web
+    from config import load_config
+    from handlers.payprovider import _mask
+    import web.site_deploy as site
+    _, err = await _actor_or_401(request)
+    if err is not None:
+        return err
+    cfg = load_config()
+    base = site.site_url() or "https://vpn.drbl.tech"
+    return web.json_response({
+        "merchant": _mask(cfg.get("platega_merchant_id")),
+        "methods": "СБП, карта, крипта — выбирает плательщик на форме",
+        "success_url": base + "/pay/success/",
+        "fail_url": base + "/pay/fail/",
+        "back_url": base + "/pay/back/",
+        "callback_url": base + "/api/webhooks/platega",
+        "logo_url": base + "/logo.png",
+        "cabinet_url": "https://app.platega.io/",
+        "note": ("Эти настройки живут только в кабинете Platega — API их "
+                 "не отдаёт, поэтому бот показывает, как должно быть "
+                 "настроено. Меняется всё только в кабинете. Бот сам "
+                 "подставляет адреса /pay/* в каждый счёт, но впиши "
+                 "Callback URL в кабинете — без него оплаты подтверждаются "
+                 "только опросом раз в минуту."),
+    })
+
+
 # ── Регистрация маршрутов ────────────────────────────────────────────────────
 
 def register(app):
@@ -2047,5 +2079,6 @@ def register(app):
     app.router.add_post("/retention/remind/test", retention_remind_test)
     app.router.add_post("/retention/winback/test", retention_winback_test)
     app.router.add_get("/platega", platega_get)
+    app.router.add_get("/platega/settings", platega_settings)
     app.router.add_patch("/platega", platega_patch)
     logging.info("админка: маршруты фазы 2 (финансы, рассылка) зарегистрированы")
