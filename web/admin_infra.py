@@ -2044,6 +2044,60 @@ async def web_access_check(request):
     return web.json_response({"check": res})
 
 
+async def web_access_find_upstream(request):
+    """«Найти адрес бота» — та же, что кнопка в ТГ (webapi.find_upstream).
+
+    Перебирает кандидатов (тот же сервер, внешний IP бота, хост сервера
+    сайта), проверку делает сам сервер сайта; первый ответивший 200
+    сохраняется в webapi_upstream, а при заданном домене сайта — и
+    webapi_public, как в handle_cabinet_find. Неудача — не ошибка HTTP:
+    возвращается список перебранных адресов и подсказка про файрвол.
+    """
+    from config import atomic_update
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    from web.webapi import find_upstream, settings as webapi_settings
+    try:
+        res = await find_upstream()
+    except Exception as ex:
+        logging.error("админка: web-access find-upstream: %s", ex)
+        return _json_error("check_failed", 502)
+    if not res.get("ok"):
+        port = webapi_settings()["port"]
+        return web.json_response({
+            "ok": False,
+            "tried": res.get("tried") or {},
+            "error": str(res.get("error") or "ни один адрес не ответил"),
+            "hint": (
+                "Чаще всего мешает файрвол: открой порт "
+                f"{port} на сервере бота для адреса сервера сайта. "
+                f"Например: ufw allow from АДРЕС_САЙТА to any port {port}"
+            ),
+            "port": port,
+        })
+    import web.site_deploy as site
+    target = res["target"]
+    public = site.site_url() if site.creds()["domain"] else ""
+
+    def _apply(cfg):
+        cfg["webapi_upstream"] = target
+        if public:
+            cfg["webapi_public"] = public
+    atomic_update(_apply)
+    await _audit(actor, "web_access_update",
+                 f"найден upstream {target}"
+                 + ("; public обновлён" if public else ""))
+    return web.json_response({
+        "ok": True,
+        "target": target,
+        "tried": res.get("tried") or {},
+        "ip": res.get("ip") or "",
+        "public": public,
+        "public_updated": bool(public),
+    })
+
+
 async def connect_help_get(request):
     try:
         await _require_actor(request)
@@ -3431,5 +3485,6 @@ def register(app) -> None:
     app.router.add_get("/web-access", web_access_get)
     app.router.add_patch("/web-access", web_access_patch)
     app.router.add_post("/web-access/check", web_access_check)
+    app.router.add_post("/web-access/find-upstream", web_access_find_upstream)
     app.router.add_get("/connect-help", connect_help_get)
     app.router.add_patch("/connect-help", connect_help_patch)

@@ -943,9 +943,10 @@ label.chk input{width:auto;margin:0}
           <input id="wa-upstream" placeholder="upstream (куда проксируется API), напр. http://127.0.0.1:8088">
           <input id="wa-ts-site" placeholder="Turnstile site key (оставь пустым — не менять)">
           <input id="wa-ts-secret" type="password" placeholder="Turnstile secret key (оставь пустым — не менять)" autocomplete="new-password">
-          <div class="btnrow"><button id="btn-wa-save" class="ghost">Сохранить веб-доступ</button><button id="btn-wa-check" class="ghost">Проверить кабинет</button></div>
+          <div class="btnrow"><button id="btn-wa-save" class="ghost">Сохранить веб-доступ</button><button id="btn-wa-check" class="ghost">Проверить кабинет</button><button id="btn-wa-find" class="ghost">🔍 Найти адрес бота</button></div>
           <div id="wa-out"></div>
           <div id="wa-check-out"></div>
+          <div id="wa-find-out"></div>
         </div>
         <div class="card"><h2>Помощь при подключении</h2><p class="sub">Подсказки новичкам, которые не смогли подключиться.</p>
           <div class="btnrow"><button id="btn-ch-show" class="ghost">Показать настройки</button></div>
@@ -4175,6 +4176,33 @@ $("btn-wa-check").onclick = async function(){
   if (c.outside) h += kvRow("Отвечает снаружи", c.outside.ok ? "да" : "нет");
   if (c.public) h += kvRow("Проверял", '<span class="mono">' + esc(c.public) + "</span>");
   $("wa-check-out").innerHTML = h + "</dl>" + ((c.advice || []).map(function(a){ return '<p class="sub">⚠️ ' + esc(a) + "</p>"; }).join(""));
+};
+$("btn-wa-find").onclick = async function(){
+  const out = $("wa-find-out");
+  out.innerHTML = '<p class="sub">🔎 Ищу адрес, по которому сайт достучится до бота…</p>';
+  const r = await api("/web-access/find-upstream", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+  if (r.status !== 200) { renderOut("wa-find-out", r.data); return; }
+  const d = r.data || {};
+  if (!d.ok) {
+    let h = '<p class="sub">🔎 <b>Адрес не нашёлся</b></p>';
+    const t = d.tried || {};
+    if (Array.isArray(t) && t.length) {
+      h += '<dl class="kv">' + t.map(function(x){ return kvRow('<span class="mono">' + esc(x) + '</span>', '—'); }).join('') + '</dl>';
+    } else if (t && typeof t === 'object' && Object.keys(t).length) {
+      h += '<dl class="kv">' + Object.keys(t).map(function(k){ return kvRow('<span class="mono">' + esc(k) + '</span>', 'ответ ' + esc(String(t[k]))); }).join('') + '</dl>';
+    }
+    if (d.error) h += '<p class="sub">' + esc(d.error) + '</p>';
+    if (d.hint) h += '<p class="sub">⚠️ ' + esc(d.hint) + '</p>';
+    out.innerHTML = h;
+    return;
+  }
+  let h = '<dl class="kv">';
+  h += kvRow('Найден адрес', '<span class="mono">' + esc(d.target) + '</span>');
+  if (d.public_updated) h += kvRow('Адрес API', '<span class="mono">' + esc(d.public) + '</span>');
+  h += '</dl>';
+  h += '<p class="sub">✅ Сайт будет слать <code>/api/</code> туда. Осталось развернуть сайт заново — и кабинет заработает.</p>';
+  out.innerHTML = h;
+  loadWebAccess();
 };
 async function loadConnectHelp(){
   const r = await api("/connect-help");
