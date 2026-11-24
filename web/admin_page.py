@@ -816,11 +816,13 @@ label.chk input{width:auto;margin:0}
       <!-- Бэкап -->
       <section id="sec-backup" class="page hidden">
         <div class="card"><h2>Бэкап и перенос</h2><p class="sub">Полный архив бота: база, все настройки, .env с токеном и все файлы assets, с контрольными суммами. Внутри — ключи от всего проекта, архив никому не пересылать. Восстановление — только Mark, с подтверждением, и только после свежего бэкапа: текущие данные будут заменены полностью, бот перезапустится.</p>
+          <div id="backup-info" class="mut">Загрузка…</div>
           <div class="btnrow"><a id="btn-backup" href="/api/admin/backup/export"><button type="button" class="ghost">Скачать бэкап</button></a></div>
           <label>Файл архива (.zip)</label>
           <input id="bk-file" type="file" accept=".zip,application/zip">
+          <div id="backup-preview"></div>
           <label><input id="bk-fresh" type="checkbox"> свежий бэкап сделан, я понимаю, что данные заменятся</label>
-          <div class="btnrow"><button id="btn-backup-restore" class="danger">Восстановить из архива</button></div>
+          <div class="btnrow"><button id="btn-backup-inspect" class="ghost">Проверить архив</button><button id="btn-backup-restore" class="danger">Восстановить из архива</button></div>
           <div id="backup-out"></div>
         </div>
         <div class="card"><h2>Обновление с GitHub</h2><p class="sub">Mark и Muse. Подтягивает main и перезапускает бота и сап-бота.</p>
@@ -3794,16 +3796,80 @@ $("btn-st-save").onclick = async function(){
   else renderOut("st-out", r.data);
 };
 $("btn-site-del").onclick = async function(){ const r = await postConfirm("/site/delete", {}); renderOut("site-del-out", r.data); };
-$("btn-backup-restore").onclick = async function(){
+/* Предпросмотр архива перед восстановлением — как offer_restore в ТГ:
+   сначала показываем, что внутри архива, и только потом разрешаем
+   восстановление. Флаг сбрасывается при смене файла. */
+let backupInspected = false;
+let backupLoaded = false;
+document.querySelector('[data-nav="backup"]').addEventListener("click", function(){
+  if (!backupLoaded) { backupLoaded = true; loadBackupInfo(); }
+});
+async function loadBackupInfo(){
+  let r;
+  try { r = await api("/backup/info"); }
+  catch(e) { $("backup-info").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("backup-info", r.data); return; }
+  const d = r.data || {};
+  const counts = d.counts || {};
+  const rows = Object.keys(counts).map(function(k){
+    return "<tr><td>" + esc(k) + "</td><td class='num'>" + fmtNum(counts[k]) + "</td></tr>";
+  }).join("");
+  $("backup-info").innerHTML = "<table><tbody>" + rows + "</tbody></table>"
+    + (d.db_size_human ? "<p>База: <b>" + esc(d.db_size_human) + "</b></p>" : "");
+}
+$("bk-file").addEventListener("change", function(){
+  backupInspected = false;
+  $("backup-preview").innerHTML = "";
+});
+function readBkFile(){
   const f = $("bk-file").files[0];
-  if (!f) { toast("Выберите файл архива", "err"); return; }
-  if (!$("bk-fresh").checked) { toast("Подтвердите, что свежий бэкап сделан", "err"); return; }
-  const b64 = await new Promise(function(res, rej){
+  if (!f) return Promise.resolve("");
+  return new Promise(function(res, rej){
     const rd = new FileReader();
     rd.onload = function(){ res(String(rd.result).split(",")[1] || ""); };
     rd.onerror = rej;
     rd.readAsDataURL(f);
   });
+}
+$("btn-backup-inspect").onclick = async function(){
+  if (!$("bk-file").files[0]) { toast("Выберите файл архива", "err"); return; }
+  $("backup-preview").innerHTML = "<p class='mut'>Проверяю архив…</p>";
+  let b64 = "";
+  try { b64 = await readBkFile(); }
+  catch(e) { $("backup-preview").innerHTML = "<p class='err'>Не прочитать файл</p>"; return; }
+  const r = await api("/backup/inspect", {method: "POST", headers: {"X-CSRF-Token": csrf()},
+    body: JSON.stringify({archive: b64})});
+  if (r.status !== 200) {
+    backupInspected = false;
+    const msg = (r.data && r.data.details) ? r.data.details : (r.data && r.data.error) || r.status;
+    $("backup-preview").innerHTML = "<p class='err'>Архив не подходит: " + esc(msg) + "</p>";
+    return;
+  }
+  const d = r.data || {};
+  const counts = d.counts || {};
+  const rows = Object.keys(counts).map(function(k){
+    return "<tr><td>" + esc(k) + "</td><td class='num'>" + fmtNum(counts[k]) + "</td></tr>";
+  }).join("");
+  const extras = [];
+  if (d.has_config) extras.push("настройки");
+  if (d.has_env) extras.push(".env с токеном");
+  if (d.assets_count) extras.push("файлов assets: " + d.assets_count);
+  if (d.checksum === "ok") extras.push("контрольные суммы сошлись ✅");
+  else if (d.checksum === "none") extras.push("старый формат — без контрольных сумм");
+  $("backup-preview").innerHTML = "<h3>Проверил архив</h3><table><tbody>" + rows + "</tbody></table>"
+    + (d.created_at ? "<p>📅 Создан: <b>" + fmtDate(d.created_at) + "</b></p>" : "")
+    + (extras.length ? "<p>📦 Внутри: " + esc(extras.join(", ")) + "</p>" : "")
+    + (d.checksum === "none" ? "<p class='warn'>Старый архив без контрольных сумм — проверьте, что это файл от нашего бота.</p>" : "")
+    + "<p class='warn'>⚠️ Текущие данные бота будут заменены полностью.</p>";
+  backupInspected = true;
+  toast("Архив проверен", "ok");
+};
+$("btn-backup-restore").onclick = async function(){
+  const f = $("bk-file").files[0];
+  if (!f) { toast("Выберите файл архива", "err"); return; }
+  if (!backupInspected) { toast("Сначала проверьте архив кнопкой «Проверить архив»", "err"); return; }
+  if (!$("bk-fresh").checked) { toast("Подтвердите, что свежий бэкап сделан", "err"); return; }
+  const b64 = await readBkFile();
   const r = await postConfirm("/backup/restore", {fresh_backup: true, archive: b64});
   renderOut("backup-out", r.data);
   if (r.status === 200) toast("Бэкап восстановлен, бот перезапускается", "ok");

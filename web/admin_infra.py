@@ -498,6 +498,7 @@ _ADMIN_LABELS = {
     "login": "🔐 Вход в веб-админку", "logout": "🚪 Выход из веб-админки",
     "admin_sub_create": "🆕 Создал админскую подписку",
     "backup_export": "📤 Выгрузка бэкапа", "backup_restore": "♻️ Восстановление из бэкапа",
+    "backup_inspect": "🔍 Проверил архив бэкапа",
     "backup_restore_failed": "⚠️ Восстановление из бэкапа не удалось",
     "blacklist_add": "⛔ Внёс в чёрный список", "blacklist_readd": "⛔ Вернул в чёрный список",
     "blacklist_stop": "⛔ ЧС: стоп триала",
@@ -1272,6 +1273,74 @@ async def backup_export(request):
         headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
 
+async def backup_info(request):
+    """Текущее состояние — как handle_backup_menu в ТГ: счётчики базы
+    и размер файла БД, чтобы видеть, что именно уйдёт в архив."""
+    try:
+        actor = await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    counts = backup_mod.db_counts()
+    size = None
+    try:
+        db_path = backup_mod._db_path()
+        if os.path.exists(db_path):
+            size = os.path.getsize(db_path)
+    except Exception:
+        size = None
+    return web.json_response({
+        "ok": True, "counts": counts,
+        "db_size": size,
+        "db_size_human": backup_mod.human_size(size) if size is not None else None,
+    })
+
+
+def _inspect_summary(info: dict) -> dict:
+    """Содержимое архива — те же поля, что offer_restore в ТГ
+    (features/backup.py): счётчики, дата создания, состав, контрольные
+    суммы. Секретов здесь нет — только метаданные."""
+    meta = info.get("meta") or {}
+    return {
+        "ok": True,
+        "counts": info.get("counts") or {},
+        "created_at": meta.get("created_at") or "",
+        "has_config": bool(info.get("has_config")),
+        "has_env": bool(info.get("has_env")),
+        "assets_count": len(info.get("assets") or []),
+        "checksum": info.get("checksum") or "none",
+    }
+
+
+async def backup_inspect(request):
+    """Предпросмотр архива перед восстановлением — как offer_restore в ТГ.
+    Только Mark: это шаг восстановления. Ничего не меняет, архив не
+    сохраняется; при битом архиве возвращается та же причина, что даёт
+    inspect_archive."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    mark_err = _mark_only(actor)
+    if mark_err is not None:
+        return mark_err
+    body = await _json_body(request)
+    archive_b64 = str(body.get("archive") or "")
+    if not archive_b64:
+        return _json_error("no_archive")
+    try:
+        blob = base64.b64decode(archive_b64, validate=True)
+    except Exception:
+        return _json_error("bad_archive")
+    info = backup_mod.inspect_archive(blob)
+    if not info.get("ok"):
+        return web.json_response(
+            {"error": "bad_archive", "details": str(info.get("error") or "")},
+            status=400)
+    await _audit(actor, "backup_inspect",
+                 f"users={info.get('counts', {}).get('Пользователи', '?')} "
+                 f"checksum={info.get('checksum') or 'none'}")
+    return web.json_response(_inspect_summary(info))
+
+
 async def backup_restore(request):
     actor, err = await _require_mutation(request)
     if err is not None:
@@ -1297,7 +1366,9 @@ async def backup_restore(request):
             return _json_error("bad_archive")
         info = backup_mod.inspect_archive(blob)
         if not info.get("ok"):
-            return _json_error("bad_archive")
+            return web.json_response(
+                {"error": "bad_archive",
+                 "details": str(info.get("error") or "")}, status=400)
         payload = {"archive_b64": archive_b64}
         return confirm_needed_response(
             issue_confirm(actor, "backup_restore", payload,
@@ -3245,6 +3316,8 @@ def register(app) -> None:
     app.router.add_post("/support/token", support_token_set)
     app.router.add_post("/git-update", git_update)
     app.router.add_get("/backup/export", backup_export)
+    app.router.add_get("/backup/info", backup_info)
+    app.router.add_post("/backup/inspect", backup_inspect)
     app.router.add_post("/backup/restore", backup_restore)
     app.router.add_get("/helpers", helpers_get)
     app.router.add_post("/helpers/add", helpers_add)
