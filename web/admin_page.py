@@ -924,7 +924,7 @@ label.chk input{width:auto;margin:0}
           <div id="muse-list-out"></div>
         </div>
         <div class="card"><h2>Помощники (только Mark)</h2><p class="sub">Помощники работают только в Telegram-боте, в вебе у них доступа нет.</p>
-          <input id="helper-tg" type="number" placeholder="tg_id помощника">
+          <input id="helper-tg" placeholder="TG ID или @username">
           <select id="helper-perm-sel"><option value="users">Карточки людей</option><option value="dm">Писать людям</option><option value="support">Поддержка</option><option value="subs">Подписки — смотреть</option><option value="subs_edit">Подписки — менять</option><option value="payments">Оплаты</option><option value="promos">Промокоды</option><option value="blacklist">Чёрный список</option><option value="broadcast">Рассылки</option><option value="stats">Статистика</option></select>
           <div class="btnrow"><button id="btn-helper-add" class="ghost">Добавить</button><button id="btn-helper-perm" class="ghost">Переключить право</button><button id="btn-helper-del" class="danger">Удалить</button><button id="btn-helpers" class="ghost">Список</button></div>
           <div id="helpers-out"></div>
@@ -3894,9 +3894,15 @@ $("btn-sb-save").onclick = withSpin($("btn-sb-save"), async function(){
   } else if (r.status) renderOut("sb-out", r.data);
 });
 $("btn-helper-add").onclick = async function(){
+  const target = ($("helper-tg").value || "").trim();
   const r = await api("/helpers/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({tg_id: parseInt($("helper-tg").value || "0", 10)})});
-  if (r.status === 200) { toast("Помощник добавлен", "ok"); loadHelpers(); } else renderOut("helpers-out", r.data);
+    body: JSON.stringify({target: target})});
+  if (r.status === 200) {
+    if (r.data.already) toast("Уже помощник", "ok");
+    else if (r.data.dm_sent) toast("Помощник добавлен, приглашение отправлено в Telegram", "ok");
+    else toast("Помощник добавлен, но написать ему не удалось — пригласи из списка", "");
+    loadHelpers();
+  } else renderOut("helpers-out", r.data);
 };
 $("btn-helper-perm").onclick = async function(){
   const id = $("helper-tg").value;
@@ -3907,7 +3913,10 @@ $("btn-helper-perm").onclick = async function(){
 $("btn-helper-del").onclick = async function(){
   const id = $("helper-tg").value;
   const r = await postConfirm("/helpers/" + id + "/delete", {});
-  if (r.status === 200) { toast("Помощник удалён", "ok"); loadHelpers(); } else renderOut("helpers-out", r.data);
+  if (r.status === 200) {
+    toast(r.data.dm_sent ? "Помощник удалён, уведомление отправлено" : "Помощник удалён", "ok");
+    loadHelpers();
+  } else renderOut("helpers-out", r.data);
 };
 const PERM_LABELS = {users: "Карточки людей", dm: "Писать людям", support: "Поддержка", subs: "Подписки — смотреть", subs_edit: "Подписки — менять", payments: "Оплаты", promos: "Промокоды", blacklist: "Чёрный список", broadcast: "Рассылки", stats: "Статистика"};
 async function loadHelpers(){

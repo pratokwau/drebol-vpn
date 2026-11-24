@@ -2831,6 +2831,34 @@ async def maintenance_text(request):
 
 # ── Помощники: добавление, права, удаление (Mark-only) ───────────────────────
 
+async def _helper_welcome(bot, tg_id):
+    """Приветствие нового помощника — как handle_helper_input в ТГ:
+    одноразовое приглашение в группу поддержки + DM с кнопками.
+    Возвращает (invite_created, dm_sent); ошибки бота не роняют вызов."""
+    if bot is None:
+        return False, False
+    invite = await staff_mod.make_support_invite(bot, tg_id)
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    rows = []
+    if invite:
+        rows.append([InlineKeyboardButton("📩 Вступить в группу поддержки", url=invite)])
+    rows.append([InlineKeyboardButton("🛡 Панель поддержки", callback_data="admin_panel")])
+    try:
+        await bot.send_message(
+            chat_id=tg_id,
+            text=("🛡 <b>Вам выдан доступ помощника Drebol VPN</b>\n\n"
+                  "<blockquote>Поддержка живёт в отдельной группе: там лежат обращения "
+                  "людей по темам. Вступи в группу по кнопке ниже — и сможешь отвечать "
+                  "людям прямо в темах, бот поддержки доставит ответ человеку.</blockquote>\n\n"
+                  "<i>Панель помощника — в главном меню бота, раздел «🛟 Поддержка» "
+                  "покажет твой статус в группе.</i>"),
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(rows))
+        return bool(invite), True
+    except Exception:
+        return bool(invite), False
+
+
 async def helpers_add(request):
     actor, err = await _require_mutation(request)
     if err is not None:
@@ -2839,30 +2867,43 @@ async def helpers_add(request):
     if mark_err is not None:
         return mark_err
     body = await _json_body(request)
-    try:
-        tg_id = int(body.get("tg_id") or 0)
-    except (TypeError, ValueError):
-        tg_id = 0
-    if not tg_id:
+    # Цель — TG ID или @username, как handle_helper_input в ТГ;
+    # tg_id int — legacy-поле фронта до этого прохода.
+    target = body.get("target")
+    if target is None:
+        target = body.get("tg_id")
+    raw = str(target or "").strip()
+    if not raw:
         return _json_error("bad_request")
+    from core.database import get_user_info, find_user_by_username
+    u = await get_user_info(int(raw)) if raw.isdigit() else await find_user_by_username(raw)
+    if not u:
+        return _json_error("user_not_found", 404)
+    tg_id = int(u[0])
     from config import ADMIN_ID
     if tg_id == ADMIN_ID:
         return _json_error("is_admin")
-    from core.database import get_user_info
-    u = await get_user_info(tg_id)
-    if not u:
-        return _json_error("user_not_found", 404)
     if tg_id in staff_mod.helper_ids():
         await _audit(actor, "helpers_add", f"tg_id={tg_id} already")
         return web.json_response({"ok": True, "already": True, "tg_id": tg_id,
                                   "perms": sorted(staff_mod.helper_perms(tg_id))})
     # Тот же путь, что features/staff.py handle_helper_input: в список
-    # + права по умолчанию (карточки людей, сообщения людям).
+    # + права по умолчанию (карточки людей, сообщения людям, поддержка).
     staff_mod._save_ids(staff_mod.helper_ids() + [tg_id])
     staff_mod.set_helper_perms(tg_id, staff_mod.DEFAULT_PERMS)
+    bot = get_bot()
+    invite_created, dm_sent = await _helper_welcome(bot, tg_id)
+    if bot is not None:
+        try:
+            from core.log_channel import send_log
+            await send_log(bot, f"👥 Новый помощник: {staff_mod._name(u, tg_id)} · <code>{tg_id}</code>")
+        except Exception as ex:
+            logging.error("админка: helpers_add send_log: %s", ex)
     await _audit(actor, "helpers_add", f"tg_id={tg_id}")
     return web.json_response({"ok": True, "tg_id": tg_id,
-                              "perms": sorted(staff_mod.helper_perms(tg_id))})
+                              "perms": sorted(staff_mod.helper_perms(tg_id)),
+                              "invite_sent": bool(invite_created and dm_sent),
+                              "dm_sent": dm_sent})
 
 
 async def helpers_perm(request):
@@ -2919,14 +2960,34 @@ async def helpers_delete(request):
         return _json_error("bad_confirm", 403)
     # Тот же путь, что features/staff.py handle_helper_del: из списка
     # и права вместе с ним.
+    from core.database import get_user_info
+    u = await get_user_info(tg_id)
     staff_mod._forget(tg_id)
     # и из группы поддержки — иначе продолжит отвечать людям в темах
     bot = get_bot()
     kicked = (await staff_mod.kick_from_support_group(bot, tg_id)
               if bot is not None else False)
+    dm_sent = False
+    if bot is not None:
+        try:
+            await bot.send_message(
+                chat_id=tg_id,
+                text="🛡 <b>Доступ помощника снят</b>"
+                     + ("\n\n<i>Вы также выведены из группы поддержки.</i>" if kicked else ""),
+                parse_mode="HTML")
+            dm_sent = True
+        except Exception:
+            dm_sent = False
+        try:
+            from core.log_channel import send_log
+            await send_log(bot, f"👥 Помощник убран: {staff_mod._name(u, tg_id)} · <code>{tg_id}</code>"
+                           + (" · выведен из группы поддержки" if kicked else ""))
+        except Exception as ex:
+            logging.error("админка: helpers_delete send_log: %s", ex)
     await _audit(actor, "helpers_delete",
                  f"tg_id={tg_id}" + (" kicked_from_group" if kicked else ""))
-    return web.json_response({"ok": True, "kicked_from_group": kicked})
+    return web.json_response({"ok": True, "kicked_from_group": kicked,
+                              "dm_sent": dm_sent})
 
 
 # ── Сайт: удаление и тексты ──────────────────────────────────────────────────
