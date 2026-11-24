@@ -665,6 +665,44 @@ async def settings_get(request):
     return web.json_response({"settings": _settings_snapshot()})
 
 
+# ── Документы ──────────────────────────────────────────────────────────────
+# Паритет с «📄 Документы» в ТГ (handlers/admin.py handle_documents_menu):
+# пять видов документов, действующая ссылка — doc_url(kind) из
+# web/site_deploy.py: своя из настроек или страница сайта {site}/{kind}/;
+# старая ссылка на Teletype считается незаданной. Документов по сути два:
+# правила использования и возврат — разделы Соглашения, согласие на
+# обработку — раздел Политики. Сохранение — через PATCH /settings
+# (валидация _URL_KEYS: http(s) или пусто; пусто — страница сайта).
+_DOC_KINDS = (
+    ("privacy", "📋 Политика конфиденциальности", "privacy_url", ""),
+    ("terms", "📄 Пользовательское соглашение", "terms_url", ""),
+    ("refund", "↩️ Политика возврата", "refund_url", "раздел Соглашения"),
+    ("rules", "📏 Правила использования", "rules_url", "раздел Соглашения"),
+    ("consent", "✅ Согласие на обработку", "consent_url", "раздел Политики"),
+)
+
+
+async def documents_get(request):
+    from aiohttp import web
+    from config import load_config
+    from web import site_deploy as site_mod
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    cfg = load_config()
+    docs = []
+    for kind, label, key, section in _DOC_KINDS:
+        stored = (cfg.get(key) or "").strip()
+        docs.append({
+            "kind": kind, "label": label, "key": key, "section": section,
+            "stored": stored,
+            "effective": site_mod.doc_url(kind),
+            "custom": bool(stored) and "teletype.in" not in stored,
+        })
+    return web.json_response({"documents": docs})
+
+
 async def settings_patch(request):
     from aiohttp import web
     from config import atomic_update
@@ -854,6 +892,7 @@ def build_admin_app():
     app.router.add_get("/dashboard/expiring", dashboard_expiring)
     app.router.add_get("/settings", settings_get)
     app.router.add_patch("/settings", settings_patch)
+    app.router.add_get("/documents", documents_get)
     app.router.add_post("/muse-account", muse_account_create)
     app.router.add_post("/muse-account/direct", muse_account_create_direct)
     app.router.add_get("/muse-account", muse_account_list)

@@ -545,6 +545,7 @@ _ADMIN_LABELS = {
     "site_delete": "🗑 Удалил сайт", "site_delete_failed": "⚠️ Удаление сайта не удалось",
     "site_deploy": "🚀 Развернул сайт", "site_deploy_failed": "⚠️ Деплой сайта не удался",
     "site_texts": "📝 Тексты сайта",
+    "site_texts_reset": "🔄 Сбросил все тексты сайта",
     "subs_presets_update": "⚙️ Пресеты подписок",
     "support_close": "💬 Закрыл обращение", "support_reply": "💬 Ответил в поддержке",
     "support_settings": "💬 Настройки поддержки",
@@ -3132,6 +3133,39 @@ async def site_texts_patch(request):
     return web.json_response({"ok": True, **snap})
 
 
+async def site_texts_reset(request):
+    """Сбросить все тексты сайта к стандартным — паритет с ТГ
+    (handle_site_text_reset_do: cfg['site_texts'] = {}).
+    С подтверждением, как сброс в ТГ (handle_site_text_reset_ask)."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        return confirm_needed_response(
+            issue_confirm(
+                actor, "site_texts_reset", {},
+                "Сбросить абсолютно все тексты сайта к исходным "
+                "стандартным значениям?"),
+            "Сбросить абсолютно все тексты сайта к исходным "
+            "стандартным значениям?")
+    payload = take_confirm(actor, token, "site_texts_reset")
+    if payload is None:
+        return _json_error("bad_confirm", 403)
+    from config import atomic_update
+
+    def _clear(cfg):
+        cfg["site_texts"] = {}
+
+    atomic_update(_clear)
+    await _audit(actor, "site_texts_reset", "")
+    snap = _site_texts_snapshot()
+    snap["note"] = ("Все тексты сброшены к стандартным — применится "
+                    "при следующем деплое сайта.")
+    return web.json_response({"ok": True, **snap})
+
+
 # ── Яндекс Клауд (только чтение) ─────────────────────────────────────────────
 
 # Тот же текст, что services/remnawave.py handle_rw_yandex_sub: ссылка
@@ -3299,6 +3333,7 @@ def register(app) -> None:
     app.router.add_post("/site/delete", site_delete)
     app.router.add_get("/site/texts", site_texts_get)
     app.router.add_patch("/site/texts", site_texts_patch)
+    app.router.add_post("/site/texts/reset", site_texts_reset)
     app.router.add_get("/yandex", yandex_get)
     app.router.add_post("/jobs/run-now", jobs_run_now)
     app.router.add_get("/panel/profiles/{uuid}", panel_profile_get)

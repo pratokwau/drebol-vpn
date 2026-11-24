@@ -805,7 +805,7 @@ label.chk input{width:auto;margin:0}
         <div class="card"><h2>Тексты сайта</h2>
           <input id="st-field" placeholder="поле, напр. hero_title">
           <textarea id="st-text" placeholder="новый текст"></textarea>
-          <div class="btnrow"><button id="btn-st-save" class="ghost">Сохранить текст</button><button id="btn-st-show" class="ghost">Показать тексты</button></div>
+          <div class="btnrow"><button id="btn-st-save" class="ghost">Сохранить текст</button><button id="btn-st-show" class="ghost">Показать тексты</button><button id="btn-st-reset" class="ghost">Сбросить все тексты</button></div>
           <div id="st-out"></div>
         </div>
         <div class="card"><h2>Удаление сайта</h2><p class="sub">Только Mark, с подтверждением. Действие необратимое.</p>
@@ -908,6 +908,9 @@ label.chk input{width:auto;margin:0}
           <div id="settings"></div>
           <button id="btn-save">Сохранить настройки</button>
           <span id="save-msg" class="mut"></span>
+        </div>
+        <div class="card"><h2>📄 Документы</h2><p class="sub">Ссылки видны клиентам в «О сервисе», на сайте и на экранах оплаты. Документов два: правила использования и возврат — разделы Соглашения, согласие на обработку — раздел Политики. Пустое поле — страница сайта по умолчанию.</p>
+          <div id="docs-out" class="mut">Загрузка…</div>
         </div>
         <div id="muse-box" class="card hidden"><h2>Аккаунт Muse</h2><p class="sub">Только для входа через Telegram. Два способа создать аккаунт Muse — выберите один:</p>
           <h3>Способ 1 — одноразовая ссылка</h3>
@@ -1333,6 +1336,54 @@ async function loadSettings(){
     return "<label>" + esc(SETTINGS_LABELS[k] || k) + '<input data-k="' + k + '"' + (isDay ? ' data-days="1"' : "") + ' type="' + type + '" ' + val + "></label>";
   }).join("");
 }
+/* Документы — паритет с «📄 Документы» в ТГ: действующие ссылки
+   (своя из настроек или страница сайта) и правка построчно;
+   сохранение — тем же PATCH /settings, пустое поле — сброс к сайту. */
+async function loadDocuments(){
+  const r = await api("/documents");
+  if (r.status !== 200) { renderOut("docs-out", r.data); return; }
+  const docs = r.data.documents || [];
+  if (!docs.length) { $("docs-out").innerHTML = '<div class="empty">Документов нет</div>'; return; }
+  let h = '<div class="tblwrap"><table><thead><tr><th>Документ</th><th>Действующая ссылка</th><th>Своя ссылка</th><th></th></tr></thead><tbody>';
+  docs.forEach(function(d, i){
+    const eff = d.effective
+      ? '<a href="' + esc(d.effective) + '" target="_blank" rel="noopener">открыть</a>'
+      : '<span class="mut">не задана</span>';
+    const sec = d.section ? ' <span class="mut small">(' + esc(d.section) + ')</span>' : "";
+    h += '<tr><td>' + esc(d.label) + sec + '</td><td>' + eff + '</td>'
+      + '<td><input id="doc-in-' + i + '" placeholder="https://…" value="' + esc(d.stored || "") + '"></td>'
+      + '<td><div class="btnrow"><button class="ghost" data-doc-save="' + i + '">Сохранить</button>'
+      + '<button class="ghost" data-doc-clear="' + i + '">Сбросить</button></div></td></tr>';
+  });
+  h += "</tbody></table></div>";
+  $("docs-out").innerHTML = h;
+  $("docs-out").querySelectorAll("[data-doc-save]").forEach(function(btn){
+    btn.onclick = withSpin(btn, async function(){
+      const d = docs[parseInt(btn.dataset.docSave, 10)];
+      const patch = {};
+      patch[d.key] = $("doc-in-" + btn.dataset.docSave).value.trim();
+      const rr = await api("/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
+        body: JSON.stringify({settings: patch})});
+      if (rr.status === 200) { toast("Ссылка сохранена", "ok"); loadDocuments(); }
+      else toast("Ошибка: " + ((rr.data && rr.data.details) ? rr.data.details.join("; ") : (rr.data && rr.data.error) || rr.status), "err");
+    });
+  });
+  $("docs-out").querySelectorAll("[data-doc-clear]").forEach(function(btn){
+    btn.onclick = withSpin(btn, async function(){
+      const d = docs[parseInt(btn.dataset.docClear, 10)];
+      const patch = {};
+      patch[d.key] = "";
+      const rr = await api("/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
+        body: JSON.stringify({settings: patch})});
+      if (rr.status === 200) { toast("Сброшено к странице сайта", "ok"); loadDocuments(); }
+      else toast("Ошибка: " + ((rr.data && rr.data.error) || rr.status), "err");
+    });
+  });
+}
+let docsLoaded = false;
+document.querySelector('[data-nav="settings"]').addEventListener("click", function(){
+  if (!docsLoaded) { docsLoaded = true; loadDocuments(); }
+});
 $("btn-login").onclick = withSpin($("btn-login"), async function(){
   const r = await api("/auth/password", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({email: $("email").value, password: $("pw").value})});
@@ -3833,6 +3884,11 @@ $("btn-st-save").onclick = async function(){
     body: JSON.stringify({field: $("st-field").value, text: $("st-text").value})});
   if (r.status === 200) { toast("Текст сохранён — применится при деплое", "ok"); $("btn-st-show").click(); }
   else renderOut("st-out", r.data);
+};
+$("btn-st-reset").onclick = async function(){
+  const r = await postConfirm("/site/texts/reset", {});
+  if (r.status === 200) { toast("Тексты сброшены к стандартным", "ok"); $("btn-st-show").click(); }
+  else if (r.status !== 0) renderOut("st-out", r.data);
 };
 $("btn-site-del").onclick = async function(){ const r = await postConfirm("/site/delete", {}); renderOut("site-del-out", r.data); };
 /* Предпросмотр архива перед восстановлением — как offer_restore в ТГ:
