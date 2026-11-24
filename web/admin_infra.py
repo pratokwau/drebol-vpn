@@ -3231,6 +3231,56 @@ YANDEX_MIRROR_LINES = [
 ]
 
 
+# Тот же текст, что services/remnawave.py handle_rw_yandex_whitelist:
+# белые списки Yandex Cloud CDN — в ресурсе и на origin. Plain-text,
+# без HTML-тегов ТГ (<b>/<code> сняты — фронт экранирует сам).
+# Два места актуализированы под нынешнюю инфраструктуру (в ТГ текст
+# устарел, код бота не трогается): ресурсы — sub.drbl.tech, de1cdn,
+# se1cdn (fin1cdn и ro1cdn убраны в ноябре 2026); дубликаты [CDN] —
+# Германия и Швеция (Румыния и Финляндия убраны).
+YANDEX_WHITELIST_LINES = [
+    "Белые списки",
+    "",
+    "В Yandex Cloud CDN белые списки — в двух местах: поле в самом ресурсе",
+    "и список IP edge-серверов для origin.",
+    "",
+    "1. В ресурсе CDN — ВЫКЛЮЧЕНО",
+    "Шаг 1 «Основные параметры», поля «Доступ по IP-адресам»,",
+    "«Доступ по странам», «Доступ по защищённому токену» — выкл.",
+    "для ВСЕХ наших ресурсов: sub.drbl.tech, de1cdn, se1cdn.",
+    "Клиенты заходят с любого IP по всей России — включишь и впишешь",
+    "свой IP, отрежешь всех остальных.",
+    "",
+    "2. Белый список на origin — IP Яндекса",
+    "Origin (нода) должен отвечать ТОЛЬКО edge-серверам Яндекса,",
+    "а не кому попало напрямую. Официальный список:",
+    "https://tech.cdn.yandex.net/prefixes/yc.json",
+    "(дока Яндекса «Диапазоны публичных IP-адресов» → Cloud CDN).",
+    "Список меняется — скачивать свежий при каждом применении.",
+    "",
+    "3. Применить на ноде (дубликат [CDN], порт 8880)",
+    "На сервере ноды (Германия, Швеция — дубликат [CDN]):",
+    "ufw status",
+    "Если выключен — сначала ufw allow 22/tcp, потом",
+    "ufw enable, иначе потеряешь SSH.",
+    "Затем разрешить Яндекс на 8880:",
+    "curl -s https://tech.cdn.yandex.net/prefixes/yc.json | python3 -c \"import json,sys; print('\\n'.join(p for p in json.load(sys.stdin)['prefixes'] if ':' not in p))\" | while read ip; do ufw allow from $ip to any port 8880 proto tcp; done",
+    "Правило для 12222 (только IP панели) и порт 22 — НЕ трогать.",
+    "Порты основной ноды (VTR, HY2) — тоже не трогать: они прямые, не через CDN.",
+    "",
+    "4. body-brown (подписка) — НЕ ставится",
+    "На 443 висят ещё панель и сайт — белый список на файрволе",
+    "отрежет и их. Для зеркала sub.drbl.tech он не нужен:",
+    "клиенты идут на sub.drbl.tech, а key.drbl.tech напрямую и так режет DPI.",
+    "",
+    "5. Проверка",
+    "Напрямую на origin-порт с обычного IP — таймаут (закрыто).",
+    "Через CDN-домен (se1cdn.drbl.tech:443) — подключается.",
+    "Это hardening, без него всё работает — делать после того,",
+    "как нода [CDN] уже зелёная в панели.",
+]
+
+
 async def yandex_get(request):
     try:
         await _require_actor(request)
@@ -3241,6 +3291,7 @@ async def yandex_get(request):
         "main": "key.drbl.tech",
         "cache": "disabled",
         "text": "\n".join(YANDEX_MIRROR_LINES),
+        "whitelist_text": "\n".join(YANDEX_WHITELIST_LINES),
     })
 
 

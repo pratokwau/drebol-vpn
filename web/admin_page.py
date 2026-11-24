@@ -591,7 +591,7 @@ label.chk input{width:auto;margin:0}
       <!-- Панель Remnawave -->
       <section id="sec-panel" class="page hidden">
         <div class="card"><h2>Панель Remnawave</h2><p class="sub">Профили, инбаунды и хосты — живые данные из панели. Нажми на строку, чтобы открыть профиль или хост в редакторе ниже. Правка инбаундов и хостов — только Mark, с проверкой конфига после сохранения.</p>
-          <div class="btnrow"><button id="btn-panel" class="ghost">Обновить списки</button><button id="btn-yandex" class="ghost">Яндекс Клауд: зеркало</button><button id="btn-links-panel" class="ghost">🔗 Основные ссылки</button></div>
+          <div class="btnrow"><button id="btn-panel" class="ghost">Обновить списки</button><button id="btn-yandex" class="ghost">📄 Страница подписки</button><button id="btn-yandex-wl" class="ghost">📋 Белые списки</button><button id="btn-links-panel" class="ghost">🔗 Основные ссылки</button></div>
           <div id="panel-out"></div>
           <h3>Профили</h3>
           <div id="profiles-table"></div>
@@ -3184,7 +3184,24 @@ $("btn-tags-apply").onclick = withSpin($("btn-tags-apply"), async function(){
   toast("Теги применены", "ok");
   loadTags();
 });
-$("btn-yandex").onclick = async function(){ const r = await api("/yandex"); renderOut("panel-out", r.data); };
+/* --- Яндекс Клауд: две страницы как rw_yandex в ТГ ---
+   Раньше кнопка вываливала сырой JSON-дамп через renderOut; теперь
+   каждая страница рендерится текстом в <pre>, ответ /yandex кэшируется
+   при переключении вкладок. */
+let yandexDoc = null;
+async function loadYandex(page){
+  const btn = $(page === "wl" ? "btn-yandex-wl" : "btn-yandex");
+  document.querySelectorAll("#btn-yandex, #btn-yandex-wl").forEach(function(x){ x.classList.toggle("active", x === btn); });
+  if (!yandexDoc) {
+    const r = await api("/yandex");
+    if (r.status !== 200) { renderOut("panel-out", r.data); return; }
+    yandexDoc = r.data;
+  }
+  const text = page === "wl" ? (yandexDoc.whitelist_text || "") : (yandexDoc.text || "");
+  $("panel-out").innerHTML = "<pre>" + esc(text) + "</pre>";
+}
+$("btn-yandex").onclick = function(){ loadYandex("mirror"); };
+$("btn-yandex-wl").onclick = function(){ loadYandex("wl"); };
 /* --- Основные ссылки: справка по адресам проекта ---
    Адреса подтягиваются сами: панель и сайт — из конфига бота, домены
    подписки — из констант, ноды и хосты — живьём из панели Remnawave.
