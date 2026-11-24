@@ -239,6 +239,20 @@ async def _search_payment_ids(q: str) -> list:
             or needle in (r[2] or "").casefold()]
 
 
+async def _payments_search_params(q: str) -> tuple:
+    """Нормализация поиска оплат: «@» — снять, цифры — TG ID или
+    ID счёта, текст — ID счетов по имени/username (casefold, как
+    search_paid_subs в ТГ). Общая для списка и экспорта."""
+    q = (q or "").strip()
+    if q.startswith("@"):
+        q = q[1:].strip()
+    numeric = q.isdigit() and len(q) <= 18
+    text_ids = None
+    if q and not numeric:
+        text_ids = await _search_payment_ids(q)
+    return (q if numeric else ""), text_ids
+
+
 async def _list_payments_filtered(page: int, status: str, provider, q: str):
     """Страница оплат + счётчики: те же колонки и порядок, что
     core.database.list_payments, плюс фильтры по провайдеру и поиску.
@@ -248,17 +262,9 @@ async def _list_payments_filtered(page: int, status: str, provider, q: str):
     для проверки значения provider)."""
     from core.database import DB_PATH
     import aiosqlite
-    q = (q or "").strip()
-    if q.startswith("@"):
-        q = q[1:].strip()
-    numeric = q.isdigit() and len(q) <= 18
-    text_ids = None
-    if q and not numeric:
-        text_ids = await _search_payment_ids(q)
-    where, params = _payments_where(status, provider,
-                                     q if numeric else "", text_ids)
-    where_np, params_np = _payments_where(status, None,
-                                           q if numeric else "", text_ids)
+    q_num, text_ids = await _payments_search_params(q)
+    where, params = _payments_where(status, provider, q_num, text_ids)
+    where_np, params_np = _payments_where(status, None, q_num, text_ids)
     offset = (page - 1) * _PAYMENTS_PER_PAGE
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
@@ -284,6 +290,62 @@ async def _list_payments_filtered(page: int, status: str, provider, q: str):
     return {"rows": rows, "total_pages": total_pages, "total": total,
             "total_amount": total_amount, "providers": providers,
             "all_providers": all_providers}
+
+
+async def _list_payments_all(status: str, provider, q: str):
+    """Все оплаты выборки без пагинации (для экспорта): те же фильтры,
+    что _list_payments_filtered. Возвращает dict: rows, total,
+    all_providers."""
+    from core.database import DB_PATH
+    import aiosqlite
+    q_num, text_ids = await _payments_search_params(q)
+    where, params = _payments_where(status, provider, q_num, text_ids)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+                "SELECT COUNT(*) FROM payments p "
+                f"LEFT JOIN users u ON u.id = p.tg_id {where}", params) as cur:
+            total = (await cur.fetchone())[0]
+        async with db.execute(
+                f"SELECT {_PAYMENT_LIST_COLS} FROM payments p "
+                f"LEFT JOIN users u ON u.id = p.tg_id {where} "
+                "ORDER BY p.id DESC", params) as cur:
+            rows = await cur.fetchall()
+        async with db.execute(
+                "SELECT DISTINCT provider FROM payments") as cur:
+            all_providers = [r[0] for r in await cur.fetchall()]
+    return {"rows": rows, "total": total, "all_providers": all_providers}
+
+
+async def payments_export(request):
+    """Экспорт оплат в CSV: те же статус/провайдер/поиск, что в списке
+    (тот же _payments_where), без пагинации. Сверх EXPORT_MAX_ROWS —
+    409 too_large с total, а не обрезанный молча файл."""
+    from aiohttp import web
+    _, err = await _actor_or_401(request)
+    if err is not None:
+        return err
+    from datetime import date
+    from handlers.control import EXPORT_MAX_ROWS
+    status = request.query.get("status") or "all"
+    if status not in _PAYMENT_STATUS_WHERE:
+        return web.json_response({"error": "bad_status"}, status=400)
+    provider = (request.query.get("provider") or "").strip()
+    q = request.query.get("q") or ""
+    res = await _list_payments_all(status, provider or None, q)
+    if provider and provider not in res["all_providers"]:
+        return web.json_response({"error": "bad_provider"}, status=400)
+    if res["total"] > EXPORT_MAX_ROWS:
+        return web.json_response(
+            {"error": "too_large", "total": res["total"],
+             "max": EXPORT_MAX_ROWS}, status=409)
+    return _admin._csv_response(
+        ["id", "date", "tg_id", "first_name", "username", "provider",
+         "amount", "status", "promo_code", "period_days"],
+        [[r[0], r[5], r[1], r[6] or "",
+          ("@" + r[7]) if r[7] else "", r[2] or "", r[3], r[4],
+          r[8] or "",
+          (int(r[9] // 86400) if r[9] else "")] for r in res["rows"]],
+        f"drebol-payments-{status}-{date.today().isoformat()}.csv")
 
 
 async def payments_list(request):
@@ -1939,6 +2001,7 @@ def register(app):
     Пути — относительные, без /api/admin: префикс даёт add_subapp()
     в web/webapi.py (как и маршруты фазы 1 в build_admin_app)."""
     app.router.add_get("/payments", payments_list)
+    app.router.add_get("/payments/export", payments_export)
     app.router.add_get("/payments/{pid}", payment_detail)
     app.router.add_get("/payments/{pid}/platega", payment_platega_check)
     app.router.add_post("/payments/{pid}/refund", payment_refund)

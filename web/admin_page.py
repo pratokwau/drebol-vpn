@@ -332,7 +332,7 @@ label.chk input{width:auto;margin:0}
               <option value="id">По TG ID</option>
             </select>
           </div>
-          <div class="btnrow"><button id="btn-find">Найти</button><button id="btn-recent" class="ghost">Недавние</button><button id="btn-users-prev" class="ghost">← Назад</button><button id="btn-users-next" class="ghost">Вперёд →</button><span id="users-page-label" class="mut"></span></div>
+          <div class="btnrow"><button id="btn-find">Найти</button><button id="btn-users-export" class="ghost">⬇️ CSV</button><button id="btn-recent" class="ghost">Недавние</button><button id="btn-users-prev" class="ghost">← Назад</button><button id="btn-users-next" class="ghost">Вперёд →</button><span id="users-page-label" class="mut"></span></div>
           <div id="users-out"></div>
         </div>
         <div class="card"><h2>Сообщение пользователю</h2><p class="sub">Отправляется от имени бота Drebol VPN.</p>
@@ -383,6 +383,7 @@ label.chk input{width:auto;margin:0}
             </select>
             <button id="btn-subs-search">Найти</button>
             <button id="btn-subs-refresh" class="ghost">Обновить</button>
+            <button id="btn-subs-export" class="ghost">⬇️ CSV</button>
           </div>
           <div id="subs-panel-warn" class="mut" style="margin-top:6px"></div>
           <div id="subs-table"></div>
@@ -469,6 +470,7 @@ label.chk input{width:auto;margin:0}
             <select id="pay-provider" style="width:auto;min-width:150px"><option value="">Все провайдеры</option></select>
             <input id="pay-q" type="search" placeholder="Имя, @username, TG ID или № счёта" style="flex:1;min-width:200px">
             <button id="btn-payments">Показать оплаты</button>
+            <button id="btn-payments-export" class="ghost">⬇️ CSV</button>
           </div>
           <div id="payments-summary" class="mut" style="margin-top:8px"></div>
           <div id="payments-out"></div>
@@ -1068,6 +1070,31 @@ async function postConfirm(path, body){
   }
   return r;
 }
+async function downloadCsv(url){
+  // Скачивание CSV-экспорта: сессия — в куках, как у api(); ошибка
+  // (401/400/409 too_large) — тостом, а не битым файлом.
+  let r;
+  try { r = await fetch(API + url, {credentials: "same-origin"}); }
+  catch(e) { toast("Ошибка загрузки", "err"); return; }
+  if (r.status !== 200) {
+    let d = {};
+    try { d = await r.json(); } catch(e) {}
+    if (d.error === "too_large") toast("Слишком много строк (" + (d.total || "?") + ") — сузьте фильтр", "err");
+    else toast("Ошибка: " + (d.error || r.status), "err");
+    return;
+  }
+  const blob = await r.blob();
+  const a = document.createElement("a");
+  const disp = r.headers.get("Content-Disposition") || "";
+  const m = disp.match(/filename="([^"]+)"/);
+  a.href = URL.createObjectURL(blob);
+  a.download = m ? m[1] : "export.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+  toast("Файл скачан", "ok");
+}
 async function postConfirmAny(path, method, body){
   let r = await api(path, {method: method, headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body || {})});
   if (r.data && r.data.need_confirm) {
@@ -1396,6 +1423,10 @@ async function loadUsers(page){
   renderUsersTable($("users-out"), rows, "Создан");
 }
 $("btn-find").onclick = withSpin($("btn-find"), async function(){ loadUsers(1); });
+$("btn-users-export").onclick = function(){
+  const q = $("q-user").value.trim();
+  downloadCsv("/users/export?scope=" + usersScope + "&sort=" + $("users-sort").value + (q ? "&q=" + encodeURIComponent(q) : ""));
+};
 $("q-user").addEventListener("keydown", function(e){ if (e.key === "Enter") loadUsers(1); });
 $("users-sort").onchange = function(){ loadUsers(1); };
 $("users-tabs").addEventListener("click", function(e){
@@ -1702,6 +1733,10 @@ async function loadSubs(page){
 }
 $("btn-subs-search").onclick = function(){ loadSubs(1); };
 $("btn-subs-refresh").onclick = function(){ loadSubs(subsPage); };
+$("btn-subs-export").onclick = function(){
+  const q = encodeURIComponent($("subs-q").value.trim());
+  downloadCsv("/subs/export?scope=" + subsScope + "&sort=" + $("subs-sort").value + (q ? "&q=" + q : ""));
+};
 $("subs-q").addEventListener("keydown", function(e){ if (e.key === "Enter") loadSubs(1); });
 $("subs-sort").onchange = function(){ loadSubs(1); };
 $("subs-tabs").addEventListener("click", function(e){
@@ -2291,6 +2326,15 @@ async function loadPayments(page){
   });
 }
 $("btn-payments").onclick = function(){ loadPayments(1); };
+$("btn-payments-export").onclick = function(){
+  const st = $("pay-status").value;
+  const prov = $("pay-provider").value;
+  const q = $("pay-q").value.trim();
+  let url = "/payments/export?status=" + (st || "all");
+  if (prov) url += "&provider=" + encodeURIComponent(prov);
+  if (q) url += "&q=" + encodeURIComponent(q);
+  downloadCsv(url);
+};
 $("pay-status").onchange = function(){ loadPayments(1); };
 $("pay-provider").onchange = function(){ loadPayments(1); };
 $("pay-q").addEventListener("input", function(){

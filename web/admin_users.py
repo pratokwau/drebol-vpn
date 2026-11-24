@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from web.admin_api import (
-    _audit, _require_actor, _require_mutation,
+    _audit, _csv_response, _require_actor, _require_mutation,
     confirm_needed_response, get_bot, issue_confirm, take_confirm,
 )
 
@@ -161,6 +161,38 @@ async def _users_counts() -> dict:
     return counts
 
 
+def _users_where(q: str, scope: str) -> tuple:
+    """(where_sql, params) списка пользователей: поиск + вкладка.
+    Общая для users_list и users_export — экспорт отдаёт ровно
+    те же строки, что список при тех же фильтрах."""
+    where = ""
+    params: list = []
+    if q:
+        like = f"%{q.lower()}%"
+        # Скобки вокруг OR-условий обязательны: иначе добавленный следом
+        # AND scope (AND связывает сильнее OR) применился бы только
+        # к последней ветке EXISTS.
+        where = """WHERE (CAST(u.id AS TEXT) LIKE ?
+               OR lower(u.username) LIKE ?
+               OR lower(u.first_name) LIKE ?
+               OR EXISTS (SELECT 1 FROM paid_subs p
+                          WHERE p.tg_id = u.id AND lower(p.email) LIKE ?))"""
+        params = [like, like, like, like]
+    if scope == "active":
+        where += (" AND " if where else "WHERE ") + _LATEST_SUB_STATUS + " = 'active'"
+    elif scope == "expired":
+        where += (" AND " if where else "WHERE ") + _LATEST_SUB_STATUS + " = 'expired'"
+    elif scope == "none":
+        where += (" AND " if where else "WHERE ") + "NOT EXISTS (SELECT 1 FROM paid_subs p WHERE p.tg_id = u.id)"
+    return where, params
+
+
+def _users_order(sort: str) -> str:
+    return {"new": "ORDER BY u.created_at DESC, u.id DESC",
+            "name": "ORDER BY lower(u.first_name) ASC, lower(u.username) ASC, u.id ASC",
+            "id": "ORDER BY u.id DESC"}[sort]
+
+
 async def users_list(request):
     """Все пользователи: вкладки по статусу подписки, сортировка, поиск,
     страницы. Клик по строке — карточка юзера (openUserEditor).
@@ -184,28 +216,8 @@ async def users_list(request):
     if sort not in _USERS_SORTS:
         return web.json_response({"error": "bad_sort"}, status=400)
     q = (request.query.get("q") or "").strip()
-    where = ""
-    params: list = []
-    if q:
-        like = f"%{q.lower()}%"
-        # Скобки вокруг OR-условий обязательны: иначе добавленный следом
-        # AND scope (AND связывает сильнее OR) применился бы только
-        # к последней ветке EXISTS.
-        where = """WHERE (CAST(u.id AS TEXT) LIKE ?
-               OR lower(u.username) LIKE ?
-               OR lower(u.first_name) LIKE ?
-               OR EXISTS (SELECT 1 FROM paid_subs p
-                          WHERE p.tg_id = u.id AND lower(p.email) LIKE ?))"""
-        params = [like, like, like, like]
-    if scope == "active":
-        where += (" AND " if where else "WHERE ") + _LATEST_SUB_STATUS + " = 'active'"
-    elif scope == "expired":
-        where += (" AND " if where else "WHERE ") + _LATEST_SUB_STATUS + " = 'expired'"
-    elif scope == "none":
-        where += (" AND " if where else "WHERE ") + "NOT EXISTS (SELECT 1 FROM paid_subs p WHERE p.tg_id = u.id)"
-    order = {"new": "ORDER BY u.created_at DESC, u.id DESC",
-             "name": "ORDER BY lower(u.first_name) ASC, lower(u.username) ASC, u.id ASC",
-             "id": "ORDER BY u.id DESC"}[sort]
+    where, params = _users_where(q, scope)
+    order = _users_order(sort)
     cols = """u.id, u.first_name, u.username,
               (SELECT status FROM paid_subs p WHERE p.tg_id = u.id
                ORDER BY p.id DESC LIMIT 1), u.created_at"""
@@ -227,6 +239,54 @@ async def users_list(request):
          "sub_status": r[3], "created_at": str(r[4] or "")} for r in rows],
         "page": page, "total_pages": total_pages, "total": total,
         "scope": scope, "sort": sort, "counts": counts})
+
+
+async def users_export(request):
+    """Экспорт пользователей в CSV: те же вкладка, сортировка и поиск,
+    что в списке (тот же _users_where), без пагинации. Сверх
+    EXPORT_MAX_ROWS — 409 too_large с total, а не обрезанный молча
+    файл (как в ТГ-выгрузке логов — там truncation виден в подписи)."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from datetime import date
+    from handlers.control import EXPORT_MAX_ROWS
+    from core.database import DB_PATH
+    import aiosqlite
+    scope = (request.query.get("scope") or "all").strip()
+    if scope not in _USERS_SCOPES:
+        return web.json_response({"error": "bad_scope"}, status=400)
+    sort = (request.query.get("sort") or "new").strip()
+    if sort not in _USERS_SORTS:
+        return web.json_response({"error": "bad_sort"}, status=400)
+    q = (request.query.get("q") or "").strip()
+    where, params = _users_where(q, scope)
+    order = _users_order(sort)
+    cols = """u.id, u.first_name, u.username,
+              (SELECT email FROM paid_subs p WHERE p.tg_id = u.id
+               ORDER BY p.id DESC LIMIT 1),
+              (SELECT status FROM paid_subs p WHERE p.tg_id = u.id
+               ORDER BY p.id DESC LIMIT 1), u.created_at"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+                f"SELECT COUNT(*) FROM users u {where}", params) as cur:
+            total = (await cur.fetchone())[0]
+        if total > EXPORT_MAX_ROWS:
+            return web.json_response(
+                {"error": "too_large", "total": total,
+                 "max": EXPORT_MAX_ROWS}, status=409)
+        async with db.execute(
+                f"SELECT {cols} FROM users u {where} {order} "
+                f"LIMIT {EXPORT_MAX_ROWS}", params) as cur:
+            rows = await cur.fetchall()
+    return _csv_response(
+        ["tg_id", "first_name", "username", "email", "sub_status",
+         "created_at"],
+        [[r[0], r[1] or "", ("@" + r[2]) if r[2] else "", r[3] or "",
+          r[4] or "none", str(r[5] or "")] for r in rows],
+        f"drebol-users-{scope}-{date.today().isoformat()}.csv")
 
 
 async def user_profile(request):
@@ -712,6 +772,58 @@ async def subs_list(request):
                               "total_pages": total_pages, "scope": scope,
                               "sort": sort, "counts": counts,
                               "panel_ok": panel["ok"]})
+
+
+async def subs_export(request):
+    """Экспорт платных подписок в CSV: та же выборка, что в списке
+    (вкладка/сортировка/поиск; off — из живых состояний панели),
+    без пагинации. Битые scope/sort — дефолты all/new, как в списке.
+    Поиск — без капа списка (search_paid_subs отдаёт до 20, здесь —
+    до EXPORT_MAX_ROWS+1, чтобы заметить переполнение). Сверх капа —
+    409 too_large с total, а не обрезанный молча файл."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from datetime import date
+    from handlers.control import EXPORT_MAX_ROWS
+    from paidsub.storage import (all_paid_subs, search_paid_subs)
+    scope = (request.query.get("scope") or "all").strip()
+    if scope not in _PAID_SCOPES:
+        scope = "all"
+    sort = (request.query.get("sort") or "new").strip()
+    if sort not in _PAID_SORTS:
+        sort = "new"
+    q = (request.query.get("q") or "").strip()
+    panel = await _paid_panel_states()
+    states = panel["states"]
+    if q:
+        short = await search_paid_subs(q, limit=EXPORT_MAX_ROWS + 1)
+    elif scope == "off":
+        off_emails = {e for e, st in states.items() if st == "DISABLED"}
+        short = [r for r in await all_paid_subs("all", sort)
+                 if r[2] in off_emails]
+    else:
+        short = await all_paid_subs(scope, sort)
+    if len(short) > EXPORT_MAX_ROWS:
+        # Для поиска total — «как минимум столько» (лимит +1 оборвал
+        # выборку); для вкладок — точное число строк.
+        return web.json_response(
+            {"error": "too_large", "total": len(short),
+             "max": EXPORT_MAX_ROWS}, status=409)
+    subs = await _paid_subs_enriched(short, states)
+    return _csv_response(
+        ["id", "tg_id", "first_name", "username", "email", "uuid",
+         "status", "expire_date", "created_at", "times_renewed",
+         "limit_ip", "total_gb", "panel"],
+        [[d["id"], d["tg_id"], d.get("first_name") or "",
+          ("@" + d["username"]) if d.get("username") else "",
+          d["email"] or "", d["uuid"] or "", d["status"] or "",
+          d["expire_date"] or "", d["created_at"] or "",
+          d["times_renewed"] or 0, d["limit_ip"] or "",
+          d["total_gb"] or "", d["mark"] or ""] for d in subs],
+        f"drebol-subs-{scope}-{date.today().isoformat()}.csv")
 
 
 async def sub_card(request):
@@ -1423,6 +1535,7 @@ def register(app) -> None:
     app.router.add_get("/users", users_search)
     app.router.add_get("/users/recent", users_recent)
     app.router.add_get("/users/list", users_list)
+    app.router.add_get("/users/export", users_export)
     app.router.add_get("/users/{tg_id}", user_profile)
     app.router.add_get("/users/{tg_id}/activity", user_activity)
     app.router.add_post("/users/{tg_id}/dm", user_dm)
@@ -1440,6 +1553,7 @@ def register(app) -> None:
     app.router.add_post("/subs/requests/{tg_id}/reject",
                         lambda req: _subs_request_action(req, "reject"))
     app.router.add_get("/subs", subs_list)
+    app.router.add_get("/subs/export", subs_export)
     app.router.add_get("/admin-subs", admin_subs_list)
     app.router.add_post("/admin-subs", admin_sub_create)
     app.router.add_get("/admin-subs/{sub_id}", admin_sub_card)

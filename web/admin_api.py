@@ -387,6 +387,24 @@ def _forbidden(request, error: str, status: int = 403):
     return web.json_response({"error": error}, status=status)
 
 
+def _csv_response(header: list, rows: list, fname: str):
+    """CSV-файл: запятая как в экспорте логов (handlers/control.py
+    _export_rows_to_csv), UTF-8, Content-Disposition с именем файла.
+    None — пустая ячейка; поля с запятой/кавычками csv экранирует сам."""
+    import csv
+    import io
+    from aiohttp import web
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(header)
+    for row in rows:
+        w.writerow([("" if v is None else v) for v in row])
+    return web.Response(text=buf.getvalue(), content_type="text/csv",
+                        charset="utf-8",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="{fname}"'})
+
+
 # ── Обработчики ──────────────────────────────────────────────────────────────
 
 async def _require_actor(request):
