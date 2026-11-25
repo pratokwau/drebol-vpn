@@ -13,8 +13,9 @@
 
 Кабинет показывает срок, трафик, LTE, устройства, платежи и рефералку.
 Действия — те же, что уже есть в боте для самого человека: отключить
-своё устройство, перевыпустить свой ключ, продлить подписку и подарить
-подписку другу. Продление и подарок идут через тот же счёт Platega,
+своё устройство, перевыпустить свой ключ, продлить подписку, оформить
+первую подписку (пробный период или покупка) и подарить подписку другу.
+Продление, покупка и подарок идут через тот же счёт Platega,
 что и в боте, а подтверждение — колбэком Platega на /api/webhooks/platega,
 опрос статусов фоновой задачей бота — страховка. После оплаты Platega
 возвращает человека по редиректу из счёта (страницы /pay/* на сайте).
@@ -1084,6 +1085,277 @@ def build_app():
         return web.json_response({"payment_id": pid, "url": res["url"],
                                   "amount": q["price"]})
 
+    # ── Получение первой подписки ────────────────────────────────────────
+
+    async def buy_options(request):
+        """Тарифы и пробный период для человека без подписки — то же,
+        что экран «🎁 Получить подписку» в боте (handle_request_sub +
+        handle_renew_sub/handle_pay_invoice с row=None): пробный — по
+        пресетам, покупка — тарифы с ценой из _renew_quote (устройств
+        у нового юзера нет — devices=0, как в боте)."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from features.blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        from config import load_config
+        from core.database import get_active_payment, list_tariffs
+        from paidsub.handlers import _paid_presets_ready
+        from paidsub.storage import (get_paid_sub_by_tg_id,
+                                     get_pending_request)
+        from paidsub.time_parser import fmt_duration
+        if await get_paid_sub_by_tg_id(tg_id):
+            return web.json_response({"error": "has_sub"}, status=409)
+        cfg = load_config()
+        tariffs = await list_tariffs(only_active=True)
+        if not tariffs:
+            return web.json_response({"error": "no_tariffs"}, status=409)
+        trial_sec = int(cfg.get("paid_trial_period") or 0)
+        quotes = []
+        best = None
+        for t in tariffs:
+            q = await _renew_quote(tg_id, t)
+            per_month = (q["price"] / (q["seconds"] / 2592000)
+                         if q["seconds"] else None)
+            quotes.append((t, q, per_month))
+            if per_month and (best is None or per_month < best):
+                best = per_month
+        out = []
+        for t, q, per_month in quotes:
+            out.append({"id": t[0], "name": fmt_duration(q["seconds"]),
+                        "period": fmt_duration(q["seconds"]),
+                        "price": q["price"],
+                        "per_month": round(per_month) if per_month else None,
+                        "best": bool(best and per_month
+                                     and per_month == best
+                                     and len(tariffs) > 1)})
+        pending = await get_active_payment(tg_id, "platega")
+        return web.json_response({
+            "trial": ({"seconds": trial_sec, "text": fmt_duration(trial_sec)}
+                      if trial_sec > 0 else None),
+            "tariffs": out,
+            "presets_ready": bool(_paid_presets_ready(cfg)),
+            "auto_trial": bool(cfg.get("auto_approve_trial", False)),
+            "pending_request": bool(await get_pending_request(tg_id)),
+            "pending": ({"id": pending[0], "amount": pending[4],
+                         "url": pending[8], "period": pending[5]}
+                        if pending and pending[8] else None),
+        })
+
+    async def trial_request(request):
+        """Запрос пробного периода — зеркало handle_request_sub из бота:
+        пресеты не готовы — 409, заявка уже висит — 200 pending,
+        авто-одобрение — триал сразу той же svc.create_paid_sub, иначе
+        заявка админу с кнопками одобрения и антифрод-предупреждениями."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from features.blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        from config import ADMIN_ID, load_config
+        from core.database import get_user_info
+        from paidsub.handlers import _paid_presets_ready
+        from paidsub.storage import (add_history, add_request,
+                                     get_paid_sub_by_tg_id,
+                                     get_pending_request, resolve_request)
+        from paidsub.time_parser import fmt_duration
+        if await get_paid_sub_by_tg_id(tg_id):
+            return web.json_response({"error": "has_sub"}, status=409)
+        cfg = load_config()
+        trial_sec = int(cfg.get("paid_trial_period") or 0)
+        if not _paid_presets_ready(cfg) or trial_sec <= 0:
+            # 0 секунд — не триал: в боте здесь создался бы триал на 0 сек
+            return web.json_response({"error": "presets_not_ready"},
+                                     status=409)
+        if await get_pending_request(tg_id):
+            return web.json_response({"ok": True, "status": "pending"})
+        if cfg.get("auto_approve_trial", False):
+            from paidsub import service as _svc
+            try:
+                res = await _svc.create_paid_sub(tg_id, trial=True, bot=_bot)
+            except Exception as ex:
+                logging.error("кабинет: авто-триал %s: %s", tg_id, ex)
+                return web.json_response({"error": "panel_failed"},
+                                         status=502)
+            if not res.get("ok"):
+                return web.json_response(
+                    {"error": "panel_failed",
+                     "details": str(res.get("error") or "")}, status=502)
+            await add_request(tg_id)
+            await resolve_request(tg_id, "approved")
+            await add_history(tg_id, "trial_approved", "Авто-одобрение")
+            notified = False
+            if _bot is not None:
+                from config import sub_url_for_display
+                sub_link = sub_url_for_display(res["sub_url"])
+                try:
+                    await _bot.send_message(
+                        chat_id=tg_id,
+                        text=("🎉 <b>Подписка готова!</b>\n\n"
+                              f"<blockquote>📅 Действует до: <b>{res['expire'][:16]}</b></blockquote>\n\n"
+                              "🔑 <b>Ссылка для подключения</b>\n"
+                              f"<code>{sub_link}</code>\n\n"
+                              "<i>Нажмите на ссылку — она скопируется — и вставьте её в INCY.</i>"),
+                        parse_mode="HTML")
+                    notified = True
+                except Exception as ex:
+                    logging.error("кабинет: авто-триал notify %s: %s",
+                                  tg_id, ex)
+            bonus_error = None
+            if _bot is not None:
+                try:
+                    from types import SimpleNamespace
+                    from paidsub.handlers import _process_referral_bonus
+                    await _process_referral_bonus(
+                        tg_id, SimpleNamespace(bot=_bot))
+                except Exception as ex:
+                    logging.error("кабинет: авто-триал bonus %s: %s",
+                                  tg_id, ex)
+                    bonus_error = f"{type(ex).__name__}: {ex}"
+            if _bot is not None:
+                try:
+                    from core.log_channel import send_log
+                    from html import escape as _esc
+                    user = await get_user_info(tg_id)
+                    uname = _esc(f"@{user[2]}" if user and user[2]
+                                 else f"id{tg_id}")
+                    await send_log(
+                        _bot,
+                        f"⚡ Авто-триал выдан: {_esc(str((user[1] if user else None) or tg_id))} "
+                        f"({uname}) · <code>{tg_id}</code>")
+                except Exception as ex:
+                    logging.error("кабинет: авто-триал send_log %s: %s",
+                                  tg_id, ex)
+            out = {"ok": True, "status": "trial", "notified": notified,
+                   "subscription": {"id": res["sub_id"],
+                                    "email": res["email"],
+                                    "expire": res["expire"]}}
+            if bonus_error:
+                out["referral_bonus_error"] = bonus_error
+            return web.json_response(out)
+        # Ручное одобрение: заявка + сообщение админу, как в боте.
+        await add_request(tg_id)
+        admin_notified = False
+        if _bot is not None:
+            try:
+                from paidsub.handlers import _esc_name
+                from paidsub.keyboards import approve_keyboard
+                user = await get_user_info(tg_id)
+                first = user[1] if user else None
+                uname = f"@{user[2]}" if user and user[2] else f"id{tg_id}"
+                hwid = int(cfg.get("paid_preset_hwid", 0) or 0)
+                traf_raw = int(cfg.get("paid_preset_traffic", 0) or 0)
+                hwid_str = str(hwid) if hwid > 0 else "безлимит"
+                traf_str = f"{traf_raw} ГБ" if traf_raw > 0 else "безлимит"
+                fraud_block = ""
+                try:
+                    from features.fraud import pre_trial_check
+                    warns = await pre_trial_check(tg_id)
+                    if warns:
+                        fraud_block = ("\n🕵 <b>Антифрод:</b>\n"
+                                       + "\n".join(
+                                           f"· {html.escape(w)}"
+                                           for w in warns)
+                                       + "\n")
+                except Exception:
+                    pass
+                await _bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(f"🆕 <b>Запрос на подписку</b>\n\n"
+                          f'👤 <a href="tg://user?id={tg_id}">{_esc_name(first, tg_id)}</a> '
+                          f"({_esc_name(uname, tg_id)})\n"
+                          f"🆔 TG ID: <code>{tg_id}</code>\n"
+                          f"{fraud_block}\n"
+                          f"<b>Параметры подписки:</b>\n"
+                          f"🆓 Пробный период: <b>{fmt_duration(trial_sec)}</b>\n"
+                          f"🖥 Лимит устройств: <b>{hwid_str}</b>\n"
+                          f"📶 Трафик: <b>{traf_str}</b>\n\n"
+                          "Одобрить пробную подписку?"),
+                    parse_mode="HTML",
+                    reply_markup=approve_keyboard(tg_id))
+                admin_notified = True
+            except Exception as ex:
+                logging.error("кабинет: заявка на триал notify %s: %s",
+                              tg_id, ex)
+        return web.json_response({"ok": True, "status": "requested",
+                                  "admin_notified": admin_notified})
+
+    async def buy(request):
+        """Первая покупка — тот же счёт Platega, что продление в боте
+        (handle_pay_invoice с row=None): тариф + цена из _renew_quote
+        (устройств у нового юзера нет), подтверждение — тем же вебхуком,
+        его код не трогается. Повторное нажатие на тот же тариф не плодит
+        счета: возвращается уже созданная ссылка."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            tariff_id = int(body.get("tariff_id") or 0)
+        except (TypeError, ValueError):
+            tariff_id = 0
+        from features.blacklist import is_blacklisted
+        if await is_blacklisted(tg_id):
+            return web.json_response({"error": "blocked"}, status=403)
+        from core.database import (add_payment, get_active_payment,
+                                   get_tariff, get_user_info,
+                                   set_payment_external_id,
+                                   set_payment_status)
+        from paidsub.storage import get_paid_sub_by_tg_id
+        import services.platega_api as pg
+        if await get_paid_sub_by_tg_id(tg_id):
+            return web.json_response({"error": "has_sub"}, status=409)
+        tariff = await get_tariff(tariff_id) if tariff_id else None
+        if not tariff or not tariff[4]:
+            return web.json_response({"error": "bad_tariff"}, status=400)
+        if not pg.is_configured():
+            return web.json_response({"error": "pay_unavailable"}, status=503)
+        q = await _renew_quote(tg_id, tariff)
+        existing = await get_active_payment(tg_id, "platega")
+        if (existing and existing[4] == q["price"]
+                and existing[5] == q["seconds"] and existing[8]
+                and (len(existing) < 12 or existing[11] == q["extra"])
+                and (len(existing) < 13 or not existing[12])):
+            return web.json_response({"payment_id": existing[0],
+                                      "url": existing[8],
+                                      "amount": existing[4], "reused": True})
+        user = await get_user_info(tg_id)
+        from web.site_deploy import pay_redirect_urls
+        urls = pay_redirect_urls()
+        cabinet_url = ""
+        try:
+            from web import site_deploy as site
+            cabinet_url = (site.cabinet_link() or "") + "/payments"
+        except Exception:
+            cabinet_url = ""
+        # строку создаём ДО запроса к платёжке: её id едет в payload,
+        # а по payload колбэк находит счёт обратно
+        pid = await add_payment(
+            tg_id, "platega", None, q["price"], q["seconds"],
+            "", promo_code=q["promo_code"], kind=q["kind"],
+            extra=q["extra"])
+        res = await pg.create_payment(
+            amount=q["price"],
+            description=f"Подписка Drebol VPN · {q['name']} · {tg_id}",
+            tg_id=tg_id, username=user[2] if user else None,
+            order_id=f"drebol-{pid}",
+            success_url=urls.get("success") or cabinet_url or None,
+            fail_url=urls.get("fail") or cabinet_url or None,
+            back_url=urls.get("back") or cabinet_url or None)
+        if not res.get("ok"):
+            logging.error("кабинет: счёт Platega не создан (покупка) для %s: %s",
+                          tg_id, res.get("error"))
+            await set_payment_status(pid, "error", res.get("error"))
+            return web.json_response({"error": "pay_failed"}, status=502)
+        await set_payment_external_id(pid, res["payment_id"], res["url"])
+        return web.json_response({"payment_id": pid, "url": res["url"],
+                                  "amount": q["price"]})
+
     async def gift_options(request):
         """Тарифы для подарка — те же, что в боте на экране gift_pick:
         срок и цена со скидкой висящего промокода дарителя, без устройств.
@@ -1439,6 +1711,9 @@ def build_app():
     app.router.add_post("/api/promo/apply", promo_apply)
     app.router.add_post("/api/promo/remove", promo_remove)
     app.router.add_post("/api/renew", renew)
+    app.router.add_get("/api/buy-options", buy_options)
+    app.router.add_post("/api/trial/request", trial_request)
+    app.router.add_post("/api/buy", buy)
     app.router.add_get("/api/gift-options", gift_options)
     app.router.add_post("/api/gift/resolve", gift_resolve)
     app.router.add_post("/api/gift", gift)

@@ -797,11 +797,13 @@ body.tg-fullscreen .tabs { top:96px; }
    if (!p.subscription) {
      if (p.admin_subscription) {
        out.push('<div data-sec="sub">' + adminSubCard(p.admin_subscription) + "</div>");
-     } else {
-     out.push('<div class="card hero">' + title("key", "Подписки пока нет") +
-              '<p class="card-sub">Оформите её в боте — пробный период выдаётся сразу.</p>' +
-              '<a class="btn btn-main" href="' + botUrl() + '">' + ICON.tg + "Оформить в боте</a></div>");
      }
+     // Получить подписку — и тому, у кого только админская: в боте
+     // кнопка «🎁 Получить подписку» тоже видна при любой подписке.
+     out.push('<div data-sec="sub"><div class="card" id="buy-card">' + title("key", "Получить подписку") +
+              '<div id="buy-body"><p class="card-sub">Загружаем тарифы…</p></div>' +
+              '<p class="card-sub" style="margin-top:10px">или <a href="' + botUrl() + '" style="color:var(--ink)">оформить в боте</a></p>' +
+              "</div></div>");
      var ref0 = referralCard(p);
      if (ref0) { out.push('<div data-sec="friends">' + ref0 + "</div>"); }
      var pay0 = paymentsCard(p);
@@ -1241,6 +1243,7 @@ body.tg-fullscreen .tabs { top:96px; }
    }
    if (document.getElementById("renew-card")) { loadRenew(); }
    if (document.getElementById("gift-card")) { loadGift(); }
+   if (document.getElementById("buy-card")) { loadBuy(); }
    if (document.getElementById("info-card")) { loadInfo(); }
 
    // Профиль: смена почты и пароля — формы перерисовываются при каждой
@@ -1597,6 +1600,155 @@ body.tg-fullscreen .tabs { top:96px; }
      renewTimer = setTimeout(function () { pollGift(id, tries - 1); }, 10000);
    }).catch(function () {
      renewTimer = setTimeout(function () { pollGift(id, tries - 1); }, 10000);
+   });
+ }
+
+ // Получение первой подписки: пробный период и покупка — как в боте
+ // (handle_request_sub + handle_renew_sub/handle_pay_invoice без подписки).
+ // Подтверждение оплаты приходит колбэком Platega, а опрос — страховка:
+ // страница опрашивает статус счёта каждые 10 секунд, пока ждёт.
+ var buyTariffs = {};
+ var buyPayUrl = "";
+ var buyPendingUrl = "";
+ function loadBuy() {
+   var body = document.getElementById("buy-body");
+   if (!body) { return; }
+   buyTariffs = {}; buyPayUrl = ""; buyPendingUrl = "";
+   api("/api/buy-options").then(function (r) {
+     if (r.status !== 200 || !r.data.tariffs) {
+       var msg = "Получить подписку сейчас не получится. Попробуйте позже или оформите в боте.";
+       if (r.data && r.data.error === "has_sub") { msg = "У вас уже есть подписка."; }
+       body.innerHTML = '<p class="card-sub">' + msg + "</p>";
+       return;
+     }
+     var d = r.data;
+     var html = "";
+     if (d.pending_request) {
+       html += '<p class="card-sub">⏳ Запрос на пробный период уже у нас — пришлём уведомление, как только одобрим.</p>';
+     } else if (d.trial && d.presets_ready) {
+       html += '<p class="card-sub">🆓 <b style="color:var(--ink)">Пробный период</b> — ' + esc(d.trial.text) + ' бесплатно' +
+               (d.auto_trial ? " — выдаётся сразу." : " — заявка уйдёт администратору, пришлём уведомление.") + "</p>" +
+               '<div class="stack"><button class="btn btn-main" type="button" onclick="trialRequest()">Получить пробный период</button></div>' +
+               '<div id="trial-note"></div>';
+     } else if (!d.presets_ready) {
+       html += '<p class="card-sub">Оформление пробного периода временно недоступно.</p>';
+     }
+     if (d.pending) {
+       buyPendingUrl = d.pending.url;
+       html += '<p class="card-sub">⏳ У вас есть неоплаченный счёт на <b style="color:var(--ink)">' +
+               esc(fmtMoney(d.pending.amount)) + "</b>.</p>" +
+               '<div class="stack"><button class="btn btn-main" type="button" ' +
+               'onclick="openPay(buyPendingUrl)">Продолжить оплату</button>' +
+               '<button class="btn btn-ghost" type="button" onclick="pollBuy(' +
+               d.pending.id + ', 90)">Проверить оплату</button></div>';
+     }
+     html += '<p class="card-sub">Или купите подписку сразу — выберите срок, оплата через платёжную систему.</p>';
+     html += '<div class="tariffs">';
+     d.tariffs.forEach(function (t) {
+       buyTariffs[t.id] = t;
+       var sub = "первая подписка";
+       if (t.per_month) { sub += " · ≈ " + fmtMoney(t.per_month) + "/мес"; }
+       if (t.best) { sub += " 🔥"; }
+       html += '<button class="tariff" type="button" onclick="buyPay(' +
+               t.id + ')"><span><span class="t-per">' + esc(t.period) + '</span>' +
+               '<span class="t-sub">' + esc(sub) + '</span></span>' +
+               '<span class="t-price">' + esc(fmtMoney(t.price)) + "</span></button>";
+     });
+     html += "</div>";
+     body.innerHTML = html;
+   }).catch(function () {
+     body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
+   });
+ }
+ function trialRequest() {
+   var note = document.getElementById("trial-note");
+   if (note) { note.innerHTML = '<p class="card-sub">Отправляем…</p>'; }
+   api("/api/trial/request", {method: "POST", body: "{}"})
+     .then(function (r) {
+       if (r.status === 200 && r.data.status === "trial") {
+         toast("Пробный период выдан"); haptic();
+         load();
+         return;
+       }
+       if (r.status === 200 && r.data.status === "requested") {
+         if (note) { note.innerHTML = '<p class="card-sub">📨 Запрос отправлен — пришлём уведомление, как только одобрим.</p>'; }
+         toast("Запрос отправлен"); haptic();
+         loadBuy();
+         return;
+       }
+       if (r.status === 200 && r.data.status === "pending") {
+         if (note) { note.innerHTML = '<p class="card-sub">⏳ Запрос уже у нас — пришлём уведомление, как только одобрим.</p>'; }
+         return;
+       }
+       var msg = "Не получилось — попробуйте позже.";
+       if (r.data && r.data.error === "presets_not_ready") { msg = "Оформление пробного периода временно недоступно."; }
+       else if (r.data && r.data.error === "has_sub") { msg = "У вас уже есть подписка."; }
+       if (note) { note.innerHTML = '<p class="card-sub">' + msg + "</p>"; }
+       haptic("error");
+     })
+     .catch(function () {
+       if (note) { note.innerHTML = '<p class="card-sub">Не получилось — попробуйте позже.</p>'; }
+       haptic("error");
+     });
+ }
+ function buyPay(tariffId) {
+   var body = document.getElementById("buy-body");
+   if (!body) { return; }
+   body.innerHTML = '<p class="card-sub">Создаём счёт…</p>';
+   api("/api/buy", {method: "POST", body: JSON.stringify({tariff_id: tariffId})})
+     .then(function (r) {
+       if (r.status !== 200 || !r.data.url) {
+         var msg = "Не получилось создать счёт. Попробуйте позже.";
+         if (r.data.error === "bad_tariff") { msg = "Тариф больше недоступен."; }
+         else if (r.data.error === "pay_unavailable") { msg = "Оплата временно недоступна."; }
+         else if (r.data.error === "has_sub") { msg = "У вас уже есть подписка."; }
+         body.innerHTML = '<p class="card-sub">' + msg + '</p>' +
+           '<button class="btn btn-ghost" type="button" onclick="loadBuy()">Попробовать ещё раз</button>';
+         return;
+       }
+       buyPayUrl = r.data.url;
+       body.innerHTML = '<div id="buy-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
+         esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — подписка откроется сама, " +
+         "обычно в течение минуты.</p>" +
+         '<button class="btn btn-main" type="button" onclick="openPay(buyPayUrl)">Оплатить</button>' + '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
+       openPay(r.data.url);
+       pollBuy(r.data.payment_id, 90);
+     })
+     .catch(function () {
+       body.innerHTML = '<p class="card-sub">Не получилось создать счёт. Попробуйте позже.</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="loadBuy()">Попробовать ещё раз</button>';
+     });
+ }
+ function pollBuy(id, tries) {
+   stopRenewPoll();
+   api("/api/payment?id=" + id).then(function (r) {
+     var box = document.getElementById("buy-wait");
+     if (r.status !== 200) {
+       if (box) { box.innerHTML = '<p class="card-sub">Не удалось проверить статус. Попробуйте позже.</p>'; }
+       return;
+     }
+     var st = r.data.status;
+     if (st === "paid" || st === "refund_pending") {
+       if (box) { box.innerHTML = '<p class="card-sub">✅ Оплата прошла! Обновляем данные…</p>'; }
+       toast("Оплата прошла — подписка оформлена"); haptic();
+       load();
+       return;
+     }
+     if (st === "canceled" || st === "cancelled" || st === "expired" || st === "error" ||
+         st === "refunded" || st === "chargebacked") {
+       if (box) { box.innerHTML = '<p class="card-sub">Счёт не оплачен. Создайте новый счёт.</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="loadBuy()">К тарифам</button>'; }
+       return;
+     }
+     if (tries <= 0) {
+       if (box) { box.innerHTML = '<p class="card-sub">Пока не оплачено. Если вы уже оплатили, ' +
+         'подождите немного и нажмите «Проверить».</p>' +
+         '<button class="btn btn-ghost" type="button" onclick="pollBuy(' + id + ', 90)">Проверить</button>'; }
+       return;
+     }
+     renewTimer = setTimeout(function () { pollBuy(id, tries - 1); }, 10000);
+   }).catch(function () {
+     renewTimer = setTimeout(function () { pollBuy(id, tries - 1); }, 10000);
    });
  }
 
