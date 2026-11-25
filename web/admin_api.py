@@ -568,7 +568,7 @@ async def dashboard(request):
         await _require_actor(request)
     except Exception:
         return web.json_response({"error": "no_session"}, status=401)
-    from core.database import get_dashboard_stats, payments_summary
+    from core.database import get_dashboard_stats, payments_summary, refunds_total
     from services.panel import count_panel_clients
     stats = await get_dashboard_stats()
     try:
@@ -578,8 +578,15 @@ async def dashboard(request):
     # Деньги — нетто, как в сверке с Platega: только оплаченные счета,
     # частичные возвраты вычтены, полные возвраты не считаются.
     money = await payments_summary()
+    # Для формулы выручки как в ТГ (handle_dashboard): revenue_total +
+    # unknown*paid_price − refunds, где unknown — оплаты без суммы в истории.
+    full_ref, part_ref = await refunds_total()
+    from config import load_config
+    paid_price = int(load_config().get("paid_price") or 0)
     return web.json_response({"stats": stats, "panel": panel,
-                              "money": money})
+                              "money": money,
+                              "refunds": full_ref + part_ref,
+                              "paid_price": paid_price})
 
 
 async def dashboard_series(request):

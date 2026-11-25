@@ -305,7 +305,7 @@ label.chk input{width:auto;margin:0}
         <div class="card"><h2>Истекают в ближайшие 3 дня</h2><p class="sub">Продлить — кнопкой «Открыть» рядом с подпиской.</p>
           <div id="expiring-out"></div>
         </div>
-        <div class="card"><h2>Панель Remnawave</h2><p id="panel-line" class="mut">—</p></div>
+        <div class="card"><h2>📊 Статистика</h2><p class="sub">То же, что «📊 Статистика» в ТГ: деньги, пользователи, подписки, сверка базы с панелью.</p><div id="dashboard-detail" class="mut">—</div></div>
         <div class="card"><h2>Быстрые действия</h2><p class="sub">Частые задачи — в один клик, без поиска по разделам.</p>
           <div class="btnrow">
             <button class="ghost" data-goto="users">Найти юзера</button>
@@ -1239,7 +1239,7 @@ async function loadExpiring(){
       return '<tr><td>' + name + '</td><td><span class="mono">#' + it.sub_id + '</span></td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td>' + pill(statusRu(it.status)) + '</td><td><button class="ghost" data-open-sub="' + it.sub_id + '">Открыть</button></td></tr>';
     }).join("") + "</tbody></table></div>";
 }
-let chartDays = 30, dashStats = null, dashMoney = null, expiringCount = null;
+let chartDays = 30, dashStats = null, dashMoney = null, dashPanel = null, dashRefunds = 0, dashPrice = 0, expiringCount = null;
 function renderStats(){
   const s = dashStats || {};
   const m = dashMoney || {};
@@ -1258,6 +1258,52 @@ function renderStats(){
   $("stats").innerHTML = cells.map(function(c){
     return '<div class="stat"><b>' + c[1] + '</b><span>' + c[0] + "</span>" + (c[2] ? "<small>" + c[2] + "</small>" : "") + "</div>";
   }).join("");
+}
+/* Полная статистика — паритет с «📊 Статистика» в ТГ (handle_dashboard):
+   выручка всего по той же формуле, сверка базы с панелью, триалы,
+   рефералы и промокоды. Все числа — из /dashboard, формула — как в ТГ. */
+function renderDashboardDetail(){
+  const s = dashStats || {};
+  const p = dashPanel || {};
+  const n = function(v){ return fmtNum(v || 0); };
+  // Деньги — та же формула, что в ТГ: revenue_total + unknown*price − refunds
+  const known = s.revenue_known || 0;
+  const confirmed = s.payments_confirmed || 0;
+  const unknown = Math.max(0, confirmed - known);
+  const revenue = (s.revenue_total || 0) + unknown * (dashPrice || 0) - (dashRefunds || 0);
+  let note = "";
+  if (unknown > 0) note += ' <span class="mut">(точно по ' + n(known) + ' из ' + n(confirmed) + ', остальное ~' + fmtMoney(dashPrice || 0) + ')</span>';
+  if (dashRefunds > 0) note += ' <span class="mut">· возвраты −' + fmtMoney(dashRefunds) + '</span>';
+  let h = '<h3 style="margin-top:0">💰 Деньги</h3><dl class="kv">'
+    + kvRow("Выручка всего", "<b>" + fmtMoney(revenue) + "</b>" + note)
+    + kvRow("Сегодня", "<b>" + fmtMoney(s.revenue_today || 0) + "</b> · оплат: <b>" + n(s.payments_today) + "</b>")
+    + kvRow("Подтверждено оплат", "<b>" + n(confirmed) + "</b> · триалов выдано <b>" + n(s.trials_issued) + "</b>")
+    + '</dl><h3>👥 Пользователи</h3><dl class="kv">'
+    + kvRow("Всего", "<b>" + n(s.users_total) + "</b>")
+    + kvRow("Новые", "Сегодня: <b>+" + n(s.users_today) + "</b> · за неделю: <b>+" + n(s.users_week) + "</b>")
+    + '</dl><h3>💳 Подписки</h3><dl class="kv">'
+    + kvRow("Активные", "<b>" + n(s.paid_active) + "</b> · истёкшие: <b>" + n(s.paid_expired) + "</b>" + (s.paid_other ? " · прочие: <b>" + n(s.paid_other) + "</b>" : ""))
+    + kvRow("Из активных", "триал <b>" + n(s.trial_active) + "</b> · платящих <b>" + n(s.paying_active) + "</b>")
+    + kvRow("Оплачивали хоть раз", "<b>" + n(s.paying_total) + "</b> · всего записей <b>" + n(s.paid_total) + "</b>")
+    + '</dl><h3>🖥 Панель</h3><dl class="kv">';
+  const dbAll = (s.paid_total || 0) + (s.admin_subs || 0);
+  if (p.success) {
+    const service = p.service ? " · служебных " + n(p.service) : "";
+    h += kvRow("Клиентов в панели", "<b>" + n(p.total) + "</b> (платных " + n(p.paid) + " · прочих " + n(p.other) + service + ")");
+    h += kvRow("Записей в базе", "<b>" + n(dbAll) + "</b> (платных " + n(s.paid_total) + " · админских " + n(s.admin_subs) + ")");
+    h += kvRow("Сверка", ((p.paid || 0) === (s.paid_total || 0) && (p.other || 0) === (s.admin_subs || 0))
+      ? "✅ База и панель совпадают"
+      : "⚠️ Расхождение: платных " + n(p.paid) + " vs " + n(s.paid_total) + " · прочих " + n(p.other) + " vs " + n(s.admin_subs));
+  } else {
+    h += kvRow("Панель", "🔴 Панель недоступна — сверка не выполнена");
+    h += kvRow("Записей в базе", "<b>" + n(dbAll) + "</b> (платных " + n(s.paid_total) + " · админских " + n(s.admin_subs) + ")");
+  }
+  h += '</dl><h3>🎁 Прочее</h3><dl class="kv">'
+    + kvRow("Рефералов", "<b>" + n(s.ref_total) + "</b> (с бонусом " + n(s.ref_rewarded) + ")")
+    + kvRow("Промокоды", "активно: <b>" + n(s.promos_active) + "</b> · активаций <b>" + n(s.promo_uses) + "</b>")
+    + kvRow("Админских подписок", "<b>" + n(s.admin_subs) + "</b>")
+    + "</dl>";
+  $("dashboard-detail").innerHTML = h;
 }
 async function loadCharts(){
   const rs = await api("/dashboard/series?days=" + chartDays);
@@ -1285,11 +1331,11 @@ async function loadDashboard(){
   if (r.status !== 200) return;
   dashStats = r.data.stats || {};
   dashMoney = r.data.money || {};
+  dashPanel = r.data.panel || {};
+  dashRefunds = r.data.refunds || 0;
+  dashPrice = r.data.paid_price || 0;
   renderStats();
-  const p = r.data.panel || {};
-  $("panel-line").textContent = p.success ?
-    ("Панель: клиентов " + fmtNum(p.total) + " (платных " + fmtNum(p.paid) + ")") :
-    "Панель недоступна — сверка не выполнена";
+  renderDashboardDetail();
   await loadCharts();
   paidPage = 0;
   loadPaid(1);
