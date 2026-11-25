@@ -393,6 +393,16 @@ label.chk input{width:auto;margin:0}
             <button id="btn-subs-next" class="ghost">Вперёд →</button>
           </div>
         </div>
+        <div class="card"><h2>➕ Создать платную подписку</h2><p class="sub">Выдать пробный период или оплаченный период по тарифу — как кнопка «➕ Создание подписки» в ТГ. Человек получит уведомление в Telegram со ссылкой для подключения. Действие — с подтверждением.</p>
+          <div class="btnrow"><button id="btn-create-opts" class="ghost">Обновить варианты</button></div>
+          <div id="create-opts"></div>
+          <div id="create-form" class="hidden">
+            <div class="btnrow" id="create-kinds" style="flex-wrap:wrap"></div>
+            <input id="create-tg" type="number" placeholder="TG ID пользователя">
+            <div class="btnrow"><button id="btn-create-sub">Создать подписку</button></div>
+          </div>
+          <div id="create-out"></div>
+        </div>
         <div class="card"><h2>Массовые действия</h2><p class="sub">Действие применится ко всей выбранной вкладке сразу — как в ТГ (Массовые действия).</p>
           <div class="btnrow" id="bulk-tabs" style="flex-wrap:wrap"></div>
           <div id="bulk-scope-info" class="mut" style="margin:4px 0 8px"></div>
@@ -1854,7 +1864,7 @@ $("subs-table").addEventListener("click", function(e){
   if (tr) openSubEditor(parseInt(tr.dataset.subId, 10));
 });
 document.querySelector('[data-nav="subs"]').addEventListener("click", function(){
-  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); loadBulkScopes(); }
+  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); loadBulkScopes(); loadCreateOptions(); }
 });
 
 /* --- Админские подписки: список с вкладками --- */
@@ -2180,6 +2190,66 @@ $("btn-bulk").onclick = async function(){
   const r = await postConfirm("/subs/bulk/" + kind, body);
   renderOut("bulk-out", r.data);
   if (r.status === 200) loadBulkScopes();
+};
+/* --- Создание платной подписки: паритет с «➕ Создание подписки» в ТГ
+   (paidsub/handlers.py handle_paid_create_sub/handle_paid_create_type):
+   пробный период по пресетам или оплаченный период по активному тарифу,
+   TG ID числом; создание — с подтверждением, уведомление юзеру тем же
+   текстом «Подписка готова!», что в ТГ. Период тарифа передаётся в
+   create_paid_sub как period_seconds — в ТГ он теряется (create_period
+   ставится, но нигде не читается), здесь — нет. */
+let createKind = "trial", createOpts = null;
+function renderCreateKinds(){
+  if (!createOpts) return;
+  const t = createOpts.trial || {};
+  let h = '<button class="ghost' + (createKind === "trial" ? " active" : "") + '" data-kind="trial">🆓 Пробный · ' + esc(t.label || "—") + '</button>';
+  (createOpts.tariffs || []).forEach(function(tf){
+    h += '<button class="ghost' + (String(createKind) === String(tf.id) ? " active" : "") + '" data-kind="' + tf.id + '">💳 ' + esc(tf.label || "") + ' · ' + tf.price + ' ₽</button>';
+  });
+  $("create-kinds").innerHTML = h;
+}
+async function loadCreateOptions(){
+  let r;
+  try { r = await api("/subs/create-options"); }
+  catch(e) { $("create-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { $("create-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  createOpts = r.data;
+  if (!r.data.ready) {
+    $("create-opts").innerHTML = '<p class="err">⚠️ Сначала задай пресеты (карточка «Пресеты подписок» ниже): не заданы ' + esc((r.data.missing || []).join(", ")) + '.</p>';
+    show("create-form", false);
+    return;
+  }
+  $("create-opts").innerHTML = "";
+  renderCreateKinds();
+  show("create-form", true);
+}
+$("btn-create-opts").onclick = function(){ loadCreateOptions(); };
+$("create-kinds").addEventListener("click", function(e){
+  const b = e.target.closest("button[data-kind]");
+  if (!b) return;
+  createKind = b.dataset.kind;
+  renderCreateKinds();
+});
+$("btn-create-sub").onclick = async function(){
+  const tg = parseInt($("create-tg").value || "0", 10);
+  if (!tg) { $("create-out").innerHTML = '<p class="err">Введи TG ID пользователя (числом).</p>'; return; }
+  const kind = createKind === "trial" ? "trial" : parseInt(createKind, 10);
+  const r = await postConfirm("/subs/create", {tg_id: tg, kind: kind});
+  if (r.status === 0) return;
+  if (r.status !== 200) {
+    const e = r.data || {};
+    let msg = "Ошибка: " + (e.error || r.status);
+    if (e.error === "already_has_sub") msg = "⚠️ У пользователя уже есть платная подписка — вторую не создаю.";
+    if (e.error === "presets_not_ready") msg = "⚠️ Пресеты не заданы: " + (e.missing || []).join(", ") + ". Задай их в карточке «Пресеты подписок».";
+    if (e.error === "bad_tariff") msg = "Тариф не найден или выключен — обнови варианты кнопкой выше.";
+    if (e.error === "panel_failed" || e.error === "create_failed") msg = "❌ Не удалось создать подписку в панели: " + (e.details || e.error);
+    $("create-out").innerHTML = '<p class="err">' + esc(msg) + '</p>';
+    return;
+  }
+  const s = r.data.subscription || {};
+  $("create-out").innerHTML = '<p class="ok">✅ Подписка создана' + (r.data.notified ? ' — человек уведомлён в Telegram.' : ' — уведомление в Telegram не дошло (бота нет или человек не начинал диалог).') + '</p><dl class="kv">' + kvRow("ID подписки", esc(String(s.id == null ? "—" : s.id))) + kvRow("Email", esc(s.email || "—")) + kvRow("Действует до", esc(s.expire || "—")) + '</dl>';
+  $("create-tg").value = "";
+  loadSubs(1);
 };
 $("btn-presets").onclick = async function(){
   const r = await api("/subs/presets");

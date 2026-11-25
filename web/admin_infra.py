@@ -497,6 +497,7 @@ async def panel_tags_apply(request):
 _ADMIN_LABELS = {
     "login": "🔐 Вход в веб-админку", "logout": "🚪 Выход из веб-админки",
     "admin_sub_create": "🆕 Создал админскую подписку",
+    "paid_sub_create": "➕ Создал платную подписку",
     "backup_export": "📤 Выгрузка бэкапа", "backup_restore": "♻️ Восстановление из бэкапа",
     "backup_inspect": "🔍 Проверил архив бэкапа",
     "backup_restore_failed": "⚠️ Восстановление из бэкапа не удалось",

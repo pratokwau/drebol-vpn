@@ -1528,6 +1528,171 @@ async def subs_presets_patch(request):
     return web.json_response({"ok": True})
 
 
+# ── Создание платной подписки ──────────────────────────────────────────────
+
+_PRESET_KEYS = ("paid_trial_period", "paid_preset_hwid",
+                "paid_preset_traffic")
+
+
+def _presets_missing(cfg: dict) -> list:
+    """Те же 3 ключа, что _paid_presets_ready в paidsub/handlers.py."""
+    return [k for k in _PRESET_KEYS if cfg.get(k) is None]
+
+
+async def subs_create_options(request):
+    """Опции создания платной подписки: те же варианты, что в ТГ
+    (paidsub/handlers.py handle_paid_create_sub): пробный период по
+    пресетам + активные тарифы. Только чтение."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from config import load_config
+    from core.database import list_tariffs
+    from paidsub.time_parser import fmt_duration
+    cfg = load_config()
+    trial = cfg.get("paid_trial_period")
+    tariffs = await list_tariffs(only_active=True)
+    return web.json_response({
+        "ready": not _presets_missing(cfg),
+        "missing": _presets_missing(cfg),
+        "trial": {"seconds": trial,
+                  "label": fmt_duration(trial) if trial is not None else None},
+        "tariffs": [{"id": t[0], "name": t[1], "period": t[2],
+                     "price": t[3],
+                     "label": fmt_duration(t[2])} for t in tariffs]})
+
+
+async def subs_create(request):
+    """Создать платную подписку напрямую: тот же смысл, что
+    handle_paid_create_type + do_create_paid_sub в ТГ, с подтверждением,
+    как остальные действия по подпискам в вебе.
+
+    Тело: {tg_id, kind: "trial" | <id тарифа>}.
+    Отличия от ТГ сознательные: период тарифа реально передаётся в
+    create_paid_sub как period_seconds — сервис это поддерживает, а в
+    ТГ create_period ставится в handle_paid_create_type, но нигде не
+    читается (messages.py передаёт только trial), и выбор тарифа молча
+    даёт длину пробного периода; уже есть платная подписка →
+    409 already_has_sub, как в approve заявки, вместо молчаливого дубля
+    в панели; реферальный бонус не начисляется — прямое создание в ТГ
+    его тоже не делает (бонус только в approve заявки).
+    """
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    try:
+        tg_id = int(body.get("tg_id") or 0)
+    except (TypeError, ValueError):
+        return web.json_response({"error": "bad_id"}, status=400)
+    if tg_id <= 0:
+        return web.json_response({"error": "bad_id"}, status=400)
+    kind = body.get("kind")
+    trial = kind == "trial"
+    tariff_id = None
+    if not trial:
+        # kind — только int (не bool) или строка цифр; float/bool/мусор —
+        # bad_kind, а не молчаливое int() с усечением.
+        if isinstance(kind, bool):
+            return web.json_response({"error": "bad_kind"}, status=400)
+        if isinstance(kind, int):
+            tariff_id = kind
+        elif isinstance(kind, str) and kind.isdigit():
+            tariff_id = int(kind)
+        else:
+            return web.json_response({"error": "bad_kind"}, status=400)
+        kind = tariff_id  # нормализованный kind — в токен подтверждения
+    from config import load_config
+    from paidsub.time_parser import fmt_duration
+    cfg = load_config()
+    missing = _presets_missing(cfg)
+    if missing:
+        return web.json_response({"error": "presets_not_ready",
+                                  "missing": missing}, status=409)
+    tariff = None
+    if not trial:
+        from core.database import get_tariff
+        tariff = await get_tariff(tariff_id)
+        if not tariff or not tariff[4]:
+            return web.json_response({"error": "bad_tariff"}, status=400)
+        label = (f"💳 Платная подписка · {fmt_duration(tariff[2])} · "
+                 f"{tariff[3]} ₽")
+        period_seconds = int(tariff[2])
+    else:
+        label = (f"🆓 Пробная подписка · "
+                 f"{fmt_duration(cfg.get('paid_trial_period'))}")
+        period_seconds = None
+    token = body.get("confirm_token")
+    if not token:
+        tok = issue_confirm(actor, "paid_sub_create",
+                            {"tg_id": tg_id, "kind": kind},
+                            f"Создать подписку ({label}) для {tg_id}")
+        return confirm_needed_response(tok, f"Создать подписку ({label}) "
+                                            f"для {tg_id}")
+    payload = take_confirm(actor, token, "paid_sub_create")
+    if payload is None or payload.get("tg_id") != tg_id:
+        return web.json_response({"error": "bad_confirm"}, status=403)
+    # kind мог поменяться между подтверждением и применением — берём
+    # тот, что в токене, и перепроверяем тариф и пресеты.
+    kind = payload.get("kind")
+    trial = kind == "trial"
+    if not trial:
+        try:
+            tariff_id = int(kind)
+        except (TypeError, ValueError):
+            return web.json_response({"error": "bad_confirm"}, status=403)
+        from core.database import get_tariff
+        tariff = await get_tariff(tariff_id)
+        if not tariff or not tariff[4]:
+            return web.json_response({"error": "bad_tariff"}, status=400)
+        period_seconds = int(tariff[2])
+    else:
+        period_seconds = None
+    missing = _presets_missing(load_config())
+    if missing:
+        return web.json_response({"error": "presets_not_ready",
+                                  "missing": missing}, status=409)
+    from paidsub.storage import get_paid_sub_by_tg_id
+    if await get_paid_sub_by_tg_id(tg_id):
+        return web.json_response({"error": "already_has_sub"}, status=409)
+    svc = _service()
+    bot = get_bot()
+    try:
+        res = await svc.create_paid_sub(tg_id, trial=trial,
+                                        period_seconds=period_seconds,
+                                        bot=bot)
+    except Exception as ex:
+        logging.error("админка: paid sub create %s: %s", tg_id, ex)
+        return web.json_response({"error": "create_failed"}, status=502)
+    if not res.get("ok"):
+        return web.json_response(
+            {"error": "panel_failed",
+             "details": str(res.get("error") or "")}, status=502)
+    # Уведомление юзеру — тот же текст «Подписка готова!», что шлёт
+    # do_create_paid_sub; ссылка — показная, через sub.drbl.tech.
+    notified = False
+    if bot is not None:
+        from config import sub_url_for_display
+        sub_link = sub_url_for_display(res["sub_url"])
+        notified = await _notify_request_user(
+            bot, tg_id,
+            "🎉 <b>Подписка готова!</b>\n\n"
+            f"<blockquote>📅 Действует до: <b>{res['expire'][:16]}</b></blockquote>\n\n"
+            "🔑 <b>Ссылка для подключения</b>\n"
+            f"<code>{sub_link}</code>\n\n"
+            "<i>Нажмите на ссылку — она скопируется — и вставьте её в INCY.</i>")
+    await _audit(actor, "paid_sub_create",
+                 f"tg_id: {tg_id}, sub_id: {res['sub_id']}, "
+                 f"{'trial' if trial else 'tariff ' + str(tariff_id)}")
+    return web.json_response({"ok": True, "notified": notified,
+                              "subscription": {"id": res["sub_id"],
+                                               "email": res["email"],
+                                               "expire": res["expire"]}})
+
+
 # ── Регистрация ────────────────────────────────────────────────────────────
 
 def register(app) -> None:
@@ -1543,6 +1708,9 @@ def register(app) -> None:
     # Статические пути — ДО шаблонов {sub_id}, иначе aiohttp отдаст
     # /subs/presets и /subs/bulk/* в хендлеры подписок.
     app.router.add_get("/subs/presets", subs_presets_get)
+    app.router.add_post("/subs/presets", subs_presets_patch)
+    app.router.add_get("/subs/create-options", subs_create_options)
+    app.router.add_post("/subs/create", subs_create)
     app.router.add_patch("/subs/presets", subs_presets_patch)
     app.router.add_get("/subs/bulk/scopes", bulk_scopes)
     app.router.add_post("/subs/bulk/{kind}", subs_bulk)
