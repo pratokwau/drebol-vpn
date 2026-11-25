@@ -432,6 +432,7 @@ label.chk input{width:auto;margin:0}
         <div class="card"><h2>Рефералка</h2><p class="sub">Кто приводит друзей и какие бонусы настроены.</p>
           <div class="btnrow"><button id="btn-referrals" class="ghost">Показать рефералку</button><button id="btn-lte" class="ghost">Проверить LTE сейчас</button></div>
           <div id="ref-out"></div>
+          <div id="lte-out"></div>
         </div>
       </section>
 
@@ -2163,8 +2164,90 @@ $("btn-asub").onclick = withSpin($("btn-asub"), async function(){
   renderOut("asub-out", r.data);
   if (r.status === 200) loadAdminSubs(1);
 });
-$("btn-referrals").onclick = async function(){ const r = await api("/referrals"); renderOut("ref-out", r.data); };
-$("btn-lte").onclick = async function(){ const r = await postConfirm("/subs/lte/check-now", {}); renderOut("ref-out", r.data); };
+/* --- Рефералка: паритет с «👥 Реферальная система» в ТГ
+   (paidsub/handlers.py handle_referral_settings): бонусы, статистика,
+   топ-10; правка бонусов вводом длительности как в ТГ (parse_duration).
+   «0» — выкл (расширение веба: в ТГ 0 не принимается, а PATCH /settings
+   его разрешает); «выкл» — то же словами. */
+function parseDuration(text){
+  var raw = String(text == null ? '' : text).trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === '0' || raw === 'выкл' || raw === 'выключить' || raw === 'off') return 0;
+  var WORDS = {'полгода': 15552000, 'полугодие': 15552000, 'год': 31536000, 'года': 31536000, 'годик': 31536000, 'месяц': 2592000, 'неделя': 604800, 'неделю': 604800, 'день': 86400, 'сутки': 86400, 'year': 31536000, 'month': 2592000, 'week': 604800, 'day': 86400};
+  if (WORDS[raw] != null) return WORDS[raw];
+  var i = 0;
+  while (i < raw.length && raw[i] >= '0' && raw[i] <= '9') i++;
+  if (!i) return null;
+  var num = parseInt(raw.slice(0, i), 10);
+  if (!(num > 0)) return null;
+  var unit = raw.slice(i).trim();
+  if (!unit) return null;
+  var UNITS = [['минут', 60], ['мин', 60], ['minute', 60], ['min', 60], ['час', 3600], ['hour', 3600], ['hr', 3600], ['день', 86400], ['дн', 86400], ['day', 86400], ['недел', 604800], ['week', 604800], ['месяц', 2592000], ['мес', 2592000], ['month', 2592000], ['год', 31536000], ['года', 31536000], ['лет', 31536000], ['year', 31536000]];
+  var sorted = UNITS.slice().sort(function(a, b){ return b[0].length - a[0].length; });
+  for (var k = 0; k < sorted.length; k++) {
+    if (unit.indexOf(sorted[k][0]) === 0) return num * sorted[k][1];
+  }
+  return null;
+}
+function refBonusText(v){
+  if (v == null) return 'не задан';
+  if (!v) return 'выключен';
+  return fmtDur(v);
+}
+async function saveRefBonus(key, inputId, msgId){
+  var sec = parseDuration($(inputId).value);
+  if (sec == null) {
+    $(msgId).textContent = 'Не удалось распознать. Примеры: «1 день», «12 часов», «0» — выкл.';
+    return;
+  }
+  var body = {settings: {}};
+  body.settings[key] = sec;
+  var r = await api('/settings', {method: 'PATCH', headers: {'X-CSRF-Token': csrf()}, body: JSON.stringify(body)});
+  if (r.status !== 200) { $(msgId).textContent = 'Ошибка: ' + (r.data.error || r.status); return; }
+  $(msgId).textContent = '';
+  toast('Бонус сохранён', 'ok');
+  loadReferrals();
+}
+function renderReferrals(d){
+  var b = d.bonus || {};
+  var h = '<h3>🎁 Бонусы</h3><dl class="kv">';
+  h += kvRow('Пригласившему', refBonusText(b.referral_bonus));
+  h += kvRow('Приглашённому', refBonusText(b.referral_invited_bonus));
+  h += '</dl>';
+  h += '<div class="btnrow"><input id="ref-bonus-in" placeholder="Пригласившему: 7 дней" autocomplete="off"><button class="ghost" type="button" id="ref-bonus-save">Сохранить</button></div><div id="ref-bonus-msg" class="mut"></div>';
+  h += '<div class="btnrow"><input id="ref-invited-in" placeholder="Приглашённому: 7 дней" autocomplete="off"><button class="ghost" type="button" id="ref-invited-save">Сохранить</button></div><div id="ref-invited-msg" class="mut"></div>';
+  h += '<h3>📊 Статистика</h3><dl class="kv">';
+  h += kvRow('Всего рефералов', fmtNum(d.total));
+  h += kvRow('С бонусом', fmtNum(d.rewarded));
+  if (d.total_bonus > 0) h += kvRow('Всего начислено', fmtDur(d.total_bonus));
+  h += '</dl>';
+  var top = d.top_referrers || [];
+  h += '<h3>🏆 Топ пригласивших</h3>';
+  if (!top.length) {
+    h += '<div class="empty">Пока никто никого не пригласил</div>';
+  } else {
+    h += '<div class="tblwrap"><table><thead><tr><th>#</th><th>Кто</th><th>TG ID</th><th>Пригласил</th></tr></thead><tbody>';
+    top.forEach(function(w, i){
+      var name = w.first_name || ('id' + w.tg_id);
+      var who = esc(name) + (w.username ? ' <span class="mut">@' + esc(w.username) + '</span>' : '');
+      h += '<tr data-tg="' + w.tg_id + '"><td class="num">' + (i + 1) + '</td><td>' + who + '</td><td class="num">' + w.tg_id + '</td><td class="num">' + fmtNum(w.count) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  $('ref-out').innerHTML = h;
+  $('ref-bonus-save').onclick = function(){ saveRefBonus('referral_bonus', 'ref-bonus-in', 'ref-bonus-msg'); };
+  $('ref-invited-save').onclick = function(){ saveRefBonus('referral_invited_bonus', 'ref-invited-in', 'ref-invited-msg'); };
+  document.querySelectorAll('#ref-out tr[data-tg]').forEach(function(tr){
+    tr.onclick = function(){ openUserEditor(parseInt(tr.dataset.tg, 10)); };
+  });
+}
+async function loadReferrals(){
+  const r = await api('/referrals');
+  if (r.status !== 200) { renderOut('ref-out', r.data); return; }
+  renderReferrals(r.data);
+}
+$("btn-referrals").onclick = async function(){ loadReferrals(); };
+$("btn-lte").onclick = async function(){ const r = await postConfirm("/subs/lte/check-now", {}); renderOut("lte-out", r.data); };
 
 /* --- Финансы и оплаты --- */
 const MONTHS_RU = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
