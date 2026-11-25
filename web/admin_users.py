@@ -1488,6 +1488,16 @@ async def subs_presets_get(request):
         squads = await list_squads()
     except Exception:
         pass
+    # Блок оплаты — та же строка, что provider_line() в ТГ
+    # (handlers/payprovider.py): настроена ли Platega и маска Merchant ID.
+    payment = {"configured": False, "merchant": "не задан"}
+    try:
+        import services.platega_api as pg
+        from handlers.payprovider import _mask
+        payment = {"configured": bool(pg.is_configured()),
+                   "merchant": _mask(cfg.get("platega_merchant_id"))}
+    except Exception:
+        pass
     return web.json_response({"presets": {
         "paid_trial_period": cfg.get("paid_trial_period"),
         "paid_preset_hwid": cfg.get("paid_preset_hwid"),
@@ -1496,7 +1506,13 @@ async def subs_presets_get(request):
         "paid_lte_squads": cfg.get("paid_lte_squads"),
         "paid_lte_fallback_squad": cfg.get("paid_lte_fallback_squad"),
         "rw_squads": cfg.get("rw_squads"),
-    }, "squads": squads})
+    }, "squads": squads,
+        # Тумблер авто-триала — как кнопка «⚡ Авто-триал» в ТГ
+        # (paidsub/keyboards.py paid_presets_keyboard).
+        "auto_approve_trial": bool(cfg.get("auto_approve_trial", False)),
+        "device_price": cfg.get("device_price"),
+        "device_max_extra": cfg.get("device_max_extra"),
+        "payment": payment})
 
 
 async def subs_presets_patch(request):
@@ -1508,14 +1524,32 @@ async def subs_presets_patch(request):
     body = await _json_body(request)
     allowed = {"paid_trial_period", "paid_preset_hwid", "paid_preset_traffic",
                "paid_preset_lte", "paid_lte_squads",
-               "paid_lte_fallback_squad", "rw_squads"}
+               "paid_lte_fallback_squad", "rw_squads",
+               "auto_approve_trial"}
     patch = {}
+    pop_keys = []
     for k, v in body.items():
         if k not in allowed:
             return web.json_response({"error": "forbidden_keys", "keys": [k]},
                                      status=403)
-        if k in ("paid_trial_period", "paid_preset_hwid",
-                 "paid_preset_traffic", "paid_preset_lte"):
+        if k == "auto_approve_trial":
+            if not isinstance(v, bool):
+                return web.json_response({"error": "bad_value"}, status=400)
+        elif k == "paid_trial_period":
+            # В ТГ пробный период вводится свободной длительностью, а 0
+            # (parse_duration("0")) не сохраняется — так и здесь.
+            if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+                return web.json_response({"error": "bad_value"}, status=400)
+        elif k in ("paid_preset_hwid",
+                 "paid_preset_traffic"):
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                return web.json_response({"error": "bad_value"}, status=400)
+        elif k == "paid_preset_lte":
+            # null — как "-" в ТГ: ключ удаляется, действует 30 ГБ
+            # по умолчанию (lte_limit_gb с preset=None).
+            if v is None:
+                pop_keys.append(k)
+                continue
             if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 return web.json_response({"error": "bad_value"}, status=400)
         elif k in ("paid_lte_squads", "rw_squads"):
@@ -1531,12 +1565,14 @@ async def subs_presets_patch(request):
             if v is not None and not isinstance(v, str):
                 return web.json_response({"error": "bad_value"}, status=400)
         patch[k] = v
-    if patch:
+    if patch or pop_keys:
         def _apply(cfg):
             cfg.update(patch)
+            for k in pop_keys:
+                cfg.pop(k, None)
         atomic_update(_apply)
     await _audit(actor, "subs_presets_update",
-                 "keys: " + ", ".join(sorted(patch)))
+                 "keys: " + ", ".join(sorted(set(patch) | set(pop_keys))))
     return web.json_response({"ok": True})
 
 

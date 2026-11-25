@@ -413,8 +413,8 @@ label.chk input{width:auto;margin:0}
           <button id="btn-bulk">Применить к выборке</button>
           <div id="bulk-out"></div>
         </div>
-        <div class="card"><h2>Пресеты подписок</h2><p class="sub">Значения по умолчанию для новых платных подписок.</p>
-          <div class="btnrow"><button id="btn-presets" class="ghost">Показать пресеты</button></div>
+        <div class="card"><h2>⚙️ Настройки подписок</h2><p class="sub">Значения по умолчанию для новых платных подписок — как экран «Настройки подписок» в ТГ.</p>
+          <div class="btnrow"><button id="btn-presets" class="ghost">Обновить</button></div>
           <div id="presets-out"></div>
         </div>
         <div class="card"><h2>🗂 Сквады Remnawave</h2><p class="sub">Какие сквады получают новые платные подписки, какой из них считается LTE и какой включить после конца LTE-трафика — как экран «🗂 Сквады Remnawave» в ТГ. Нажми на сквад, чтобы отметить или снять отметку, — применяется сразу.</p>
@@ -1869,7 +1869,7 @@ $("subs-table").addEventListener("click", function(e){
   if (tr) openSubEditor(parseInt(tr.dataset.subId, 10));
 });
 document.querySelector('[data-nav="subs"]').addEventListener("click", function(){
-  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); loadBulkScopes(); loadCreateOptions(); loadSquads(); }
+  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); loadBulkScopes(); loadCreateOptions(); loadSquads(); loadPresets(); }
 });
 
 /* --- Админские подписки: список с вкладками --- */
@@ -2256,29 +2256,86 @@ $("btn-create-sub").onclick = async function(){
   $("create-tg").value = "";
   loadSubs(1);
 };
-$("btn-presets").onclick = async function(){
-  const r = await api("/subs/presets");
-  renderOut("presets-out", r.data);
-  if (r.status === 200 && r.data.presets) {
-    const p = r.data.presets;
-    const div = document.createElement("div");
-    div.innerHTML = '<h3>Изменить пресеты</h3>' +
-      '<label>Триал, дней<input id="pr-trial" type="number" value="' + Math.round((p.paid_trial_period || 0) / 86400) + '"></label>' +
-      '<label>Лимит устройств<input id="pr-hwid" type="number" value="' + (p.paid_preset_hwid || 0) + '"></label>' +
-      '<label>Лимит трафика, ГБ<input id="pr-traffic" type="number" value="' + (p.paid_preset_traffic || 0) + '"></label>' +
-      '<label>Лимит LTE, ГБ<input id="pr-lte" type="number" value="' + (p.paid_preset_lte || 0) + '"></label>' +
-      '<button id="btn-pr-save" class="ghost">Сохранить пресеты</button>';
-    $("presets-out").appendChild(div);
-    $("btn-pr-save").onclick = async function(){
-      const rr = await api("/subs/presets", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({
-        paid_trial_period: parseInt($("pr-trial").value || "0", 10) * 86400,
-        paid_preset_hwid: parseInt($("pr-hwid").value || "0", 10),
-        paid_preset_traffic: parseInt($("pr-traffic").value || "0", 10),
-        paid_preset_lte: parseInt($("pr-lte").value || "0", 10)})});
-      toast(rr.status === 200 ? "Пресеты сохранены" : "Ошибка: " + (rr.data.error || rr.status), rr.status === 200 ? "ok" : "err");
-    };
-  }
-};
+/* --- Настройки подписок: паритет с ТГ (paidsub/handlers.py
+   handle_paid_presets_menu + _fmt_presets + paid_presets_keyboard):
+   пробный период свободной длительностью, авто-триал, оплата,
+   лимиты, выдаваемые сквады, цена/максимум докупа. --- */
+async function loadPresets(){
+  let r;
+  try { r = await api("/subs/presets"); }
+  catch(e) { $("presets-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  renderPresets(r);
+}
+function presetTrafficText(v){
+  if (v == null) return "не задан";
+  if (!v) return "безлимит";
+  return v + " ГБ";
+}
+function presetLteText(v){
+  if (v == null) return "30 ГБ (по умолчанию)";
+  return v + " ГБ";
+}
+function renderPresets(r){
+  const box = $("presets-out");
+  if (r.status !== 200) { box.innerHTML = '<p class="err">Ошибка: ' + esc((r.data && r.data.error) || r.status) + '</p>'; return; }
+  const d = r.data || {}, p = d.presets || {};
+  const names = {};
+  ((d.squads && d.squads.squads) || []).forEach(function(s){ names[s.uuid] = s.name; });
+  const issued = (p.rw_squads || []).map(function(u){ return names[u] || u; });
+  const pay = d.payment || {};
+  const auto = !!d.auto_approve_trial;
+  let h = '<p class="sub">Применяются только к новым подпискам. У выданных условия зафиксированы при создании — меняются в самой подписке. Исключение: LTE-пресет подхватывают и старые подписки без своего лимита.</p>';
+  h += '<h3>⏱ Сроки</h3><dl class="kv">' + kvRow("🆓 Пробный период", p.paid_trial_period ? fmtDur(p.paid_trial_period) : "не задан") + '</dl>';
+  h += '<div class="btnrow"><input id="pr-trial-in" placeholder="Пробный период: 7 дней" autocomplete="off"><button class="ghost" type="button" id="pr-trial-save">Сохранить</button></div><div id="pr-trial-msg" class="mut"></div>';
+  h += '<div class="btnrow"><button class="ghost" type="button" id="pr-auto">' + (auto ? "⚡ Авто-триал · вкл ✅" : "⚡ Авто-триал · выкл") + '</button></div><div id="pr-auto-msg" class="mut"></div>';
+  h += '<h3>💳 Оплата</h3><dl class="kv">' + kvRow("Platega", pay.configured ? ("merchant " + (pay.merchant || "задан")) : "⚠️ ключи не заданы") + '</dl>';
+  h += '<div class="btnrow"><button class="ghost" type="button" id="pr-tariffs">🏷 Тарифы</button></div>';
+  h += '<h3>📊 Лимиты</h3><dl class="kv">' + kvRow("🖥 Устройств", p.paid_preset_hwid == null ? "не задан" : (p.paid_preset_hwid ? p.paid_preset_hwid : "безлимит")) + kvRow("📶 Трафик", presetTrafficText(p.paid_preset_traffic)) + kvRow("🌐 LTE новых подписок", presetLteText(p.paid_preset_lte)) + '</dl>';
+  h += '<div class="btnrow"><input id="pr-hwid-in" placeholder="Устройств: число, 0 — безлимит" autocomplete="off"><button class="ghost" type="button" id="pr-hwid-save">Сохранить</button></div><div id="pr-hwid-msg" class="mut"></div>';
+  h += '<div class="btnrow"><input id="pr-traffic-in" placeholder="Трафик, ГБ или «-» — безлимит" autocomplete="off"><button class="ghost" type="button" id="pr-traffic-save">Сохранить</button></div><div id="pr-traffic-msg" class="mut"></div>';
+  h += '<div class="btnrow"><input id="pr-lte-in" placeholder="LTE, ГБ или «-» — 30 ГБ по умолчанию" autocomplete="off"><button class="ghost" type="button" id="pr-lte-save">Сохранить</button></div><div id="pr-lte-msg" class="mut"></div>';
+  h += '<h3>🗂 Сквады Remnawave</h3><dl class="kv">' + kvRow("Выдаём", issued.length ? issued.join(", ") : "не выбраны") + '</dl>';
+  h += '<div class="btnrow"><button class="ghost" type="button" id="pr-squads">🗂 Сквады Remnawave</button></div>';
+  h += '<h3>📱 Устройства</h3><dl class="kv">' + kvRow("Цена доп. устройства", d.device_price ? d.device_price + " ₽" : "не задана") + kvRow("Максимум докупа", d.device_max_extra == null ? "не задан" : d.device_max_extra) + '</dl>';
+  h += '<p class="mut">Цена и максимум докупа меняются в Настройках.</p><div class="btnrow"><button class="ghost" type="button" id="pr-settings">⚙️ Настройки</button></div>';
+  box.innerHTML = h;
+  $("pr-trial-save").onclick = async function(){
+    const sec = parseDuration($("pr-trial-in").value);
+    if (!sec) { $("pr-trial-msg").textContent = "Не удалось распознать. Примеры: «5 часов», «7 дней», «2 недели»."; return; }
+    await savePreset({paid_trial_period: sec}, "pr-trial-msg", "Пробный период сохранён");
+  };
+  $("pr-auto").onclick = async function(){
+    await savePreset({auto_approve_trial: !auto}, "pr-auto-msg", "Авто-триал " + (auto ? "выключен" : "включён"));
+  };
+  $("pr-hwid-save").onclick = async function(){
+    const v = $("pr-hwid-in").value.trim();
+    if (!/^\d+$/.test(v)) { $("pr-hwid-msg").textContent = "Введи число (0 — безлимит)."; return; }
+    await savePreset({paid_preset_hwid: parseInt(v, 10)}, "pr-hwid-msg", "Лимит устройств сохранён");
+  };
+  $("pr-traffic-save").onclick = async function(){
+    const v = $("pr-traffic-in").value.trim();
+    if (v === "-") { await savePreset({paid_preset_traffic: 0}, "pr-traffic-msg", "Трафик: безлимит"); return; }
+    if (!/^\d+$/.test(v)) { $("pr-traffic-msg").textContent = "Число ГБ или «-»."; return; }
+    await savePreset({paid_preset_traffic: parseInt(v, 10)}, "pr-traffic-msg", "Трафик сохранён");
+  };
+  $("pr-lte-save").onclick = async function(){
+    const v = $("pr-lte-in").value.trim();
+    if (v === "-") { await savePreset({paid_preset_lte: null}, "pr-lte-msg", "LTE: 30 ГБ по умолчанию"); return; }
+    if (!/^\d+$/.test(v)) { $("pr-lte-msg").textContent = "Число ГБ или «-»."; return; }
+    await savePreset({paid_preset_lte: parseInt(v, 10)}, "pr-lte-msg", "LTE сохранён");
+  };
+  $("pr-tariffs").onclick = function(){ showSection("tariffs"); window.scrollTo(0, 0); };
+  $("pr-squads").onclick = function(){ const el = $("squads-out"); if (el) el.scrollIntoView(); };
+  $("pr-settings").onclick = function(){ showSection("settings"); window.scrollTo(0, 0); };
+}
+async function savePreset(body, msgId, okText){
+  const r = await api("/subs/presets", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+  if (r.status !== 200) { $(msgId).textContent = "Ошибка: " + ((r.data && r.data.error) || r.status); return; }
+  $(msgId).textContent = "";
+  toast(okText, "ok");
+  loadPresets();
+}
+$("btn-presets").onclick = function(){ loadPresets(); };
 /* --- Сквады Remnawave: паритет с «🗂 Сквады Remnawave» в ТГ
    (paidsub/handlers.py handle_paid_squads_menu): выдаваемые сквады,
    сквад LTE-серверов, сквад после конца LTE; тумблеры — мгновенные,
@@ -3636,11 +3693,31 @@ async function loadHealth(){
   h += "</tbody></table></div>";
   const nds = sv.nodes || [];
   if (nds.length) {
+    const working = nds.filter(function(n){ return n.enabled; });
+    const up = working.filter(function(n){ return n.reachable; }).length;
+    h += '<p class="sub">🖧 Узлы — в строю <b>' + up + ' из ' + working.length + '</b></p>';
     h += '<h3>Ноды по данным панели</h3><div class="tblwrap"><table><thead><tr><th>Нода</th><th>Адрес</th><th>Xray</th><th>Онлайн</th><th>Статус</th></tr></thead><tbody>';
     nds.forEach(function(n){
       h += "<tr><td>" + esc(n.tag || "") + '</td><td class="mono">' + esc(n.host || "") + '</td><td>' + esc(n.xray || "—") + '</td><td class="num">' + (n.clients || 0) + "</td><td>" + (!n.enabled ? '<span class="pill warn">Выключена</span>' : n.reachable ? '<span class="pill ok">Доступна</span>' : '<span class="pill bad">' + esc(n.error || "Недоступна") + "</span>") + "</td></tr>";
     });
     h += "</tbody></table></div>";
+  }
+  // Блок «Срок не применился» и сводка проблем — как в ТГ handle_healthcheck.
+  const ef = r.data.expire_fail;
+  if (ef) {
+    h += '<h3>⚠️ Срок не применился</h3><blockquote>Клиент: <code>' + esc(ef.email || "") + '</code><br>Ставили: <b>' + esc(ef.wanted || "") + '</b><br>Когда: ' + esc(ef.at || "") + '<br><code>' + esc(ef.error || "") + '</code></blockquote><p class="mut">У этого клиента срок в панели разошёлся с базой — проверь его вручную.</p>';
+  }
+  const problems = [];
+  if (sv.panel && !sv.panel.ok) problems.push("панель не отвечает — бот не сможет выдавать и продлевать ключи");
+  if (ef) problems.push("срок не применился у " + (ef.email || ""));
+  if (sv.sub && !sv.sub.ok) problems.push("ссылки подписок не отдаются — выданные ключи не обновятся у клиентов");
+  const dead = nds.filter(function(n){ return n.enabled && !n.reachable; }).map(function(n){ return n.tag; });
+  if (dead.length) problems.push("узел не в строю: " + dead.slice(0, 5).join(", "));
+  if (sv.panel && sv.panel.ok && !nds.length) problems.push("в панели нет узлов");
+  if (problems.length) {
+    h += '<h3>⚠️ Проблемы</h3><blockquote>' + problems.map(function(p){ return "• " + esc(p); }).join("<br>") + '</blockquote>';
+  } else if (sv.panel && sv.panel.ok) {
+    h += '<h3>✅ Всё работает</h3>';
   }
   const siteKeys = Object.keys(sites);
   if (siteKeys.length) {

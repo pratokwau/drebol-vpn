@@ -135,7 +135,11 @@ async def nodes(request):
     except Exception as ex:
         logging.error("админка: probe_sites: %s", ex)
         sites = {}
-    return web.json_response({"servers": servers, "sites": sites})
+    # Последний неприменённый срок — как блок «Срок не применился» в ТГ
+    # handle_healthcheck: панель помнит его в services.panel.LAST_EXPIRE_FAIL.
+    expire_fail = getattr(panel_mod, "LAST_EXPIRE_FAIL", None)
+    return web.json_response({"servers": servers, "sites": sites,
+                              "expire_fail": expire_fail})
 
 
 async def squads(request):
