@@ -795,9 +795,13 @@ body.tg-fullscreen .tabs { top:96px; }
      return;
    }
    if (!p.subscription) {
+     if (p.admin_subscription) {
+       out.push('<div data-sec="sub">' + adminSubCard(p.admin_subscription) + "</div>");
+     } else {
      out.push('<div class="card hero">' + title("key", "Подписки пока нет") +
               '<p class="card-sub">Оформите её в боте — пробный период выдаётся сразу.</p>' +
               '<a class="btn btn-main" href="' + botUrl() + '">' + ICON.tg + "Оформить в боте</a></div>");
+     }
      var ref0 = referralCard(p);
      if (ref0) { out.push('<div data-sec="friends">' + ref0 + "</div>"); }
      var pay0 = paymentsCard(p);
@@ -844,6 +848,9 @@ body.tg-fullscreen .tabs { top:96px; }
             '<div class="stack" style="margin-top:16px"><button class="btn btn-main" type="button" id="renew-open">' +
             ICON.card + "Продлить подписку</button></div>" +
             "</div></div>");
+   if (p.admin_subscription) {
+     out.push('<div data-sec="sub">' + adminSubCard(p.admin_subscription) + "</div>");
+   }
 
    // Продление: тарифы и оплата прямо здесь, без ухода в бот
    out.push('<div data-sec="sub"><div class="card" id="renew-card">' + title("card", "Продление") +
@@ -1033,6 +1040,28 @@ body.tg-fullscreen .tabs { top:96px; }
  }
 
  // Рефералка: статистика и ссылка — имя бота страница уже знает (BOT)
+ // Админская подписка — как экран «🪪 Админская подписка» в боте:
+ // срок, трафик, живой статус из панели, ссылка с копированием.
+ function adminSubCard(a) {
+   var mark = a.enabled === true ? pill("активна", "ok")
+            : a.enabled === false ? pill("отключена", "bad")
+            : pill("статус неизвестен", "warn");
+   return '<div class="card">' + title("key", "Админская подписка") +
+     '<div class="hero-head"><span class="plan">🪪 Служебная</span>' + mark + "</div>" +
+     row("Действует до", esc(fmtDate(a.until) || a.until)) +
+     row("Трафик", esc(a.traffic_text)) +
+     '<p class="card-sub">Скопируйте ссылку и вставьте в приложение (INCY, Happ и др.).</p>' +
+     '<div class="link"><code>' + esc(a.url) + "</code>" +
+     '<button class="copy" type="button" data-copy="' + esc(a.url) + '">Скопировать</button></div></div>';
+ }
+ // Правила бонусов — как шапка handle_referral в боте.
+ function refRules(r) {
+   var lines = [];
+   if (r.bonus) { lines.push("🎁 Вам: <b>+" + esc(r.bonus) + "</b> за каждого друга"); }
+   if (r.invited_bonus) { lines.push("🤝 Другу: <b>+" + esc(r.invited_bonus) + "</b> при регистрации"); }
+   if (!lines.length) { return ""; }
+   return '<p class="card-sub">' + lines.join("<br>") + "</p>";
+ }
  function referralCard(p) {
    if (!p.referral) { return ""; }
    var r = p.referral;
@@ -1043,6 +1072,7 @@ body.tg-fullscreen .tabs { top:96px; }
      '<p class="card-sub">Приглашено: <b style="color:var(--ink)">' + esc(r.invited) + "</b>" +
      " · бонус получили: <b style=\"color:var(--ink)\">" + esc(r.rewarded) + "</b>" +
      (r.bonus_text ? " · вам начислено: <b style=\"color:var(--ink)\">+" + esc(r.bonus_text) + "</b>" : "") + "</p>" +
+     refRules(r) +
      '<div class="link"><code id="reflink">' + esc(link) + "</code>" +
      '<button class="copy" type="button" data-copy="' + esc(link) + '">Скопировать</button></div>' +
      referralList(r) +

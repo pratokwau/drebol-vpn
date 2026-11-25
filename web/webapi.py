@@ -249,6 +249,11 @@ async def profile(tg_id: int) -> dict:
             })
         out["referral"]["list"] = items
         out["referral"]["list_total"] = len(lst)
+        # Правила бонусов — как шапка handle_referral в боте.
+        from config import load_config as _lc
+        _cfg = _lc()
+        out["referral"]["bonus"] = fmt_duration(_cfg.get("referral_bonus")) if _cfg.get("referral_bonus") else ""
+        out["referral"]["invited_bonus"] = fmt_duration(_cfg.get("referral_invited_bonus")) if _cfg.get("referral_invited_bonus") else ""
     except Exception:
         pass
     ble = await bl_entry(tg_id)
@@ -256,8 +261,58 @@ async def profile(tg_id: int) -> dict:
         out["blocked"] = {"kind": "blacklist", "reason": public_reason(ble["reason"])}
         return out
 
+    # Админская подписка — как экран «🪪 Админская подписка» в боте
+    # (handle_my_sub): срок, трафик, живой статус из панели, ссылка.
+    # Независима от платной: показывается и когда платной нет.
+    admin_row = None
+    try:
+        from adminsub.storage import get_sub_by_tg_id
+        admin_row = await get_sub_by_tg_id(tg_id)
+    except Exception:
+        admin_row = None
+    if admin_row:
+        from config import sub_url_for_display
+        from services.panel import get_client_info
+        a_total = admin_row[9] or 0
+        a_enabled = None
+        try:
+            a_info = await get_client_info(admin_row[2])
+            if a_info.get("success"):
+                a_enabled = bool(a_info.get("enabled", True))
+        except Exception:
+            a_enabled = None
+        out["admin_subscription"] = {
+            "until": str(admin_row[6] or ""),
+            "traffic_text": f"{a_total} ГБ" if a_total > 0 else "безлимит",
+            "enabled": a_enabled,
+            "url": sub_url_for_display(admin_row[5] or ""),
+        }
+
     row = await get_paid_sub_by_tg_id(tg_id)
     if not row:
+        if admin_row:
+            # LTE админской подписки — как handle_my_lte kind="admin":
+            # расход за месяц по админской почте, лимит из preset_lte.
+            try:
+                from config import load_config
+                from services.remnawave import is_configured, lte_limit_gb, make_username, user_cdn_usage
+                a_limit = lte_limit_gb(admin_row[11] if len(admin_row) > 11 else None,
+                                       load_config().get("preset_lte"))
+                if a_limit == 0:
+                    out["lte"] = {"available": True, "closed": True, "limit_gb": 0}
+                elif is_configured():
+                    r = await user_cdn_usage(make_username(admin_row[2] or "", 0))
+                    if r.get("ok") and r.get("cdn_nodes"):
+                        a_used = int(r["used_bytes"] or 0)
+                        out["lte"] = {
+                            "available": True, "closed": False,
+                            "limit_gb": int(a_limit),
+                            "used": a_used, "used_text": _fmt_bytes(a_used),
+                            "left_gb": round(max(0.0, a_limit - a_used / 1024 ** 3), 2),
+                            "fallback_active": False,
+                        }
+            except Exception:
+                pass
         return out
 
     email, sub_url, limit_hwid = row[2], row[5], row[8]
