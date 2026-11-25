@@ -417,6 +417,11 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-presets" class="ghost">Показать пресеты</button></div>
           <div id="presets-out"></div>
         </div>
+        <div class="card"><h2>🗂 Сквады Remnawave</h2><p class="sub">Какие сквады получают новые платные подписки, какой из них считается LTE и какой включить после конца LTE-трафика — как экран «🗂 Сквады Remnawave» в ТГ. Нажми на сквад, чтобы отметить или снять отметку, — применяется сразу.</p>
+          <div class="btnrow"><button id="btn-squads" class="ghost">Показать сквады</button><button id="btn-squads-lte" class="ghost">🔍 Проверить LTE сейчас</button></div>
+          <div id="squads-out"></div>
+          <div id="squads-lte-out"></div>
+        </div>
         <div class="card"><h2>Админские подписки</h2><p class="sub">Подписки, выданные вручную администратором. Вкладки и сортировка — как в ТГ, нажми на строку, чтобы открыть карточку со всеми действиями: заморозка, продление, устройства, история.</p>
           <div class="btnrow" id="asub-tabs" style="flex-wrap:wrap"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -1864,7 +1869,7 @@ $("subs-table").addEventListener("click", function(e){
   if (tr) openSubEditor(parseInt(tr.dataset.subId, 10));
 });
 document.querySelector('[data-nav="subs"]').addEventListener("click", function(){
-  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); loadBulkScopes(); loadCreateOptions(); }
+  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); loadBulkScopes(); loadCreateOptions(); loadSquads(); }
 });
 
 /* --- Админские подписки: список с вкладками --- */
@@ -2273,6 +2278,73 @@ $("btn-presets").onclick = async function(){
       toast(rr.status === 200 ? "Пресеты сохранены" : "Ошибка: " + (rr.data.error || rr.status), rr.status === 200 ? "ok" : "err");
     };
   }
+};
+/* --- Сквады Remnawave: паритет с «🗂 Сквады Remnawave» в ТГ
+   (paidsub/handlers.py handle_paid_squads_menu): выдаваемые сквады,
+   сквад LTE-серверов, сквад после конца LTE; тумблеры — мгновенные,
+   как в ТГ; «Проверить LTE сейчас» — тот же lte_fallback_tick. */
+let lastSquads = null;
+async function loadSquads(){
+  let r;
+  try { r = await api("/subs/squads"); }
+  catch(e) { $("squads-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  renderSquads(r);
+}
+function squadRow(s, kind, checked){
+  var label = esc(s.name) + ' <span class="mut">· ' + s.inbounds + ' инб · ' + s.members + ' чел</span>';
+  return '<tr data-uuid="' + esc(s.uuid) + '" data-kind="' + kind + '"><td>' + (checked ? '✅ ' : '') + label + '</td></tr>';
+}
+function renderSquads(r){
+  var box = $("squads-out");
+  if (r.status !== 200) { box.innerHTML = '<p class="err">Ошибка: ' + esc((r.data && r.data.error) || r.status) + '</p>'; return; }
+  var d = r.data || {};
+  lastSquads = d;
+  if (!d.panel_ok) { box.innerHTML = '<p class="err">⚠️ Панель Remnawave недоступна — список сквадов получить не удалось. Попробуй позже.</p>'; return; }
+  var sq = d.squads || [];
+  var h = '<dl class="kv">' + kvRow('LTE-трафик в месяц', d.lte_limit == null ? '30 ГБ (по умолчанию)' : esc(String(d.lte_limit)) + ' ГБ') + '</dl>';
+  var warns = d.warnings || [];
+  if (warns.length) {
+    h += warns.map(function(w){ return '<div style="margin-top:6px"><span class="pill warn">⚠️ ' + esc(w.text) + '</span></div>'; }).join('');
+  }
+  if (!sq.length) { h += '<div class="empty">В панели нет сквадов</div>'; box.innerHTML = h; return; }
+  h += '<h3>🗂 Выдаваемые сквады</h3><p class="mut">Новые платные подписки получают отмеченные. В их число должен входить и сквад LTE-серверов.</p><div class="tblwrap"><table><tbody>';
+  h += sq.map(function(s){ return squadRow(s, 'issued', s.issued); }).join('');
+  h += '</tbody></table></div>';
+  h += '<h3>📡 Сквад LTE-серверов</h3><p class="mut">Именно их бот отключит, когда у подписки кончится LTE-трафик. Можно выбрать несколько.</p><div class="tblwrap"><table><tbody>';
+  h += sq.map(function(s){ return squadRow(s, 'lte', s.lte); }).join('');
+  h += '</tbody></table></div>';
+  h += '<h3>🔀 Сквад после конца LTE</h3><p class="mut">Его инбаунды получит подписка, когда её месячный LTE-трафик закончится. В новом месяце бот вернёт обычные сквады сам.</p><div class="tblwrap"><table><tbody>';
+  h += sq.map(function(s){ return squadRow(s, 'fallback', s.fallback); }).join('');
+  h += '<tr data-uuid="" data-kind="fallback"><td>🚫 Не переключать</td></tr>';
+  h += '</tbody></table></div>';
+  box.innerHTML = h;
+}
+$("squads-out").addEventListener("click", async function(e){
+  var tr = e.target.closest("tr[data-kind]");
+  if (!tr) return;
+  var kind = tr.dataset.kind;
+  var uuid = tr.dataset.uuid || null;
+  var url = kind === "fallback" ? "/subs/squads/fallback" : "/subs/squads/" + kind;
+  var r = await api(url, {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({uuid: uuid})});
+  if (r.status !== 200) { toast("Ошибка: " + ((r.data && r.data.error) || r.status), "err"); return; }
+  loadSquads();
+});
+$("btn-squads").onclick = function(){ loadSquads(); };
+$("btn-squads-lte").onclick = async function(){
+  var r = await postConfirm("/subs/lte/check-now", {});
+  var box = $("squads-lte-out");
+  if (r.status !== 200) { box.innerHTML = '<p class="err">Ошибка: ' + esc((r.data && r.data.error) || r.status) + ((r.data && r.data.details) ? ' — ' + esc(r.data.details) : '') + '</p>'; return; }
+  var d = r.data || {};
+  var h = '<p class="ok">✅ Проверка LTE завершена</p><dl class="kv">';
+  h += kvRow('🔀 Переведено на fallback-сквад', fmtNum(d.switched));
+  h += kvRow('↩️ Возвращено на обычные сквады', fmtNum(d.restored));
+  h += kvRow('👥 Проверено подписок', fmtNum(d.checked));
+  if (d.panel_fail) h += kvRow('⚠️ Панель не приняла', fmtNum(d.panel_fail));
+  h += '</dl>';
+  var warns = (lastSquads && lastSquads.warnings) || [];
+  if (warns.length) h += warns.map(function(w){ return '<div style="margin-top:6px"><span class="pill warn">⚠️ ' + esc(w.text) + '</span></div>'; }).join('');
+  box.innerHTML = h;
+  loadSquads();
 };
 $("btn-asub").onclick = withSpin($("btn-asub"), async function(){
   const r = await api("/admin-subs", {method: "POST", headers: {"X-CSRF-Token": csrf()},

@@ -1518,6 +1518,18 @@ async def subs_presets_patch(request):
                  "paid_preset_traffic", "paid_preset_lte"):
             if isinstance(v, bool) or not isinstance(v, int) or v < 0:
                 return web.json_response({"error": "bad_value"}, status=400)
+        elif k in ("paid_lte_squads", "rw_squads"):
+            # Ключи сквадов раньше принимались без проверки — любой мусор
+            # (строка вместо списка, числа) писался в config.json и ломал
+            # lte_fallback_tick. UUID против панели здесь не сверяем:
+            # PATCH не должен зависеть от доступности панели, полная
+            # проверка — в тумблерах /subs/squads/* ниже.
+            if (not isinstance(v, list)
+                    or any(not isinstance(x, str) for x in v)):
+                return web.json_response({"error": "bad_value"}, status=400)
+        elif k == "paid_lte_fallback_squad":
+            if v is not None and not isinstance(v, str):
+                return web.json_response({"error": "bad_value"}, status=400)
         patch[k] = v
     if patch:
         def _apply(cfg):
@@ -1526,6 +1538,176 @@ async def subs_presets_patch(request):
     await _audit(actor, "subs_presets_update",
                  "keys: " + ", ".join(sorted(patch)))
     return web.json_response({"ok": True})
+
+
+# ── Сквады Remnawave ───────────────────────────────────────────────────────
+# Паритет с ТГ (paidsub/handlers.py handle_paid_squads_menu +
+# handle_paid_issued_squads / handle_paid_lte_squads /
+# handle_paid_lte_fallback): какие сквады получают новые платные подписки
+# (rw_squads), какой из них считается LTE (paid_lte_squads — его бот
+# отключит при конце трафика) и какой включить вместо него
+# (paid_lte_fallback_squad). Тумблеры — мгновенные, как в ТГ: тот же
+# ключ конфига, та же запись через atomic_update. Гейт — как у пресетов
+# (_require_mutation, без mark-only): чувствительность та же, что у
+# PATCH /subs/presets, который эти же ключи и пишет.
+
+_SQUAD_WARN_TEXT = {
+    "no_lte_squad": "Не выбран сквад LTE-серверов — бот не знает, что отключать при конце LTE-трафика.",
+    "lte_not_issued": "Сквад LTE-серверов не входит в выдаваемые — новые подписки его не получат, и отключать будет нечего.",
+    "no_fallback": "Не выбран сквад после конца LTE — переключения не будет, доступ просто останется как есть.",
+}
+
+
+async def _panel_squads():
+    """Список сквадов панели: (ok, squads) — та же list_squads(), что в ТГ."""
+    try:
+        from services.remnawave import list_squads
+        r = await list_squads()
+    except Exception:
+        return False, []
+    if not r.get("ok"):
+        return False, []
+    return True, r.get("squads") or []
+
+
+def _squad_warnings(cfg, squads, panel_ok):
+    """Предупреждения — те же смыслы, что в ТГ (handle_paid_squads_menu
+    и handle_paid_lte_check_now): LTE-сквад обязан быть в выдаваемых,
+    фолбэк — выбран; плюс выбранные uuid, которых нет в панели."""
+    issued = set(cfg.get("rw_squads") or [])
+    lte = set(cfg.get("paid_lte_squads") or [])
+    fallback = cfg.get("paid_lte_fallback_squad")
+    warnings = []
+    if not lte:
+        warnings.append({"code": "no_lte_squad",
+                         "text": _SQUAD_WARN_TEXT["no_lte_squad"]})
+    elif not lte <= issued:
+        warnings.append({"code": "lte_not_issued",
+                         "text": _SQUAD_WARN_TEXT["lte_not_issued"]})
+    if not fallback:
+        warnings.append({"code": "no_fallback",
+                         "text": _SQUAD_WARN_TEXT["no_fallback"]})
+    if panel_ok:
+        known = {s.get("uuid") for s in squads}
+        where = (("rw_squads", "выдаваемых", issued),
+                 ("paid_lte_squads", "LTE-серверов", lte))
+        for key, label, chosen in where:
+            for u in sorted(chosen - known):
+                warnings.append({
+                    "code": "unknown_squad",
+                    "text": f"В {label} выбран сквад, которого нет в панели: "
+                            f"{str(u)[:8]}… ({key})"})
+        if fallback and fallback not in known:
+            warnings.append({
+                "code": "unknown_squad",
+                "text": "Сквад после конца LTE отсутствует в панели: "
+                        f"{str(fallback)[:8]}… (paid_lte_fallback_squad)"})
+    return warnings
+
+
+async def subs_squads_get(request):
+    """Сквады Remnawave: список панели с флагами, лимит LTE и
+    предупреждения. Только чтение."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from config import load_config
+    cfg = load_config()
+    panel_ok, squads = await _panel_squads()
+    issued = set(cfg.get("rw_squads") or [])
+    lte = set(cfg.get("paid_lte_squads") or [])
+    fallback = cfg.get("paid_lte_fallback_squad")
+    return web.json_response({
+        "panel_ok": panel_ok,
+        "lte_limit": cfg.get("paid_preset_lte"),
+        "squads": [{"uuid": s.get("uuid"), "name": s.get("name") or "без имени",
+                    "inbounds": s.get("inbounds") or 0,
+                    "members": s.get("members") or 0,
+                    "issued": s.get("uuid") in issued,
+                    "lte": s.get("uuid") in lte,
+                    "fallback": s.get("uuid") == fallback}
+                   for s in squads],
+        "warnings": _squad_warnings(cfg, squads, panel_ok)})
+
+
+async def _squads_toggle(request, key, audit_action):
+    """Мгновенный тумблер сквада (выдаваемые / LTE): тот же смысл, что
+    handle_paid_issued_squad_toggle / handle_paid_lte_squad_toggle в ТГ.
+    UUID обязан быть в списке панели — иначе запись не происходит."""
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    uuid = body.get("uuid")
+    if not isinstance(uuid, str) or not uuid:
+        return web.json_response({"error": "bad_squad"}, status=400)
+    panel_ok, squads = await _panel_squads()
+    if not panel_ok:
+        return web.json_response({"error": "panel_failed"}, status=502)
+    if uuid not in {s.get("uuid") for s in squads}:
+        return web.json_response({"error": "bad_squad"}, status=400)
+    from config import atomic_update
+
+    def _apply(cfg):
+        chosen = list(cfg.get(key) or [])
+        if uuid in chosen:
+            chosen.remove(uuid)
+        else:
+            chosen.append(uuid)
+        cfg[key] = chosen
+
+    cfg = atomic_update(_apply)
+    chosen = list(cfg.get(key) or [])
+    await _audit(actor, audit_action,
+                 f"uuid={uuid} on={uuid in chosen}")
+    return web.json_response({"ok": True, "uuid": uuid,
+                              "enabled": uuid in chosen,
+                              "chosen": chosen})
+
+
+async def subs_squads_issued_toggle(request):
+    return await _squads_toggle(request, "rw_squads", "subs_squads_issued")
+
+
+async def subs_squads_lte_toggle(request):
+    return await _squads_toggle(request, "paid_lte_squads", "subs_squads_lte")
+
+
+async def subs_squads_fallback(request):
+    """Сквад после конца LTE: тот же смысл, что
+    handle_paid_lte_fallback_set в ТГ. uuid null (или пустая строка) —
+    «Не переключать», ключ удаляется из конфига."""
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    uuid = body.get("uuid")
+    if uuid == "":
+        uuid = None
+    if uuid is not None and not isinstance(uuid, str):
+        return web.json_response({"error": "bad_squad"}, status=400)
+    if uuid is not None:
+        panel_ok, squads = await _panel_squads()
+        if not panel_ok:
+            return web.json_response({"error": "panel_failed"}, status=502)
+        if uuid not in {s.get("uuid") for s in squads}:
+            return web.json_response({"error": "bad_squad"}, status=400)
+    from config import atomic_update
+
+    def _apply(cfg):
+        if uuid:
+            cfg["paid_lte_fallback_squad"] = uuid
+        else:
+            cfg.pop("paid_lte_fallback_squad", None)
+
+    atomic_update(_apply)
+    await _audit(actor, "subs_squads_fallback",
+                 f"uuid={uuid or 'off'}")
+    return web.json_response({"ok": True, "uuid": uuid})
 
 
 # ── Создание платной подписки ──────────────────────────────────────────────
@@ -1709,6 +1891,10 @@ def register(app) -> None:
     # /subs/presets и /subs/bulk/* в хендлеры подписок.
     app.router.add_get("/subs/presets", subs_presets_get)
     app.router.add_post("/subs/presets", subs_presets_patch)
+    app.router.add_get("/subs/squads", subs_squads_get)
+    app.router.add_post("/subs/squads/issued", subs_squads_issued_toggle)
+    app.router.add_post("/subs/squads/lte", subs_squads_lte_toggle)
+    app.router.add_post("/subs/squads/fallback", subs_squads_fallback)
     app.router.add_get("/subs/create-options", subs_create_options)
     app.router.add_post("/subs/create", subs_create)
     app.router.add_patch("/subs/presets", subs_presets_patch)

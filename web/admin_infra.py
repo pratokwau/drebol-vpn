@@ -520,6 +520,8 @@ _ADMIN_LABELS = {
     "helpers_perm": "👥 Сменил права помощника",
     "jobs_run_now": "▶️ Запустил фоновую задачу", "jobs_run_now_failed": "⚠️ Фоновая задача упала",
     "logs_purge": "🧹 Очистил старые логи", "lte_check_now": "📶 Ручная проверка LTE",
+    "subs_squads_issued": "🗂 Выдаваемые сквады: переключил", "subs_squads_lte": "📡 Сквад LTE: переключил",
+    "subs_squads_fallback": "🔀 Сквад после конца LTE: выбрал",
     "morning_run_now": "🌅 Запустил утреннюю сводку", "morning_update": "🌅 Настройки утренней сводки",
     "maintenance_feature": "🛠 Функция вкл/выкл", "maintenance_text": "🛠 Текст техработ",
     "maintenance_toggle": "🛠 Техработы вкл/выкл",
