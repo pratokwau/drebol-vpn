@@ -483,6 +483,24 @@ def _cors(response):
     return response
 
 
+# Ссылки магазинов для раздела «Инфо» — те же, что в боте на экране
+# «Как подключиться» (handlers/user.py handle_how_to).
+_INFO_APPS = {
+    "incy": {
+        "ios": "https://apps.apple.com/ru/app/incy/id6756943388",
+        "android": "https://play.google.com/store/apps/details?id=llc.itdev.incy&pli=1",
+        "windows": "https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe",
+        "macos": "https://apps.apple.com/ru/app/incy/id6756943388",
+    },
+    "happ": {
+        "ios": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+        "android": "https://play.google.com/store/apps/details?id=com.happproxy",
+        "windows": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+        "macos": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+    },
+}
+
+
 def build_app():
     from aiohttp import web
 
@@ -843,6 +861,57 @@ def build_app():
                           "status": r[3], "date": str(r[4] or "")[:16],
                           "promo": r[5] or ""} for r in rows],
             "payments_total": {"count": cnt, "sum": total},
+        })
+
+    async def info(request):
+        """Раздел «Инфо» в кабинете — то же, что экран «ℹ️ Инфо» в боте
+        (handlers/user.py: handle_info/handle_how_to/handle_about/
+        handle_prices): как подключиться, о сервисе, цены. Только чтение;
+        подписка не нужна — цены и инструкции нужны и до оформления."""
+        tg_id = await session_user(request)
+        if not tg_id:
+            return web.json_response({"error": "no_session"}, status=401)
+        from config import load_config
+        from core.database import list_tariffs
+        from paidsub.time_parser import fmt_duration
+        from web.site_deploy import doc_url
+        cfg = load_config()
+        trial = int(cfg.get("paid_trial_period") or 0)
+        tariffs = await list_tariffs(only_active=True)
+        out_tariffs = []
+        base = None
+        for _id, _name, period, price, _a, _s in tariffs:
+            per_month = (int(price) / (int(period) / 2592000)
+                         if period else None)
+            if base is None and per_month:
+                base = per_month
+            saving = None
+            if base and per_month and per_month < base * 0.97:
+                saving = round((1 - per_month / base) * 100)
+            out_tariffs.append({
+                "id": _id, "period": fmt_duration(period),
+                "price": int(price),
+                "per_month": round(per_month) if per_month else None,
+                "saving_pct": saving,
+            })
+        try:
+            from handlers.support import support_bot_url
+            support_url = support_bot_url()
+        except Exception:
+            support_url = ""
+        return web.json_response({
+            "trial": ({"seconds": trial, "text": fmt_duration(trial)}
+                      if trial else None),
+            "tariffs": out_tariffs,
+            "fallback_price": int(cfg.get("paid_price") or 0) or None,
+            "devices": int(cfg.get("paid_preset_hwid") or 0),
+            "device_price": int(cfg.get("device_price") or 0),
+            "traffic_gb": int(cfg.get("paid_preset_traffic") or 0),
+            "apps": _INFO_APPS,
+            "docs": {"privacy": doc_url("privacy"),
+                     "terms": doc_url("terms")},
+            "support_url": support_url,
+            "channel_url": cfg.get("channel_url") or "",
         })
 
     async def promo_apply(request):
@@ -1305,6 +1374,7 @@ def build_app():
     app.router.add_post("/api/profile/email", profile_email)
     app.router.add_post("/api/profile/password", profile_password)
     app.router.add_get("/api/me", me)
+    app.router.add_get("/api/info", info)
     app.router.add_get("/api/qr", qr)
     app.router.add_post("/api/logout", logout)
     app.router.add_post("/api/device/delete", device_delete)

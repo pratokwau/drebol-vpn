@@ -571,9 +571,10 @@ body.tg-fullscreen .tabs { top:96px; }
    phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M10.5 18.5h3"/></svg>',
    monitor: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M9 20.5h6M12 16.5v4"/></svg>',
    refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 3v4h-4"/></svg>',
-   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4.5 12.5 5 5 10-11"/></svg>'
+   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4.5 12.5 5 5 10-11"/></svg>',
+   info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="1" fill="currentColor" stroke="none"/></svg>'
  };
- var SEC_ICONS = {sub: "key", lte: "lte", devices: "dev", payments: "card", friends: "users", profile: "user"};
+ var SEC_ICONS = {sub: "key", lte: "lte", devices: "dev", payments: "card", friends: "users", profile: "user", info: "info"};
  function title(icon, text) {
    return '<div class="card-title"><span class="ico">' + ICON[icon] + "</span>" + esc(text) + "</div>";
  }
@@ -802,6 +803,8 @@ body.tg-fullscreen .tabs { top:96px; }
      var pay0 = paymentsCard(p);
      if (pay0) { out.push(pay0); }
      out.push(profileCard(p));
+     // Инфо: как подключиться, цены, о сервисе — как экран «ℹ️ Инфо» в боте.
+     out.push(infoCard());
      document.getElementById("body").innerHTML = out.join("");
      buildTabs();
      bindActions();
@@ -931,6 +934,9 @@ body.tg-fullscreen .tabs { top:96px; }
    if (ref) { out.push('<div data-sec="friends">' + ref + "</div>"); }
    out.push(profileCard(p));
 
+   // Инфо: как подключиться, цены, о сервисе — как экран «ℹ️ Инфо» в боте.
+   out.push(infoCard());
+
    out.push('<div class="stack" style="margin-top:6px">' +
             '<button class="btn btn-ghost" type="button" onclick="load()">' + ICON.refresh + "Обновить данные</button>" +
             (p.support_url ? '<a class="btn btn-ghost" href="' + esc(p.support_url) + '">🛟 Поддержка</a>' : "") +
@@ -948,7 +954,7 @@ body.tg-fullscreen .tabs { top:96px; }
  // тихое: раздел меняется на месте, без перезагрузки, а адрес просто
  // подстраивается под текущий раздел, чтобы ссылку можно было взять.
  var SEC_LABELS = {sub: "Подписка", lte: "LTE", devices: "Устройства",
-                   payments: "Платежи", friends: "Друзья", profile: "Профиль"};
+                   payments: "Платежи", friends: "Друзья", profile: "Профиль", info: "Инфо"};
  function cabinetBase() {
    var p = location.pathname.replace(/\/+$/, "");
    if (p.slice(-13) === "/cabinet.html") { return p.slice(0, -13) + "/cabinet"; }
@@ -1205,6 +1211,7 @@ body.tg-fullscreen .tabs { top:96px; }
    }
    if (document.getElementById("renew-card")) { loadRenew(); }
    if (document.getElementById("gift-card")) { loadGift(); }
+   if (document.getElementById("info-card")) { loadInfo(); }
 
    // Профиль: смена почты и пароля — формы перерисовываются при каждой
    // загрузке, поэтому привязка здесь же, после каждой отрисовки.
@@ -1561,6 +1568,87 @@ body.tg-fullscreen .tabs { top:96px; }
    }).catch(function () {
      renewTimer = setTimeout(function () { pollGift(id, tries - 1); }, 10000);
    });
+ }
+
+ // Инфо: как подключиться, цены, о сервисе — как экран «ℹ️ Инфо» в боте
+ // (handlers/user.py handle_info/handle_how_to/handle_about/handle_prices).
+ // Карточка — оболочка, содержимое подгружается из /api/info.
+ function infoCard() {
+   return '<div data-sec="info"><div class="card" id="info-card">' + title("info", "Инфо") +
+          '<div id="info-body"><p class="card-sub">Загружаем…</p></div></div></div>';
+ }
+ function loadInfo() {
+   var body = document.getElementById("info-body");
+   if (!body) { return; }
+   api("/api/info").then(function (r) {
+     if (r.status === 200) { renderInfo(r.data); return; }
+     body.innerHTML = '<p class="card-sub">Не получилось загрузить — попробуйте позже.</p>';
+   }).catch(function () {
+     body.innerHTML = '<p class="card-sub">Не получилось загрузить — попробуйте позже.</p>';
+   });
+ }
+ // «устройства» — только при 1, 21, 31…; остальное — «устройств», как в боте.
+ function devWord(n) { return (n % 10 === 1 && n % 100 !== 11) ? "устройства" : "устройств"; }
+ function renderInfo(d) {
+   var box = document.getElementById("info-body");
+   if (!box) { return; }
+   var h = "";
+   // Как подключиться: три шага и ссылки магазинов INCY/Happ.
+   h += '<p class="card-sub"><b style="color:var(--ink)">Как подключиться</b></p>' +
+        '<div class="steps"><span><b>1</b>Установите INCY или Happ</span>' +
+        '<span><b>2</b>Скопируйте ссылку подписки в разделе «Подписка»</span>' +
+        '<span><b>3</b>Вставьте её в приложение</span></div>';
+   var apps = d.apps || {};
+   ["incy", "happ"].forEach(function (key) {
+     var a = apps[key];
+     if (!a) { return; }
+     h += '<p class="card-sub" style="margin-top:12px"><b style="color:var(--ink)">' +
+          (key === "incy" ? "INCY" : "Happ") + '</b></p><div class="stack">';
+     [["iOS", a.ios], ["Android", a.android], ["Windows", a.windows], ["macOS", a.macos]].forEach(function (pr) {
+       if (pr[1]) { h += '<a class="btn btn-ghost" target="_blank" rel="noopener" href="' + esc(pr[1]) + '">' + pr[0] + '</a>'; }
+     });
+     h += '</div>';
+   });
+   // Цены: пробный период, тарифы с ценой в месяц и выгодой, что входит.
+   h += '<p class="card-sub" style="margin-top:16px"><b style="color:var(--ink)">Цены</b></p>';
+   if (d.trial) {
+     h += '<p class="card-sub">🆓 <b style="color:var(--ink)">Пробный период</b> — ' + esc(d.trial.text) + ' бесплатно</p>';
+   }
+   var tariffs = d.tariffs || [];
+   if (tariffs.length) {
+     h += '<div class="stack">' + tariffs.map(function (t) {
+       return '<div class="row"><span>' + esc(t.period) +
+              (t.per_month ? ' · ≈ ' + esc(fmtMoney(t.per_month)) + '/мес' : '') +
+              (t.saving_pct ? ' · <span class="pill ok">выгода ' + t.saving_pct + '%</span>' : '') +
+              '</span><b>' + esc(fmtMoney(t.price)) + '</b></div>';
+     }).join("") + '</div>';
+   } else if (d.fallback_price) {
+     h += row("Подписка", "<b>" + esc(fmtMoney(d.fallback_price)) + "</b>");
+   }
+   var perks = [];
+   if (d.devices > 0) { perks.push("📱 До " + d.devices + " " + devWord(d.devices) + " одновременно"); }
+   else { perks.push("📱 Без ограничения устройств"); }
+   perks.push(d.traffic_gb > 0 ? "📶 " + d.traffic_gb + " ГБ трафика" : "📶 Безлимитный трафик");
+   perks.push("🖥 iOS, Android, Windows, macOS");
+   if (d.devices > 0 && d.device_price > 0) { perks.push("➕ Доп. устройство — " + esc(fmtMoney(d.device_price))); }
+   h += '<p class="card-sub" style="margin-top:10px">В каждом тарифе:</p><div class="stack">' +
+        perks.map(function (x) { return '<div class="row"><span>' + x + '</span></div>'; }).join("") + '</div>';
+   // О сервисе: то же, что в боте, плюс документы и ссылки.
+   h += '<p class="card-sub" style="margin-top:16px"><b style="color:var(--ink)">О сервисе</b></p>' +
+        '<p class="card-sub"><b style="color:var(--ink)">Drebol VPN</b> — быстрый VPN без логов, который живёт в Telegram.</p>' +
+        '<div class="stack">' +
+        '<div class="row"><span>🖥 Любая платформа</span><span>iOS, Android, Windows, macOS</span></div>' +
+        '<div class="row"><span>🛡 Без логов</span><span>Не храним данные о вашей активности</span></div>' +
+        '<div class="row"><span>💳 Честные платежи</span><span>Без скрытых списаний и автопродления</span></div></div>';
+   var docs = [];
+   if (d.docs && d.docs.privacy) { docs.push('<a href="' + esc(d.docs.privacy) + '" target="_blank" rel="noopener">Политика конфиденциальности</a>'); }
+   if (d.docs && d.docs.terms) { docs.push('<a href="' + esc(d.docs.terms) + '" target="_blank" rel="noopener">Пользовательское соглашение</a>'); }
+   if (docs.length) { h += '<p class="card-sub" style="margin-top:10px">📄 ' + docs.join("  ·  ") + '</p>'; }
+   var links = "";
+   if (d.support_url) { links += '<a class="btn btn-ghost" href="' + esc(d.support_url) + '">🛟 Поддержка</a>'; }
+   if (d.channel_url) { links += '<a class="btn btn-ghost" href="' + esc(d.channel_url) + '">📣 Новости</a>'; }
+   if (links) { h += '<div class="stack" style="margin-top:12px">' + links + '</div>'; }
+   box.innerHTML = h;
  }
 
  // Копирование ссылки. Где буфер недоступен — просто выделяем её
