@@ -3768,14 +3768,21 @@ function fmtUnix(ts){
 $("btn-downtime").onclick = async function(){
   const r = await api("/downtime");
   if (r.status !== 200) { renderOut("downtime-out", r.data); return; }
-  const sm = r.data.summary || {}, evs = r.data.events || [];
-  let h = '<p class="sub">За последние ' + (r.data.days || 30) + ' дней</p>';
+  const sm = r.data.summary || {}, evs = r.data.events || [], cur = r.data.current || {};
+  let h = '<p class="sub">Наблюдение с ' + fmtUnix(r.data.observation_since) + " · окно " + (r.data.days || 30) + " дней</p>";
   const targets = Object.keys(sm);
   if (targets.length) {
-    h += '<div class="tblwrap"><table><thead><tr><th>Цель</th><th>Инцидентов</th><th>Простой суммарно</th><th>Статус</th></tr></thead><tbody>';
+    h += '<div class="tblwrap"><table><thead><tr><th>Цель</th><th>Аптайм</th><th>Инцидентов</th><th>Простой суммарно</th><th>Последнее падение</th><th>Статус</th></tr></thead><tbody>';
     targets.forEach(function(t){
       const v = sm[t];
-      h += "<tr><td>" + esc(t) + '</td><td class="num">' + fmtNum(v.incidents) + '</td><td class="num">' + fmtDur(v.downtime_sec) + "</td><td>" + (v.open_since ? '<span class="pill bad">лежит с ' + fmtUnix(v.open_since) + "</span>" : '<span class="pill ok">работает</span>') + "</td></tr>";
+      let last = "—";
+      if (v.open_since) last = "лежит сейчас";
+      else if (v.last_start) last = fmtUnix(v.last_start) + " — " + (v.last_end ? fmtUnix(v.last_end) : "сейчас");
+      let st;
+      if (cur[t] === true) st = '<span class="pill ok">работает</span>';
+      else if (cur[t] === false) st = v.open_since ? '<span class="pill bad">лежит с ' + fmtUnix(v.open_since) + "</span>" : '<span class="pill bad">лежит</span>';
+      else st = '<span class="pill grey">неизвестно</span>';
+      h += "<tr><td>" + esc(v.label || t) + '</td><td class="num">' + esc(v.uptime || "—") + '</td><td class="num">' + fmtNum(v.incidents) + '</td><td class="num">' + fmtDur(v.downtime_sec) + "</td><td>" + last + "</td><td>" + st + "</td></tr>";
     });
     h += "</tbody></table></div>";
   }
@@ -3783,7 +3790,7 @@ $("btn-downtime").onclick = async function(){
   else {
     h += '<h3>События</h3><div class="tblwrap"><table><thead><tr><th>Цель</th><th>Начало (МСК)</th><th>Конец (МСК)</th><th>Длительность</th><th>Детали</th></tr></thead><tbody>';
     evs.forEach(function(ev){
-      h += "<tr><td>" + esc(ev.target || "") + '</td><td class="mono">' + esc(ev.started_str || "") + '</td><td class="mono">' + (ev.ended_str ? esc(ev.ended_str) : '<span class="pill bad">ещё лежит</span>') + '</td><td class="num">' + fmtDur(ev.duration_sec) + '</td><td class="trunc">' + esc(ev.detail || "") + "</td></tr>";
+      h += "<tr><td>" + esc(ev.label || ev.target || "") + '</td><td class="mono">' + esc(ev.started_str || "") + '</td><td class="mono">' + (ev.ended_str ? esc(ev.ended_str) : '<span class="pill bad">ещё лежит</span>') + '</td><td class="num">' + fmtDur(ev.duration_sec) + '</td><td class="trunc">' + esc(ev.detail || "") + "</td></tr>";
     });
     h += "</tbody></table></div>";
   }

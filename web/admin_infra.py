@@ -1901,18 +1901,56 @@ async def support_topics(request):
     })
 
 
+# Подписи целей и порядок — как handlers/downtime.py target_label/_ordered_targets.
+_DOWNTIME_KIND_ORDER = {"service": 0, "site": 1, "node": 2}
+
+
+def _downtime_label(target: str) -> str:
+    if target == "panel":
+        return "Панель"
+    if target == "sub":
+        return "Ссылки подписок"
+    if target.startswith("site:"):
+        return ("Сайт" if target == "site:vpn.drbl.tech"
+                else "Страница подписки")
+    if target.startswith("node:"):
+        return f"Узел {target[5:]}"
+    return target
+
+
+def _downtime_ordered_targets(summary, current):
+    targets = list(dict.fromkeys(list(summary) + list(current)))
+
+    def _kind(t):
+        k = (summary.get(t) or {}).get("kind")
+        if k:
+            return k
+        if t.startswith("node:"):
+            return "node"
+        if t.startswith("site:"):
+            return "site"
+        return "service"
+
+    return sorted(targets,
+                  key=lambda t: (_DOWNTIME_KIND_ORDER.get(_kind(t), 9), t))
+
+
 async def downtime_get(request):
     try:
         await _require_actor(request)
     except Exception:
         return _json_error("no_session", 401)
     import time as _time
+    from config import load_config
     from core.database import downtime_summary, get_downtime_events
     days = _int_query(request, "days", 30)
     days = min(90, max(1, days))
     now = int(_time.time())
-    since = now - days * 86400
-    events = await get_downtime_events(since)
+    cfg = load_config()
+    observation_since = int(cfg.get("downtime_since") or now)
+    window_start = max(observation_since, now - days * 86400)
+    window_sec = max(1, now - window_start)
+    events = await get_downtime_events(window_start)
     from datetime import datetime, timedelta, timezone
     msk = timezone(timedelta(hours=3))
 
@@ -1926,9 +1964,41 @@ async def downtime_get(request):
         ev["ended_str"] = _fmt(ev.get("ended_at"))
         end = int(ev["ended_at"]) if ev.get("ended_at") else now
         ev["duration_sec"] = max(0, end - int(ev["started_at"]))
+        ev["label"] = _downtime_label(ev.get("target") or "")
+    summary = downtime_summary(events, window_start, now)
+    # Текущее состояние — живой пробой, как в ТГ handle_downtime_menu.
+    # Падение пробоя — пустой current, а не 500: сводка всё равно отдаётся.
+    current: dict[str, bool] = {}
+    try:
+        r = await panel_mod.probe_servers()
+        current["panel"] = bool(r["panel"]["ok"])
+        if r["panel"]["ok"]:
+            current["sub"] = bool(r["sub"]["ok"])
+            for n in r["nodes"]:
+                if n["enabled"]:
+                    current[f"node:{n['tag']}"] = bool(n["reachable"])
+    except Exception:
+        pass
+    try:
+        for target, st in (await panel_mod.probe_sites()).items():
+            current[target] = bool(st["ok"])
+    except Exception:
+        pass
+    ordered_summary: dict[str, dict] = {}
+    for t in _downtime_ordered_targets(summary, current):
+        st = dict(summary.get(t) or {
+            "kind": "", "incidents": 0, "downtime_sec": 0,
+            "open_since": None, "last_start": None, "last_end": None,
+        })
+        st["label"] = _downtime_label(t)
+        # Та же формула и тот же формат, что _uptime_pct в handlers/downtime.py.
+        st["uptime"] = f"{100.0 * (1 - st['downtime_sec'] / window_sec):.1f}%"
+        ordered_summary[t] = st
     return web.json_response({
-        "days": days, "since": since, "now": now,
-        "summary": downtime_summary(events, since, now),
+        "days": days, "since": window_start, "now": now,
+        "observation_since": observation_since,
+        "current": current,
+        "summary": ordered_summary,
         "events": events,
     })
 
