@@ -3776,7 +3776,10 @@ async function loadYandex(page){
   const btn = $(YANDEX_BTNS[page] || 'btn-yandex');
   document.querySelectorAll('#btn-yandex-res, #btn-yandex-dns, #btn-yandex-bill, #btn-yandex, #btn-yandex-wl').forEach(function(x){ x.classList.toggle('active', x === btn); });
   if (!yandexDoc) {
-    const r = await api('/yandex');
+    $('panel-out').innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+    let r;
+    try { r = await api('/yandex'); }
+    catch(e) { $('panel-out').innerHTML = '<p class="err">Ошибка загрузки — проверьте соединение и попробуйте ещё раз.</p>'; return; }
     if (r.status !== 200) { renderOut('panel-out', r.data); return; }
     yandexDoc = r.data;
   }
@@ -4020,7 +4023,9 @@ document.querySelector('[data-nav="nodes"]').addEventListener("click", function(
   }
 });
 async function loadHealth(){
-  const r = await api("/nodes");
+  let r;
+  try { r = await api("/nodes"); }
+  catch(e) { $("nodes-out").innerHTML = '<p class="err">Ошибка загрузки — проверьте соединение и обновите раздел.</p>'; return; }
   if (r.status !== 200) { renderOut("nodes-out", r.data); return; }
   const sv = r.data.servers || {}, sites = r.data.sites || {};
   let h = '<h3>Сервисы</h3><div class="tblwrap"><table><thead><tr><th>Сервис</th><th>Статус</th><th>Отклик</th><th>Ошибка</th></tr></thead><tbody>';
@@ -4069,7 +4074,9 @@ async function loadHealth(){
 }
 $("btn-nodes").onclick = function(){ loadHealth(); };
 async function loadSquads(){
-  const r = await api("/squads");
+  let r;
+  try { r = await api("/squads"); }
+  catch(e) { $("nodes-out").innerHTML = '<p class="err">Ошибка загрузки — проверьте соединение и попробуйте ещё раз.</p>'; return; }
   if (r.status !== 200 || !r.data.ok) { $("nodes-out").innerHTML = '<p class="err">Панель недоступна — сквады не получены</p>'; return; }
   const items = r.data.squads || [];
   if (!items.length) { $("nodes-out").innerHTML = '<div class="empty">Сквадов нет</div>'; return; }
