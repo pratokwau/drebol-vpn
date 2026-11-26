@@ -664,12 +664,14 @@ async def _paid_panel_states() -> dict:
     return _PANEL_STATES
 
 
-def _paid_mark_raw(row, states: dict) -> str:
+def _paid_mark_raw(row, states: dict, frozen_ids=None) -> str:
     """Значок подписки в списке — копия _sub_mark из paidsub/handlers.py:
     что с ней прямо сейчас. row — полная строка, как в _paid_sub_dict
     (логин — [2], срок — [6], статус — [11])."""
     from datetime import datetime
     from paidsub.storage import SOON_DAYS, parse_sub_date
+    if frozen_ids and row[0] in frozen_ids:
+        return "❄️"
     if states.get(row[2] or "") == "DISABLED":
         return "⏸"
     if row[11] == "expired":
@@ -699,7 +701,8 @@ async def _paid_full_rows(ids: list) -> list:
             return await cur.fetchall()
 
 
-async def _paid_subs_enriched(short_rows, states: dict) -> list:
+async def _paid_subs_enriched(short_rows, states: dict,
+                             frozen_ids=None) -> list:
     """Короткие строки (id, tg_id, email, ...) из paidsub/storage.py →
     полные dict для фронта: те же поля, что раньше, плюс значок mark.
     Порядок коротких строк (сортировка вкладки) сохраняется."""
@@ -714,7 +717,7 @@ async def _paid_subs_enriched(short_rows, states: dict) -> list:
         d = _paid_sub_dict(r)
         d["first_name"] = r[-2]
         d["username"] = r[-1]
-        d["mark"] = _paid_mark_raw(r, states)
+        d["mark"] = _paid_mark_raw(r, states, frozen_ids)
         subs.append(d)
     return subs
 
@@ -745,13 +748,21 @@ async def subs_list(request):
     counts = await paid_counts()
     panel = await _paid_panel_states()
     states = panel["states"]
+    # Замороженные — для значка ❄️ (как frozen_ids в handle_paid_subs_menu
+    # в ТГ): падение запроса не должно ронять список.
+    try:
+        from paidsub.storage import frozen_paid_sub_ids
+        frozen_ids = await frozen_paid_sub_ids()
+    except Exception:
+        frozen_ids = set()
     off_emails = {e for e, st in states.items() if st == "DISABLED"}
     counts["off"] = (len(off_emails & await paid_emails())
                      if panel["ok"] else None)
     if q:
         # Поиск — отдельным экраном, как в ТГ (apply_paid_search):
         # вкладки и страницы не применяются, найдено — до 20 строк.
-        subs = await _paid_subs_enriched(await search_paid_subs(q), states)
+        subs = await _paid_subs_enriched(await search_paid_subs(q), states,
+                                         frozen_ids)
         return web.json_response({"subs": subs, "page": 1, "total_pages": 1,
                                   "scope": scope, "sort": sort,
                                   "counts": counts, "panel_ok": panel["ok"]})
@@ -767,7 +778,7 @@ async def subs_list(request):
         short, total_pages = await list_paid_subs(page, scope, sort,
                                                   _PAID_PER_PAGE)
         page = min(page, total_pages)
-    subs = await _paid_subs_enriched(short, states)
+    subs = await _paid_subs_enriched(short, states, frozen_ids)
     return web.json_response({"subs": subs, "page": page,
                               "total_pages": total_pages, "scope": scope,
                               "sort": sort, "counts": counts,
@@ -798,6 +809,11 @@ async def subs_export(request):
     q = (request.query.get("q") or "").strip()
     panel = await _paid_panel_states()
     states = panel["states"]
+    try:
+        from paidsub.storage import frozen_paid_sub_ids
+        frozen_ids = await frozen_paid_sub_ids()
+    except Exception:
+        frozen_ids = set()
     if q:
         short = await search_paid_subs(q, limit=EXPORT_MAX_ROWS + 1)
     elif scope == "off":
@@ -812,7 +828,7 @@ async def subs_export(request):
         return web.json_response(
             {"error": "too_large", "total": len(short),
              "max": EXPORT_MAX_ROWS}, status=409)
-    subs = await _paid_subs_enriched(short, states)
+    subs = await _paid_subs_enriched(short, states, frozen_ids)
     return _csv_response(
         ["id", "tg_id", "first_name", "username", "email", "uuid",
          "status", "expire_date", "created_at", "times_renewed",
@@ -853,6 +869,46 @@ async def sub_card(request):
             referrer = card.get("referrer")
     except Exception:
         logging.exception("админка: sub_card #%s: панель недоступна", sub_id)
+    # Единая карточка ТГ (handle_paid_sub_view): заморозка, последнее
+    # подключение к VPN, приглашённые рефералы, чёрный список. Каждый
+    # блок — best-effort: падение блока не роняет карточку.
+    frozen_at = None
+    try:
+        from paidsub.storage import get_paid_sub_frozen_at
+        frozen_at = await get_paid_sub_frozen_at(sub_id)
+    except Exception:
+        logging.exception("админка: sub_card #%s: frozen_at недоступен",
+                          sub_id)
+    last_online_ms, last_online_ok = None, False
+    try:
+        from services.panel import get_last_online
+        lo = await get_last_online(timeout=5)
+        if lo.get("ok"):
+            last_online_ok = True
+            last_online_ms = (lo.get("last") or {}).get(row[2] or "")
+    except Exception:
+        logging.exception("админка: sub_card #%s: last_online недоступен",
+                          sub_id)
+    invited = None
+    if row[1]:
+        try:
+            from paidsub.storage import get_referral_stats
+            rs = await get_referral_stats(row[1])
+            invited = {"total": rs["total"], "rewarded": rs["rewarded"]}
+        except Exception:
+            logging.exception("админка: sub_card #%s: рефералы недоступны",
+                              sub_id)
+    blacklist = None
+    if row[1]:
+        try:
+            from features.blacklist import (entry as _bl_entry,
+                                            public_reason as _bl_reason)
+            ble = await _bl_entry(row[1])
+            if ble:
+                blacklist = {"source": ble["source"],
+                             "reason": _bl_reason(ble["reason"])}
+        except Exception:
+            logging.exception("админка: sub_card #%s: ЧС недоступен", sub_id)
     payments = {"items": [], "count": 0, "sum": 0}
     try:
         from core.database import user_payments
@@ -872,10 +928,51 @@ async def sub_card(request):
         "subscription": _paid_sub_dict(row),
         "panel": panel, "user": user, "referrer": referrer,
         "payments": payments,
+        "frozen_at": frozen_at,
+        "last_online_ms": last_online_ms,
+        "last_online_ok": last_online_ok,
+        "invited": invited, "blacklist": blacklist,
         "display_url": sub_url_for_display(raw_url),
         "url_sub": sub_url_with_domain(raw_url, SUB_DISPLAY_DOMAIN),
         "url_key": sub_url_with_domain(raw_url, SUB_STORED_DOMAIN),
     })
+
+
+async def sub_topic(request):
+    """«💬 Открыть тему»: тема человека в группе поддержки + ссылка.
+
+    Как handle_paid_sub_topic в ТГ (paidsub/handlers.py): тема одна
+    на человека навсегда, нет — заводится основным ботом (origin='admin').
+    Дальше админ пишет прямо в тему, бот поддержки пересылает человеку.
+    """
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    try:
+        sub_id = int(request.match_info["sub_id"])
+    except (KeyError, ValueError):
+        return web.json_response({"error": "bad_id"}, status=400)
+    from paidsub.storage import get_paid_sub
+    row = await get_paid_sub(sub_id)
+    if not row:
+        return web.json_response({"error": "not_found"}, status=404)
+    tg_id = row[1]
+    if not tg_id:
+        return web.json_response({"error": "no_tg_id"}, status=409)
+    bot = get_bot()
+    if bot is None:
+        return web.json_response({"error": "no_bot"}, status=503)
+    from core.admin_dm import ensure_user_topic
+    topic = await ensure_user_topic(bot, tg_id)
+    if not topic:
+        return web.json_response({"error": "topic_failed"}, status=502)
+    topic_id, group_id = topic
+    gid = str(group_id)
+    internal = gid[4:] if gid.startswith("-100") else gid.lstrip("-")
+    url = f"https://t.me/c/{internal}/{topic_id}"
+    await _audit(actor, "sub_topic", f"sub_id: {sub_id}, tg_id: {tg_id}")
+    return web.json_response({"ok": True, "url": url, "topic_id": topic_id})
 
 
 async def _sub_action(request, action: str):
@@ -1959,11 +2056,12 @@ def register(app) -> None:
     app.router.add_get("/referrals", referrals_get)
     app.router.add_get("/subs/{sub_id}", sub_card)
     app.router.add_get("/subs/{sub_id}/history", sub_history)
-    for action in ("toggle", "freeze", "delete", "reissue", "extend",
-                   "expire", "hwid", "traffic", "lte", "trial"):
+    for action in ("toggle", "freeze", "unfreeze", "delete", "reissue",
+                   "extend", "expire", "hwid", "traffic", "lte", "trial"):
         app.router.add_post(
             f"/subs/{{sub_id}}/{action}",
             lambda req, a=action: _sub_action(req, a))
+    app.router.add_post("/subs/{sub_id}/topic", sub_topic)
     app.router.add_get("/subs/{sub_id}/devices", sub_devices)
     app.router.add_get("/subs/{sub_id}/ips", sub_ips)
     app.router.add_post("/subs/{sub_id}/devices/delete", sub_device_delete)

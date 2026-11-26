@@ -2032,6 +2032,17 @@ function fmtBytesAdmin(n){
   while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
   return (i === 0 ? String(Math.round(n)) : n.toFixed(n >= 100 ? 0 : 1)) + " " + u[i];
 }
+/* Подпись последнего подключения — зеркало handlers/control.py
+   last_seen_text: мс из панели, 0 — ни разу, null — клиента нет. */
+function lastSeenText(ms){
+  if (ms == null) return "<i>клиента нет в панели</i>";
+  if (ms <= 0) return "⚪️ подключений ещё не было";
+  const ago = Date.now() / 1000 - ms / 1000;
+  if (ago < 120) return "🟢 в сети";
+  if (ago < 3600) return "последнее подключение " + Math.floor(ago / 60) + " мин назад";
+  if (ago < 48 * 3600) return "последнее подключение " + Math.floor(ago / 3600) + " ч назад";
+  return "последнее подключение " + Math.floor(ago / 86400) + " дн. назад";
+}
 function renderSubEditor(data){
   const s = data.subscription || {};
   const p = data.panel || {};
@@ -2051,14 +2062,27 @@ function renderSubEditor(data){
   h += kvRow("Логин в панели", '<span class="mono">' + esc(s.email || "") + '</span>');
   h += kvRow("Владелец", esc((usr.first_name || "—") + (usr.username ? " @" + usr.username : "")) + ' · <span class="mono">tg ' + s.tg_id + '</span>');
   if (ref) h += kvRow("Пригласил", esc(ref.first_name || "") + ' · <span class="mono">tg ' + ref.tg_id + '</span>');
+  if (data.invited && data.invited.total > 0) h += kvRow("Приглашено", "<b>" + data.invited.total + "</b> (с бонусом: " + (data.invited.rewarded || 0) + ")");
+  if (data.blacklist) h += kvRow("Чёрный список", "⛔ " + esc(data.blacklist.source === "manual" ? "вручную" : "общий список") + (data.blacklist.reason ? " — " + esc(data.blacklist.reason) : ""));
   h += kvRow("UUID", '<span class="mono">' + esc(s.uuid || "") + '</span>');
   h += kvRow("Sub ID", '<span class="mono">' + esc(s.sub_id || "") + '</span>');
   h += kvRow("Создана", '<span class="mono">' + esc(String(s.created_at || "").slice(0, 16)) + '</span>');
   h += kvRow("Истекает", '<span class="mono">' + fmtDate(s.expire_date) + '</span>' + leftTxt);
   h += kvRow("Статус", subStatusPill(s.status));
+  // Замороженная платная — как в ТГ: с какого момента и сколько на паузе.
+  if (subsCurrentKind !== "admin" && data.frozen_at) {
+    let pausedTxt = "";
+    const fp = String(data.frozen_at).split(/[. :]/);
+    if (fp.length >= 6) {
+      const fdt = new Date(+fp[2], +fp[1] - 1, +fp[0], +fp[3], +fp[4], +fp[5]).getTime();
+      if (!isNaN(fdt)) pausedTxt = " · на паузе уже " + fmtDur(Math.max(0, Math.floor((Date.now() - fdt) / 1000)));
+    }
+    h += kvRow("Заморозка", "❄️ с " + esc(data.frozen_at) + pausedTxt + " — срок стоит, дни не сгорают");
+  }
   // Продлений и триал — только у платных: у админских их нет (как в ТГ).
   if (subsCurrentKind !== "admin") h += kvRow("Продлений", s.times_renewed == null ? "—" : s.times_renewed);
   if (typeof p.enabled !== "undefined") h += kvRow("В панели", p.enabled ? "включена" : "выключена");
+  if (subsCurrentKind !== "admin" && data.last_online_ok) h += kvRow("VPN", lastSeenText(data.last_online_ms));
   if (p.traffic_ok) {
     let t = fmtBytesAdmin(usedBytes) + (limitBytes > 0 ? " из " + (s.total_gb || 0) + " ГБ" : " · лимит не задан");
     if (limitBytes > 0) {
@@ -2073,6 +2097,9 @@ function renderSubEditor(data){
   h += kvRow("LTE", s.lte_gb == null ? "без лимита" : s.lte_gb + " ГБ");
   if (subsCurrentKind !== "admin") h += kvRow("Триал", s.trial_period == null ? "—" : fmtDays(s.trial_period));
   h += '</dl>';
+  if (subsCurrentKind !== "admin" && s.tg_id) {
+    h += '<div class="btnrow"><button class="ghost" id="ed-topic">💬 Открыть тему</button><button class="ghost" id="ed-promo">🎁 Промокод</button><button class="ghost" id="ed-bl">⛔ Чёрный список</button><button class="ghost" id="ed-activity">📊 Действия</button></div><p class="mut" id="ed-topic-msg"></p>';
+  }
   if (data.url_sub || data.url_key) {
     h += '<h3>Ссылки подписки</h3>';
     if (data.url_sub) h += '<div class="sublink"><span class="mut">sub</span><span class="mono">' + esc(data.url_sub) + '</span><button class="ghost" data-copy="' + esc(data.url_sub) + '">Копировать</button></div>';
@@ -2095,7 +2122,13 @@ function renderSubEditor(data){
   h += '<h3>История</h3><div class="btnrow"><button class="ghost" id="ed-history">Показать историю</button></div><div id="ed-history-out"></div>';
   h += '<p class="mut" id="ed-msg" style="margin-top:10px"></p>';
   $("drawer-body").innerHTML = h;
-  $("drawer-foot").innerHTML = '<button class="ghost" data-ed="toggle">Вкл / выкл</button><button class="ghost" data-ed="freeze">Заморозить</button><button class="ghost" data-ed="reissue">Перевыпустить</button><button class="danger" data-ed="delete">Удалить</button>';
+  // Замороженная платная — только разморозка, как в ТГ: одна строка
+  // под реальное состояние («включить» без сдвига срока было бы
+  // воровством дней у клиента). У админских заморозки нет.
+  const frozenSub = subsCurrentKind !== "admin" && !!data.frozen_at;
+  $("drawer-foot").innerHTML = frozenSub
+    ? '<button class="ghost" data-ed="unfreeze">▶️ Разморозить</button><button class="ghost" data-ed="reissue">Перевыпустить</button><button class="danger" data-ed="delete">Удалить</button>'
+    : '<button class="ghost" data-ed="toggle">Вкл / выкл</button><button class="ghost" data-ed="freeze">Заморозить</button><button class="ghost" data-ed="reissue">Перевыпустить</button><button class="danger" data-ed="delete">Удалить</button>';
   const bind = function(root){
     root.querySelectorAll("[data-ed]").forEach(function(b){
       b.onclick = withSpin(b, function(){ return subEditorAction(b.dataset.ed); });
@@ -2113,6 +2146,20 @@ function renderSubEditor(data){
   $("ed-devices").onclick = loadSubDevices;
   $("ed-ips").onclick = loadSubIps;
   $("ed-history").onclick = function(){ loadSubHistory(1); };
+  const et = $("ed-topic");
+  if (et) et.onclick = withSpin(et, async function(){
+    const msg = $("ed-topic-msg");
+    const r = await api("/subs/" + subsCurrentId + "/topic", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+    if (r.status === 200 && r.data.url) { if (msg) msg.textContent = ""; window.open(r.data.url, "_blank"); return; }
+    const t = {no_tg_id: "У подписки нет владельца в Telegram — тему завести некому.", no_bot: "Бот недоступен — попробуйте позже.", topic_failed: "Не удалось открыть тему: группа поддержки не настроена или основной бот не админ в ней."};
+    if (msg) msg.textContent = t[(r.data && r.data.error) || ""] || ("Ошибка: " + ((r.data && r.data.error) || r.status));
+  });
+  const ep = $("ed-promo");
+  if (ep) ep.onclick = function(){ closeDrawer(); showSection("promos"); loadGiveMeta(); $("give-target").value = s.tg_id; $("give-target").focus(); window.scrollTo(0, 0); };
+  const eb = $("ed-bl");
+  if (eb) eb.onclick = function(){ closeDrawer(); showSection("users"); $("bl-tg").value = s.tg_id; $("bl-tg").focus(); window.scrollTo(0, 0); };
+  const ea = $("ed-activity");
+  if (ea) ea.onclick = function(){ openUserEditor(s.tg_id); };
 }
 let subHistoryPage = 1;
 async function loadSubHistory(page){
