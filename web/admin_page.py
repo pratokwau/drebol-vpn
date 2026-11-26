@@ -755,6 +755,11 @@ label.chk input{width:auto;margin:0}
           <div id="logs-out"></div>
           <div class="btnrow"><button id="btn-logs-prev" class="ghost">← Назад</button><span id="logs-page-label" class="mut"></span><button id="btn-logs-next" class="ghost">Вперёд →</button></div>
         </div>
+        <div class="card"><h2>🗄 Хранение журналов</h2><p class="sub">Сколько хранится журнал, сколько в нём записей, размер базы. Старые записи удаляются сами раз в сутки.</p>
+          <div class="btnrow" id="storage-chips" style="flex-wrap:wrap"></div>
+          <div id="storage-out"></div>
+          <div class="btnrow"><button id="btn-storage-purge" class="danger">🧹 Очистить старые сейчас</button></div>
+        </div>
         <div class="card"><h2>Падения и сбои</h2><p class="sub">Когда узлы и панель были недоступны.</p>
           <div class="btnrow"><button id="btn-downtime" class="ghost">Показать падения</button><button id="btn-online" class="ghost">Кто онлайн</button></div>
           <div id="downtime-out"></div>
@@ -3910,6 +3915,7 @@ $("btn-usage-custom").onclick = function(){ loadUsage(1); };
 let logsLoaded = false;
 document.querySelector('[data-nav="logs"]').addEventListener("click", function(){
   if (!logsLoaded) { logsLoaded = true; $("btn-logs").click(); }
+  if (!storageLoaded) { storageLoaded = true; loadStorage(); }
 });
 /* Вкладки ленты — те же 6, что FEED_TITLES в handlers/control.py. */
 const LOGS_TABS = {all: "📜 Лента действий", important: "⭐ Важные события", admin: "⚙️ Аудит админки", helpers: "👥 Помощники", subs: "💳 История подписок", errors: "🚨 Ошибки"};
@@ -4053,6 +4059,50 @@ $("btn-logs-export").onclick = function(){
 $("btn-logs-purge").onclick = async function(){
   const r = await postConfirm("/logs/purge", {});
   renderOut("logs-out", r.data);
+  if (r.status === 200 && r.data && r.data.ok && storageLoaded) loadStorage();
+};
+let storageLoaded = false;
+async function loadStorage(){
+  const r = await api("/logs/storage");
+  if (r.status !== 200) { renderOut("storage-out", r.data); return; }
+  const d = r.data;
+  let h = '<dl class="kv">';
+  h += kvRow("Срок хранения", "<b>" + esc(String(d.days)) + " дн.</b>");
+  h += kvRow("Записей действий", fmtNum(d.activity_rows));
+  h += kvRow("Записей ошибок", fmtNum(d.error_rows));
+  h += kvRow("Самая старая запись действий", '<span class="mono">' + esc(String(d.oldest_activity || "—").slice(0, 16)) + "</span>");
+  h += kvRow("Самая старая ошибка", '<span class="mono">' + esc(String(d.oldest_error || "—").slice(0, 16)) + "</span>");
+  h += kvRow("Размер базы", esc(d.db_size_human || "—"));
+  h += "</dl>";
+  $("storage-out").innerHTML = h;
+  const chips = $("storage-chips");
+  chips.innerHTML = "";
+  (d.retention_days || [30, 90, 180, 365]).forEach(function(n){
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ghost" + (n === d.days ? " active" : "");
+    b.setAttribute("data-days", String(n));
+    b.textContent = (n === d.days ? "• " : "") + n + " дн.";
+    chips.appendChild(b);
+  });
+}
+$("storage-chips").addEventListener("click", async function(e){
+  const b = e.target.closest("button[data-days]");
+  if (!b) return;
+  const n = parseInt(b.dataset.days, 10);
+  const r = await api("/logs/retention", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({days: n})});
+  if (r.status !== 200) { toast("Не удалось сменить срок хранения"); return; }
+  toast("Срок хранения журналов: " + n + " дн.");
+  loadStorage();
+});
+$("btn-storage-purge").onclick = async function(){
+  const r = await postConfirm("/logs/purge", {});
+  if (r.status === 200 && r.data && r.data.ok) {
+    toast("Очистка готова: действий — " + fmtNum(r.data.removed_activity) + ", ошибок — " + fmtNum(r.data.removed_errors));
+    loadStorage();
+  } else if (r.status !== 0) {
+    renderOut("storage-out", r.data);
+  }
 };
 function fmtDur(sec){
   sec = Math.max(0, Math.round(sec || 0));

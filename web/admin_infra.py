@@ -523,7 +523,7 @@ _ADMIN_LABELS = {
     "helper_invite": "📩 Приглашение в группу поддержки",
     "helpers_perm": "👥 Сменил права помощника",
     "jobs_run_now": "▶️ Запустил фоновую задачу", "jobs_run_now_failed": "⚠️ Фоновая задача упала",
-    "logs_purge": "🧹 Очистил старые логи", "lte_check_now": "📶 Ручная проверка LTE",
+    "logs_purge": "🧹 Очистил старые логи", "logs_retention": "🗄 Срок хранения журналов", "lte_check_now": "📶 Ручная проверка LTE",
     "subs_squads_issued": "🗂 Выдаваемые сквады: переключил", "subs_squads_lte": "📡 Сквад LTE: переключил",
     "subs_squads_fallback": "🔀 Сквад после конца LTE: выбрал",
     "morning_run_now": "🌅 Запустил утреннюю сводку", "morning_update": "🌅 Настройки утренней сводки",
@@ -853,6 +853,62 @@ async def logs_purge(request):
                  f"days={days} activity={removed_act} errors={removed_err}")
     return web.json_response({"ok": True, "removed_activity": removed_act,
                               "removed_errors": removed_err, "days": days})
+
+
+# ── Хранение журналов ─────────────────────────────────────────────────────────
+# Паритет с ТГ: handlers/control.py handle_storage_menu / handle_retention_set.
+# Те же сроки хранения (30/90/180/365) и та же статистика из
+# core.database.activity_stats; размер базы — тем же human_size, что в бэкапе.
+LOG_RETENTION_DAYS = (30, 90, 180, 365)
+
+
+async def _logs_storage_payload() -> dict:
+    from config import load_config
+    from core.database import activity_stats
+    try:
+        days = int(load_config().get("activity_retention_days", 90) or 90)
+    except (TypeError, ValueError):
+        days = 90
+    st = await activity_stats()
+    return {
+        "days": days,
+        "retention_days": list(LOG_RETENTION_DAYS),
+        "activity_rows": st["activity_rows"],
+        "error_rows": st["error_rows"],
+        "oldest_activity": st["oldest_activity"],
+        "oldest_error": st["oldest_error"],
+        "db_bytes": st["db_bytes"],
+        "db_size_human": backup_mod.human_size(st["db_bytes"]),
+    }
+
+
+async def logs_storage(request):
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    return web.json_response(await _logs_storage_payload())
+
+
+async def logs_retention(request):
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    days = body.get("days")
+    if (isinstance(days, bool) or not isinstance(days, int)
+            or days not in LOG_RETENTION_DAYS):
+        return _json_error("bad_days", 400)
+    from config import atomic_update
+
+    def _apply(cfg):
+        cfg["activity_retention_days"] = days
+
+    atomic_update(_apply)
+    await _audit(actor, "logs_retention", f"days={days}")
+    payload = await _logs_storage_payload()
+    payload["ok"] = True
+    return web.json_response(payload)
 
 
 # ── Утренняя синхронизация ────────────────────────────────────────────────────
@@ -3496,6 +3552,8 @@ def register(app) -> None:
     app.router.add_get("/logs/errors/{entry_id}", logs_error_entry)
     app.router.add_get("/logs/history/{entry_id}", logs_history_entry)
     app.router.add_post("/logs/purge", logs_purge)
+    app.router.add_get("/logs/storage", logs_storage)
+    app.router.add_patch("/logs/retention", logs_retention)
     app.router.add_get("/morning", morning_get)
     app.router.add_patch("/morning", morning_patch)
     app.router.add_post("/morning/run-now", morning_run_now)
