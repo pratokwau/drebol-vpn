@@ -132,6 +132,18 @@ async def post_init(app: Application):
                         await record_downtime_status(
                             f"node:{_n['tag']}", "node", _n["reachable"],
                             str(_n.get("error") or ""), now=_now)
+                # Узлы, исчезнувшие из панели (удалены или переименованы),
+                # сами не «поднимутся»: их открытые падения закрываем здесь,
+                # иначе они навсегда висят в сводке как «сейчас лежит»
+                # (так висели Финляндия, Франция и старые имена Латвии).
+                from core.database import get_open_downtime_events
+                _live = {f"node:{_n['tag']}" for _n in r["nodes"]}
+                for _ev in await get_open_downtime_events():
+                    if (_ev.get("kind") == "node"
+                            and _ev["target"] not in _live):
+                        await record_downtime_status(
+                            _ev["target"], "node", True,
+                            "узел удалён или переименован", now=_now)
             alerts = []
             changed = False
 

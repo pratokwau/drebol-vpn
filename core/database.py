@@ -686,6 +686,19 @@ async def record_downtime_status(target: str, kind: str, ok: bool,
             await db.commit()
 
 
+async def get_open_downtime_events() -> list[dict]:
+    """Все незакрытые падения (ended_at IS NULL), новые первыми."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+                "SELECT id, target, kind, started_at, ended_at, detail "
+                "FROM downtime_events "
+                "WHERE ended_at IS NULL "
+                "ORDER BY started_at DESC") as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
 async def get_downtime_events(since_ts: int) -> list[dict]:
     """Все падения, начавшиеся не раньше since_ts, плюс открытые,
     начавшиеся раньше. Новые первыми."""
