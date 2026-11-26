@@ -26,60 +26,113 @@ LOGO_NAME = "logo.png"
 # ловят свои схемы (happ://, incy://). Открывается по ссылке из бота и сразу
 # уводит в приложение; если оно не установлено, остаётся ссылка и инструкция.
 ADD_PAGE = """<!doctype html>
-<html lang="ru"><head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
+<html lang=\"ru\"><head>
+<meta charset=\"utf-8\">
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+<meta name=\"robots\" content=\"noindex\">
+<meta name=\"theme-color\" content=\"#050505\">
+<link rel=\"icon\" href=\"/favicon.ico\">
 <title>Добавляем подписку</title>
+<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">
+<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>
+<link href=\"https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap\" rel=\"stylesheet\">
 <style>
- :root { color-scheme: dark; }
+ :root { color-scheme: dark;
+         --grad: linear-gradient(120deg, #FFFFFF 0%, #C9CDD3 45%, #8f959e 70%, #E8EAED 100%);
+         --soft: #8A8A92; }
+ * { box-sizing:border-box; }
  body { margin:0; min-height:100vh; display:flex; align-items:center;
-        justify-content:center; background:#0e1117; color:#e7e9ee;
-        font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
- .card { max-width:420px; padding:28px 22px; text-align:center; }
- h1 { font-size:20px; margin:0 0 10px; }
- p { color:#9aa4b2; margin:0 0 18px; }
- a.btn { display:block; padding:14px 18px; margin:10px 0; border-radius:12px;
-         background:#2f81f7; color:#fff; text-decoration:none; font-weight:600; }
- a.ghost { background:#1c2128; color:#e7e9ee; }
- code { display:block; word-break:break-all; background:#1c2128; color:#9aa4b2;
-        padding:12px; border-radius:10px; font-size:13px; margin-top:16px; }
+        justify-content:center; background:#050505; color:#fff; padding:16px;
+        font:16px/1.5 \"Manrope\",-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif;
+        -webkit-font-smoothing:antialiased; }
+ .card { width:100%; max-width:420px; padding:28px 22px; text-align:center;
+         background:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.028));
+         border:1px solid rgba(255,255,255,.10); border-radius:22px;
+         box-shadow:0 12px 34px rgba(0,0,0,.5); }
+ .appicon { width:84px; height:84px; border-radius:22px; margin-bottom:14px;
+            background:rgba(255,255,255,.06); box-shadow:0 4px 18px rgba(0,0,0,.45); }
+ h1 { font-size:clamp(24px,6vw,30px); font-weight:800; letter-spacing:-.02em; margin:0 0 10px; }
+ p { color:var(--soft); margin:0 0 18px; }
+ a.btn { display:block; padding:14px 18px; margin:10px 0; border-radius:999px;
+         text-decoration:none; font-weight:700;
+         transition:transform .18s, background .2s, background-position .3s, box-shadow .25s, opacity .3s, visibility .3s; }
+ a.btn:active { transform:scale(.975); }
+ a.btn:focus-visible { outline:2px solid rgba(255,255,255,.65); outline-offset:2px; }
+ a.main { background:var(--grad); background-size:160% 100%; color:#050505;
+          box-shadow:0 10px 26px rgba(255,255,255,.16), inset 0 1px 0 rgba(255,255,255,.7); }
+ a.main:hover { transform:translateY(-2px); background-position:90% 0;
+          box-shadow:0 16px 36px rgba(255,255,255,.22), inset 0 1px 0 rgba(255,255,255,.7); }
+ a.ghost { background:rgba(255,255,255,.03); color:#fff; border:1px solid rgba(255,255,255,.22); }
+ a.ghost:hover { background:rgba(255,255,255,.07); transform:translateY(-2px); }
+ a.store { opacity:0; visibility:hidden; transform:translateY(6px); pointer-events:none; }
+ a.store.on { opacity:1; visibility:visible; transform:none; pointer-events:auto; }
+ .rawlabel { margin:18px 0 0; font-size:12px; color:var(--soft); }
+ code { display:block; word-break:break-all; background:rgba(255,255,255,.04);
+        border:1px solid rgba(255,255,255,.08); color:#C9CDD3;
+        padding:12px; border-radius:16px; font-size:13px; margin-top:8px; text-align:left; }
+ button.copy { margin-top:10px; min-height:40px; padding:0 16px; border-radius:999px;
+        border:1px solid rgba(255,255,255,.22); background:transparent; color:#fff;
+        font:inherit; font-size:13px; font-weight:700; cursor:pointer;
+        transition:background .2s, border-color .2s, transform .15s; }
+ button.copy:hover { background:rgba(255,255,255,.07); }
+ button.copy:active { transform:scale(.95); }
+ button.copy.done { background:rgba(74,222,128,.12); border-color:rgba(74,222,128,.5); color:#4ade80; }
 </style></head>
-<body><div class="card">
- <img id="appicon" alt="" width="84" height="84" style="border-radius:22px;margin-bottom:14px;box-shadow:0 4px 18px rgba(0,0,0,.45)">
- <h1 id="head">Открываем приложение…</h1>
- <p id="hint">Если ничего не произошло — нажмите кнопку ниже.</p>
- <a class="btn" id="go" href="#">Добавить подписку</a>
- <a class="ghost btn" id="store" href="#" style="display:none">Установить приложение</a>
- <code id="raw"></code>
+<body><div class=\"card\">
+ <img class=\"appicon\" id=\"appicon\" alt=\"\" width=\"84\" height=\"84\">
+ <h1 id=\"head\">Открываем приложение…</h1>
+ <p id=\"hint\">Если ничего не произошло — нажмите кнопку ниже.</p>
+ <a class=\"btn main\" id=\"go\" href=\"#\">Добавить подписку</a>
+ <a class=\"btn ghost store\" id=\"store\" href=\"#\">Установить приложение</a>
+ <a class=\"btn ghost\" id=\"botlink\" href=\"https://t.me/drebolvpn_bot\" style=\"display:none\">Вернуться в бот</a>
+ <p class=\"rawlabel\" id=\"rawlabel\">Ссылка подписки — вставьте её в приложение вручную:</p>
+ <code id=\"raw\"></code>
+ <button class=\"copy\" id=\"copy\" type=\"button\">Скопировать ссылку</button>
+ <noscript><p style=\"margin-top:18px\">Включите JavaScript или вернитесь в бот и нажмите кнопку ещё раз.</p></noscript>
 </div>
 <script>
  var q = new URLSearchParams(location.search);
- var app = (q.get("app") || "happ").toLowerCase();
- var sub = q.get("u") || "";
+ var app = (q.get(\"app\") || \"happ\").toLowerCase();
+ var sub = q.get(\"u\") || \"\";
  var apps = {
-   happ: {name: "Happ", scheme: "happ://add/", icon: "__HAPP_ICON__",
-          store: "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"},
-   incy: {name: "INCY", scheme: "incy://add/", icon: "__INCY_ICON__",
-          store: "https://apps.apple.com/ru/app/incy/id6756943388"}
+   happ: {name: \"Happ\", scheme: \"happ://add/\", icon: \"__HAPP_ICON__\",
+          store: \"https://apps.apple.com/ru/app/happ-proxy-utility/id6504287215\"},
+   incy: {name: \"INCY\", scheme: \"incy://add/\", icon: \"__INCY_ICON__\",
+          store: \"https://apps.apple.com/ru/app/incy/id6756943388\"}
  };
  var cfg = apps[app] || apps.happ;
- var link = sub ? cfg.scheme + sub : "";
- document.getElementById("head").textContent = "Добавляем подписку в " + cfg.name;
- document.getElementById("appicon").src = cfg.icon;
- var go = document.getElementById("go");
- go.textContent = "Открыть " + cfg.name;
- go.href = link || "#";
- var store = document.getElementById("store");
+ var link = sub ? cfg.scheme + sub : \"\";
+ var el = function (id) { return document.getElementById(id); };
+ el(\"head\").textContent = \"Добавляем подписку в \" + cfg.name;
+ el(\"appicon\").src = cfg.icon;
+ el(\"appicon\").alt = cfg.name;
+ var go = el(\"go\");
+ go.textContent = \"Открыть \" + cfg.name;
+ go.href = link || \"#\";
+ var store = el(\"store\");
  store.href = cfg.store;
- store.textContent = "Установить " + cfg.name;
- document.getElementById("raw").textContent = sub;
+ store.textContent = \"Установить \" + cfg.name;
+ el(\"raw\").textContent = sub;
+ el(\"copy\").addEventListener(\"click\", function () {
+   var btn = el(\"copy\");
+   function done() {
+     btn.classList.add(\"done\"); btn.textContent = \"Скопировано\";
+     setTimeout(function () { btn.classList.remove(\"done\"); btn.textContent = \"Скопировать ссылку\"; }, 1600);
+   }
+   if (navigator.clipboard && navigator.clipboard.writeText) {
+     navigator.clipboard.writeText(sub).then(done, done);
+   } else { done(); }
+ });
  if (link) {
    setTimeout(function () { location.href = link; }, 100);
-   setTimeout(function () { store.style.display = "block"; }, 2500);
+   setTimeout(function () { store.classList.add(\"on\"); }, 2500);
  } else {
-   document.getElementById("head").textContent = "Ссылка не передана";
-   document.getElementById("hint").textContent = "Вернитесь в бот и нажмите кнопку ещё раз.";
+   el(\"head\").textContent = \"Ссылка не передана\";
+   el(\"hint\").textContent = \"Вернитесь в бот и нажмите кнопку ещё раз.\";
+   [\"go\", \"store\", \"raw\", \"rawlabel\", \"copy\", \"appicon\"].forEach(function (id) {
+     el(id).style.display = \"none\";
+   });
+   el(\"botlink\").style.display = \"block\";
  }
 </script></body></html>
 """
