@@ -101,7 +101,7 @@ _MONTH_PREP = ("", "январе", "феврале", "марте", "апреле
                "июле", "августе", "сентябре", "октябре", "ноябре", "декабре")
 
 
-def _format_lte(result: dict, limit: int, month: int | None = None) -> str:
+def _format_lte(result: dict, limit: int | None, month: int | None = None) -> str:
     """Текст блока LTE-трафика по уже полученному результату статистики.
 
     Разбивки по узлам здесь нет сознательно: человеку важен только
@@ -110,6 +110,16 @@ def _format_lte(result: dict, limit: int, month: int | None = None) -> str:
     from datetime import datetime
     month_name = _MONTH_PREP[month or datetime.now().month]
     used_gb = result["used_bytes"] / 1024 ** 3
+    if limit is None:
+        # Лимит отключён тумблером в админке — только расход, без cap.
+        lines = [f"🌐 <b>LTE-трафик в {month_name}</b>",
+                 f"Использовано: <b>{used_gb:.2f} ГБ</b>",
+                 "<i>Лимит отключён — серверы через CDN доступны "
+                 "без ограничения.</i>"]
+        if result.get("failed"):
+            lines.append("<i>Часть LTE-серверов не ответила — "
+                         "цифра может быть неполной.</i>")
+        return "\n".join(lines)
     left_gb = max(0.0, limit - used_gb)
     lines = [f"🌐 <b>LTE-трафик в {month_name}</b>",
              f"Использовано: <b>{used_gb:.2f} ГБ</b> "
@@ -180,7 +190,8 @@ async def handle_my_lte(query, kind: str = "paid"):
                         "кончается на [CDN]. Как только появятся, расход "
                         "будет считаться здесь.</i>")
             else:
-                body = _format_lte(r, limit)
+                from services.remnawave import lte_limit_off
+                body = _format_lte(r, None if lte_limit_off() else limit)
     except Exception:
         body = "⚠️ <i>Не удалось получить статистику LTE. Попробуй обновить через минуту.</i>"
 

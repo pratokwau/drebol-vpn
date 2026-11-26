@@ -508,6 +508,17 @@ def lte_limit_label(sub_lte=None, preset=None) -> str:
     return f"{LTE_MONTHLY_GB} ГБ (по умолчанию)"
 
 
+def lte_limit_off() -> bool:
+    """Тумблер «Отключить лимит LTE» (config paid_lte_limit_off).
+
+    Включён — месячный лимит LTE не применяется: проверка
+    lte_fallback_tick никого не перекидывает в fallback-сквад,
+    а уже перекинутых возвращает на обычные сквады; показы
+    остатка в боте и в перехватчике подписки говорят «без лимита».
+    """
+    return bool(load_config().get("paid_lte_limit_off"))
+
+
 def is_cdn_node(name) -> bool:
     """LTE-узел — тот, чьё название кончается ровно на «[CDN]»,
     со скобками. «Германия - 1 [CDN]» — да, «Германия - 1» — нет."""
@@ -1480,7 +1491,6 @@ async def handle_rw_menu(query, context=None):
         kb.append([InlineKeyboardButton("🔌 Проверить", callback_data="rw_test")])
         kb.append([InlineKeyboardButton("🩺 Здоровье узлов", callback_data="healthcheck")])
         kb.append([InlineKeyboardButton("📉 Падения и сбои", callback_data="rw_downtime")])
-        kb.append([InlineKeyboardButton("☁️ Яндекс Клауд", callback_data="rw_yandex")])
         kb.append([InlineKeyboardButton("🔄 Синхронизация",
                                         callback_data="panel_sync_menu")])
     kb.append([InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")])
@@ -1765,7 +1775,7 @@ async def handle_rw_yandex_whitelist(query, context=None):
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ К Яндекс Клауд", callback_data="rw_yandex")]]),
+            [InlineKeyboardButton("◀️ К Yandex Cloud", callback_data="yc_menu")]]),
         disable_web_page_preview=True)
 
 
@@ -1844,7 +1854,7 @@ async def handle_rw_yandex_sub(query, context=None):
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ К Яндекс Клауд", callback_data="rw_yandex")]]),
+            [InlineKeyboardButton("◀️ К Yandex Cloud", callback_data="yc_menu")]]),
         disable_web_page_preview=True)
 
 

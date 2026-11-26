@@ -44,7 +44,7 @@ SETTINGS_ALLOWLIST = {
     "channel_url", "force_subscribe", "sub_link_domain",
     "privacy_url", "terms_url", "refund_url", "rules_url", "consent_url",
     "paid_trial_period", "paid_preset_hwid", "paid_preset_traffic",
-    "paid_preset_lte",
+    "paid_preset_lte", "paid_lte_limit_off",
     "referral_bonus", "referral_invited_bonus",
     "remind_enabled", "remind_first", "remind_second", "remind_third",
     "remind_trials", "remind_quiet_from", "remind_quiet_to",
@@ -58,6 +58,7 @@ SETTINGS_ALLOWLIST = {
 _BOOL_KEYS = {
     "force_subscribe", "remind_enabled", "remind_trials",
     "winback_enabled", "winback_paid_only", "maintenance_enabled",
+    "paid_lte_limit_off",
 }
 _INT_KEYS = {
     "paid_trial_period", "paid_preset_hwid", "paid_preset_traffic",

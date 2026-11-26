@@ -157,6 +157,7 @@ from paidsub.handlers import (
     handle_paid_subs_menu, handle_paid_presets_menu,
     handle_paid_preset_hwid, handle_paid_preset_traffic,
     handle_paid_preset_lte, handle_paid_lte_fallback,
+    handle_paid_lte_limit_toggle,
     handle_paid_lte_fallback_set, handle_paid_lte_check_now,
     handle_paid_squads_menu, handle_paid_issued_squads,
     handle_paid_issued_squad_toggle, handle_paid_lte_squads,
@@ -574,7 +575,7 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("rw_link_set:"):
         await handle_rw_link_set(query, context, data.split(":", 1)[1])
     elif data == "rw_yandex":
-        await handle_rw_yandex(query, context)
+        await handle_yc_menu(query, context)
     elif data == "rw_yandex_sub":
         await handle_rw_yandex_sub(query, context)
     elif data == "rw_yandex_whitelist":
@@ -934,6 +935,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_lte_squad_toggle(query, context, data.split(":", 1)[1])
     elif data == "paid_lte_fallback":
         await handle_paid_lte_fallback(query, context)
+    elif data == "paid_lte_limit_toggle":
+        await handle_paid_lte_limit_toggle(query, context)
     elif data == "paid_lte_fallback_off":
         await handle_paid_lte_fallback_set(query, context, None)
     elif data.startswith("paid_lte_fallback:"):

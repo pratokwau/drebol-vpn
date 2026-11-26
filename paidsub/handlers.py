@@ -515,7 +515,11 @@ async def handle_paid_lte_fallback(query, context):
         return
     cfg = load_config()
     current = cfg.get("paid_lte_fallback_squad")
-    rows = []
+    limit_off = bool(cfg.get("paid_lte_limit_off"))
+    rows = [[InlineKeyboardButton(
+        "✅ Лимит LTE отключён — нажми, чтобы включить" if limit_off
+        else "📉 Лимит LTE включён — нажми, чтобы отключить",
+        callback_data="paid_lte_limit_toggle")]]
     for sq in r["squads"]:
         mark = "✅ " if sq["uuid"] == current else ""
         rows.append([InlineKeyboardButton(
@@ -533,6 +537,10 @@ async def handle_paid_lte_fallback(query, context):
                         "выбранный сквад")
     await query.edit_message_text(
         "🔀 <b>Сквад после конца LTE</b>\n\n"
+        + ("<blockquote>📴 <b>Лимит LTE сейчас ОТКЛЮЧЁН</b> — "
+           "CDN-серверы доступны всем без учёта трафика, "
+           "в fallback никто не перекидывается.</blockquote>\n\n"
+           if limit_off else "")
         + (f"<blockquote>Сейчас: <b>{_esc_name(cur_name)}</b></blockquote>\n\n"
            if cur_name else "")
         + "Выбери внутренний сквад панели — его инбаунды получит подписка, "
@@ -543,6 +551,18 @@ async def handle_paid_lte_fallback(query, context):
           "а доступ не меняется — как раньше.</i>",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows),
     )
+
+
+async def handle_paid_lte_limit_toggle(query, context):
+    """Тумблер «Отключить лимит LTE» (config paid_lte_limit_off).
+
+    При отключении лимита lte_fallback_tick на ближайшем проходе
+    вернёт уже перекинутых в fallback на обычные сквады.
+    """
+    cfg = load_config()
+    cfg["paid_lte_limit_off"] = not bool(cfg.get("paid_lte_limit_off"))
+    save_config(cfg)
+    await handle_paid_lte_fallback(query, context)
 
 
 async def handle_paid_lte_fallback_set(query, context, uuid: str | None):
@@ -603,6 +623,7 @@ async def lte_fallback_tick(context) -> dict:
     import services.remnawave as rw
     cfg = load_config()
     fallback = cfg.get("paid_lte_fallback_squad")
+    limit_off = bool(cfg.get("paid_lte_limit_off"))
     lte_squads = set(cfg.get("paid_lte_squads") or [])
     month = datetime.now().strftime("%Y-%m")
     if not rw.is_configured():
@@ -630,7 +651,7 @@ async def lte_fallback_tick(context) -> dict:
         used_gb = usage.get(rw.make_username(email or "", 0), 0) / 1024 ** 3
         limit = rw.lte_limit_gb(sub_lte, cfg.get("paid_preset_lte"))
         exhausted = used_gb >= limit
-        if (exhausted and fallback and lte_squads
+        if (not limit_off and exhausted and fallback and lte_squads
                 and not (switched_this_month and fb_sq == fallback)):
             res = await update_client_squads(email, exhausted_squads)
             if not res.get("success"):
@@ -651,9 +672,10 @@ async def lte_fallback_tick(context) -> dict:
                     f"<blockquote>Использовано: <b>{used_gb:.2f} ГБ</b> из {limit} ГБ</blockquote>\n\n"
                     "<i>LTE-серверы отключены, до 1-го числа доступны "
                     "обычные серверы — LTE вернётся в новом месяце.</i>")
-        elif fb_m and fb_m != month and normal:
+        elif fb_m and (fb_m != month or limit_off) and normal:
             # новый месяц: счётчик обнулся — возвращаем обычные сквады
-            # (среди них снова есть сквад LTE-серверов, fallback уходит)
+            # (среди них снова есть сквад LTE-серверов, fallback уходит);
+            # тот же возврат — при отключении лимита админом.
             res = await update_client_squads(email, normal)
             if not res.get("success"):
                 panel_fail += 1
@@ -662,12 +684,18 @@ async def lte_fallback_tick(context) -> dict:
                 continue
             await update_paid_sub_field(sub_id, "lte_fallback_month", None)
             await add_history(tg_id, "settings_changed",
+                              "Лимит LTE отключён — возврат с fallback-сквада "
+                              "на обычные, LTE-сквад снова включён"
+                              if limit_off else
                               "Новый месяц — возврат с fallback-сквада на обычные, "
                               "LTE-сквад снова включён")
             restored += 1
             if bot and tg_id:
                 await _notify_user(
                     bot, tg_id,
+                    "🌐 <b>Лимит LTE отключён</b>\n\n"
+                    "<i>Серверы через CDN снова доступны без ограничения.</i>"
+                    if limit_off else
                     "🌐 <b>Новый месяц — LTE-трафик снова доступен</b>\n\n"
                     f"<blockquote>Лимит на месяц: <b>{limit} ГБ</b></blockquote>")
         elif switched_this_month and not exhausted:

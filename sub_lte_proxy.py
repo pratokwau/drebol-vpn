@@ -92,7 +92,10 @@ async def _compute_lte_line(email, lte_gb_val):
     """
     from config import load_config
     from services.remnawave import (is_configured, lte_limit_gb,
+                                    lte_limit_off,
                                     make_username, user_cdn_usage)
+    if lte_limit_off():
+        return "📡 Трафик через CDN: без лимита"
     limit = lte_limit_gb(lte_gb_val, load_config().get("paid_preset_lte"))
     if limit == 0:
         return "📡 LTE-серверы: закрыты"

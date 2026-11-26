@@ -2,16 +2,17 @@
 
 Только справка, ничего не меняется и не нажимается: ресурсы Yandex CDN,
 их связь с панелью Remnawave и нодами, DNS зоны drbl.tech, биллинг
-и типовые поломки LTE-линейки с рецептами ремонта (по итогам разбора
-и починки 2026-11-22). Настройка зеркала страницы подписки и белые
-списки живут отдельно — в «Панель и узлы» → «Яндекс Клауд» (rw_yandex).
+и типовые поломки CDN-линейки с рецептами ремонта (по итогам разбора
+и починки 2026-11-22). Здесь же — настройка зеркала страницы подписки
+и белые списки (экраны rw_yandex_sub / rw_yandex_whitelist из
+services/remnawave.py, кнопки ведут сюда же).
 """
 
 from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-GSLB = "8d4319fdecfff922.topology.gslb.yccdn.ru"
+GSLB = "bc6681bc57f8bf03.topology.gslb.yccdn.ru"
 
 
 def _kb(rows):
@@ -39,7 +40,8 @@ async def handle_yc_menu(query, context=None):
         "здесь ничего не меняется и не нажимается.</i>",
         "",
         "<b>Роль</b>",
-        "Yandex CDN — край для LTE-линейки и страницы подписки.",
+        "Yandex CDN — край для CDN-вариантов стран (хосты «- 2»)",
+        "и страницы подписки.",
         "Схема: пользователь → Yandex CDN → основная нода страны.",
         "Кеширование на всех ресурсах <b>ВЫКЛЮЧЕНО</b> — CDN только",
         "проксирует трафик к нодам.",
@@ -48,15 +50,15 @@ async def handle_yc_menu(query, context=None):
         "• «Ресурсы и ноды» — ресурсы CDN, origins, цепочка на ноде;",
         "• «DNS и ремонт» — записи зоны и типовые поломки;",
         "• «Биллинг» — пакеты, грант и связь с лимитами LTE в боте.",
-        "",
-        "⚠️ <b>Финляндия умирает 2026-11-24 01:09</b> вместе с сервером FI:",
-        "после этого ресурс fin1cdn и хост «Финляндия [LTE]»",
-        "подлежат удалению.",
+        "• «Страница подписки» и «Белые списки» — настройка зеркала",
+        "  sub.drbl.tech и списки IP Яндекса для файрвола нод.",
     ]
     kb = _kb([
         [InlineKeyboardButton("📦 Ресурсы и ноды", callback_data="yc_resources")],
         [InlineKeyboardButton("🌐 DNS и ремонт", callback_data="yc_dns")],
         [InlineKeyboardButton("💰 Биллинг", callback_data="yc_billing")],
+        [InlineKeyboardButton("📄 Страница подписки", callback_data="rw_yandex_sub")],
+        [InlineKeyboardButton("📋 Белые списки", callback_data="rw_yandex_whitelist")],
         [InlineKeyboardButton("◀️ Назад в админку", callback_data="admin_panel")],
     ])
     await _show(query, context, lines, kb)
@@ -67,22 +69,24 @@ async def handle_yc_resources(query, context=None):
     lines = [
         "📦 <b>Ресурсы и ноды</b>",
         "",
-        "Папка в Yandex Cloud: <b>cloud-pratokwau</b>. Все ресурсы Active,",
+        "Папка в Yandex Cloud: <b>cloud-frost-287</b> (новый аккаунт,",
+        "миграция 2026-11-26). Все ресурсы Active,",
         "сертификаты выпущены. Общий CNAME для всех ресурсов:",
         f"<code>{GSLB}</code>",
         "",
         "<b>Ресурсы и их origins</b>",
-        "• <b>fin1cdn</b> (<code>bc8r6dlc6663p5pte2m7</code>) → 95.85.251.169",
-        "  по HTTP, Host — как у клиента;",
-        "• <b>de1cdn</b> (<code>bc8rpgse7cdpe44yji5v</code>) → 144.31.223.252",
-        "  по HTTP, Host de1cdn.drbl.tech;",
-        "• <b>se1cdn</b> (<code>bc8rnvikmt7jicqodcjk</code>) → 81.90.21.84 по HTTP;",
-        "• <b>sub</b> (<code>bc8rx2kwik6ohfqdylu3</code>) → key.drbl.tech по HTTPS",
-        "  (страница подписки).",
+        "• <b>static</b> (<code>bc8rhsx4snr37xstoxao</code>) → 144.31.223.252",
+        "  по HTTP, Host static.drbl.tech (Германия, хост «- 2»);",
+        "• <b>assets</b> (<code>bc8rjuvq5ztilk7zwrp2</code>) → 81.90.21.84",
+        "  по HTTP, Host — как у клиента (Швеция, хост «- 2»);",
+        "• <b>sub</b> → key.drbl.tech по HTTPS",
+        "  (страница подписки, перенос на новый аккаунт);",
+        "• <b>media</b> → 109.248.161.146 по HTTP (Латвия, хост «- 2»,",
+        "  строится).",
         "",
         "<b>Цепочка на ноде</b>",
         "CDN приходит на nginx ноды: порт 80, server_name —",
-        "<code>&lt;страна&gt;1cdn.drbl.tech</code>. Дальше <code>location /drbl7f3a</code>",
+        "домен ресурса страны (<code>static</code>/<code>assets</code>/<code>media</code>). Дальше <code>location /drbl7f3a</code>",
         "→ <code>proxy_pass 127.0.0.1:8880</code> — это XHTTP-инбаунд",
         "VXC-&lt;Country&gt;-1 в панели Remnawave (packet-up, GET-uplink).",
         "",
@@ -101,9 +105,8 @@ async def handle_yc_dns(query, context=None):
         "🌐 <b>DNS и ремонт</b>",
         "",
         "Зона <b>drbl.tech</b> ведётся в SpaceWeb. Записи CDN-части:",
-        "• fin1cdn, de1cdn, se1cdn, sub — CNAME на",
+        "• static, assets, sub — CNAME на",
         f"  <code>{GSLB}</code>;",
-        "• finnode1 — A 95.85.251.169;",
         "• denode1 — A 144.31.223.252;",
         "• senode1 — A 81.90.21.84;",
         "• key — A 144.31.223.252.",
@@ -136,7 +139,9 @@ async def handle_yc_billing(query, context=None):
         "💰 <b>Биллинг Yandex CDN</b>",
         "",
         "<b>Пакеты</b>",
-        "150 ₽/мес за ресурс × 4 ресурса = <b>600 ₽/мес</b>.",
+        "150 ₽/мес за ресурс. Сейчас в новом аккаунте 2 ресурса",
+        "(static, assets) = <b>300 ₽/мес</b>; с sub и media будет",
+        "4 ресурса = <b>600 ₽/мес</b>.",
         "В пакет каждого ресурса включено: 150 ГБ исходящего",
         "трафика + 100 млн запросов. Пакеты между ресурсами",
         "<b>НЕ переносятся</b> — неиспользованное сгорает.",
@@ -145,15 +150,16 @@ async def handle_yc_billing(query, context=None):
         "не отображается: смотреть детализацию биллинга.",
         "",
         "<b>Сейчас</b>",
-        "На 2026-11-22 потребление (~44,5 ГБ за 30 дней) полностью",
-        "покрыто грантом 2 650 ₽ — к оплате 0 ₽. Когда грант",
-        "кончится, счёт станет ~600 ₽/мес плюс сверхпакетный трафик.",
+        "Новый аккаунт (cloud-frost-287): стартовый грант",
+        "<b>4 000 ₽ до 25.01.2027</b> покрывает пакеты и трафик.",
+        "Старый аккаунт после переноса sub выводится из работы.",
         "",
         "<b>Связь с ботом</b>",
         "У подписок есть месячный LTE-лимит: пресеты paid_preset_lte",
         "и preset_lte (настройки подписок), изначально — 30 ГБ/мес.",
         "При превышении лимита бот перекидывает подписку",
-        "в fallback-сквад, поэтому для основной линейки пресет",
-        "должен быть заметно выше фактического расхода.",
+        "в fallback-сквад. Лимит можно полностью <b>отключить</b>",
+        "тумблером «Лимит LTE» (Платные подписки → «Сквад после",
+        "конца LTE») — тогда CDN-варианты доступны всем без учёта.",
     ]
     await _show(query, context, lines, _back_to_menu())
