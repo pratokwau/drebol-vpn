@@ -876,7 +876,12 @@ async def handle_dm_user(query, tg_id: int, context: ContextTypes.DEFAULT_TYPE):
     name = escape(str(u[1] if u else tg_id))
     await query.edit_message_text(
         f"📌 <b>Сообщение для {name}</b>  ·  <code>{tg_id}</code>\n\n"
-        "<i>Напиши текст одним сообщением — он придёт от имени Drebol VPN.</i>",
+        "<i>Пришлите одним сообщением: текст, фото, файл, видео или "
+        "голосовое.\n"
+        "Если у человека есть диалог в боте поддержки — уйдёт в его тему "
+        "в группе и придёт ему в бота поддержки. Если не писал в "
+        "поддержку — придёт сюда, в основной бот, с припиской про "
+        "поддержку, а тема в группе всё равно создастся.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("◀️ К профилю", callback_data=f"user_profile:{tg_id}")],

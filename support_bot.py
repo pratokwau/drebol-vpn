@@ -146,7 +146,8 @@ async def _create_topic(bot, user, group_id) -> int | None:
         log.error("create_forum_topic failed for %s: %s", user.id, e)
         return None
     topic_id = int(topic.message_thread_id)
-    await db.set_support_topic(user.id, topic_id, int(group_id), topic_name)
+    await db.set_support_topic(user.id, topic_id, int(group_id), topic_name,
+                               origin="user")
     # карточка в теме: кто это, чтобы было видно без открытия профиля
     try:
         await bot.send_message(
@@ -173,6 +174,11 @@ async def _ensure_topic(bot, user) -> int | None:
         return None
     row = await db.get_support_topic(user.id)
     if row and int(row[1]) == int(group_id):
+        # Тему мог завести админ первым сообщением из основного бота:
+        # человек написал сам — диалог в боте поддержки теперь есть.
+        full = await db.get_support_topic_full(user.id)
+        if full and full[3] == "admin":
+            await db.set_support_topic_origin(user.id, "user")
         if row[2] != "open":
             await db.set_support_topic_status(user.id, "open")
             await _sync_topic_icon(bot, user.id)
@@ -278,7 +284,9 @@ async def on_group_message(update: Update, context) -> None:
     Не пересылаем только свои сообщения (карточка темы и т.п.):
     сообщения других ботов — в первую очередь основного бота —
     пересылаем, иначе ответ из веб-админки остался бы в теме
-    и не дошёл бы до юзера.
+    и не дошёл бы до юзера. Исключение — темы, заведенные админом
+    из основного бота (origin='admin'): их архивные копии человеку
+    уже ушли в основной бот, пересылка дала бы дубль.
     """
     msg = update.message
     if not msg or not msg.message_thread_id:
@@ -293,6 +301,15 @@ async def on_group_message(update: Update, context) -> None:
     user_id = await db.get_user_by_topic(msg.message_thread_id, int(group_id))
     if not user_id:
         return
+    # Тема заведена админом из основного бота (origin='admin'): копии
+    # сообщений основного бота в ней — это архив первого обращения,
+    # человеку они уже ушли в основной бот. Не пересылаем, иначе он
+    # получит дубль сюда. Сообщения людей (админ, помощники) —
+    # пересылаем как обычно.
+    if msg.from_user and msg.from_user.is_bot:
+        full = await db.get_support_topic_full(user_id)
+        if full and full[3] == "admin":
+            return
     try:
         await msg.copy(chat_id=user_id)
         await db.touch_support_topic(user_id)

@@ -129,10 +129,12 @@ async def panel_states(force: bool = False) -> dict:
     return _PANEL_STATES
 
 
-def _sub_mark(row, states: dict) -> str:
+def _sub_mark(row, states: dict, frozen_ids: set = None) -> str:
     """Значок подписки в списке: что с ней прямо сейчас."""
     from paidsub.storage import SOON_DAYS, parse_sub_date
     email, status = row[2], (row[6] if len(row) > 6 else "active")
+    if frozen_ids and row[0] in frozen_ids:
+        return "❄️"
     if states.get(email) == "DISABLED":
         return "⏸"
     if status == "expired":
@@ -173,13 +175,15 @@ async def handle_paid_subs_menu(query, page: int = 1, scope: str = "all", sort: 
         page = min(max(1, page), total_pages)
         counts["off"] = (len(off_emails & await paid_emails()) if panel["ok"] else None)
 
-    marks = {r[0]: _sub_mark(r, states) for r in rows}
+    from paidsub.storage import frozen_paid_sub_ids
+    frozen_ids = await frozen_paid_sub_ids()
+    marks = {r[0]: _sub_mark(r, states, frozen_ids) for r in rows}
     cfg = load_config()
     ready = _paid_presets_ready(cfg)
     icon, label = PAID_TABS[scope]
 
     lines = ["💳 <b>Платные подписки</b>", "",
-             "<blockquote>🟢 работает · ⏳ скоро кончится · 🔴 истекла · ⏸ выключена в панели\n"
+             "<blockquote>🟢 работает · ⏳ скоро кончится · 🔴 истекла · ⏸ выключена в панели · ❄️ заморожена\n"
              "🆓 пробные · ⭐ платящие · 📋 все</blockquote>",
              f"\n{icon} <b>{label}</b> · сортировка: <b>{SORT_LABELS[sort]}</b> · "
              f"стр. {page} из {total_pages}"]
@@ -1172,7 +1176,19 @@ async def handle_paid_sub_view(query, sub_id: int):
         traffic_line = f"📶 Трафик: <b>{traffic_limit}</b>"
 
     enabled = card["panel"]["enabled"]
-    status_icon = "🟢" if enabled else "🔴"
+    frozen_at = card.get("frozen_at")
+    frozen = bool(frozen_at)
+    status_icon = "❄️" if frozen else ("🟢" if enabled else "🔴")
+    frozen_line = ""
+    if frozen:
+        from paidsub.storage import parse_sub_date as _psd
+        frozen_dt = _psd(frozen_at)
+        paused_line = ""
+        if frozen_dt:
+            paused_line = (f" · на паузе уже "
+                           f"{fmt_duration_precise(int((datetime.now() - frozen_dt).total_seconds()))}")
+        frozen_line = (f"❄️ <b>Заморожена</b> с {frozen_at}{paused_line} — "
+                       f"срок стоит, дни не сгорают\n")
 
     # Статус подписки
     status_labels = {"active": "активна", "expired": "истекла"}
@@ -1261,6 +1277,7 @@ async def handle_paid_sub_view(query, sub_id: int):
         + tg_line
         + "\n📌 <b>Срок</b>\n<blockquote>"
         f"Статус: <b>{status_label}</b>  ·  {sub_type} (продлений: {times_renewed})\n"
+        + frozen_line
         + payment_line
         + time_left_line.rstrip("\n")
         + "</blockquote>\n\n"
@@ -1281,7 +1298,8 @@ async def handle_paid_sub_view(query, sub_id: int):
         f"sub: <code>{sub_form}</code>\n"
         f"key: <code>{key_form}</code>",
         parse_mode="HTML",
-        reply_markup=paid_sub_view_keyboard(sub_id, enabled),
+        reply_markup=paid_sub_view_keyboard(sub_id, enabled, frozen=frozen,
+                                            tg_id=tg_id),
         disable_web_page_preview=True,
     )
 
@@ -1335,6 +1353,9 @@ async def handle_paid_sub_freeze(query, sub_id: int, context=None):
     if not result.get("ok"):
         if result.get("error") == "already_frozen":
             await query.answer("Подписка уже заморожена", show_alert=True)
+            await handle_paid_sub_view(query, sub_id)
+        elif result.get("error") == "panel_client_not_found":
+            await query.answer("❌ Клиент не найден в панели", show_alert=True)
         else:
             await query.edit_message_text(
                 f"❌ Ошибка: <code>{result['error']}</code>",
@@ -1342,6 +1363,69 @@ async def handle_paid_sub_freeze(query, sub_id: int, context=None):
             )
         return
     await handle_paid_sub_view(query, sub_id)
+
+
+async def handle_paid_sub_unfreeze(query, sub_id: int, context=None):
+    bot = context.bot if context and hasattr(context, "bot") else None
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+    await query.edit_message_text("▶️ Размораживаю подписку...")
+    result = await _svc.unfreeze_sub(sub_id, kind="paid", bot=bot)
+    if not result.get("ok"):
+        if result.get("error") == "not_frozen":
+            await query.answer("Подписка не заморожена", show_alert=True)
+            await handle_paid_sub_view(query, sub_id)
+        else:
+            await query.edit_message_text(
+                f"❌ Ошибка: <code>{result['error']}</code>",
+                parse_mode="HTML", reply_markup=back_admin(),
+            )
+        return
+    await handle_paid_sub_view(query, sub_id)
+
+
+async def handle_paid_sub_topic(query, sub_id: int, context=None):
+    """«💬 Открыть тему»: тема человека в группе поддержки + ссылка.
+
+    Тема одна на человека навсегда: существующую переиспользуем,
+    нет — заводим из основного бота (origin='admin'). Дальше админ
+    пишет прямо в тему, бот поддержки пересылает человеку.
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    bot = context.bot if context and hasattr(context, "bot") else None
+    row = await get_paid_sub(sub_id)
+    if not row:
+        await query.edit_message_text("❌ Подписка не найдена.", reply_markup=back_admin())
+        return
+    tg_id = row[1]
+    if not tg_id or not bot:
+        await query.answer("У подписки нет владельца в Telegram — тему завести некому.",
+                           show_alert=True)
+        return
+    from core.admin_dm import ensure_user_topic
+    topic = await ensure_user_topic(bot, tg_id)
+    if not topic:
+        await query.answer("Не удалось открыть тему: группа поддержки не настроена "
+                           "или основной бот не админ в ней.", show_alert=True)
+        return
+    topic_id, group_id = topic
+    gid = str(group_id)
+    internal = gid[4:] if gid.startswith("-100") else gid.lstrip("-")
+    url = f"https://t.me/c/{internal}/{topic_id}"
+    await query.edit_message_text(
+        "💬 <b>Тема в группе поддержки</b>\n\n"
+        "<i>Пишите прямо в тему — бот поддержки перешлёт человеку. "
+        "Если человек ещё ни разу не писал в бота поддержки, переслать "
+        "ему не выйдет, пока он не обратится туда сам.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💬 Перейти в тему", url=url)],
+            [InlineKeyboardButton("◀️ К подписке",
+                                  callback_data=f"paid_sub_view:{sub_id}")],
+        ]),
+    )
 
 
 # ── Продление срока ──────────────────────────────────────────────────────────
@@ -2083,7 +2167,14 @@ async def check_expired_subs(context):
     now = datetime.now()
     for row in await get_expired_paid_subs():
         (sub_id, tg_id, email, _uuid_val, _sub_id_str, _sub_url,
-         expire_str, status, times_renewed, _ind_renew_time, _period_end) = row
+         expire_str, status, times_renewed, _ind_renew_time, _period_end,
+         frozen_at) = row
+
+        if frozen_at:
+            # Замороженная: срок на паузе. Не помечаем истёкшей и не
+            # тревожим человека — при разморозке дата сдвинется на всё
+            # время паузы, и проверка увидит её уже актуальной.
+            continue
 
         expire_dt = parse_sub_date(expire_str)
         if not expire_dt:

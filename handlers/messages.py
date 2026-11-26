@@ -1325,29 +1325,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await apply_server_step(update.message, context, state, text)
         return
 
-    # ── Сообщение юзеру из профиля ─────────────────────────────────────────────
+    # ── Сообщение юзеру из профиля/подписки ──────────────────────────────────
     if state == AWAITING_DM_USER:
         dm_target = context.user_data.pop("dm_target", None)
         context.user_data.pop("state", None)
         if dm_target:
-            try:
-                await context.bot.send_message(
-                    chat_id=dm_target,
-                    text=f"📌 <b>Сообщение от Drebol VPN</b>\n\n<blockquote>{text}</blockquote>",
-                    parse_mode="HTML",
-                )
-                from html import escape
-                from core.log_channel import send_log
-                await send_log(context.bot,
-                    f"📌 Админ → <code>{dm_target}</code>: {escape(text[:100])}"
-                )
+            from core.admin_dm import deliver_admin_message
+            res = await deliver_admin_message(
+                context.bot, update.message, dm_target)
+            if res.get("ok"):
                 await update.message.reply_text(
-                    f"✅ Сообщение отправлено пользователю <code>{dm_target}</code>.",
-                    parse_mode="HTML", reply_markup=back_admin(),
-                )
-            except Exception as e:
+                    res["report"], parse_mode="HTML",
+                    reply_markup=back_admin())
+            else:
                 await update.message.reply_text(
-                    f"❌ Не удалось отправить: <code>{e}</code>",
+                    f"❌ Не удалось отправить: <code>{res.get('error')}</code>",
                     parse_mode="HTML", reply_markup=back_admin(),
                 )
         return
@@ -1366,6 +1358,22 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("state", None)
             await mnt.show_maintenance(message=msg)
             return
+
+    # ── Медиа юзеру из профиля/подписки («📌 Написать») ──────────────────────
+    if is_admin and state == AWAITING_DM_USER:
+        dm_target = context.user_data.pop("dm_target", None)
+        context.user_data.pop("state", None)
+        if dm_target:
+            from core.admin_dm import deliver_admin_message
+            res = await deliver_admin_message(context.bot, msg, dm_target)
+            if res.get("ok"):
+                await msg.reply_text(res["report"], parse_mode="HTML",
+                                     reply_markup=back_admin())
+            else:
+                await msg.reply_text(
+                    f"❌ Не удалось отправить: <code>{res.get('error')}</code>",
+                    parse_mode="HTML", reply_markup=back_admin())
+        return
 
     if msg.photo:
         file_id = msg.photo[-1].file_id

@@ -309,7 +309,8 @@ async def update_paid_sub_field(sub_id: int, field: str, value):
     allowed = {"expire_date", "limit_ip", "limit_hwid", "total_gb", "status", "payment_pending",
                 "ind_trial_period", "ind_pay_period", "ind_renew_time", "ind_price", "ind_pay_url",
                 "times_renewed", "pending_promo", "uuid", "period_end", "extra_devices",
-                "sub_id", "sub_url", "remind_stage", "lte_gb", "lte_fallback_month"}
+                "sub_id", "sub_url", "remind_stage", "lte_gb", "lte_fallback_month",
+                "frozen_at"}
     if field not in allowed:
         return
     async with aiosqlite.connect(DB_PATH) as db:
@@ -320,10 +321,29 @@ async def update_paid_sub_field(sub_id: int, field: str, value):
 async def get_expired_paid_subs() -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("""
-            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, status, times_renewed, ind_renew_time, period_end
+            SELECT id, tg_id, email, uuid, sub_id, sub_url, expire_date, status, times_renewed, ind_renew_time, period_end, frozen_at
             FROM paid_subs
         """) as cur:
             return await cur.fetchall()
+
+
+async def get_paid_sub_frozen_at(sub_id: int):
+    """Момент заморозки подписки (строка) или None, если не заморожена."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT frozen_at FROM paid_subs WHERE id = ?", (sub_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+
+async def frozen_paid_sub_ids() -> set:
+    """ID замороженных подписок — для значков ❄️ в списке."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id FROM paid_subs WHERE frozen_at IS NOT NULL"
+        ) as cur:
+            return {r[0] for r in await cur.fetchall()}
 
 
 # ── Запросы на подписку ──────────────────────────────────────────────────────

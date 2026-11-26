@@ -602,6 +602,10 @@ async def admin_flow(bot, sub_id):
     pu = await panel_user(row[2])
     log.check("заморозка отключает клиента в панели", pu.get("status") != "ACTIVE",
               "статус не ACTIVE", pu.get("status"))
+    from paidsub.storage import get_paid_sub_frozen_at
+    log.check("заморозка ставит отметку frozen_at — срок на паузе",
+              bool(await get_paid_sub_frozen_at(sub_id)),
+              "frozen_at задан", await get_paid_sub_frozen_at(sub_id))
     log.note(f"после заморозки статус подписки в базе: {row[11]}")
     import handlers.user as hu
     text, _mk = await hu.start_screen(types.SimpleNamespace(
@@ -615,6 +619,29 @@ async def admin_flow(bot, sub_id):
     pu = await panel_user((await get_paid_sub(sub_id))[2])
     log.check("после разморозки доступ снова открыт", pu.get("status") == "ACTIVE",
               "статус ACTIVE", pu.get("status"))
+    log.check("«включить» замороженную снимает отметку frozen_at",
+              not await get_paid_sub_frozen_at(sub_id),
+              "frozen_at пуст", await get_paid_sub_frozen_at(sub_id))
+
+    # ── разморозка сдвигает срок ровно на время паузы
+    from paidsub import service as _svc_ft
+    from paidsub.storage import update_paid_sub_field as _upf_ft, parse_sub_date as _psd_ft
+    q = FakeQuery(ADMIN_ID, "Админ", "admin")
+    await ph.handle_paid_sub_freeze(q, sub_id, c)
+    before = _psd_ft((await get_paid_sub(sub_id))[6])
+    await _upf_ft(sub_id, "frozen_at",
+                  (datetime.now() - timedelta(days=2)).strftime("%d.%m.%Y %H:%M:%S"))
+    res = await _svc_ft.unfreeze_sub(sub_id, kind="paid", bot=bot)
+    row = await get_paid_sub(sub_id)
+    after = _psd_ft(row[6])
+    log.check("разморозка сдвигает срок на время заморозки (≈2 дня)",
+              bool(res.get("ok")) and before and after
+              and abs((after - before).total_seconds() - 2 * 86400) < 180,
+              "срок +2 дня", f"{before} → {after}")
+    log.check("после разморозки frozen_at снята, клиент в панели активен",
+              not await get_paid_sub_frozen_at(sub_id)
+              and (await panel_user(row[2])).get("status") == "ACTIVE",
+              "чисто и ACTIVE", row[6])
 
     # ── общие экраны админки
     import handlers.admin as ha

@@ -111,11 +111,27 @@ def paid_presets_keyboard() -> InlineKeyboardMarkup:
 
 
 
-def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardMarkup:
-    toggle_label = "⏸ Отключить" if enabled else "▶️ Включить"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(toggle_label, callback_data=f"paid_sub_toggle:{sub_id}"),
-         InlineKeyboardButton("❄️ Заморозить", callback_data=f"paid_sub_freeze:{sub_id}")],
+def paid_sub_view_keyboard(sub_id: int, enabled: bool = True,
+                           frozen: bool = False,
+                           tg_id: int = None) -> InlineKeyboardMarkup:
+    # Доступ — одна синхронизированная строка под реальное состояние:
+    # работает → Отключить/Заморозить; выключена → Включить/Заморозить;
+    # заморожена → только Разморозить (срок на паузе, «включить» без
+    # сдвига срока было бы воровством дней у клиента).
+    if frozen:
+        state_row = [InlineKeyboardButton(
+            "▶️ Разморозить", callback_data=f"paid_sub_unfreeze:{sub_id}")]
+    else:
+        toggle_label = "⏸ Отключить" if enabled else "▶️ Включить"
+        state_row = [
+            InlineKeyboardButton(toggle_label, callback_data=f"paid_sub_toggle:{sub_id}"),
+            InlineKeyboardButton("❄️ Заморозить", callback_data=f"paid_sub_freeze:{sub_id}"),
+        ]
+    rows = [state_row]
+    if tg_id:
+        rows.append([InlineKeyboardButton(
+            "💬 Открыть тему", callback_data=f"sub_topic:{sub_id}")])
+    rows += [
         [
             InlineKeyboardButton("➕ Добавить срок", callback_data=f"paid_sub_extend:{sub_id}"),
             InlineKeyboardButton("➖ Убавить срок", callback_data=f"paid_sub_reduce:{sub_id}"),
@@ -129,7 +145,8 @@ def paid_sub_view_keyboard(sub_id: int, enabled: bool = True) -> InlineKeyboardM
         [InlineKeyboardButton("⚙️ Настройки", callback_data=f"paid_sub_settings:{sub_id}"),
          InlineKeyboardButton("🗑 Удалить", callback_data=f"paid_sub_delete:{sub_id}")],
         [InlineKeyboardButton("◀️ К списку", callback_data="paid_subs")],
-    ])
+    ]
+    return InlineKeyboardMarkup(rows)
 
 
 def paid_sub_settings_keyboard(sub_id: int) -> InlineKeyboardMarkup:

@@ -156,6 +156,20 @@ async def _re_enable_if_needed(panel_mod, email: str):
         await panel_mod.toggle_client(email, True)
 
 
+async def _frozen_at(sub_id: int):
+    """Момент заморозки платной подписки или None, если не заморожена.
+
+    Заморозка — отдельный флаг в базе (frozen_at), а не просто
+    «выключена в панели»: выключенная подписка может быть и не
+    замороженной, а у замороженной срок стоит на паузе.
+    """
+    from paidsub.storage import get_paid_sub_frozen_at
+    try:
+        return await get_paid_sub_frozen_at(sub_id)
+    except Exception:
+        return None
+
+
 # ── Карточка подписки ─────────────────────────────────────────────────────────
 
 async def get_sub_card(sub_id: int, *, kind: str = "paid", panel=None) -> dict:
@@ -196,10 +210,12 @@ async def get_sub_card(sub_id: int, *, kind: str = "paid", panel=None) -> dict:
             referrer = {"tg_id": ref_id,
                         "first_name": ref_info[1] if ref_info else str(ref_id)}
 
+    frozen_at = await _frozen_at(sub_id) if kind == "paid" else None
     return {"ok": True, "kind": kind, "sub": sub, "row": row,
             "panel": {"enabled": enabled, "traffic_ok": traffic_ok,
                       "up": up, "down": down},
             "times_renewed": sub["times_renewed"],
+            "frozen_at": frozen_at,
             "user": user, "referrer": referrer}
 
 
@@ -208,12 +224,17 @@ async def get_sub_card(sub_id: int, *, kind: str = "paid", panel=None) -> dict:
 async def toggle_sub(sub_id: int, *, kind: str = "paid", bot=None, panel=None) -> dict:
     """Включает/выключает подписку в панели (состояние читается из панели).
 
+    Синхронизация с заморозкой: «включить» замороженную платную
+    подписку — это разморозка (срок сдвигается на время паузы),
+    а не просто включение, иначе дни заморозки сгорели бы.
     Возвращает {"ok": True, "enabled": bool, "email", "tg_id"} или
     {"ok": False, "error": "not_found" | "panel_client_not_found" | <текст панели>}.
     """
     row, _ = await _load(kind, sub_id)
     if not row:
         return {"ok": False, "error": "not_found"}
+    if kind == "paid" and await _frozen_at(sub_id):
+        return await unfreeze_sub(sub_id, kind=kind, bot=bot, panel=panel)
     sub = _norm(kind, row)
     panel_mod = _panel(panel)
     info = await panel_mod.get_client_info(sub["email"])
@@ -246,35 +267,102 @@ async def toggle_sub(sub_id: int, *, kind: str = "paid", bot=None, panel=None) -
 
 
 async def freeze_sub(sub_id: int, *, kind: str = "paid", bot=None, panel=None) -> dict:
-    """Замораживает подписку: выключает в панели, срок не трогает.
+    """Замораживает подписку: выключает в панели и ставит срок на паузу.
 
+    Пауза — флаг frozen_at в базе. Разморозка (unfreeze_sub) сдвинет
+    дату окончания на всё время паузы, поэтому обещание «оставшиеся
+    дни никуда не денутся» — правда. Заморозить можно и уже
+    выключенную подписку: пауза начнётся с этого момента.
+    У админских подписок заморозки нет — там это просто выключение,
+    как было раньше.
     Возвращает {"ok": True, "enabled": False, ...} или
-    {"ok": False, "error": "not_found" | "already_frozen" | <текст панели>}.
+    {"ok": False, "error": "not_found" | "already_frozen" |
+    "panel_client_not_found" | <текст панели>}.
     """
     row, _ = await _load(kind, sub_id)
     if not row:
         return {"ok": False, "error": "not_found"}
     sub = _norm(kind, row)
     panel_mod = _panel(panel)
-    info = await panel_mod.get_client_info(sub["email"])
-    enabled = info.get("enabled", True) if info.get("success") else True
-    if not enabled:
+    if kind == "paid" and await _frozen_at(sub_id):
         return {"ok": False, "error": "already_frozen",
                 "email": sub["email"], "tg_id": sub["tg_id"]}
-    result = await panel_mod.toggle_client(sub["email"], False)
-    if not result.get("success"):
-        return {"ok": False, "error": str(result.get("error") or "?"),
+    info = await panel_mod.get_client_info(sub["email"])
+    if not info.get("success"):
+        return {"ok": False, "error": "panel_client_not_found",
                 "email": sub["email"], "tg_id": sub["tg_id"]}
+    if info.get("enabled", True):
+        result = await panel_mod.toggle_client(sub["email"], False)
+        if not result.get("success"):
+            return {"ok": False, "error": str(result.get("error") or "?"),
+                    "email": sub["email"], "tg_id": sub["tg_id"]}
     if kind == "paid":
+        frozen_at = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+        await _write(kind, sub_id, "frozen_at", frozen_at)
         await _notify(bot, sub["tg_id"],
                       "❄️ <b>Подписка заморожена</b>\n\n"
                       "<blockquote>Срок на паузе — оставшиеся дни никуда не денутся.</blockquote>")
         await _history(kind, sub["tg_id"], "sub_frozen",
-                       f"Подписка #{sub_id} ({sub['email']})")
-    else:
-        await _notify(bot, sub["tg_id"],
-                      "ℹ️ Ваша админская подписка <b>⏸ приостановлена</b>.")
+                       f"Подписка #{sub_id} ({sub['email']}) · с {frozen_at}")
+        return {"ok": True, "enabled": False, "frozen_at": frozen_at,
+                "email": sub["email"], "tg_id": sub["tg_id"]}
+    await _notify(bot, sub["tg_id"],
+                  "ℹ️ Ваша админская подписка <b>⏸ приостановлена</b>.")
     return {"ok": True, "enabled": False,
+            "email": sub["email"], "tg_id": sub["tg_id"]}
+
+
+async def unfreeze_sub(sub_id: int, *, kind: str = "paid", bot=None, panel=None) -> dict:
+    """Размораживает платную подписку: срок +время паузы, доступ открыт.
+
+    Дата окончания сдвигается ровно на время заморозки (чистый сдвиг
+    от старой даты, а не «от сегодня»): сколько дней было в остатке
+    при заморозке, столько и останется. Порядок шагов — сначала срок
+    (база+панель), потом включение в панели, потом снятие флага: если
+    панель не приняла включение, флаг останется и разморозку можно
+    повторить, ничего не потеряв.
+    Возвращает {"ok": True, "enabled": True, "until", "paused_seconds"} или
+    {"ok": False, "error": "not_found" | "not_frozen" | <текст панели>}.
+    """
+    row, _ = await _load(kind, sub_id)
+    if not row:
+        return {"ok": False, "error": "not_found"}
+    sub = _norm(kind, row)
+    if kind != "paid":
+        # у админских заморозки нет: «разморозить» = просто включить
+        return await toggle_sub(sub_id, kind=kind, bot=bot, panel=panel)
+    frozen_at = await _frozen_at(sub_id)
+    if not frozen_at:
+        return {"ok": False, "error": "not_frozen",
+                "email": sub["email"], "tg_id": sub["tg_id"]}
+    frozen_dt = _parse_expire(frozen_at)
+    paused = 0
+    if frozen_dt:
+        paused = max(0, int((datetime.now() - frozen_dt).total_seconds()))
+    expire_dt = _parse_expire(sub["expire_date"])
+    base = expire_dt if expire_dt else datetime.now()
+    new_str = (base + timedelta(seconds=paused)).strftime("%d.%m.%Y %H:%M:%S")
+    panel_mod = _panel(panel)
+    shifted = await set_expire(sub_id, new_str, kind=kind,
+                               mark_active=True, bot=bot, panel=panel)
+    info = await panel_mod.get_client_info(sub["email"])
+    if info.get("success") and not info.get("enabled", True):
+        result = await panel_mod.toggle_client(sub["email"], True)
+        if not result.get("success"):
+            return {"ok": False, "error": str(result.get("error") or "?"),
+                    "email": sub["email"], "tg_id": sub["tg_id"]}
+    await _write(kind, sub_id, "frozen_at", None)
+    await _notify(bot, sub["tg_id"],
+                  "▶️ <b>Подписка снова работает</b>\n\n"
+                  f"<blockquote>Заморозка снята: срок был на паузе "
+                  f"{_fmt_seconds(paused)} — на столько же сдвинулась дата "
+                  f"окончания.\n📅 Действует до: <b>{new_str}</b></blockquote>")
+    await _history(kind, sub["tg_id"], "sub_unfrozen",
+                   f"Подписка #{sub_id} ({sub['email']}) · пауза "
+                   f"{_fmt_seconds(paused)} · до {new_str}")
+    await _retag(sub["tg_id"])
+    return {"ok": True, "enabled": True, "until": new_str,
+            "paused_seconds": paused, "panel_ok": shifted.get("panel_ok", True),
             "email": sub["email"], "tg_id": sub["tg_id"]}
 
 

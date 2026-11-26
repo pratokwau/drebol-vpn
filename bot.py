@@ -398,7 +398,10 @@ def main():
     app.add_handler(MessageHandler(filters.Regex(r"^/a\d+$"), activity_command))
     app.add_handler(MessageHandler(filters.Regex(r"^/e\d+$"), error_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, handle_media))
+    app.add_handler(MessageHandler(
+        filters.PHOTO | filters.Document.ALL | filters.VIDEO | filters.VOICE
+        | filters.VIDEO_NOTE | filters.AUDIO | filters.ANIMATION,
+        handle_media))
     app.add_error_handler(_on_error)
 
     print("Бот запущен...")

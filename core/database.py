@@ -62,6 +62,14 @@ async def init_db():
             await db.execute("ALTER TABLE support_topics ADD COLUMN topic_name TEXT")
         except Exception:
             pass
+        # origin: кто создал тему — 'user' (человек сам написал в бота
+        # поддержки) или 'admin' (админ написал первым из основного бота).
+        # У старых тем NULL — это 'user': темы тогда создавал только бот
+        # поддержки по обращению человека.
+        try:
+            await db.execute("ALTER TABLE support_topics ADD COLUMN origin TEXT")
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS admin_subs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,6 +237,14 @@ async def init_db():
         """)
         try:
             await db.execute("ALTER TABLE paid_subs ADD COLUMN pending_promo TEXT")
+        except Exception:
+            pass
+        # frozen_at — момент заморозки («дд.мм.гггг чч:мм:сс»). NULL —
+        # подписка не заморожена. Заморозка = выключена в панели + срок
+        # на паузе: при разморозке дата окончания сдвигается на время
+        # заморозки (paidsub.service.unfreeze_sub).
+        try:
+            await db.execute("ALTER TABLE paid_subs ADD COLUMN frozen_at TEXT")
         except Exception:
             pass
         # Промокоды: личные (привязаны к человеку), общий лимит использований,
@@ -3029,16 +3045,42 @@ async def get_support_topic(user_id: int) -> tuple | None:
 
 
 async def set_support_topic(user_id: int, topic_id: int, group_id: int,
-                          topic_name: str | None = None) -> None:
+                          topic_name: str | None = None,
+                          origin: str | None = None) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT INTO support_topics (user_id, topic_id, group_id, status, topic_name) "
-            "VALUES (?, ?, ?, 'open', ?) "
+            "INSERT INTO support_topics (user_id, topic_id, group_id, status, topic_name, origin) "
+            "VALUES (?, ?, ?, 'open', ?, ?) "
             "ON CONFLICT(user_id) DO UPDATE SET topic_id = excluded.topic_id, "
             "group_id = excluded.group_id, status = 'open', "
             "topic_name = COALESCE(excluded.topic_name, support_topics.topic_name), "
+            "origin = COALESCE(excluded.origin, support_topics.origin), "
             "last_msg_at = CURRENT_TIMESTAMP",
-            (user_id, topic_id, group_id, topic_name))
+            (user_id, topic_id, group_id, topic_name, origin))
+        await db.commit()
+
+
+async def get_support_topic_full(user_id: int) -> tuple | None:
+    """Тема юзера целиком: (topic_id, group_id, status, origin).
+
+    origin: 'user' — тему создал сам человек обращением в бота
+    поддержки (или тема старая, origin пуст); 'admin' — тему завёл
+    админ первым сообщением из основного бота, диалога в боте
+    поддержки у человека ещё не было.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT topic_id, group_id, status, origin FROM support_topics "
+            "WHERE user_id = ?", (user_id,)
+        ) as cur:
+            return await cur.fetchone()
+
+
+async def set_support_topic_origin(user_id: int, origin: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE support_topics SET origin = ? WHERE user_id = ?",
+            (origin, user_id))
         await db.commit()
 
 

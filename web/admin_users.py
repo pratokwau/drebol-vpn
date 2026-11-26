@@ -909,6 +909,7 @@ async def _sub_action(request, action: str):
     except ImportError:
         return web.json_response({"error": "service_not_ready"}, status=503)
     fn = {"toggle": svc.toggle_sub, "freeze": svc.freeze_sub,
+          "unfreeze": svc.unfreeze_sub,
           "delete": svc.delete_sub, "reissue": svc.reissue_sub,
           "extend": svc.extend_sub, "expire": svc.set_expire,
           "hwid": svc.set_hwid_limit, "traffic": svc.set_traffic_limit,

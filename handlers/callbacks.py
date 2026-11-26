@@ -165,6 +165,7 @@ from paidsub.handlers import (
     handle_paid_preset_trial,
     handle_paid_create_sub, handle_paid_create_type,
     handle_paid_sub_view, handle_paid_sub_delete, handle_paid_sub_toggle,
+    handle_paid_sub_unfreeze, handle_paid_sub_topic,
     handle_approve, handle_reject, handle_request_sub,
     handle_paid_sub_freeze, handle_paid_sub_extend, handle_paid_sub_reduce,
     handle_paid_bulk_menu, handle_paid_bulk_extend, handle_paid_bulk_reduce,
@@ -966,6 +967,10 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_paid_sub_delete(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_freeze:"):
         await handle_paid_sub_freeze(query, int(data.split(":")[1]), context)
+    elif data.startswith("paid_sub_unfreeze:"):
+        await handle_paid_sub_unfreeze(query, int(data.split(":")[1]), context)
+    elif data.startswith("sub_topic:"):
+        await handle_paid_sub_topic(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_extend:"):
         await handle_paid_sub_extend(query, int(data.split(":")[1]), context)
     elif data.startswith("paid_sub_reduce:"):
