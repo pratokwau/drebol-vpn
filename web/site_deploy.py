@@ -587,7 +587,12 @@ body.tg-fullscreen .tabs { top:96px; }
    memToken = t || "";
    try { t ? localStorage.setItem(KEY, t) : localStorage.removeItem(KEY); } catch (e) {}
  }
- function say(msg) { document.getElementById("loginerr").innerHTML = msg || ""; }
+ function say(msg, kind) {
+   var e = document.getElementById("loginerr");
+   e.innerHTML = msg || "";
+   e.style.color = !msg ? "" : kind === "wait" ? "var(--soft)"
+                 : kind === "ok" ? "var(--ok)" : "var(--bad)";
+ }
  function botUrl() { return "https://t.me/" + BOT; }
  document.getElementById("botlink").href = botUrl();
 
@@ -667,7 +672,7 @@ body.tg-fullscreen .tabs { top:96px; }
  }
 
  function login(payload) {
-   say("Входим…");
+   say("Входим…", "wait");
    return api("/api/auth", {method: "POST", body: JSON.stringify(payload)})
      .then(function (r) {
        if (r.status === 200 && r.data.token) { setToken(r.data.token); return load(); }
@@ -813,14 +818,14 @@ body.tg-fullscreen .tabs { top:96px; }
      rows.join("") +
      '<form id="prof-email-form" style="margin-top:14px">' +
        '<label class="field">Почта<input type="email" id="prof-email" value="' + esc(lg.email || "") +
-       '" placeholder="you@example.com" autocomplete="email"></label>' +
-       '<button class="btn btn-ghost" type="submit">Сохранить почту</button></form>' +
+       '" placeholder="you@example.com" autocomplete="email" required></label>' +
+       '<button class="btn btn-main" type="submit">Сохранить почту</button></form>' +
      '<form id="prof-pass-form" style="margin-top:14px">' +
        (lg.has_password
          ? '<label class="field">Текущий пароль<input type="password" id="prof-cur" autocomplete="current-password"></label>'
          : "") +
        '<label class="field">Новый пароль (от 8 символов)<input type="password" id="prof-new" autocomplete="new-password" minlength="8"></label>' +
-       '<button class="btn btn-ghost" type="submit">' +
+       '<button class="btn btn-main" type="submit">' +
        (lg.has_password ? "Сменить пароль" : "Задать пароль") + "</button></form>" +
      '<p class="form-note" id="prof-note"></p>' +
      "</div></div>";
@@ -908,7 +913,7 @@ body.tg-fullscreen .tabs { top:96px; }
    if (s.traffic_limit_gb) {
      var pct = Math.min(100, Math.round(s.traffic_used / (s.traffic_limit_gb * 1024 * 1024 * 1024) * 100));
      trafficBar = '<div class="bar"><div class="bar-fill' + barClass(pct) +
-                  '" style="width:' + pct + '%"></div></div>' +
+                  '" style="width:0%" data-w="' + pct + '"></div></div>' +
                   '<div class="bar-note"><span>Использовано ' + pct + "%</span><span>" + traffic + "</span></div>";
    }
 
@@ -956,7 +961,7 @@ body.tg-fullscreen .tabs { top:96px; }
                  esc(p.lte.limit_gb) + " ГБ · осталось <b style=\"color:var(--ink)\">" +
                  esc(p.lte.left_gb) + " ГБ</b></p>" +
                  '<div class="bar"><div class="bar-fill' + barClass(lpct) +
-                 '" style="width:' + lpct + '%"></div></div>' +
+                 '" style="width:0%" data-w="' + lpct + '"></div></div>' +
                  '<div class="bar-note"><span>Лимит обновляется каждый месяц</span><span>' + lpct + "%</span></div>" +
                  (p.lte.fallback_active
                    ? '<p class="card-sub" style="margin-top:12px">⚠️ LTE на этот месяц закончился — ' +
@@ -1002,7 +1007,8 @@ body.tg-fullscreen .tabs { top:96px; }
             (s.devices_limit ? " из " + esc(s.devices_limit) : "") +
             (s.devices_limit && p.devices && p.devices.length >= s.devices_limit
               ? " · все места заняты" : "") + "</p>" +
-            (devList || '<p class="card-sub">Пока ни одного — подключитесь в приложении.</p>') +
+            (devList || '<p class="card-sub">Пока ни одного.</p>' +
+            '<button class="btn btn-ghost" type="button" onclick="showTab(\'sub\')">Как подключиться</button>') +
             devBuyBlock(s) + "</div></div>");
 
    // Действия: перевыпуск ключа — как кнопка «Новый ключ» в боте
@@ -1154,7 +1160,10 @@ body.tg-fullscreen .tabs { top:96px; }
    return '<p class="card-sub">' + lines.join("<br>") + "</p>";
  }
  function referralCard(p) {
-   if (!p.referral) { return ""; }
+   if (!p.referral) {
+     return '<div class="card">' + title("users", "Приглашайте друзей") +
+       '<p class="card-sub">Реферальная программа сейчас недоступна.</p></div>';
+   }
    var r = p.referral;
    var link = "https://t.me/" + BOT + "?start=ref_" + p.user.id;
    var share = "https://t.me/share/url?url=" + encodeURIComponent(link) +
@@ -1173,7 +1182,7 @@ body.tg-fullscreen .tabs { top:96px; }
  // Кто именно пришёл по ссылке и кому бонус уже начислен
  function referralList(r) {
    var lst = r.list || [];
-   if (!lst.length) { return ""; }
+   if (!lst.length) { return '<p class="card-sub" style="margin-top:10px">Пока никого — поделитесь ссылкой, и друзья появятся здесь.</p>'; }
    var html = lst.map(function (x) {
      return '<div class="pay"><div class="pay-head"><div>' +
        '<div class="pay-amount" style="font-size:15px">' + esc(x.name) + "</div>" +
@@ -1269,7 +1278,18 @@ body.tg-fullscreen .tabs { top:96px; }
  }
 
  // Кнопки действий после отрисовки: отключение устройства и перевыпуск
+ // Шкалы трафика/LTE в разметке стоят на 0% — доводим ширину до data-w
+ // двойным кадром, чтобы transition сработал после вставки в DOM.
+ function animateBars() {
+   document.querySelectorAll(".bar-fill[data-w]").forEach(function (b) {
+     requestAnimationFrame(function () {
+       requestAnimationFrame(function () { b.style.width = b.getAttribute("data-w") + "%"; });
+     });
+   });
+ }
+
  function bindActions() {
+   animateBars();
    document.querySelectorAll("[data-del]").forEach(function (btn) {
      btn.onclick = function () {
        var name = btn.getAttribute("data-name") || "это устройство";
@@ -1344,6 +1364,7 @@ body.tg-fullscreen .tabs { top:96px; }
        e.preventDefault();
        var v = document.getElementById("prof-email").value.trim();
        var note = document.getElementById("prof-note");
+       if (!v) { note.textContent = "Введите почту."; return; }
        note.textContent = "Сохраняем…";
        api("/api/profile/email", {method: "POST", body: JSON.stringify({email: v})})
          .then(function (r) {
@@ -1936,7 +1957,9 @@ body.tg-fullscreen .tabs { top:96px; }
      setTimeout(function () { btn.classList.remove("done"); btn.textContent = "Скопировать"; }, 1600);
    }
    function select() {
-     var el = document.getElementById("suburl") || document.getElementById("reflink");
+     var card = btn.closest ? btn.closest(".card") : null;
+     var el = (card && card.querySelector("code")) ||
+              document.getElementById("suburl") || document.getElementById("reflink");
      if (!el) { return; }
      var r = document.createRange(); r.selectNodeContents(el);
      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
@@ -2014,7 +2037,7 @@ body.tg-fullscreen .tabs { top:96px; }
        var pass = document.getElementById("pw-pass").value;
        var cap = tsToken("pw");
        if (!cap) { say("Подтвердите, что вы не робот — нажмите на капчу."); return; }
-       say("Входим…");
+       say("Входим…", "wait");
        api("/api/auth/password", {method: "POST",
            body: JSON.stringify({email: email, password: pass, captcha: cap})})
          .then(function (r) {
