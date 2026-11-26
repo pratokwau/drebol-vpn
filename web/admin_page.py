@@ -96,7 +96,7 @@ h3{font-size:14px;font-weight:700;margin:18px 0 8px}
 /* --- Карточки, таблицы, формы --- */
 .card{position:relative;background:linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.028));border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin-top:16px;box-shadow:0 12px 34px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05);transition:transform .35s var(--ease),box-shadow .35s var(--ease),border-color .3s ease}
 .card::before{content:"";position:absolute;top:0;left:26px;right:26px;height:1px;background:linear-gradient(90deg, transparent, rgba(220,225,232,.5), transparent);pointer-events:none}
-.card:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.18);box-shadow:0 18px 42px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06)}
+@media (hover:hover){.card:not(:has(form)):hover{transform:translateY(-2px);border-color:rgba(255,255,255,.18);box-shadow:0 18px 42px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06)}}
 .card > p.sub{color:var(--mut);font-size:13.5px;margin-bottom:12px}
 .card h2 + p.sub{margin-top:2px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
@@ -147,7 +147,7 @@ td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
 tr:last-child td{border-bottom:0}
 tbody tr{transition:background .2s}
 .tblwrap{overflow-x:auto;margin:8px -4px 0}
-.tblwrap table{min-width:560px}
+.tblwrap table:has(>thead>tr>th:nth-child(5)){min-width:560px}
 td.trunc{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pill{display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap}
 .pill.ok{background:rgba(74,222,128,.14);color:var(--ok)}

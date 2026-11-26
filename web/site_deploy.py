@@ -308,7 +308,7 @@ body.tg-fullscreen .tabs { top:96px; }
 .card::before { content:""; position:absolute; top:0; left:26px; right:26px; height:1px;
   background:linear-gradient(90deg, transparent, rgba(220,225,232,.55), transparent); pointer-events:none; }
 @media (hover:hover) { .card { transition:transform .25s var(--ease), border-color .25s ease, box-shadow .25s ease; }
-  .card:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.18); box-shadow:0 18px 42px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06); }
+  .card:not(:has(form)):hover { transform:translateY(-2px); border-color:rgba(255,255,255,.18); box-shadow:0 18px 42px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06); }
   .card.hero:hover { transform:none; } }
 .card.hero { border-color:rgba(255,255,255,.18); color:#FFFFFF; overflow:hidden;
              background:
