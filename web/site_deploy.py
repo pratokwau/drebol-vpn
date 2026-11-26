@@ -188,14 +188,14 @@ h1, h2, p { margin:0; }
 button { -webkit-tap-highlight-color: transparent; }
 :focus-visible { outline:2px solid rgba(255,255,255,.65); outline-offset:2px; border-radius:8px; }
 
-/* Живой фон: два серебристых пятна медленно дрейфуют, поверх — тонкая сетка */
+/* Живой фон: два фиолетово-индиговых пятна медленно дрейфуют и «дышат», поверх — тонкая сетка */
 .bg { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
 .bg .glow { position:absolute; top:-340px; right:-220px; width:820px; height:820px; border-radius:50%;
-  background:radial-gradient(circle at center, rgba(255,255,255,.10), rgba(255,255,255,0) 62%);
-  animation:drift 26s ease-in-out infinite alternate; }
+  background:radial-gradient(circle at center, rgba(126,96,250,.15), rgba(79,70,229,.05) 45%, rgba(255,255,255,0) 62%);
+  animation:drift 30s ease-in-out infinite alternate; }
 .bg .glow-b { top:auto; bottom:-420px; left:-260px; right:auto;
-  background:radial-gradient(circle at center, rgba(190,200,215,.07), rgba(255,255,255,0) 62%);
-  animation:drift 32s ease-in-out infinite alternate-reverse; }
+  background:radial-gradient(circle at center, rgba(79,70,229,.11), rgba(126,96,250,.04) 45%, rgba(255,255,255,0) 62%);
+  animation:drift 38s ease-in-out infinite alternate-reverse; }
 .bg .grid { position:absolute; inset:0; opacity:.5;
   background:
     linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
@@ -203,7 +203,9 @@ button { -webkit-tap-highlight-color: transparent; }
   background-size:56px 56px;
   -webkit-mask-image:radial-gradient(ellipse 90% 60% at 50% 0%, #000 30%, transparent 75%);
           mask-image:radial-gradient(ellipse 90% 60% at 50% 0%, #000 30%, transparent 75%); }
-@keyframes drift { from { transform:translate(0,0) scale(1); } to { transform:translate(-70px,50px) scale(1.12); } }
+@keyframes drift { 0% { transform:translate(0,0) scale(1); opacity:.85; }
+  50% { transform:translate(-38px,28px) scale(1.07); opacity:1; }
+  100% { transform:translate(-72px,52px) scale(1.13); opacity:.9; } }
 
 .wrap { position:relative; z-index:1; max-width:520px; margin:0 auto;
         padding:12px 12px 40px;
@@ -251,8 +253,8 @@ body.tg-fullscreen .tabs { top:96px; }
   .card.hero:hover { transform:none; } }
 .card.hero { border-color:rgba(255,255,255,.18); color:#FFFFFF; overflow:hidden;
              background:
-               radial-gradient(560px 300px at 85% -10%, rgba(255,255,255,.13), rgba(255,255,255,0) 60%),
-               radial-gradient(420px 260px at -10% 110%, rgba(170,182,200,.10), rgba(255,255,255,0) 55%),
+               radial-gradient(560px 300px at 85% -10%, rgba(126,96,250,.14), rgba(255,255,255,0) 60%),
+               radial-gradient(420px 260px at -10% 110%, rgba(79,70,229,.10), rgba(255,255,255,0) 55%),
                linear-gradient(180deg, #101013, #0A0A0B);
              box-shadow:0 22px 50px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.09);
              animation:heroIn .55s var(--ease) both; }
