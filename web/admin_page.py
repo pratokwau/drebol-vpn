@@ -355,6 +355,7 @@ label.chk input{width:auto;margin:0}
           <input id="bl-reason" placeholder="причина">
           <select id="bl-term"><option value="">Срок: навсегда</option><option value="day">1 день</option><option value="week">Неделя</option><option value="month">Месяц</option></select>
           <div class="btnrow"><button id="btn-bl-add" class="ghost">Добавить в ЧС</button><button id="btn-bl-stop" class="ghost">Остановить подписку</button><button id="btn-bl-readd" class="ghost">Вернуть из ЧС</button></div>
+          <div id="bl-result"></div>
           <div id="bl-out"></div>
         </div>
         <div class="card"><h2>Повторные триалы</h2><p class="sub">Пары аккаунтов, которые, возможно, берут триал повторно. Нажми на строку, чтобы разобрать находку.</p>
@@ -1499,8 +1500,22 @@ $("btn-muse-direct").onclick = withSpin($("btn-muse-direct"), async function(){
 });
 $("btn-muse-list").onclick = async function(){
   const r = await api("/muse-account");
-  renderOut("muse-list-out", r.data);
+  if (r.status !== 200) { renderOut("muse-list-out", r.data); return; }
+  renderMuseAccounts(r.data.accounts || []);
 };
+/* Список аккаунтов Muse — таблицей вместо сырого JSON: почта, роль,
+   создан, последний вход, статус. Паролей/хешей в ответе нет
+   (admin_account_list отдаёт только метаданные). */
+function renderMuseAccounts(list){
+  const box = $("muse-list-out");
+  if (!list.length) { box.innerHTML = "<div class='empty'>Аккаунтов Muse нет</div>"; return; }
+  const roleLabel = {mark: "Mark", muse: "Muse"};
+  let h = "<div class='tblwrap'><table><thead><tr><th>Почта</th><th>Роль</th><th>Создан</th><th>Последний вход</th><th>Статус</th></tr></thead><tbody>";
+  list.forEach(function(a){
+    h += "<tr><td class='mono'>" + esc(a.email || "") + "</td><td>" + esc(roleLabel[a.role] || a.role || "—") + "</td><td class='mono'>" + esc(String(a.created_at || "").slice(0, 16) || "—") + "</td><td class='mono'>" + (a.last_login_at ? esc(String(a.last_login_at).slice(0, 16)) : "—") + "</td><td>" + (a.disabled ? statusPill("disabled", "Выключен") : statusPill("active", "Включён")) + "</td></tr>";
+  });
+  box.innerHTML = h + "</tbody></table></div>";
+}
 $("btn-setup").onclick = async function(){
   const token = new URLSearchParams(location.search).get("token") || "";
   const r = await api("/auth/setup", {method: "POST", headers: {"X-CSRF-Token": csrf()},
@@ -1655,8 +1670,13 @@ $("btn-gift").onclick = withSpin($("btn-gift"), async function(){
   if (promo) body.promo_code = promo;
   const r = await api("/users/" + $("gift-tg").value + "/gift",
     {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
-  renderOut("gift-out", r.data);
-  if (r.status === 200) toast("Подписка подарена", "ok");
+  if (r.status === 200) {
+    const exp = (r.data.result && r.data.result.expire) || "";
+    $("gift-out").innerHTML = "<p>✅ Подписка подарена" + (exp ? " · действует до <b>" + esc(String(exp).slice(0, 16)) + "</b>" : "") + "</p>";
+    toast("Подписка подарена", "ok");
+  } else if (r.status !== 0) {
+    renderOut("gift-out", r.data);
+  }
 });
 $("btn-blacklist").onclick = async function(){
   const r = await api("/blacklist");
@@ -1673,19 +1693,39 @@ $("btn-blacklist").onclick = async function(){
     tr.onclick = function(){ $("bl-tg").value = tr.dataset.tg; };
   });
 };
+/* Результат действия с ЧС — строкой вместо сырого JSON: что остановлено
+   (stop_subs: paid — остаток срока в секундах или null, admin — была ли
+   остановлена админская подписка, errors — ошибки панели). Список
+   обновляется отдельно, результат остаётся виден. */
+function renderBlResult(tgId, verb, res){
+  let h = "<p>⛔ " + esc(verb) + " <b>" + esc(String(tgId)) + "</b>";
+  if (res) {
+    if (res.paid != null) h += " · платная подписка остановлена, остаток: <b>" + esc(fmtDur(res.paid)) + "</b>";
+    else h += " · активной платной подписки не было";
+    if (res.admin) h += " · админская подписка остановлена";
+    if (res.errors && res.errors.length) h += "<br>⚠️ Ошибки панели: " + res.errors.map(function(e){ return esc(String(e)); }).join("; ");
+  }
+  $("bl-result").innerHTML = h + "</p>";
+}
 $("btn-bl-add").onclick = withSpin($("btn-bl-add"), async function(){
+  const tg = parseInt($("bl-tg").value || "0", 10);
   const r = await api("/blacklist/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({tg_id: parseInt($("bl-tg").value || "0", 10), reason: $("bl-reason").value, term: $("bl-term").value || undefined})});
-  renderOut("bl-out", r.data);
+    body: JSON.stringify({tg_id: tg, reason: $("bl-reason").value, term: $("bl-term").value || undefined})});
+  if (r.status === 200) { renderBlResult(tg, "В чёрный список:", r.data.result || {}); $("btn-blacklist").click(); }
+  else if (r.status !== 0) renderOut("bl-out", r.data);
 });
 $("btn-bl-stop").onclick = async function(){
-  const r = await postConfirm("/blacklist/" + $("bl-tg").value + "/stop", {});
-  renderOut("bl-out", r.data);
+  const tg = parseInt($("bl-tg").value || "0", 10);
+  const r = await postConfirm("/blacklist/" + tg + "/stop", {});
+  if (r.status === 200) { renderBlResult(tg, "Подписка остановлена (ЧС):", r.data.result || {}); $("btn-blacklist").click(); }
+  else if (r.status !== 0) renderOut("bl-out", r.data);
 };
 $("btn-bl-readd").onclick = async function(){
-  const r = await api("/blacklist/" + $("bl-tg").value + "/readd",
+  const tg = parseInt($("bl-tg").value || "0", 10);
+  const r = await api("/blacklist/" + tg + "/readd",
     {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
-  renderOut("bl-out", r.data);
+  if (r.status === 200) { renderBlResult(tg, "Снова в чёрном списке:", r.data.result || {}); $("btn-blacklist").click(); }
+  else if (r.status !== 0) renderOut("bl-out", r.data);
 };
 let fraudStatus = "new", fraudIsMark = false;
 const FRAUD_TABS = [["new", "🆕 Новые"], ["blocked", "⛔ Блок"], ["ignored", "🙈 Не фрод"], ["all", "📚 Все"]];
@@ -1732,8 +1772,12 @@ async function loadFraud(){
 $("btn-fraud").onclick = async function(){ loadFraud(); };
 $("btn-fraud-scan").onclick = withSpin($("btn-fraud-scan"), async function(){
   const r = await postConfirm("/fraud/scan", {});
-  renderOut("fraud-out", r.data);
-  if (r.status === 200) loadFraud();
+  if (r.status === 200) {
+    toast("Скан готов: проверено подписок " + fmtNum(r.data.checked) + " · новых находок " + fmtNum(r.data.alerts), "ok");
+    loadFraud();
+  } else if (r.status !== 0) {
+    renderOut("fraud-out", r.data);
+  }
 });
 $("btn-fraud-toggle").onclick = withSpin($("btn-fraud-toggle"), async function(){
   const r = await postConfirm("/fraud/toggle", {});
@@ -2198,9 +2242,30 @@ $("btn-bulk").onclick = async function(){
   if (kind === "extend") { body.days = parseInt($("bulk-days").value || "0", 10); body.direction = body.days >= 0 ? "extend" : "reduce"; }
   else { body.value = parseInt($("bulk-value").value || "0", 10); body.kind_limit = $("bulk-kind-limit").value || "hwid"; }
   const r = await postConfirm("/subs/bulk/" + kind, body);
-  renderOut("bulk-out", r.data);
-  if (r.status === 200) loadBulkScopes();
+  if (r.status === 200) { renderBulkResult(kind, r.data); loadBulkScopes(); }
+  else if (r.status !== 0) renderOut("bulk-out", r.data);
 };
+/* Результат массового действия — строкой вместо сырого JSON. extend:
+   bulk_extend {updated, errors, total, skipped}; limits/lte:
+   bulk_set_limits {updated, panel_fail, skipped, tightened}. */
+function renderBulkResult(kind, d){
+  const res = (d && d.result) || {};
+  const scope = (d && d.scope) || bulkScope;
+  const label = (BULK_TABS[scope] || ["", ""])[1] || scope;
+  let h;
+  if (kind === "extend") {
+    h = "<p>✅ Сроки сдвинуты · выборка: <b>" + esc(label) + "</b> · обновлено <b>" + fmtNum(res.updated) + "</b> из " + fmtNum(res.total);
+    if (res.skipped) h += " · пропущено (ЧС): <b>" + fmtNum(res.skipped) + "</b>";
+    if (res.errors) h += " · ошибок: <b>" + fmtNum(res.errors) + "</b>";
+  } else {
+    const what = kind === "lte" ? "LTE-лимит изменён" : "Лимиты изменены";
+    h = "<p>✅ " + what + " · выборка: <b>" + esc(label) + "</b> · обновлено <b>" + fmtNum(res.updated) + "</b>";
+    if (res.panel_fail) h += " · панель не приняла: <b>" + fmtNum(res.panel_fail) + "</b>";
+    if (res.skipped) h += " · пропущено (ЧС): <b>" + fmtNum(res.skipped) + "</b>";
+    if (res.tightened) h += " · уведомлено об ужесточении: <b>" + fmtNum(res.tightened) + "</b>";
+  }
+  $("bulk-out").innerHTML = h + "</p>";
+}
 /* --- Создание платной подписки: паритет с «➕ Создание подписки» в ТГ
    (paidsub/handlers.py handle_paid_create_sub/handle_paid_create_type):
    пробный период по пресетам или оплаченный период по активному тарифу,
@@ -2392,17 +2457,23 @@ $("squads-out").addEventListener("click", async function(e){
   loadSquads();
 });
 $("btn-squads").onclick = function(){ loadSquads(); };
+/* Результат «Проверить LTE сейчас» (lte_fallback_tick: checked/switched/
+   restored/panel_fail) — один рендер на обе кнопки: в карточке сквадов
+   и в карточке рефералки. */
+function lteCheckHtml(d){
+  let h = "<p class='ok'>✅ Проверка LTE завершена</p><dl class='kv'>";
+  h += kvRow("🔀 Переведено на fallback-сквад", fmtNum(d.switched));
+  h += kvRow("↩️ Возвращено на обычные сквады", fmtNum(d.restored));
+  h += kvRow("👥 Проверено подписок", fmtNum(d.checked));
+  if (d.panel_fail) h += kvRow("⚠️ Панель не приняла", fmtNum(d.panel_fail));
+  return h + "</dl>";
+}
 $("btn-squads-lte").onclick = async function(){
   var r = await postConfirm("/subs/lte/check-now", {});
   var box = $("squads-lte-out");
   if (r.status !== 200) { box.innerHTML = '<p class="err">Ошибка: ' + esc((r.data && r.data.error) || r.status) + ((r.data && r.data.details) ? ' — ' + esc(r.data.details) : '') + '</p>'; return; }
   var d = r.data || {};
-  var h = '<p class="ok">✅ Проверка LTE завершена</p><dl class="kv">';
-  h += kvRow('🔀 Переведено на fallback-сквад', fmtNum(d.switched));
-  h += kvRow('↩️ Возвращено на обычные сквады', fmtNum(d.restored));
-  h += kvRow('👥 Проверено подписок', fmtNum(d.checked));
-  if (d.panel_fail) h += kvRow('⚠️ Панель не приняла', fmtNum(d.panel_fail));
-  h += '</dl>';
+  var h = lteCheckHtml(d);
   var warns = (lastSquads && lastSquads.warnings) || [];
   if (warns.length) h += warns.map(function(w){ return '<div style="margin-top:6px"><span class="pill warn">⚠️ ' + esc(w.text) + '</span></div>'; }).join('');
   box.innerHTML = h;
@@ -2411,8 +2482,13 @@ $("btn-squads-lte").onclick = async function(){
 $("btn-asub").onclick = withSpin($("btn-asub"), async function(){
   const r = await api("/admin-subs", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({tg_id: parseInt($("asub-tg").value || "0", 10)})});
-  renderOut("asub-out", r.data);
-  if (r.status === 200) loadAdminSubs(1);
+  if (r.status === 200) {
+    const s = r.data.subscription || {};
+    $("asub-out").innerHTML = "<p>✅ Админская подписка <b>#" + esc(String(s.id || "")) + "</b> создана · " + esc(s.email || "") + (s.expire ? " · до <b>" + esc(String(s.expire).slice(0, 16)) + "</b>" : "") + (s.sub_url ? "<br>🔗 Ссылка: <span class='mono'>" + esc(s.sub_url) + "</span>" : "") + "</p>";
+    loadAdminSubs(1);
+  } else if (r.status !== 0) {
+    renderOut("asub-out", r.data);
+  }
 });
 /* --- Рефералка: паритет с «👥 Реферальная система» в ТГ
    (paidsub/handlers.py handle_referral_settings): бонусы, статистика,
@@ -2497,7 +2573,11 @@ async function loadReferrals(){
   renderReferrals(r.data);
 }
 $("btn-referrals").onclick = async function(){ loadReferrals(); };
-$("btn-lte").onclick = async function(){ const r = await postConfirm("/subs/lte/check-now", {}); renderOut("lte-out", r.data); };
+$("btn-lte").onclick = async function(){
+  const r = await postConfirm("/subs/lte/check-now", {});
+  if (r.status === 200) { $("lte-out").innerHTML = lteCheckHtml(r.data || {}); }
+  else if (r.status !== 0) { renderOut("lte-out", r.data); }
+};
 
 /* --- Финансы и оплаты --- */
 const MONTHS_RU = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
@@ -4145,8 +4225,13 @@ $("btn-logs-export").onclick = function(){
 };
 $("btn-logs-purge").onclick = async function(){
   const r = await postConfirm("/logs/purge", {});
-  renderOut("logs-out", r.data);
-  if (r.status === 200 && r.data && r.data.ok && storageLoaded) loadStorage();
+  if (r.status === 200 && r.data && r.data.ok) {
+    toast("Очистка готова: действий — " + fmtNum(r.data.removed_activity) + ", ошибок — " + fmtNum(r.data.removed_errors), "ok");
+    loadLogs(1);
+    if (storageLoaded) loadStorage();
+  } else if (r.status !== 0) {
+    renderOut("logs-out", r.data);
+  }
 };
 let storageLoaded = false;
 async function loadStorage(){
@@ -4351,7 +4436,12 @@ $("btn-morning-save").onclick = async function(){
 };
 $("btn-job").onclick = async function(){
   const r = await postConfirm("/jobs/run-now", {job: $("job-sel").value});
-  renderOut("job-out", r.data);
+  if (r.status === 200) {
+    const label = ($("job-sel").selectedOptions && $("job-sel").selectedOptions[0]) ? $("job-sel").selectedOptions[0].textContent : $("job-sel").value;
+    $("job-out").innerHTML = "<p>✅ Задача «" + esc(label) + "» выполнена</p>" + (r.data.result != null ? "<pre>" + esc(String(r.data.result)) + "</pre>" : "");
+  } else if (r.status !== 0) {
+    renderOut("job-out", r.data);
+  }
 };
 async function loadNetcheck(){
   const r = await api("/netcheck");
@@ -4459,7 +4549,14 @@ $("btn-ss2-save").onclick = async function(){
   if (r.status === 200) { toast("Настройки сайта сохранены", "ok"); loadSite(); }
   else renderOut("ss2-out", r.data);
 };
-$("btn-site-cert").onclick = async function(){ const r = await postConfirm("/site/cert", {}); renderOut("ss2-out", r.data); if (r.status === 200) loadSite(); };
+$("btn-site-cert").onclick = async function(){
+  const r = await postConfirm("/site/cert", {});
+  if (r.status === 200) {
+    const d = (r.data.site && r.data.site.domain) || "";
+    $("ss2-out").innerHTML = "<p>✅ HTTPS-сертификат выпущен" + (d ? " для <b>" + esc(d) + "</b>" : "") + "</p>";
+    loadSite();
+  } else if (r.status !== 0) renderOut("ss2-out", r.data);
+};
 $("btn-site-check").onclick = async function(){
   const r = await api("/site/check");
   if (r.status !== 200) { renderOut("site-check-out", r.data); return; }
@@ -4474,7 +4571,14 @@ let siteLoaded = false;
 document.querySelector('[data-nav="site"]').addEventListener("click", function(){
   if (!siteLoaded) { siteLoaded = true; loadSite(); $("btn-st-show").click(); }
 });
-$("btn-deploy").onclick = async function(){ const r = await postConfirm("/site/deploy", {}); renderOut("site-out", r.data); };
+$("btn-deploy").onclick = async function(){
+  const r = await postConfirm("/site/deploy", {});
+  if (r.status === 200) {
+    const u = (r.data.site && r.data.site.url) || "";
+    $("site-out").innerHTML = "<p>✅ Сайт развёрнут" + (u ? ": <a href='" + esc(u) + "' target='_blank'>" + esc(u) + "</a>" : "") + "</p>";
+    loadSite();
+  } else if (r.status !== 0) renderOut("site-out", r.data);
+};
 $("btn-st-show").onclick = async function(){
   const r = await api("/site/texts");
   if (r.status !== 200) { renderOut("st-out", r.data); return; }
@@ -4512,7 +4616,11 @@ $("btn-st-reset").onclick = async function(){
   if (r.status === 200) { toast("Тексты сброшены к стандартным", "ok"); $("btn-st-show").click(); }
   else if (r.status !== 0) renderOut("st-out", r.data);
 };
-$("btn-site-del").onclick = async function(){ const r = await postConfirm("/site/delete", {}); renderOut("site-del-out", r.data); };
+$("btn-site-del").onclick = async function(){
+  const r = await postConfirm("/site/delete", {});
+  if (r.status === 200) { $("site-del-out").innerHTML = "<p>✅ Сайт удалён с сервера</p>"; loadSite(); }
+  else if (r.status !== 0) renderOut("site-del-out", r.data);
+};
 /* Предпросмотр архива перед восстановлением — как offer_restore в ТГ:
    сначала показываем, что внутри архива, и только потом разрешаем
    восстановление. Флаг сбрасывается при смене файла. */
@@ -4588,10 +4696,33 @@ $("btn-backup-restore").onclick = async function(){
   if (!$("bk-fresh").checked) { toast("Подтвердите, что свежий бэкап сделан", "err"); return; }
   const b64 = await readBkFile();
   const r = await postConfirm("/backup/restore", {fresh_backup: true, archive: b64});
-  renderOut("backup-out", r.data);
-  if (r.status === 200) toast("Бэкап восстановлен, бот перезапускается", "ok");
+  if (r.status === 200) {
+    const scheduled = r.data.restart === "scheduled";
+    let h = "<p>✅ Бэкап восстановлен" + (scheduled ? " · бот перезапускается" : " · ⚠️ перезапуск не запланировался — перезапусти бота вручную") + "</p>";
+    const counts = r.data.counts || {};
+    const keys = Object.keys(counts);
+    if (keys.length) {
+      h += "<dl class='kv'>";
+      keys.forEach(function(k){ h += kvRow(esc(k), fmtNum(counts[k])); });
+      h += "</dl>";
+    }
+    $("backup-out").innerHTML = h;
+    toast("Бэкап восстановлен" + (scheduled ? ", бот перезапускается" : ", перезапусти бота вручную"), scheduled ? "ok" : "err");
+  } else if (r.status !== 0) {
+    renderOut("backup-out", r.data);
+  }
 };
-$("btn-git").onclick = async function(){ const r = await postConfirm("/git-update", {}); renderOut("git-out", r.data); };
+$("btn-git").onclick = async function(){
+  const r = await postConfirm("/git-update", {});
+  if (r.status === 200) {
+    let h;
+    if (r.data.up_to_date) h = "<p>✅ Уже актуально — обновлений с GitHub нет, перезапуск не нужен</p>";
+    else h = "<p>✅ Бот обновлён с GitHub" + (r.data.site_changed ? " · сайт тоже обновлён" : "") + " · перезапуск запланирован</p>";
+    $("git-out").innerHTML = h;
+  } else if (r.status !== 0) {
+    renderOut("git-out", r.data);
+  }
+};
 
 /* --- Поддержка и настройки --- */
 let supportLoaded = false;
