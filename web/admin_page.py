@@ -608,7 +608,7 @@ label.chk input{width:auto;margin:0}
       <!-- Панель Remnawave -->
       <section id="sec-panel" class="page hidden">
         <div class="card"><h2>Панель Remnawave</h2><p class="sub">Профили, инбаунды и хосты — живые данные из панели. Нажми на строку, чтобы открыть профиль или хост в редакторе ниже. Правка инбаундов и хостов — только Mark, с проверкой конфига после сохранения.</p>
-          <div class="btnrow"><button id="btn-panel" class="ghost">Обновить списки</button><button id="btn-yandex" class="ghost">📄 Страница подписки</button><button id="btn-yandex-wl" class="ghost">📋 Белые списки</button><button id="btn-links-panel" class="ghost">🔗 Основные ссылки</button></div>
+          <div class="btnrow"><button id="btn-panel" class="ghost">Обновить списки</button><button id="btn-yandex-res" class="ghost">📦 Ресурсы и ноды</button><button id="btn-yandex-dns" class="ghost">🌐 DNS и ремонт</button><button id="btn-yandex-bill" class="ghost">💰 Биллинг</button><button id="btn-yandex" class="ghost">📄 Страница подписки</button><button id="btn-yandex-wl" class="ghost">📋 Белые списки</button><button id="btn-links-panel" class="ghost">🔗 Основные ссылки</button></div>
           <div id="panel-out"></div>
           <h3>Профили</h3>
           <div id="profiles-table"></div>
@@ -665,9 +665,9 @@ label.chk input{width:auto;margin:0}
           <div id="nodes-out"></div>
         </div>
         <div class="card" id="yandex-cdn-doc"><h2>Yandex Cloud CDN перед нодами</h2><p class="sub">Инструкция: сертификат, дубликат ноды, CDN-ресурс, хост в панели. Источник — INSTRUCTION.md, карточка пересобирается скриптом build_admin_html.py.</p>
-        <p>Цель: поставить перед нодой Швеции (потом Румынии) Yandex Cloud CDN, как уже сделано для Германии и Финляндии. CDN прячет реальный IP ноды и даёт свой сертификат. Порядок: Швеция → Румыния.</p>
+        <p>Состояние: CDN уже стоит перед всеми тремя странами — хосты «- 2» в подписке. Новый аккаунт cloud-frost-287 (миграция 2026-11-26), общий CNAME — bc6681bc57f8bf03.topology.gslb.yccdn.ru. Румыния и Финляндия убраны, их домены *1cdn — старый аккаунт. Ниже — история настройки Швеции от 2026-11-16, домены *1cdn там — старые.</p>
         <p>Доменная схема:</p>
-        <ul><li>Германия: нода <code class="mono">denode1.drbl.tech</code>, CDN-домен <code class="mono">de1cdn.drbl.tech</code></li><li>Швеция: нода <code class="mono">senode1.drbl.tech</code>, CDN-домен <code class="mono">se1cdn.drbl.tech</code></li><li>Румыния: нода <code class="mono">ronode1.drbl.tech</code>, CDN-домен <code class="mono">ro1cdn.drbl.tech</code></li></ul>
+        <ul><li>Германия: нода <code class="mono">denode1.drbl.tech</code>, CDN-домен <code class="mono">static.drbl.tech</code></li><li>Швеция: нода <code class="mono">senode1.drbl.tech</code>, CDN-домен <code class="mono">assets.drbl.tech</code></li><li>Латвия: нода <code class="mono">lvnode1.drbl.tech</code>, CDN-домен <code class="mono">media.drbl.tech</code></li></ul>
         <details><summary>Образец: рабочий ресурс Финляндии <code class="mono">fin1cdn.drbl.tech</code></summary>
         <p>ID <code class="mono">bc8r6d1c6663p5pte2n7</code>, создан 19.10.2026. Точные настройки из его карточки (скриншоты 2026-11-16 01:20):</p>
         <ul><li>Группа источников: <code class="mono">common-95-85-251-169</code> (авто-группа Яндекса, её искать не надо)</li><li>Протокол для источников: <b>HTTP</b></li><li>Доступ к контенту: Разрешен</li><li>Заголовок Host: <b>Как у клиента</b></li><li>Тип сертификата: <code class="mono">fin1cdn</code>, статус <b>Выпущен</b></li><li>Переадресация клиентов: <b>Не использовать</b></li><li>Доступ по защищённому токену / по IP-адресам / по странам: выключено</li><li>Перенаправление запросов / следование перенаправлениям: выключено</li><li>Кеширование в CDN: <b>Выключено</b>, в браузере: <b>Выключено</b>, Cookie — <b>Не игнорировать</b>, query-параметры — <b>Не кешировать</b></li><li>Скрытие заголовков источника: <b>Не скрывать</b></li><li>CORS: <b>Не добавлять</b></li><li>Настраиваемый HTTP-ответ: <b>Включено</b></li><li>gzip-сжатие: <b>Не сжимать</b>, сегментация больших файлов: <b>Не сегментировать</b></li><li>DNS: <code class="mono">fin1cdn.drbl.tech</code> → CNAME <code class="mono">8d4319fdecfff922.topology.gslb.yccdn.ru</code></li><li>Метрики за 30 дней: 37,14 ГБ из источников, 2 435 046 запросов, ответы из кеша — 0 (кэш выключен, всё идёт в origin). Финляндия через CDN реально работает, хотя IP ноды заблочен.</li></ul>
@@ -2429,6 +2429,7 @@ function renderSquads(r){
   if (!d.panel_ok) { box.innerHTML = '<p class="err">⚠️ Панель Remnawave недоступна — список сквадов получить не удалось. Попробуй позже.</p>'; return; }
   var sq = d.squads || [];
   var h = '<dl class="kv">' + kvRow('LTE-трафик в месяц', d.lte_limit == null ? '30 ГБ (по умолчанию)' : esc(String(d.lte_limit)) + ' ГБ') + '</dl>';
+  h += '<p style="margin-top:8px"><label><input type="checkbox" id="sq-lte-off"' + (d.lte_limit_off ? ' checked' : '') + '> Лимит LTE отключён</label> <span class="mut">— CDN-варианты доступны всем без учёта трафика</span> <span id="sq-lte-msg" class="mut"></span></p>';
   var warns = d.warnings || [];
   if (warns.length) {
     h += warns.map(function(w){ return '<div style="margin-top:6px"><span class="pill warn">⚠️ ' + esc(w.text) + '</span></div>'; }).join('');
@@ -2455,6 +2456,15 @@ $("squads-out").addEventListener("click", async function(e){
   var r = await api(url, {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({uuid: uuid})});
   if (r.status !== 200) { toast("Ошибка: " + ((r.data && r.data.error) || r.status), "err"); return; }
   loadSquads();
+});
+/* Тумблер «Лимит LTE отключён» — тот же ключ paid_lte_limit_off, что
+   в настройках (a455d759) и в экране «Биллинг» Yandex Cloud. */
+$("squads-out").addEventListener("change", async function(e){
+  if (e.target.id !== "sq-lte-off") return;
+  var r = await api("/subs/presets", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({paid_lte_limit_off: e.target.checked})});
+  if (r.status !== 200) { $("sq-lte-msg").textContent = "Ошибка: " + ((r.data && r.data.error) || r.status); loadSquads(); return; }
+  $("sq-lte-msg").textContent = "";
+  toast(e.target.checked ? "Лимит LTE отключён" : "Лимит LTE включён", "ok");
 });
 $("btn-squads").onclick = function(){ loadSquads(); };
 /* Результат «Проверить LTE сейчас» (lte_fallback_tick: checked/switched/
@@ -3689,24 +3699,31 @@ $("btn-tags-apply").onclick = withSpin($("btn-tags-apply"), async function(){
   toast("Теги применены", "ok");
   loadTags();
 });
-/* --- Яндекс Клауд: две страницы как rw_yandex в ТГ ---
-   Раньше кнопка вываливала сырой JSON-дамп через renderOut; теперь
-   каждая страница рендерится текстом в <pre>, ответ /yandex кэшируется
-   при переключении вкладок. */
+/* --- Яндекс Клауд: пять страниц как yc_menu в ТГ ---
+   Ресурсы и ноды / DNS и ремонт / Биллинг — новые экраны
+   handlers/yandex_cloud.py (a455d759); Страница подписки и
+   Белые списки — обновлены под новый аккаунт cloud-frost-287.
+   Каждая страница рендерится текстом в <pre>, ответ /yandex
+   кэшируется при переключении вкладок. */
 let yandexDoc = null;
+const YANDEX_PAGES = {res: 'resources_text', dns: 'dns_text', bill: 'billing_text', wl: 'whitelist_text', mirror: 'text'};
+const YANDEX_BTNS = {res: 'btn-yandex-res', dns: 'btn-yandex-dns', bill: 'btn-yandex-bill', wl: 'btn-yandex-wl', mirror: 'btn-yandex'};
 async function loadYandex(page){
-  const btn = $(page === "wl" ? "btn-yandex-wl" : "btn-yandex");
-  document.querySelectorAll("#btn-yandex, #btn-yandex-wl").forEach(function(x){ x.classList.toggle("active", x === btn); });
+  const btn = $(YANDEX_BTNS[page] || 'btn-yandex');
+  document.querySelectorAll('#btn-yandex-res, #btn-yandex-dns, #btn-yandex-bill, #btn-yandex, #btn-yandex-wl').forEach(function(x){ x.classList.toggle('active', x === btn); });
   if (!yandexDoc) {
-    const r = await api("/yandex");
-    if (r.status !== 200) { renderOut("panel-out", r.data); return; }
+    const r = await api('/yandex');
+    if (r.status !== 200) { renderOut('panel-out', r.data); return; }
     yandexDoc = r.data;
   }
-  const text = page === "wl" ? (yandexDoc.whitelist_text || "") : (yandexDoc.text || "");
-  $("panel-out").innerHTML = "<pre>" + esc(text) + "</pre>";
+  const text = yandexDoc[YANDEX_PAGES[page] || 'text'] || '';
+  $('panel-out').innerHTML = '<pre>' + esc(text) + '</pre>';
 }
-$("btn-yandex").onclick = function(){ loadYandex("mirror"); };
-$("btn-yandex-wl").onclick = function(){ loadYandex("wl"); };
+$('btn-yandex-res').onclick = function(){ loadYandex('res'); };
+$('btn-yandex-dns').onclick = function(){ loadYandex('dns'); };
+$('btn-yandex-bill').onclick = function(){ loadYandex('bill'); };
+$('btn-yandex').onclick = function(){ loadYandex('mirror'); };
+$('btn-yandex-wl').onclick = function(){ loadYandex('wl'); };
 /* --- Основные ссылки: справка по адресам проекта ---
    Адреса подтягиваются сами: панель и сайт — из конфига бота, домены
    подписки — из констант, ноды и хосты — живьём из панели Remnawave.

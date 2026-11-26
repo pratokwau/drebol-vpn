@@ -1525,14 +1525,14 @@ async def subs_presets_patch(request):
     allowed = {"paid_trial_period", "paid_preset_hwid", "paid_preset_traffic",
                "paid_preset_lte", "paid_lte_squads",
                "paid_lte_fallback_squad", "rw_squads",
-               "auto_approve_trial"}
+               "auto_approve_trial", "paid_lte_limit_off"}
     patch = {}
     pop_keys = []
     for k, v in body.items():
         if k not in allowed:
             return web.json_response({"error": "forbidden_keys", "keys": [k]},
                                      status=403)
-        if k == "auto_approve_trial":
+        if k in ("auto_approve_trial", "paid_lte_limit_off"):
             if not isinstance(v, bool):
                 return web.json_response({"error": "bad_value"}, status=400)
         elif k == "paid_trial_period":
@@ -1658,6 +1658,7 @@ async def subs_squads_get(request):
     return web.json_response({
         "panel_ok": panel_ok,
         "lte_limit": cfg.get("paid_preset_lte"),
+        "lte_limit_off": bool(cfg.get("paid_lte_limit_off")),
         "squads": [{"uuid": s.get("uuid"), "name": s.get("name") or "без имени",
                     "inbounds": s.get("inbounds") or 0,
                     "members": s.get("members") or 0,
