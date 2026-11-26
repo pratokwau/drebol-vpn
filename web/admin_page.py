@@ -1066,8 +1066,9 @@ function cellVal(k, v){
   if (NUM_KEYS.indexOf(k) >= 0 && typeof v === "number") return '<span class="num">' + fmtNum(v) + "</span>";
   if (typeof v === "boolean") return statusPill(v ? "active" : "disabled", v ? "Да" : "Нет");
   if (k === "status" || k === "state" || k === "active" || k === "enabled" || k === "disabled" || k === "is_disabled") return pill(v);
-  if (typeof v === "object") return '<span class="mono">' + esc(JSON.stringify(v)).slice(0, 120) + "</span>";
+  if (typeof v === "object") { const js = JSON.stringify(v); const n = Array.isArray(v) ? v.length : Object.keys(v).length; return '<span title="' + esc(js) + '">' + (Array.isArray(v) ? "список: " + n : "объект: " + n + " полей") + "</span>"; }
   const s = String(v);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return '<span class="mono" title="' + esc(s) + '">' + esc(s.slice(0, 8)) + "…</span>";
   if (s.length > 60) return '<span title="' + esc(s) + '">' + esc(s.slice(0, 60)) + "…</span>";
   if (k === "id" || k === "uuid" || k === "tg_id" || k === "email" || k === "username") return '<span class="mono">' + esc(s) + "</span>";
   return esc(s);
@@ -2109,8 +2110,8 @@ function renderSubEditor(data){
   if (ref) h += kvRow("Пригласил", esc(ref.first_name || "") + ' · <span class="mono">tg ' + ref.tg_id + '</span>');
   if (data.invited && data.invited.total > 0) h += kvRow("Приглашено", "<b>" + data.invited.total + "</b> (с бонусом: " + (data.invited.rewarded || 0) + ")");
   if (data.blacklist) h += kvRow("Чёрный список", "⛔ " + esc(data.blacklist.source === "manual" ? "вручную" : "общий список") + (data.blacklist.reason ? " — " + esc(data.blacklist.reason) : ""));
-  h += kvRow("UUID", '<span class="mono">' + esc(s.uuid || "") + '</span>');
-  h += kvRow("Sub ID", '<span class="mono">' + esc(s.sub_id || "") + '</span>');
+  if (s.uuid) h += kvRow("UUID", '<span class="mono" title="' + esc(s.uuid) + '">' + esc(String(s.uuid).slice(0, 8)) + '…</span> <button class="ghost" data-copy="' + esc(s.uuid) + '">Копировать</button>');
+  if (s.sub_id) h += kvRow("Sub ID", '<span class="mono">' + esc(s.sub_id) + '</span> <button class="ghost" data-copy="' + esc(s.sub_id) + '">Копировать</button>');
   h += kvRow("Создана", '<span class="mono">' + fmtDate(s.created_at) + '</span>');
   h += kvRow("Истекает", '<span class="mono">' + fmtDate(s.expire_date) + '</span>' + leftTxt);
   h += kvRow("Статус", subStatusPill(s.status));
