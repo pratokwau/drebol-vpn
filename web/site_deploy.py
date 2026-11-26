@@ -166,7 +166,7 @@ CABINET_PAGE = r"""<!doctype html>
 :root {
   color-scheme: dark;
   --bg: #050505; --bg-2: #0A0A0A; --ink: #FFFFFF;
-  --muted: #ACACB2; --soft: #8A8A92;
+  --muted: #ACACB2; --soft: #9C9CA4;
   --line: rgba(255,255,255,.10); --line-strong: rgba(255,255,255,.22);
   --card: rgba(255,255,255,.045); --card-2: rgba(255,255,255,.075);
   --accent: #FFFFFF; --accent-soft: rgba(255,255,255,.09);
@@ -327,6 +327,7 @@ body.tg-fullscreen .tabs { top:96px; }
 .row:first-of-type { border-top:0; }
 .row span:first-child { color:var(--ink); min-width:0; overflow-wrap:anywhere; }
 .row span:last-child { color:var(--soft); text-align:right; }
+.row.single span { text-align:left; color:var(--ink); }
 
 .bar { height:10px; border-radius:999px; background:rgba(255,255,255,.12); overflow:hidden; margin-top:14px; }
 .bar-fill { height:100%; border-radius:999px; background:linear-gradient(90deg, #FFFFFF, #9aa1ab);
@@ -345,7 +346,7 @@ body.tg-fullscreen .tabs { top:96px; }
 .dev .dbody { flex:1; min-width:0; }
 .dev b { display:block; font-size:15px; overflow-wrap:anywhere; }
 .dev small { color:var(--soft); font-size:13px; }
-.btn-mini { flex:none; min-height:36px; padding:0 14px; border-radius:999px;
+.btn-mini { flex:none; min-height:40px; padding:0 16px; border-radius:999px;
             border:1px solid rgba(248,113,113,.4); background:transparent; color:var(--bad);
             font:inherit; font-size:13px; font-weight:700; cursor:pointer; transition:background .2s, transform .15s var(--ease); }
 .btn-mini:hover { background:var(--bad-bg); }
@@ -442,7 +443,7 @@ body.tg-fullscreen .tabs { top:96px; }
          backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
          opacity:0; pointer-events:none; transition:opacity .3s ease, transform .3s var(--ease); }
 #toast.show { opacity:1; transform:translate(-50%, 0); }
-@media (max-width: 760px) { #toast { bottom:calc(88px + env(safe-area-inset-bottom, 0px)); } }
+@media (max-width: 760px) { #toast { bottom:calc(96px + env(safe-area-inset-bottom, 0px)); } }
 
 @keyframes secIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
 @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
@@ -707,7 +708,7 @@ body.tg-fullscreen .tabs { top:96px; }
 
  function pill(text, kind) { return '<span class="pill ' + kind + '">' + esc(text) + "</span>"; }
  function row(a, b) { return '<div class="row"><span>' + a + "</span><span>" + b + "</span></div>"; }
- function stat(value, label) { return '<div class="stat"><b>' + value + "</b><span>" + esc(label) + "</span></div>"; }
+ function stat(value, label, title) { return '<div class="stat"' + (title ? ' title="' + esc(title) + '"' : "") + "><b>" + value + "</b><span>" + esc(label) + "</span></div>"; }
  function barClass(pct) { return pct >= 100 ? " full" : pct >= 75 ? " mid" : ""; }
 
  // Статусы платежей — человеческим языком, а не кодами из базы
@@ -723,8 +724,8 @@ body.tg-fullscreen .tabs { top:96px; }
    partial_refunded: {text: "Частичный возврат", kind: "warn"}
  };
  function payProvider(raw) {
-   var map = {anore: "Anore", platega: "Platega", yookassa: "ЮKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта", manual: "Вручную"};
-   return map[String(raw).toLowerCase()] || String(raw);
+   var map = {anore: "Anore", platega: "Platega", yookassa: "YooKassa", telegram: "Telegram", stars: "Stars", crypto: "Крипта", manual: "Вручную"};
+   return map[String(raw || "").toLowerCase()] || "Онлайн-оплата";
  }
  function fmtMoney(n) {
    var v = Number(n || 0);
@@ -733,7 +734,9 @@ body.tg-fullscreen .tabs { top:96px; }
  // "2026-10-20 10:00" -> "20.10.2026 · 10:00"
  function fmtDate(raw) {
    var m = String(raw || "").match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}:\d{2})/);
-   return m ? m[3] + "." + m[2] + "." + m[1] + " · " + m[4] : String(raw || "");
+   if (m) { return m[3] + "." + m[2] + "." + m[1] + " · " + m[4]; }
+   var d = String(raw || "").match(/(\d{4})-(\d{2})-(\d{2})/);
+   return d ? d[3] + "." + d[2] + "." + d[1] : String(raw || "");
  }
 
  // Платежи: API отдавал список всегда, а страница его не показывала —
@@ -748,7 +751,7 @@ body.tg-fullscreen .tabs { top:96px; }
             "они появятся здесь.</p></div></div>";
    }
    var tot = p.payments_total || {};
-   var sub = "Всего оплат: " + esc(tot.count != null ? tot.count : items.length) +
+   var sub = "Всего платежей: " + esc(tot.count != null ? tot.count : items.length) +
              (tot.sum ? " · на сумму " + esc(fmtMoney(tot.sum)) : "") +
              ". Показаны последние " + items.length + ".";
    PAY_SHOWN = items.length;
@@ -760,7 +763,7 @@ body.tg-fullscreen .tabs { top:96px; }
           '<div id="pay-list">' + items.map(payItem).join("") + "</div>" + more + "</div></div>";
  }
  function payItem(x) {
-   var st = PAY_STATUS[String(x.status || "").toLowerCase()] || {text: String(x.status || ""), kind: "warn"};
+   var st = PAY_STATUS[String(x.status || "").toLowerCase()] || {text: "Статус уточняется", kind: "warn"};
    var meta = "";
    if (x.provider) { meta += '<span class="chip">' + esc(payProvider(x.provider)) + "</span>"; }
    if (x.promo) { meta += '<span class="chip">🎟 ' + esc(x.promo) + "</span>"; }
@@ -900,7 +903,7 @@ body.tg-fullscreen .tabs { top:96px; }
             '<div class="stats">' +
               stat(esc(fmtDate(s.until)), "действует до") +
               stat(s.devices_limit ? "до " + esc(s.devices_limit) : "∞", "устройств") +
-              stat(traffic || "—", s.traffic_limit_gb ? "трафик" : "трафик · безлимит") +
+              stat(traffic || "—", s.traffic_limit_gb ? "трафик" : "трафик · безлимит", traffic || "") +
             "</div>" + trafficBar +
             '<div class="stack" style="margin-top:16px"><button class="btn btn-main" type="button" id="renew-open">' +
             ICON.card + "Продлить подписку</button></div>" +
@@ -1001,11 +1004,11 @@ body.tg-fullscreen .tabs { top:96px; }
    // Инфо: как подключиться, цены, о сервисе — как экран «ℹ️ Инфо» в боте.
    out.push(infoCard());
 
-   out.push('<div class="stack" style="margin-top:6px">' +
+   out.push('<div data-sec="sub"><div class="stack" style="margin-top:6px">' +
             '<button class="btn btn-ghost" type="button" onclick="load()">' + ICON.refresh + "Обновить данные</button>" +
             (p.support_url ? '<a class="btn btn-ghost" href="' + esc(p.support_url) + '">🛟 Поддержка</a>' : "") +
             '<a class="btn btn-ghost" href="' + botUrl() + '">' +
-            ICON.tg + "Открыть бота</a></div>");
+            ICON.tg + "Открыть бота</a></div></div>");
    document.getElementById("body").innerHTML = '<div class="tabs" id="tabs" role="tablist"></div><div class="breadcrumb" id="breadcrumb"></div>' + out.join("");
    buildTabs();
    bindActions();
@@ -1390,7 +1393,7 @@ body.tg-fullscreen .tabs { top:96px; }
        html += '<div style="display:flex;gap:8px;align-items:flex-end;margin:4px 0 10px">' +
                '<label class="field" style="flex:1;margin:0">Промокод' +
                '<input type="text" id="promo-input" placeholder="Введите код" autocomplete="off"></label>' +
-               '<button class="btn btn-ghost" type="button" onclick="applyPromo()">Применить</button></div>';
+               '<button class="btn btn-ghost" type="button" style="flex:0 0 auto;width:auto" onclick="applyPromo()">Применить</button></div>';
      }
      if (d.devices && d.devices.count && d.devices.price) {
        html += '<p class="card-sub">В цену включены ваши места: ' + esc(d.devices.count) +
@@ -1554,7 +1557,7 @@ body.tg-fullscreen .tabs { top:96px; }
      '<div style="display:flex;gap:8px;align-items:flex-end;margin:4px 0 10px">' +
      '<label class="field" style="flex:1;margin:0">Кому дарим' +
      '<input type="text" id="gift-target" placeholder="@ник друга или TG ID" autocomplete="off"></label>' +
-     '<button class="btn btn-ghost" type="button" onclick="resolveGift()">Найти</button></div>' +
+     '<button class="btn btn-ghost" type="button" style="flex:0 0 auto;width:auto" onclick="resolveGift()">Найти</button></div>' +
      '<div id="gift-confirm"></div>' +
      '<p class="card-sub"><a href="#" onclick="loadGift();return false" style="color:var(--ink)">← Выбрать другой срок</a></p>';
    var inp = document.getElementById("gift-target");
@@ -1583,7 +1586,7 @@ body.tg-fullscreen .tabs { top:96px; }
          '<p class="card-sub">⏱ Срок: <b style="color:var(--ink)">' + esc(giftTariff.period) +
          "</b> · 💵 Цена: <b style=\"color:var(--ink)\">" + esc(fmtMoney(giftTariff.price)) + "</b></p>";
        if (r.data.has_sub && r.data.sub_until) {
-         h += '<p class="card-sub">У друга уже есть подписка до ' + esc(r.data.sub_until) +
+         h += '<p class="card-sub">У друга уже есть подписка до ' + esc(fmtDate(r.data.sub_until)) +
               " — срок прибавится к ней.</p>";
        } else {
          h += '<p class="card-sub">Если друг ещё не запускал бота, после оплаты ' +
@@ -1869,7 +1872,7 @@ body.tg-fullscreen .tabs { top:96px; }
    perks.push("🖥 iOS, Android, Windows, macOS");
    if (d.devices > 0 && d.device_price > 0) { perks.push("➕ Доп. устройство — " + esc(fmtMoney(d.device_price))); }
    h += '<p class="card-sub" style="margin-top:10px">В каждом тарифе:</p><div class="stack">' +
-        perks.map(function (x) { return '<div class="row"><span>' + x + '</span></div>'; }).join("") + '</div>';
+        perks.map(function (x) { return '<div class="row single"><span>' + x + '</span></div>'; }).join("") + '</div>';
    // О сервисе: то же, что в боте, плюс документы и ссылки.
    h += '<p class="card-sub" style="margin-top:16px"><b style="color:var(--ink)">О сервисе</b></p>' +
         '<p class="card-sub"><b style="color:var(--ink)">Drebol VPN</b> — быстрый VPN без логов, который живёт в Telegram.</p>' +
