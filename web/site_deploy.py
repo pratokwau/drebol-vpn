@@ -385,6 +385,7 @@ body.tg-fullscreen .tabs { top:96px; }
   .tab { flex:1; flex-direction:column; gap:3px; min-height:52px; padding:6px 2px; border:0; background:transparent;
          font-size:10.5px; border-radius:16px; }
   .tab svg { width:20px; height:20px; }
+  .tab span { white-space:normal; line-height:1.15; text-align:center; }
   .tab.active { background:rgba(255,255,255,.12); color:#FFFFFF; box-shadow:inset 0 1px 0 rgba(255,255,255,.14); }
   .tab .dot { top:6px; right:calc(50% - 16px); }
   .breadcrumb { display:none; }
@@ -449,6 +450,7 @@ body.tg-fullscreen .tabs { top:96px; }
 @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
 #app:not(.hide) { animation:fadeIn .35s ease both; }
 [data-sec].sec-show { animation:secIn .38s var(--ease) both; }
+.card.sec-show { animation:secIn .38s var(--ease) both; }
 
 #login { text-align:center; padding:4vh 0 0; animation:fadeIn .4s ease both; }
 #login .card { padding:30px 22px; box-shadow:0 24px 64px rgba(0,0,0,.65); }
@@ -503,7 +505,7 @@ body.tg-fullscreen .tabs { top:96px; }
 @media (prefers-reduced-motion: reduce) {
   .btn, .tab, .tariff, .card, .bar-fill { transition:none; }
   .tab .dot, .pill.ok::before, .bg .glow, .skel::after { animation:none; }
-  .card.hero, #app:not(.hide), [data-sec].sec-show, #login { animation:none; }
+  .card.hero, #app:not(.hide), [data-sec].sec-show, .card.sec-show, #login { animation:none; }
   html { scroll-behavior:auto; }
 }
 </style></head>
@@ -869,7 +871,12 @@ body.tg-fullscreen .tabs { top:96px; }
      out.push(profileCard(p));
      // Инфо: как подключиться, цены, о сервисе — как экран «ℹ️ Инфо» в боте.
      out.push(infoCard());
-     document.getElementById("body").innerHTML = out.join("");
+     out.push('<div data-sec="sub"><div class="stack" style="margin-top:6px">' +
+              '<button class="btn btn-ghost" type="button" onclick="load()">' + ICON.refresh + "Обновить данные</button>" +
+              (p.support_url ? '<a class="btn btn-ghost" href="' + esc(p.support_url) + '">🛟 Поддержка</a>' : "") +
+              '<a class="btn btn-ghost" href="' + botUrl() + '">' +
+              ICON.tg + "Открыть бота</a></div></div>");
+     document.getElementById("body").innerHTML = '<div class="tabs" id="tabs" role="tablist"></div><div class="breadcrumb" id="breadcrumb"></div>' + out.join("");
      buildTabs();
      bindActions();
      return;
@@ -1078,12 +1085,25 @@ body.tg-fullscreen .tabs { top:96px; }
      var show = el.getAttribute("data-sec") === name;
      el.style.display = show ? "" : "none";
      if (show) {
-       // перезапускаем анимацию появления при каждом переключении,
-       // карточки одного раздела выходят лёгкой лесенкой
-       el.classList.remove("sec-show");
-       void el.offsetWidth;
-       el.style.animationDelay = (idx++ * 55) + "ms";
-       el.classList.add("sec-show");
+       // перезапускаем анимацию появления при каждом переключении:
+       // карточки раздела выходят лёгкой лесенкой, каждая со своей задержкой
+       var cards = el.querySelectorAll(".card");
+       if (cards.length) {
+         cards.forEach(function (c) {
+           c.classList.remove("sec-show");
+           void c.offsetWidth;
+           c.style.animationDelay = (idx++ * 55) + "ms";
+           c.classList.add("sec-show");
+         });
+       } else {
+         el.classList.remove("sec-show");
+         void el.offsetWidth;
+         el.style.animationDelay = (idx++ * 55) + "ms";
+         el.classList.add("sec-show");
+       }
+     } else {
+       el.querySelectorAll(".card").forEach(function (c) { c.style.animationDelay = ""; });
+       el.style.animationDelay = "";
      }
    });
    document.querySelectorAll("#tabs .tab").forEach(function (b) {
