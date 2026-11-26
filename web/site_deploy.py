@@ -3408,7 +3408,7 @@ async def handle_site_domain(query, context):
         "<code>-</code> — убрать домен.</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
+            [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
         ]),
     )
 
@@ -3425,11 +3425,11 @@ async def handle_site_deploy(query, context):
     if not res.get("ok"):
         await query.edit_message_text(
             "❌ <b>Не получилось развернуть</b>\n\n"
-            f"<blockquote><code>{escape(str(res.get('error'))[:500])}</code></blockquote>",
+            f"<blockquote><code>{escape(str(res.get('error'))[:300])}</code></blockquote>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_deploy"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
+                 InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
             ]),
         )
         return
@@ -3459,7 +3459,7 @@ async def handle_site_auto(query, context):
 async def handle_site_check(query, context):
     """Почему сайт не на HTTPS — по фактам с самого сервера."""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text("🩺 Проверяю сервер…")
+    await query.edit_message_text("🩺 <b>Проверяю сервер…</b>", parse_mode="HTML")
     res = await diagnose()
     if not res.get("ok"):
         await query.edit_message_text(
@@ -3480,6 +3480,9 @@ async def handle_site_check(query, context):
     listen443 = d.get("listen443", "0") != "0"
     https_code = d.get("https", "-")
     http_code = d.get("http", "-")
+    ip_txt = "не определён" if ip == "?" else ip
+    https_txt = "нет ответа" if https_code == "-" else https_code
+    http_txt = "нет ответа" if http_code == "-" else http_code
     dns_ok = bool(dns) and ip != "?" and ip in dns.split()
 
     def mark(ok):
@@ -3490,15 +3493,15 @@ async def handle_site_check(query, context):
         lines += ["❌ <b>Домен не задан</b>", "",
                   "По IP сертификат не выпустить — HTTPS бывает только с доменом.",
                   "Задай домен, направь его A-запись на "
-                  f"<code>{escape(ip)}</code> и включи HTTPS."]
+                  f"<code>{escape(ip_txt)}</code> и включи HTTPS."]
     else:
-        lines += [f"🌍 <code>{escape(domain)}</code>  ·  🖥 <code>{escape(ip)}</code>", "",
+        lines += [f"🌍 <code>{escape(domain)}</code>  ·  🖥 <code>{escape(ip_txt)}</code>", "",
                   "<blockquote>"
                   f"{mark(dns_ok)} A-запись: <code>{escape(dns or 'не найдена')}</code>\n"
                   f"{mark(cert)} Сертификат на сервере\n"
                   f"{mark(conf443)} 443 в конфиге nginx\n"
                   f"{mark(listen443)} nginx слушает 443\n"
-                  f"🌐 Ответ: http <b>{escape(http_code)}</b> · https <b>{escape(https_code)}</b>"
+                  f"🌐 Ответ: http <b>{escape(http_txt)}</b> · https <b>{escape(https_txt)}</b>"
                   "</blockquote>", ""]
         # первая же невыполненная причина и объясняет всё остальное
         if not dns_ok:
@@ -3535,12 +3538,12 @@ async def handle_site_cert(query, context):
     if not res.get("ok"):
         await query.edit_message_text(
             "❌ <b>Сертификат не выпустился</b>\n\n"
-            f"<blockquote><code>{escape(str(res.get('error'))[:500])}</code></blockquote>\n\n"
+            f"<blockquote><code>{escape(str(res.get('error'))[:300])}</code></blockquote>\n\n"
             "<i>Обычно причина одна: домен ещё не смотрит на этот сервер.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔁 Ещё раз", callback_data="site_cert"),
-                 InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
+                 InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
             ]),
         )
         return
@@ -3550,15 +3553,15 @@ async def handle_site_cert(query, context):
 
 async def handle_site_delete(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-    await query.edit_message_text("🗑 Удаляю сайт…")
+    await query.edit_message_text("🗑 <b>Удаляю сайт…</b>", parse_mode="HTML")
     res = await remove_site()
     if not res.get("ok"):
         await query.edit_message_text(
             f"❌ <b>Не получилось удалить</b>\n\n"
-            f"<blockquote><code>{escape(str(res.get('error'))[:400])}</code></blockquote>",
+            f"<blockquote><code>{escape(str(res.get('error'))[:300])}</code></blockquote>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("◀️ Назад", callback_data="site_menu")],
+                [InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")],
             ]),
         )
         return
@@ -3697,7 +3700,7 @@ async def handle_site_texts_menu(query, context, section: str | None = None):
         for sec_id, (title, _) in SITE_SECTIONS.items():
             kb.append([InlineKeyboardButton(title, callback_data=f"site_txt_sec:{sec_id}")])
         kb.append([InlineKeyboardButton("🔄 Сбросить все тексты", callback_data="site_txt_reset")])
-        kb.append([InlineKeyboardButton("◀️ В меню сайта", callback_data="site_menu")])
+        kb.append([InlineKeyboardButton("◀️ К сайту", callback_data="site_menu")])
 
         await query.edit_message_text(
             "✍️ <b>Редактор текстов сайта</b>\n\n"
@@ -3716,7 +3719,7 @@ async def handle_site_texts_menu(query, context, section: str | None = None):
     for k, name in fields:
         val = texts.get(k, "")
         short_val = (val[:35] + "…") if len(val) > 35 else val
-        summary_lines.append(f"• <b>{escape(name)}</b>: <i>{escape(short_val)}</i>")
+        summary_lines.append(f"• <b>{escape(name)}</b>: <i>{escape(short_val) if short_val else 'по умолчанию'}</i>")
         kb.append([InlineKeyboardButton(f"✏️ {name}", callback_data=f"site_txt_edit:{k}")])
 
     kb.append([InlineKeyboardButton("◀️ К разделам", callback_data="site_texts")])
@@ -3724,10 +3727,8 @@ async def handle_site_texts_menu(query, context, section: str | None = None):
     text_msg = (
         f"✍️ <b>{escape(sec_title)}</b>\n\n"
         "Нажмите на нужный пункт, чтобы изменить его текст:\n\n"
-        "<blockquote>" + "\n".join(summary_lines[:8]) + "</blockquote>"
+        "<blockquote>" + "\n".join(summary_lines) + "</blockquote>"
     )
-    if len(summary_lines) > 8:
-        text_msg += "\n<blockquote>" + "\n".join(summary_lines[8:]) + "</blockquote>"
 
     await query.edit_message_text(
         text_msg,
@@ -3752,7 +3753,7 @@ async def handle_site_text_edit_ask(query, context, field: str):
 
     await query.edit_message_text(
         f"✏️ <b>Редактирование: {escape(field_name)}</b>\n\n"
-        f"<blockquote>Сейчас:\n<b>{escape(cur)}</b></blockquote>\n\n"
+        f"<blockquote>Сейчас:\n<b>{escape(cur) if cur else '— (используется стандартное значение)'}</b></blockquote>\n\n"
         "Отправьте новый текст следующим сообщением в чат.\n\n"
         "<i>Если хотите вернуть стандартное значение этого поля, отправьте знак <code>-</code>.</i>",
         parse_mode="HTML",
@@ -3764,13 +3765,16 @@ async def handle_site_text_edit_ask(query, context, field: str):
 
 async def handle_site_text_reset_ask(query, context):
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    cfg = load_config()
+    changed = len([v for v in (cfg.get("site_texts") or {}).values() if v])
     await query.edit_message_text(
         "⚠️ <b>Сброс всех текстов сайта</b>\n\n"
-        "Вы действительно хотите сбросить абсолютно все тексты сайта к исходным стандартным значениям?",
+        f"Сейчас изменено полей: <b>{changed}</b>. "
+        "Сбросить их все к исходным стандартным значениям?",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Да, сбросить все тексты", callback_data="site_txt_do_reset")],
             [InlineKeyboardButton("❌ Отмена", callback_data="site_texts")],
+            [InlineKeyboardButton("✅ Да, сбросить все тексты", callback_data="site_txt_do_reset")],
         ]),
     )
 
