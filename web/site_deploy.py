@@ -870,6 +870,33 @@ body.tg-fullscreen .tabs { top:96px; }
             '<p class="card-sub">Цифры на сейчас — кнопка «Обновить» внизу пересчитает их.</p>' +
             details.join("") + "</div></div>");
 
+   // LTE: остаток за текущий месяц, как в боте на экране «LTE-интернет»
+   if (p.lte && p.lte.available) {
+     var lteBody;
+     if (p.lte.closed) {
+       lteBody = '<p class="card-sub">LTE-серверы для этой подписки закрыты.</p>';
+     } else {
+       var lpct = Math.min(100, Math.round(p.lte.used / (p.lte.limit_gb * 1024 * 1024 * 1024) * 100));
+       lteBody = '<p class="card-sub">Использовано ' + esc(p.lte.used_text) + " из " +
+                 esc(p.lte.limit_gb) + " ГБ · осталось <b style=\"color:var(--ink)\">" +
+                 esc(p.lte.left_gb) + " ГБ</b></p>" +
+                 '<div class="bar"><div class="bar-fill' + barClass(lpct) +
+                 '" style="width:' + lpct + '%"></div></div>' +
+                 '<div class="bar-note"><span>Лимит обновляется каждый месяц</span><span>' + lpct + "%</span></div>" +
+                 (p.lte.fallback_active
+                   ? '<p class="card-sub" style="margin-top:12px">⚠️ LTE на этот месяц закончился — ' +
+                     "сейчас работают обычные серверы, в новом месяце LTE вернётся.</p>"
+                   : "");
+     }
+     out.push('<div data-sec="lte"><div class="card">' + title("lte", "LTE-интернет") + lteBody + "</div></div>");
+   } else if (!p.lte || !p.lte.off) {
+     // Панель не ответила — раздел не прячем молча, а честно говорим,
+     // что данные временно недоступны.
+     out.push('<div data-sec="lte"><div class="card">' + title("lte", "LTE-интернет") +
+              '<p class="card-sub">Не удалось получить данные LTE — панель временно ' +
+              "не отвечает. Нажмите «Обновить данные» чуть позже.</p></div></div>");
+   }
+
    // Подключение: приложение в одно нажатие и ссылка с копированием
    out.push('<div data-sec="sub"><div class="card">' + title("key", "Подключение") +
             '<p class="card-sub">Добавьте подписку в приложение одним нажатием.</p>' +

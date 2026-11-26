@@ -95,7 +95,8 @@ async def _compute_lte_line(email, lte_gb_val):
                                     lte_limit_off,
                                     make_username, user_cdn_usage)
     if lte_limit_off():
-        return "📡 Трафик через CDN: без лимита"
+        # Учёт CDN выключен тумблером в админке — строки в подписке нет.
+        return None
     limit = lte_limit_gb(lte_gb_val, load_config().get("paid_preset_lte"))
     if limit == 0:
         return "📡 LTE-серверы: закрыты"

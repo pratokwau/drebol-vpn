@@ -291,6 +291,34 @@ async def profile(tg_id: int) -> dict:
 
     row = await get_paid_sub_by_tg_id(tg_id)
     if not row:
+        if admin_row:
+            # LTE админской подписки — как handle_my_lte kind="admin":
+            # расход за месяц по админской почте, лимит из preset_lte.
+            # Учёт CDN выключен тумблером в админке — раздела нет.
+            from services.remnawave import lte_limit_off
+            if lte_limit_off():
+                out["lte"] = {"available": False, "off": True}
+                return out
+            try:
+                from config import load_config
+                from services.remnawave import is_configured, lte_limit_gb, make_username, user_cdn_usage
+                a_limit = lte_limit_gb(admin_row[11] if len(admin_row) > 11 else None,
+                                       load_config().get("preset_lte"))
+                if a_limit == 0:
+                    out["lte"] = {"available": True, "closed": True, "limit_gb": 0}
+                elif is_configured():
+                    r = await user_cdn_usage(make_username(admin_row[2] or "", 0))
+                    if r.get("ok") and r.get("cdn_nodes"):
+                        a_used = int(r["used_bytes"] or 0)
+                        out["lte"] = {
+                            "available": True, "closed": False,
+                            "limit_gb": int(a_limit),
+                            "used": a_used, "used_text": _fmt_bytes(a_used),
+                            "left_gb": round(max(0.0, a_limit - a_used / 1024 ** 3), 2),
+                            "fallback_active": False,
+                        }
+            except Exception:
+                pass
         return out
 
     email, sub_url, limit_hwid = row[2], row[5], row[8]
@@ -324,6 +352,36 @@ async def profile(tg_id: int) -> dict:
         "traffic_used_text": _fmt_bytes(used),
         "renewed": int(renewed or 0),
     }
+
+    # LTE: остаток за текущий месяц и переведён ли человек на fallback-сквад.
+    # Панель может не ответить — тогда карточку просто не показываем.
+    from services.remnawave import lte_limit_off
+    if lte_limit_off():
+        out["lte"] = {"available": False, "off": True}
+    else:
+        try:
+            from config import load_config
+            from services.remnawave import (is_configured, lte_limit_gb,
+                                   make_username, user_cdn_usage)
+            lte_limit = lte_limit_gb(row[19] if len(row) > 19 else None,
+                                     load_config().get("paid_preset_lte"))
+            fb_raw = row[20] if len(row) > 20 else ""
+            fb_month = (fb_raw or "").partition(":")[0]
+            if lte_limit == 0:
+                out["lte"] = {"available": True, "closed": True, "limit_gb": 0}
+            elif is_configured():
+                r = await user_cdn_usage(make_username(email or "", 0))
+                if r.get("ok") and r.get("cdn_nodes"):
+                    lte_used = int(r["used_bytes"] or 0)
+                    out["lte"] = {
+                        "available": True, "closed": False,
+                        "limit_gb": int(lte_limit),
+                        "used": lte_used, "used_text": _fmt_bytes(lte_used),
+                        "left_gb": round(max(0.0, lte_limit - lte_used / 1024 ** 3), 2),
+                        "fallback_active": bool(fb_month) and fb_month == datetime.now().strftime("%Y-%m"),
+                    }
+        except Exception:
+            pass
 
     hw = await get_client_hwids(email)
     if hw.get("ok"):

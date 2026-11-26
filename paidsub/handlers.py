@@ -559,7 +559,8 @@ async def handle_paid_lte_fallback(query, context):
         "🔀 <b>Сквад после конца LTE</b>\n\n"
         + ("<blockquote>📴 <b>Лимит LTE сейчас ОТКЛЮЧЁН</b> — "
            "CDN-серверы доступны всем без учёта трафика, "
-           "в fallback никто не перекидывается.</blockquote>\n\n"
+           "в fallback никто не перекидывается, а у пользователей "
+           "скрыты остаток LTE в боте, кабинете и подписке.</blockquote>\n\n"
            if limit_off else "")
         + (f"<blockquote>Сейчас: <b>{_esc_name(cur_name)}</b></blockquote>\n\n"
            if cur_name else "")
