@@ -656,7 +656,7 @@ label.chk input{width:auto;margin:0}
       <!-- Узлы -->
       <section id="sec-nodes" class="page hidden">
         <div class="card"><h2>Узлы и здоровье</h2><p class="sub">Живой статус нод, панели и сайта подписки. Нажми на строку ноды, чтобы посмотреть её трафик.</p>
-          <div class="btnrow"><button id="btn-nodes">Здоровье узлов</button><button id="btn-squads" class="ghost">Сквады</button><button id="btn-links-nodes" class="ghost">🔗 Основные ссылки</button></div>
+          <div class="btnrow"><button id="btn-nodes">Здоровье узлов</button><button id="btn-node-squads" class="ghost">Сквады</button><button id="btn-links-nodes" class="ghost">🔗 Основные ссылки</button></div>
           <div id="nodes-table"></div>
           <div id="nodes-snapshot"></div>
           <h3>Трафик</h3>
@@ -975,7 +975,7 @@ label.chk input{width:auto;margin:0}
         </div>
         <div class="card"><h2>Помощь при подключении</h2><p class="sub">Подсказки новичкам, которые не смогли подключиться.</p>
           <div class="btnrow"><button id="btn-ch-show" class="ghost">Показать настройки</button></div>
-          <div id="ch-out"></div>
+          <div id="ch-help-out"></div>
         </div>
       </section>
     </div>
@@ -4102,7 +4102,7 @@ async function loadHealth(){
   $("nodes-out").innerHTML = h;
 }
 $("btn-nodes").onclick = function(){ loadHealth(); };
-async function loadSquads(){
+async function loadNodeSquads(){
   let r;
   try { r = await api("/squads"); }
   catch(e) { $("nodes-out").innerHTML = '<p class="err">Ошибка загрузки — проверьте соединение и попробуйте ещё раз.</p>'; return; }
@@ -4115,7 +4115,7 @@ async function loadSquads(){
   });
   $("nodes-out").innerHTML = h + "</tbody></table></div>";
 }
-$("btn-squads").onclick = function(){ loadSquads(); };
+$("btn-node-squads").onclick = function(){ loadNodeSquads(); };
 /* --- Трафик по узлам: те же периоды и подписи, что в ТГ (handle_rw_usage). --- */
 const USAGE_PERIODS = {month: "Текущий месяц", prev: "Прошлый месяц", "7d": "Последние 7 дней", "30d": "Последние 30 дней", "90d": "Последние 90 дней", custom: "Свой период…"};
 let usagePeriod = "month", usagePage = 1, usageNode = "all", usageNodeName = "Все ноды";
@@ -5058,7 +5058,7 @@ $("btn-wa-find").onclick = async function(){
 };
 async function loadConnectHelp(){
   const r = await api("/connect-help");
-  if (r.status !== 200) { renderOut("ch-out", r.data); return; }
+  if (r.status !== 200) { renderOut("ch-help-out", r.data); return; }
   const d = r.data, st = d.stats || {};
   let h = '<dl class="kv">';
   h += kvRow("Подсказки", d.enabled ? '<span class="pill ok">Включены</span>' : '<span class="pill bad">Выключены</span>');
@@ -5069,7 +5069,7 @@ async function loadConnectHelp(){
   h += '<label><input id="ch-enabled" type="checkbox"' + (d.enabled ? " checked" : "") + "> подсказки включены</label>";
   h += '<label>Через сколько часов<input id="ch-hours" type="number" min="1" value="' + (d.hours || 3) + '"></label>';
   h += '<div class="btnrow"><button class="ghost" id="ch-save">Сохранить</button></div>';
-  $("ch-out").innerHTML = h;
+  $("ch-help-out").innerHTML = h;
   $("ch-save").onclick = withSpin($("ch-save"), async function(){
     const rr = await api("/connect-help", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
       body: JSON.stringify({enabled: $("ch-enabled").checked, hours: parseInt($("ch-hours").value || "3", 10)})});
