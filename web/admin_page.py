@@ -2608,17 +2608,100 @@ $("btn-platega-save").onclick = withSpin($("btn-platega-save"), async function()
   if (r.status === 200) { $("pl-secret").value = ""; toast("Данные Platega сохранены", "ok"); await loadPlatega(); }
   else renderOut("platega-out", r.data);
 });
+const RECONCILE_KIND_LABELS = {
+  not_found: "Счёт не найден",
+  unchecked: "Не проверено",
+  amount: "Сумма не сходится",
+  missed_confirm: "Оплата не засчитана",
+  refund_mismatch: "Возврат не сходится",
+  state: "Статусы не сходятся",
+  paid_canceled: "Оплачен, но отменён",
+  full_refund_missed: "Возврат не учтён",
+  partial_unknown: "Частичный возврат без суммы",
+  partial_mismatch: "Частичный возврат"
+};
+function reconcileKindLabel(kind){ return RECONCILE_KIND_LABELS[kind] || esc(kind || "—"); }
+function renderReconcile(d){
+  const out = $("reconcile-out");
+  const fixBtn = $("btn-reconcile-fix");
+  function setFixLabel(n){ if (fixBtn) fixBtn.textContent = n ? "✅ Исправить расхождения (" + n + ")" : "Исправить расхождения"; }
+  if (!d || d.error) {
+    if (d && d.error === "platega_not_configured") {
+      out.innerHTML = '<p class="err">⚠️ Platega не настроена — задай Merchant ID и API ключ (Финансы → Платёжная система), потом возвращайся.</p>';
+    } else {
+      renderOut("reconcile-out", d);
+    }
+    setFixLabel(0);
+    return;
+  }
+  const checked = d.checked || 0;
+  const issues = d.issues || [];
+  const fixable = d.fixable || [];
+  const impact = d.impact || 0;
+  if (!checked) {
+    out.innerHTML = '<p class="mut">Счетов Platega за последние 60 дней нет — сверять нечего.</p>';
+    setFixLabel(0);
+    return;
+  }
+  let h = '<dl class="kv">';
+  h += kvRow("Проверено счетов", fmtNum(checked) + ' <span class="mut">· за 60 дней</span>');
+  h += kvRow("✅ Совпало", fmtNum(checked - issues.length));
+  h += kvRow("⚠️ Расхождений", fmtNum(issues.length));
+  if (impact > 0) h += kvRow("💸 Прибыль завышена на", fmtMoney(impact));
+  h += '</dl>';
+  if (!issues.length) {
+    h += '<p class="ok">Всё сходится — база и Platega совпадают.</p>';
+  } else {
+    h += '<p class="sub">Расхождения — нажми на строку, чтобы открыть карточку счёта:</p>';
+    h += '<div class="tblwrap"><table><thead><tr><th>Счёт</th><th>Сумма</th><th>Вид</th><th>Что не так</th><th>Исправимо</th></tr></thead><tbody>';
+    issues.forEach(function(it){
+      h += '<tr data-pay="' + it.payment_id + '"><td class="num">#' + it.payment_id + '</td><td class="num">' + fmtMoney(it.amount) + '</td><td>' + reconcileKindLabel(it.kind) + '</td><td>' + esc(it.text || "") + '</td><td>' + (it.fix ? "✅" : "—") + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  out.innerHTML = h;
+  out.querySelectorAll("tr[data-pay]").forEach(function(tr){
+    tr.onclick = function(){ openPaymentEditor(parseInt(tr.dataset.pay, 10)); };
+  });
+  setFixLabel(fixable.length);
+}
+function renderReconcileFix(d){
+  const out = $("reconcile-out");
+  const fixBtn = $("btn-reconcile-fix");
+  if (!d || d.error) { renderOut("reconcile-out", d); return; }
+  const fixed = d.fixed || [];
+  const already = d.already || [];
+  let h = '<p><b>✅ Исправлено</b></p>';
+  if (fixed.length) {
+    h += '<ul>';
+    fixed.forEach(function(f){
+      h += '<li>#' + f.payment_id + ' → ' + (f.kind === "full" ? "полный возврат учтён" : "частичный возврат " + fmtMoney(f.amount)) + '</li>';
+    });
+    h += '</ul>';
+  } else {
+    h += '<p class="mut">Новых исправлений нет.</p>';
+  }
+  if (already.length) {
+    h += '<p class="mut">Уже было учтено: ' + already.map(function(f){ return "#" + f.payment_id; }).join(", ") + '</p>';
+  }
+  h += '<p class="mut">Доходы теперь считаются нетто — прибыль уменьшена на сумму возвратов. Сроки подписок не отзывались: если нужно, отзови срок через карточку платежа.</p>';
+  h += '<div class="btnrow"><button class="ghost" id="btn-reconcile-again">🔄 Проверить снова</button></div>';
+  out.innerHTML = h;
+  $("btn-reconcile-again").onclick = function(){ $("btn-reconcile").click(); };
+  if (fixBtn) fixBtn.textContent = "Исправить расхождения";
+}
 let lastReconcile = null;
 $("btn-reconcile").onclick = withSpin($("btn-reconcile"), async function(){
   const r = await postConfirm("/reconcile/run", {});
   lastReconcile = r.data;
-  renderOut("reconcile-out", r.data);
+  renderReconcile(r.data);
 });
 $("btn-reconcile-fix").onclick = async function(){
   const fixes = (lastReconcile && lastReconcile.fixable) || [];
   if (!fixes.length) { toast("Сначала запустите сверку — расхождений нет", "err"); return; }
   const r = await postConfirm("/reconcile/fix", {fixes: fixes});
-  renderOut("reconcile-out", r.data);
+  lastReconcile = null;
+  renderReconcileFix(r.data);
 };
 /* --- Серверы (расходы): список + редактор --- */
 let serversLoaded = false;
