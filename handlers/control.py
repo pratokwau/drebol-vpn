@@ -225,6 +225,7 @@ CB_LABELS = {
 
 EVENT_LABELS = {
     "registered": "🆕 Регистрация",
+    "reminded": "🔔 Напоминание о конце подписки",
     "period_ended": "⏳ Кончился период",
     "expired": "🔴 Подписка отключена",
     "trial_approved": "🆓 Выдан триал",
@@ -369,7 +370,12 @@ def action_label(action: str, details: str | None) -> str:
             return f"✏️ Ввод ({_esc(details.replace('awaiting_', ''))})"
         return {"photo": "🖼 Фото", "document": "📎 Файл"}.get(rest, "✉️ Сообщение")
     if kind == "ev":
-        return EVENT_LABELS.get(rest, f"• {_esc(rest)}")
+        label = EVENT_LABELS.get(rest, f"• {_esc(rest)}")
+        if details:
+            first = details.splitlines()[0].strip()
+            if first and len(first) <= 55:
+                label += f" · {_esc(first)}"
+        return label
     return _esc(action)
 
 
@@ -877,6 +883,19 @@ async def handle_activity_entry(target, entry_id: int, edit: bool = True):
         return
     _id, tg_id, action, details, created_at, fn, un = entry
     u = await get_user_info(tg_id) if tg_id else None
+    sub_line = ""
+    if tg_id:
+        try:
+            from paidsub.storage import get_paid_sub_by_tg_id
+            srow = await get_paid_sub_by_tg_id(tg_id)
+            if srow:
+                kind_txt = ("триал" if not (srow[12] if len(srow) > 12 else 0)
+                            else "оплаченная")
+                sub_line = (f"\n\n<blockquote>📦 Подписка #{srow[0]} · {kind_txt} · "
+                            f"статус: {_esc(srow[11] if len(srow) > 11 else '?')} · "
+                            f"до {_esc(srow[6] or '—')}</blockquote>")
+        except Exception:
+            sub_line = ""
     kb = []
     if tg_id:
         kb.append([InlineKeyboardButton("👤 Профиль", callback_data=f"user_profile:{tg_id}"),
@@ -885,6 +904,7 @@ async def handle_activity_entry(target, entry_id: int, edit: bool = True):
     text = (f"📋 <b>{action_label(action, details)}</b>\n\n"
             f"<blockquote>👤 {_who(u[1] if u else None, u[2] if u else None, tg_id)}\n"
             f"🕐 {_short_ts(created_at) if created_at else '?'}</blockquote>"
+            + sub_line
             + (f"\n\n<blockquote expandable>{_esc(details)}</blockquote>" if details else ""))
     kwargs = dict(parse_mode="HTML", reply_markup=InlineKeyboardMarkup(kb),
                   disable_web_page_preview=True)
@@ -1358,6 +1378,8 @@ async def connect_help_tick(context):
         try:
             await context.bot.send_message(chat_id=tg_id, text=text, parse_mode="HTML",
                                            reply_markup=InlineKeyboardMarkup(kb))
-            await log_activity(tg_id, "ev:connect_help")
+            await log_activity(tg_id, "ev:connect_help",
+                               f"подписка выдана ≥{hours} ч назад, подключений не было — "
+                               "отправлена подсказка по подключению")
         except Exception:
             pass

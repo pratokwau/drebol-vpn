@@ -2201,7 +2201,16 @@ async def expiry_reminder_tick(context):
                 ]),
             )
             from core.database import log_activity
-            await log_activity(tg_id, "ev:reminded", f"этап {target}")
+            _win = stages[target - 1] if 0 < target <= len(stages) else 0
+            _stages_on = len([w for w in stages if w]) or 1
+            await log_activity(tg_id, "ev:reminded",
+                               f"этап {target} из {_stages_on} · осталось {fmt_duration_precise(left)}\n"
+                               f"Подписка #{sub_id} ({'триал' if trial else 'оплаченная'}), "
+                               f"конец: {period_end_str}.\n"
+                               f"Этап {target} — напоминание, когда до конца осталось "
+                               f"не больше {fmt_duration_precise(_win) if _win else '—'}.\n"
+                               f"Отправлено сообщение «{what} скоро закончится» "
+                               f"с кнопкой «{action}».")
         except Exception:
             pass
 
@@ -2250,8 +2259,14 @@ async def check_expired_subs(context):
         if tg_id:
             from core.database import log_activity
             await log_activity(tg_id, "ev:period_ended",
-                               "триал" if times_renewed == 0 else "оплаченный")
-            await log_activity(tg_id, "ev:expired")
+                               f"подписка #{sub_id} · "
+                               f"{'триал' if times_renewed == 0 else 'оплаченная'} · "
+                               f"срок вышел {expire_str}")
+            await log_activity(tg_id, "ev:expired",
+                               f"подписка #{sub_id} · "
+                               f"{'триал' if times_renewed == 0 else 'оплаченная'} · "
+                               f"срок вышел {expire_str} · помечена истёкшей, "
+                               "доступ закрывает панель по своему сроку")
 
         # Панель закрывает доступ сама по своему сроку. Перезаписывать её
         # прошедшей датой Remnawave не даёт («Validation failed») — а разница
