@@ -461,6 +461,8 @@ body.tg-fullscreen .tabs { top:96px; }
           transition:transform .18s var(--ease), border-color .2s, background .2s, box-shadow .2s; }
 .tariff:hover { border-color:rgba(255,255,255,.55); transform:translateY(-2px); box-shadow:0 12px 26px rgba(0,0,0,.4); }
 .tariff:active { transform:scale(.985); }
+.tariff:disabled { opacity:.55; cursor:default; transform:none; box-shadow:none; }
+.tariff:disabled:hover { border-color:var(--line-strong); transform:none; box-shadow:none; }
 .tariff .t-per { font-weight:800; font-size:15px; }
 .tariff .t-sub { display:block; font-size:12px; color:var(--soft); font-weight:600; margin-top:1px; }
 .tariff .t-price { font-size:19px; font-weight:800; letter-spacing:-.01em; white-space:nowrap; }
@@ -546,6 +548,13 @@ body.tg-fullscreen .tabs { top:96px; }
   #body.tab-sub > #tabs, #body.tab-sub > .breadcrumb,
   #body.tab-sub > .stack, #body.tab-sub > .sub-hero { grid-column:1 / -1; }
   [data-sec="sub"] > .card { margin:14px 0; }
+  /* Двухколоночная сетка остальных вкладок: блоки внутри одной карточки
+     (профиль — две формы, инфо — подключение/цены, друзья — статистика/список,
+     устройства — строки, платежи — список). Ниже 900px — одна колонка. */
+  .cols-2 { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; align-items:start; }
+  #pay-list { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; align-items:start; }
+  #pay-list .pay { border-top:0; }
+  .cols-2 > .dev { border-top:0; }
 }
 
 .field { display:block; text-align:left; margin:12px 0 0; font-size:13px; font-weight:700; color:var(--muted); }
@@ -875,6 +884,7 @@ body.tg-fullscreen .tabs { top:96px; }
    return '<div data-sec="profile"><div class="card">' + title("user", "Профиль") +
      '<p class="card-sub">Почта и пароль — для входа в кабинет из браузера, без Telegram.</p>' +
      rows.join("") +
+     '<div class="cols-2">' +
      '<form id="prof-email-form" style="margin-top:14px">' +
        '<label class="field">Почта<input type="email" id="prof-email" value="' + esc(lg.email || "") +
        '" placeholder="you@example.com" autocomplete="email" required></label>' +
@@ -886,6 +896,7 @@ body.tg-fullscreen .tabs { top:96px; }
        '<label class="field">Новый пароль (от 8 символов)<input type="password" id="prof-new" autocomplete="new-password" minlength="8"></label>' +
        '<button class="btn btn-main" type="submit">' +
        (lg.has_password ? "Сменить пароль" : "Задать пароль") + "</button></form>" +
+     '</div>' +
      '<p class="form-note" id="prof-note"></p>' +
      "</div></div>";
  }
@@ -1066,7 +1077,8 @@ body.tg-fullscreen .tabs { top:96px; }
             (s.devices_limit ? " из " + esc(s.devices_limit) : "") +
             (s.devices_limit && p.devices && p.devices.length >= s.devices_limit
               ? " · все места заняты" : "") + "</p>" +
-            (devList || '<p class="card-sub">Пока ни одного.</p>' +
+            (devList ? '<div class="cols-2">' + devList + '</div>'
+             : '<p class="card-sub">Пока ни одного.</p>' +
             '<button class="btn btn-ghost" type="button" onclick="showTab(\'sub\')">Как подключиться</button>') +
             devBuyBlock(s) + "</div></div>");
 
@@ -1228,15 +1240,17 @@ body.tg-fullscreen .tabs { top:96px; }
    var share = "https://t.me/share/url?url=" + encodeURIComponent(link) +
                "&text=" + encodeURIComponent("Попробуй Drebol VPN — быстрый и безопасный VPN!");
    return '<div class="card">' + title("users", "Приглашайте друзей") +
+     '<div class="cols-2"><div>' +
      '<p class="card-sub">Приглашено: <b style="color:var(--ink)">' + esc(r.invited) + "</b>" +
      " · бонус получили: <b style=\"color:var(--ink)\">" + esc(r.rewarded) + "</b>" +
      (r.bonus_text ? " · вам начислено: <b style=\"color:var(--ink)\">+" + esc(r.bonus_text) + "</b>" : "") + "</p>" +
      refRules(r) +
      '<div class="link"><code id="reflink">' + esc(link) + "</code>" +
      '<button class="copy" type="button" data-copy="' + esc(link) + '">Скопировать</button></div>' +
-     referralList(r) +
      '<div class="stack" style="margin-top:12px"><a class="btn btn-ghost" href="' + share +
-     '">📤 Поделиться ссылкой</a></div></div>';
+     '">📤 Поделиться ссылкой</a></div></div><div>' +
+     referralList(r) +
+     '</div></div></div>';
  }
  // Кто именно пришёл по ссылке и кому бонус уже начислен
  function referralList(r) {
@@ -1564,9 +1578,15 @@ body.tg-fullscreen .tabs { top:96px; }
      .then(function () { toast("Промокод убран"); loadRenew(); })
      .catch(function () { loadRenew(); });
  }
+ function lockTariffs() {
+   // Двойной тап по тарифу — второй счёт: блокируем все .tariff на время
+   // запроса (тело карточки и так заменяется сразу, это страховка).
+   document.querySelectorAll(".tariff").forEach(function (b) { b.disabled = true; });
+ }
  function renewPay(tariffId) {
    var body = document.getElementById("renew-body");
    if (!body) { return; }
+   lockTariffs();
    body.innerHTML = '<p class="card-sub">Создаём счёт…</p>';
    api("/api/renew", {method: "POST", body: JSON.stringify({tariff_id: tariffId})})
      .then(function (r) {
@@ -1582,7 +1602,9 @@ body.tg-fullscreen .tabs { top:96px; }
        body.innerHTML = '<div id="renew-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
          esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — подтверждение придёт само, " +
          "обычно в течение минуты.</p>" +
-         '<button class="btn btn-main" type="button" onclick="openPay(renewPayUrl)">Оплатить</button>' + '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
+         '<button class="btn btn-main" type="button" onclick="openPay(renewPayUrl)">Оплатить</button>' +
+         '<div class="stack" style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="stopRenewPoll();loadRenew()">← К тарифам</button></div>' +
+         '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
        openPay(r.data.url);
        pollPayment(r.data.payment_id, 90);
      })
@@ -1735,7 +1757,9 @@ body.tg-fullscreen .tabs { top:96px; }
        body.innerHTML = '<div id="gift-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
          esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — подписка откроется у друга, " +
          "обычно в течение минуты.</p>" +
-         '<button class="btn btn-main" type="button" onclick="openPay(giftPayUrl)">Оплатить</button>' + '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
+         '<button class="btn btn-main" type="button" onclick="openPay(giftPayUrl)">Оплатить</button>' +
+         '<div class="stack" style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="stopRenewPoll();loadGift()">← К подаркам</button></div>' +
+         '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
        openPay(r.data.url);
        pollGift(r.data.payment_id, 90);
      })
@@ -1868,6 +1892,7 @@ body.tg-fullscreen .tabs { top:96px; }
  function buyPay(tariffId) {
    var body = document.getElementById("buy-body");
    if (!body) { return; }
+   lockTariffs();
    body.innerHTML = '<p class="card-sub">Создаём счёт…</p>';
    api("/api/buy", {method: "POST", body: JSON.stringify({tariff_id: tariffId})})
      .then(function (r) {
@@ -1884,7 +1909,9 @@ body.tg-fullscreen .tabs { top:96px; }
        body.innerHTML = '<div id="buy-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
          esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — подписка откроется сама, " +
          "обычно в течение минуты.</p>" +
-         '<button class="btn btn-main" type="button" onclick="openPay(buyPayUrl)">Оплатить</button>' + '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
+         '<button class="btn btn-main" type="button" onclick="openPay(buyPayUrl)">Оплатить</button>' +
+         '<div class="stack" style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="stopRenewPoll();loadBuy()">← К тарифам</button></div>' +
+         '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
        openPay(r.data.url);
        pollBuy(r.data.payment_id, 90);
      })
@@ -1948,9 +1975,10 @@ body.tg-fullscreen .tabs { top:96px; }
  function renderInfo(d) {
    var box = document.getElementById("info-body");
    if (!box) { return; }
-   var h = "";
+   var h1 = "", h2 = "", h3 = "";
    // Как подключиться: три шага и ссылки магазинов INCY/Happ.
-   h += '<p class="card-sub"><b style="color:var(--ink)">Как подключиться</b></p>' +
+   // На десктопе — левая колонка двухколоночной сетки (см. .cols-2).
+   h1 += '<p class="card-sub"><b style="color:var(--ink)">Как подключиться</b></p>' +
         '<div class="steps"><span><b>1</b>Установите INCY или Happ</span>' +
         '<span><b>2</b>Скопируйте ссылку подписки в разделе «Подписка»</span>' +
         '<span><b>3</b>Вставьте её в приложение</span></div>';
@@ -1958,28 +1986,29 @@ body.tg-fullscreen .tabs { top:96px; }
    ["incy", "happ"].forEach(function (key) {
      var a = apps[key];
      if (!a) { return; }
-     h += '<p class="card-sub" style="margin-top:12px"><b style="color:var(--ink)">' +
+     h1 += '<p class="card-sub" style="margin-top:12px"><b style="color:var(--ink)">' +
           (key === "incy" ? "INCY" : "Happ") + '</b></p><div class="stack">';
      [["iOS", a.ios], ["Android", a.android], ["Windows", a.windows], ["macOS", a.macos]].forEach(function (pr) {
-       if (pr[1]) { h += '<a class="btn btn-ghost" target="_blank" rel="noopener" href="' + esc(pr[1]) + '">' + pr[0] + '</a>'; }
+       if (pr[1]) { h1 += '<a class="btn btn-ghost" target="_blank" rel="noopener" href="' + esc(pr[1]) + '">' + pr[0] + '</a>'; }
      });
-     h += '</div>';
+     h1 += '</div>';
    });
    // Цены: пробный период, тарифы с ценой в месяц и выгодой, что входит.
-   h += '<p class="card-sub" style="margin-top:16px"><b style="color:var(--ink)">Цены</b></p>';
+   // На десктопе — правая колонка двухколоночной сетки (см. .cols-2).
+   h2 += '<p class="card-sub"><b style="color:var(--ink)">Цены</b></p>';
    if (d.trial) {
-     h += '<p class="card-sub">🆓 <b style="color:var(--ink)">Пробный период</b> — ' + esc(d.trial.text) + ' бесплатно</p>';
+     h2 += '<p class="card-sub">🆓 <b style="color:var(--ink)">Пробный период</b> — ' + esc(d.trial.text) + ' бесплатно</p>';
    }
    var tariffs = d.tariffs || [];
    if (tariffs.length) {
-     h += '<div class="stack">' + tariffs.map(function (t) {
+     h2 += '<div class="stack">' + tariffs.map(function (t) {
        return '<div class="row"><span>' + esc(t.period) +
               (t.per_month ? ' · ≈ ' + esc(fmtMoney(t.per_month)) + '/мес' : '') +
               (t.saving_pct ? ' · <span class="pill ok">выгода ' + t.saving_pct + '%</span>' : '') +
               '</span><b>' + esc(fmtMoney(t.price)) + '</b></div>';
      }).join("") + '</div>';
    } else if (d.fallback_price) {
-     h += row("Подписка", "<b>" + esc(fmtMoney(d.fallback_price)) + "</b>");
+     h2 += row("Подписка", "<b>" + esc(fmtMoney(d.fallback_price)) + "</b>");
    }
    var perks = [];
    if (d.devices > 0) { perks.push("📱 До " + d.devices + " " + devWord(d.devices) + " одновременно"); }
@@ -1987,10 +2016,11 @@ body.tg-fullscreen .tabs { top:96px; }
    perks.push(d.traffic_gb > 0 ? "📶 " + d.traffic_gb + " ГБ трафика" : "📶 Безлимитный трафик");
    perks.push("🖥 iOS, Android, Windows, macOS");
    if (d.devices > 0 && d.device_price > 0) { perks.push("➕ Доп. устройство — " + esc(fmtMoney(d.device_price))); }
-   h += '<p class="card-sub" style="margin-top:10px">В каждом тарифе:</p><div class="stack">' +
+   h2 += '<p class="card-sub" style="margin-top:10px">В каждом тарифе:</p><div class="stack">' +
         perks.map(function (x) { return '<div class="row single"><span>' + x + '</span></div>'; }).join("") + '</div>';
    // О сервисе: то же, что в боте, плюс документы и ссылки.
-   h += '<p class="card-sub" style="margin-top:16px"><b style="color:var(--ink)">О сервисе</b></p>' +
+   // На десктопе — на всю ширину под сеткой.
+   h3 += '<p class="card-sub" style="margin-top:16px"><b style="color:var(--ink)">О сервисе</b></p>' +
         '<p class="card-sub"><b style="color:var(--ink)">Drebol VPN</b> — быстрый VPN без логов, который живёт в Telegram.</p>' +
         '<div class="stack">' +
         '<div class="row"><span>🖥 Любая платформа</span><span>iOS, Android, Windows, macOS</span></div>' +
@@ -1999,12 +2029,12 @@ body.tg-fullscreen .tabs { top:96px; }
    var docs = [];
    if (d.docs && d.docs.privacy) { docs.push('<a href="' + esc(d.docs.privacy) + '" target="_blank" rel="noopener">Политика конфиденциальности</a>'); }
    if (d.docs && d.docs.terms) { docs.push('<a href="' + esc(d.docs.terms) + '" target="_blank" rel="noopener">Пользовательское соглашение</a>'); }
-   if (docs.length) { h += '<p class="card-sub" style="margin-top:10px">📄 ' + docs.join("  ·  ") + '</p>'; }
+   if (docs.length) { h3 += '<p class="card-sub" style="margin-top:10px">📄 ' + docs.join("  ·  ") + '</p>'; }
    var links = "";
    if (d.support_url) { links += '<a class="btn btn-ghost" href="' + esc(d.support_url) + '">🛟 Поддержка</a>'; }
    if (d.channel_url) { links += '<a class="btn btn-ghost" href="' + esc(d.channel_url) + '">📣 Новости</a>'; }
-   if (links) { h += '<div class="stack" style="margin-top:12px">' + links + '</div>'; }
-   box.innerHTML = h;
+   if (links) { h3 += '<div class="stack" style="margin-top:12px">' + links + '</div>'; }
+   box.innerHTML = '<div class="cols-2"><div>' + h1 + '</div><div>' + h2 + '</div></div>' + h3;
  }
 
  // Копирование ссылки. Где буфер недоступен — просто выделяем её
