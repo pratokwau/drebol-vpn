@@ -532,6 +532,27 @@ async def handle_user_profile(query_or_msg, tg_id: int, edit=True):
 
     # Подписка
     sub = await get_paid_sub_by_tg_id(tg_id)
+    if sub and not limited:
+        # Одно меню вместо двух: карточка подписки содержит и профиль
+        # человека (оплаты, VPN-онлайн, рефералы, ЧС), и все кнопки
+        # обоих старых меню. Помощникам (limited) — прежний профиль.
+        from paidsub.handlers import handle_paid_sub_view
+        if edit:
+            await handle_paid_sub_view(query_or_msg, sub[0])
+        else:
+            class _MsgQuery:
+                """Адаптер сообщения под edit-интерфейс карточки."""
+                def __init__(self, m):
+                    self._m = m
+
+                async def edit_message_text(self, text, **kw):
+                    return await self._m.reply_text(text, **kw)
+
+                async def answer(self, *a, **kw):
+                    return None
+
+            await handle_paid_sub_view(_MsgQuery(query_or_msg), sub[0])
+        return
     if sub:
         status = sub[11] if len(sub) > 11 else "active"
         status_labels = {"active": "🟢 активна", "expired": "🔴 истекла"}

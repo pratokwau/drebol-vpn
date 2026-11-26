@@ -129,8 +129,15 @@ def paid_sub_view_keyboard(sub_id: int, enabled: bool = True,
         ]
     rows = [state_row]
     if tg_id:
+        # Единое меню подписки и человека: тема, промокод, чёрный
+        # список и активность переехали сюда из карточки пользователя,
+        # чтобы всё по одному человеку было в одном месте.
         rows.append([InlineKeyboardButton(
             "💬 Открыть тему", callback_data=f"sub_topic:{sub_id}")])
+        rows.append([
+            InlineKeyboardButton("🎁 Промокод", callback_data=f"promo_give_for:{tg_id}"),
+            InlineKeyboardButton("⛔ Чёрный список", callback_data=f"bl_view:{tg_id}"),
+        ])
     rows += [
         [
             InlineKeyboardButton("➕ Добавить срок", callback_data=f"paid_sub_extend:{sub_id}"),
@@ -141,9 +148,12 @@ def paid_sub_view_keyboard(sub_id: int, enabled: bool = True,
             InlineKeyboardButton("🌐 IP-адреса", callback_data=f"paid_ips:{sub_id}"),
         ],
         [InlineKeyboardButton("📜 История", callback_data=f"paid_sub_history:{sub_id}"),
-         InlineKeyboardButton("🔁 Перевыпустить", callback_data=f"paid_sub_reissue:{sub_id}")],
-        [InlineKeyboardButton("⚙️ Настройки", callback_data=f"paid_sub_settings:{sub_id}"),
-         InlineKeyboardButton("🗑 Удалить", callback_data=f"paid_sub_delete:{sub_id}")],
+         InlineKeyboardButton("📊 Действия", callback_data=f"user_activity:{tg_id}:1")]
+        if tg_id else
+        [InlineKeyboardButton("📜 История", callback_data=f"paid_sub_history:{sub_id}")],
+        [InlineKeyboardButton("🔁 Перевыпустить", callback_data=f"paid_sub_reissue:{sub_id}"),
+         InlineKeyboardButton("⚙️ Настройки", callback_data=f"paid_sub_settings:{sub_id}")],
+        [InlineKeyboardButton("🗑 Удалить", callback_data=f"paid_sub_delete:{sub_id}")],
         [InlineKeyboardButton("◀️ К списку", callback_data="paid_subs")],
     ]
     return InlineKeyboardMarkup(rows)

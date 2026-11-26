@@ -226,6 +226,22 @@ async def apply_paid_search(message, context, text: str):
             "или ищи через раздел пользователей.",
             reply_markup=back_admin())
         return
+    if len(rows) == 1:
+        # Одно совпадение — сразу единая карточка, без лишнего шага.
+        sent = await message.reply_text("⏳ Открываю подписку...")
+
+        class _MsgQuery:
+            def __init__(self, m):
+                self._m = m
+
+            async def edit_message_text(self, text, **kw):
+                return await self._m.edit_text(text, **kw)
+
+            async def answer(self, *a, **kw):
+                return None
+
+        await handle_paid_sub_view(_MsgQuery(sent), rows[0][0])
+        return
     lines = [f"🔎 <b>Нашлось подписок: {len(rows)}</b>\n"]
     kb = []
     for r in rows:
@@ -1268,13 +1284,50 @@ async def handle_paid_sub_view(query, sub_id: int):
     else:
         time_left_line = f"📅 До: <b>{expire}</b>\n⏱ <b>Истекла</b>\n"
 
-    extra_lines = referral_line.strip()
+    # Из карточки пользователя (меню объединили в одно): последнее
+    # подключение к VPN, приглашённые рефералы, пометка чёрного списка.
+    vpn_line = ""
+    if tg_id:
+        try:
+            from services.panel import get_last_online
+            from handlers.control import last_seen_text
+            lo = await get_last_online(timeout=5)
+            if lo.get("ok"):
+                vpn_line = f"🔌 VPN: {last_seen_text(lo['last'].get(email))}\n"
+        except Exception:
+            vpn_line = ""
+    invited_line = ""
+    if tg_id:
+        try:
+            from paidsub.storage import get_referral_stats
+            rs = await get_referral_stats(tg_id)
+            if rs["total"] > 0:
+                invited_line = (f"👥 Приглашено: <b>{rs['total']}</b> "
+                                f"(с бонусом: {rs['rewarded']})")
+        except Exception:
+            invited_line = ""
+    bl_block = ""
+    if tg_id:
+        try:
+            from features.blacklist import entry as _bl_entry, public_reason as _bl_reason
+            from html import escape as _esc_html
+            ble = await _bl_entry(tg_id)
+            if ble:
+                src = "вручную" if ble["source"] == "manual" else "общий список"
+                bl_block = (f"\n⛔ <b>В чёрном списке</b> ({src})\n"
+                            f"<blockquote>{_esc_html(_bl_reason(ble['reason']))}</blockquote>\n")
+        except Exception:
+            bl_block = ""
+
+    extra_lines = "\n".join(
+        x for x in (referral_line.strip(), invited_line) if x)
     # В админке показываем обе формы ссылки: sub — для людей, key — как
     # хранится и как ходит origin; настройка домена на админку не влияет.
     sub_form, key_form = _both_urls(sub_url)
     await query.edit_message_text(
         f"📄 <b>Подписка #{sub_id}</b>  {status_icon}\n"
         + tg_line
+        + bl_block
         + "\n📌 <b>Срок</b>\n<blockquote>"
         f"Статус: <b>{status_label}</b>  ·  {sub_type} (продлений: {times_renewed})\n"
         + frozen_line
@@ -1285,6 +1338,7 @@ async def handle_paid_sub_view(query, sub_id: int):
         f"🖥 Устройств: <b>{limit_hwid or 'без ограничения'}</b>\n"
         f"{traffic_line}\n"
         + await _lte_view_line(row)
+        + vpn_line
         + f"🕐 Создана: {created_at}"
         "</blockquote>\n"
         + (f"\n{extra_lines}\n" if extra_lines else "")
