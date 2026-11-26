@@ -407,6 +407,233 @@ async def usage_snapshot(request):
 
 # ── Синхронизация с панелью ──────────────────────────────────────────────────
 
+# Тексты статусов сайта — те же, что в services/remnawave.py
+# full_sync_report_text (секция «Сайт и кабинет»).
+_SYNC_SITE_TEXT = {
+    "unchanged": "Актуален, изменений нет — деплой не понадобился.",
+    "deployed": "Обновлён: залита свежая версия.",
+    "not_deployed": "Ещё ни разу не развёрнут — пропускаю (деплой делается вручную).",
+    "not_configured": "Не настроен — пропускаю.",
+    "no_bot": "Пропущено: нет доступа к боту.",
+}
+
+
+def _full_sync_steps(res: dict) -> list:
+    """Структурированный отчёт полной синхронизации: те же 8 секций,
+    что services/remnawave.full_sync_report_text, но машиночитаемо —
+    фронт рисует по шагам вместо сырого JSON-дампа. Каждый шаг:
+    {key, title, status: ok|fail|skip, summary, lines[]}.
+    Значения и тексты — те же, что в тексте отчёта ТГ."""
+    steps = []
+
+    # 1) панель → бот: подписки (поля панели в базу)
+    p = res.get("panel") or {}
+    if p.get("ok"):
+        lines = [
+            f"Пользователей в панели: {p.get('panel_total', 0)}",
+            f"Сверено подписок: {p.get('checked', 0)}",
+            f"Обновлено подписок: {p.get('updated_subs', 0)} "
+            f"(полей: {p.get('updated_fields', 0)})",
+        ]
+        if p.get("disabled"):
+            lines.append(f"В панели отключено подписок: {p['disabled']} "
+                         "(статусы в базе не трогаем)")
+        for label, key in (("Что поменялось", "examples"),
+                           ("В панели есть, а в базе нет", "orphans"),
+                           ("В базе есть, а в панели нет", "missing")):
+            items = p.get(key) or []
+            if items:
+                lines.append(f"{label}: {len(items)}")
+                lines.extend(str(e)[:120] for e in items[:5])
+                if len(items) > 5:
+                    lines.append(f"…и ещё {len(items) - 5}")
+        steps.append({"key": "panel", "title": "🔄 Подписки (панель → бот)",
+                      "status": "ok",
+                      "summary": f"Сверено {p.get('checked', 0)}, "
+                                 f"обновлено {p.get('updated_subs', 0)}",
+                      "lines": lines})
+    else:
+        steps.append({"key": "panel", "title": "🔄 Подписки (панель → бот)",
+                      "status": "fail",
+                      "summary": "Панель недоступна",
+                      "lines": [str(p.get("error") or "ошибка")[:300],
+                                "База не менялась: при ошибке панели "
+                                "ничего не трогаем."]})
+
+    # 2) бот → панель: ники и юзернеймы в описания клиентов
+    names = res.get("names")
+    if names is None:
+        steps.append({"key": "names", "title": "👤 Ники и юзернеймы",
+                      "status": "skip",
+                      "summary": "Пропущено: панель недоступна",
+                      "lines": []})
+    elif names.get("ok"):
+        errs = names.get("errors") or []
+        lines = [f"Проверено подписок: {names.get('checked', 0)}",
+                 f"Обновлено описаний: {names.get('updated', 0)}",
+                 f"С ошибкой: {len(errs)}"]
+        lines.extend(str(e)[:120] for e in errs[:5])
+        if len(errs) > 5:
+            lines.append(f"…и ещё {len(errs) - 5}")
+        steps.append({"key": "names", "title": "👤 Ники и юзернеймы",
+                      "status": "ok",
+                      "summary": f"Обновлено описаний: {names.get('updated', 0)}",
+                      "lines": lines})
+    else:
+        steps.append({"key": "names", "title": "👤 Ники и юзернеймы",
+                      "status": "fail",
+                      "summary": "Не удалось обновить ники",
+                      "lines": [str(names.get("error") or "ошибка")[:300]]})
+
+    # 3) ресурсы: панель, выдача подписок и все узлы — живы ли
+    probe = res.get("probe") or {}
+    if probe.get("error"):
+        steps.append({"key": "probe", "title": "🖥 Ресурсы и узлы",
+                      "status": "fail",
+                      "summary": "Проверка не удалась",
+                      "lines": [str(probe["error"])[:300]]})
+    else:
+        panel_p = probe.get("panel") or {}
+        sub = probe.get("sub") or {}
+        nodes = probe.get("nodes") or []
+        lines = [
+            f"Панель: {'отвечает' if panel_p.get('ok') else 'недоступна'}"
+            f" · {panel_p.get('ms', '—')} мс",
+            f"Выдача подписок: {'отвечает' if sub.get('ok') else 'недоступна'}"
+            f" · {sub.get('ms', '—')} мс",
+        ]
+        if nodes:
+            for n in nodes:
+                if not n.get("enabled"):
+                    state = "выключен"
+                elif n.get("reachable"):
+                    state = "онлайн"
+                else:
+                    state = str(n.get("error") or "недоступен")
+                lines.append(f"{n.get('tag')}: {state} · {n.get('host') or ''}"
+                             f" · онлайн-клиентов: {n.get('clients', 0)}")
+        else:
+            lines.append("Узлов панель не отдала.")
+        steps.append({"key": "probe", "title": "🖥 Ресурсы и узлы",
+                      "status": "ok",
+                      "summary": f"Панель {'отвечает' if panel_p.get('ok') else 'недоступна'}, "
+                                 f"узлов: {len(nodes)}",
+                      "lines": lines})
+
+    # 4) хосты панели: состав, отключённые, скрытые
+    hosts = res.get("hosts") or {}
+    if hosts.get("ok"):
+        hs = hosts.get("hosts") or []
+        off = [h for h in hs if h.get("isDisabled")]
+        hidden = [h for h in hs if h.get("isHidden")]
+        lines = [f"Всего: {len(hs)} · отключено: {len(off)}"
+                 f" · скрыто: {len(hidden)}"]
+        if off:
+            lines.append("Отключены: " + ", ".join(
+                str(h.get("remark") or h.get("address") or "?")
+                for h in off[:10]))
+        steps.append({"key": "hosts", "title": "🌐 Хосты в панели",
+                      "status": "ok",
+                      "summary": f"Всего {len(hs)}, отключено {len(off)}, "
+                                 f"скрыто {len(hidden)}",
+                      "lines": lines})
+    else:
+        steps.append({"key": "hosts", "title": "🌐 Хосты в панели",
+                      "status": "fail",
+                      "summary": "Не получить",
+                      "lines": [str(hosts.get("error") or "ошибка")[:300]]})
+
+    # 5) сквады: выбранные в боте против живых в панели
+    squads = res.get("squads") or {}
+    if squads.get("ok"):
+        missing = squads.get("missing") or []
+        lines = [f"В панели: {len(squads.get('squads') or [])} · "
+                 f"выбрано для выдачи: {squads.get('chosen', 0)}"]
+        if missing:
+            lines.append(f"⚠️ Выбранных в панели больше нет: {len(missing)}"
+                         " — проверь сквады в Remnawave.")
+        steps.append({"key": "squads", "title": "👥 Сквады",
+                      "status": "ok",
+                      "summary": f"В панели {len(squads.get('squads') or [])}, "
+                                 f"выбрано {squads.get('chosen', 0)}",
+                      "lines": lines})
+    else:
+        steps.append({"key": "squads", "title": "👥 Сквады",
+                      "status": "fail",
+                      "summary": "Не получить",
+                      "lines": [str(squads.get("error") or "ошибка")[:300]]})
+
+    # 6) сайт: пересборка и деплой, если что-то поменялось
+    site = res.get("site") or {}
+    st = site.get("status")
+    if st in ("unchanged", "deployed"):
+        site_status, site_summary = "ok", _SYNC_SITE_TEXT[st]
+    elif st in ("not_configured", "not_deployed", "no_bot"):
+        site_status, site_summary = "skip", _SYNC_SITE_TEXT[st]
+    else:
+        site_status = "fail"
+        site_summary = ("Не удалось: "
+                        + str(site.get("error") or st or "ошибка")[:300])
+    steps.append({"key": "site", "title": "🌍 Сайт и кабинет",
+                  "status": site_status, "summary": site_summary,
+                  "lines": []})
+
+    # 7) общий чёрный список: скачать и применить (если включён)
+    bl = res.get("blacklist") or {}
+    if bl.get("status") == "off":
+        steps.append({"key": "blacklist", "title": "🚫 Чёрный список",
+                      "status": "skip",
+                      "summary": "Общий список выключен — пропускаю",
+                      "lines": []})
+    elif bl.get("status") == "no_bot":
+        steps.append({"key": "blacklist", "title": "🚫 Чёрный список",
+                      "status": "skip",
+                      "summary": "Пропущено: нет доступа к боту",
+                      "lines": []})
+    elif bl.get("ok"):
+        stopped = (len(bl.get("trials_stopped") or [])
+                   + len(bl.get("paid_stopped") or [])
+                   + len(bl.get("admin_stopped") or []))
+        steps.append({"key": "blacklist", "title": "🚫 Чёрный список",
+                      "status": "ok",
+                      "summary": f"Записей в списке: {bl.get('total', 0)}, "
+                                 f"добавлено {bl.get('added', 0)}, "
+                                 f"снято {bl.get('removed', 0)}",
+                      "lines": [f"Записей в списке: {bl.get('total', 0)}",
+                                f"Добавлено: {bl.get('added', 0)}",
+                                f"Снято: {bl.get('removed', 0)}",
+                                f"Остановлено подписок: {stopped}",
+                                f"Восстановлено: "
+                                f"{len(bl.get('restored') or [])}"]})
+    else:
+        steps.append({"key": "blacklist", "title": "🚫 Чёрный список",
+                      "status": "fail",
+                      "summary": "Не удалось",
+                      "lines": [str(bl.get("error") or "ошибка")[:300]]})
+
+    # 8) сверка Platega: только отчёт, исправления — отдельной кнопкой
+    rec = res.get("reconcile") or {}
+    if rec.get("error"):
+        steps.append({"key": "reconcile", "title": "🔍 Сверка с Platega",
+                      "status": "fail",
+                      "summary": "Не удалось",
+                      "lines": [str(rec["error"])[:300]]})
+    else:
+        issues = rec.get("issues") or []
+        lines = [f"Проверено счетов: {rec.get('checked', 0)}",
+                 f"Расхождений: {len(issues)}"]
+        if issues:
+            lines.append("Исправления отсюда не применяются — они в "
+                         "разделе сверки, по кнопке.")
+        steps.append({"key": "reconcile", "title": "🔍 Сверка с Platega",
+                      "status": "ok",
+                      "summary": f"Проверено счетов: {rec.get('checked', 0)}, "
+                                 f"расхождений: {len(issues)}",
+                      "lines": lines})
+
+    return steps
+
+
 async def panel_sync_run(request):
     """Полная синхронизация одной кнопкой: подписки, ники, узлы, хосты,
     сквады, сайт, чёрный список, сверка Platega (та же, что в ТГ-боте)."""
@@ -422,6 +649,7 @@ async def panel_sync_run(request):
     return web.json_response({
         "ok": bool(panel.get("ok")),
         "report": rw_mod.full_sync_report_text(res),
+        "steps": _full_sync_steps(res),
     })
 
 

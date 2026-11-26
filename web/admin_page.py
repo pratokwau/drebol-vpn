@@ -4165,7 +4165,36 @@ $("btn-online").onclick = async function(){
   }
   $("downtime-out").innerHTML = h;
 };
-$("btn-psync").onclick = async function(){ const r = await postConfirm("/panel-sync", {}); renderOut("psync-out", r.data); };
+/* --- Полная синхронизация: отчёт по шагам как в ТГ
+   (services/remnawave.py run_full_sync/full_sync_report_text):
+   8 секций — подписки, ники, ресурсы и узлы, хосты, сквады, сайт,
+   чёрный список, сверка Platega. Раньше кнопка вываливала сырой
+   JSON-дамп {"ok": true, "report": "..."} через renderOut. */
+function renderSyncReport(d){
+  const steps = (d && d.steps) || [];
+  const okN = steps.filter(function(s){ return s.status === "ok"; }).length;
+  const failN = steps.filter(function(s){ return s.status === "fail"; }).length;
+  const skipN = steps.length - okN - failN;
+  let h = '<h3>' + (d.ok ? '✅ Полная синхронизация завершена' : '❌ Полная синхронизация: есть ошибки') + '</h3>';
+  h += '<p class="mut">✅ ' + okN + ' · ❌ ' + failN + ' · ⏭ ' + skipN + ' из ' + steps.length + ' шагов</p>';
+  steps.forEach(function(s){
+    const pill = s.status === "ok" ? statusPill("ok", "✅ Готово")
+      : s.status === "fail" ? statusPill("failed", "❌ Ошибка")
+      : statusPill("paused", "⏭ Пропущено");
+    h += '<div style="margin:14px 0"><div><b>' + esc(s.title || "") + '</b> ' + pill + '</div>';
+    if (s.summary) h += '<p>' + esc(s.summary) + '</p>';
+    if (s.lines && s.lines.length) {
+      h += '<div class="mut">' + s.lines.map(function(l){ return esc(l); }).join('<br>') + '</div>';
+    }
+    h += '</div>';
+  });
+  $("psync-out").innerHTML = h;
+}
+$("btn-psync").onclick = async function(){
+  const r = await postConfirm("/panel-sync", {});
+  if (r.status !== 200 || !r.data || !r.data.steps) { renderOut("psync-out", r.data); return; }
+  renderSyncReport(r.data);
+};
 async function loadSyncSettings(){
   const r = await api("/panel-sync/settings");
   if (r.status !== 200) { renderOut("psync-out", r.data); return; }
