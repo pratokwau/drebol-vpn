@@ -1520,14 +1520,14 @@ function renderMuseAccounts(list){
   });
   box.innerHTML = h + "</tbody></table></div>";
 }
-$("btn-setup").onclick = async function(){
+$("btn-setup").onclick = withSpin($("btn-setup"), async function(){
   const token = new URLSearchParams(location.search).get("token") || "";
   const r = await api("/auth/setup", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({token: token, password: $("pw2").value})});
   if (r.status !== 200) { $("setup-err").textContent = "Ссылка недействительна или пароль короче 8 символов"; return; }
   history.replaceState(null, "", location.pathname);
   await refreshMe(); await loadDashboard(); await loadSettings();
-};
+});
 /* --- Пользователи --- */
 /* --- Пользователи: список + карточка в редакторе --- */
 function renderUsersTable(host, rows, dateLabel){
@@ -1553,6 +1553,8 @@ async function loadUsers(page){
   if (r.status !== 200) { renderOut("users-out", r.data); return; }
   usersTotalPages = r.data.total_pages || 1;
   $("users-page-label").textContent = "Стр. " + r.data.page + " из " + usersTotalPages;
+  $("btn-users-prev").disabled = usersPage <= 1;
+  $("btn-users-next").disabled = usersPage >= usersTotalPages;
   const counts = r.data.counts || {};
   $("users-tabs").innerHTML = Object.keys(USERS_TABS).map(function(k){
     const c = counts[k];
@@ -1729,19 +1731,19 @@ $("btn-bl-add").onclick = withSpin($("btn-bl-add"), async function(){
   if (r.status === 200) { renderBlResult(tg, "В чёрный список:", r.data.result || {}); $("btn-blacklist").click(); }
   else if (r.status !== 0) renderOut("bl-out", r.data);
 });
-$("btn-bl-stop").onclick = async function(){
+$("btn-bl-stop").onclick = withSpin($("btn-bl-stop"), async function(){
   const tg = parseInt($("bl-tg").value || "0", 10);
   const r = await postConfirm("/blacklist/" + tg + "/stop", {});
   if (r.status === 200) { renderBlResult(tg, "Подписка остановлена (ЧС):", r.data.result || {}); $("btn-blacklist").click(); }
   else if (r.status !== 0) renderOut("bl-out", r.data);
-};
-$("btn-bl-readd").onclick = async function(){
+});
+$("btn-bl-readd").onclick = withSpin($("btn-bl-readd"), async function(){
   const tg = parseInt($("bl-tg").value || "0", 10);
   const r = await api("/blacklist/" + tg + "/readd",
     {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
   if (r.status === 200) { renderBlResult(tg, "Снова в чёрном списке:", r.data.result || {}); $("btn-blacklist").click(); }
   else if (r.status !== 0) renderOut("bl-out", r.data);
-};
+});
 let fraudStatus = "new", fraudIsMark = false;
 const FRAUD_TABS = [["new", "🆕 Новые"], ["blocked", "⛔ Блок"], ["ignored", "🙈 Не фрод"], ["all", "📚 Все"]];
 const FRAUD_STATUS_LABEL = {new: "🆕 не разобрано", ignored: "🙈 не фрод", blocked: "⛔ блокировка"};
@@ -2298,7 +2300,7 @@ $("bulk-tabs").addEventListener("click", function(e){
   bulkScope = b.dataset.bulkTab;
   renderBulkTabs();
 });
-$("btn-bulk").onclick = async function(){
+$("btn-bulk").onclick = withSpin($("btn-bulk"), async function(){
   const kind = $("bulk-kind").value;
   const body = {scope: bulkScope};
   if (kind === "extend") { body.days = parseInt($("bulk-days").value || "0", 10); body.direction = body.days >= 0 ? "extend" : "reduce"; }
@@ -2306,7 +2308,7 @@ $("btn-bulk").onclick = async function(){
   const r = await postConfirm("/subs/bulk/" + kind, body);
   if (r.status === 200) { renderBulkResult(kind, r.data); loadBulkScopes(); }
   else if (r.status !== 0) renderOut("bulk-out", r.data);
-};
+});
 /* Результат массового действия — строкой вместо сырого JSON. extend:
    bulk_extend {updated, errors, total, skipped}; limits/lte:
    bulk_set_limits {updated, panel_fail, skipped, tightened}. */
@@ -2367,7 +2369,7 @@ $("create-kinds").addEventListener("click", function(e){
   createKind = b.dataset.kind;
   renderCreateKinds();
 });
-$("btn-create-sub").onclick = async function(){
+$("btn-create-sub").onclick = withSpin($("btn-create-sub"), async function(){
   const tg = parseInt($("create-tg").value || "0", 10);
   if (!tg) { $("create-out").innerHTML = '<p class="err">Введи TG ID пользователя (числом).</p>'; return; }
   const kind = createKind === "trial" ? "trial" : parseInt(createKind, 10);
@@ -2387,7 +2389,7 @@ $("btn-create-sub").onclick = async function(){
   $("create-out").innerHTML = '<p class="ok">✅ Подписка создана' + (r.data.notified ? ' — человек уведомлён в Telegram.' : ' — уведомление в Telegram не дошло (бота нет или человек не начинал диалог).') + '</p><dl class="kv">' + kvRow("ID подписки", esc(String(s.id == null ? "—" : s.id))) + kvRow("Email", esc(s.email || "—")) + kvRow("Действует до", esc(s.expire || "—")) + '</dl>';
   $("create-tg").value = "";
   loadSubs(1);
-};
+});
 /* --- Настройки подписок: паритет с ТГ (paidsub/handlers.py
    handle_paid_presets_menu + _fmt_presets + paid_presets_keyboard):
    пробный период свободной длительностью, авто-триал, оплата,
@@ -2431,31 +2433,31 @@ function renderPresets(r){
   h += '<h3>📱 Устройства</h3><dl class="kv">' + kvRow("Цена доп. устройства", d.device_price ? d.device_price + " ₽" : "не задана") + kvRow("Максимум докупа", d.device_max_extra == null ? "не задан" : d.device_max_extra) + '</dl>';
   h += '<p class="mut">Цена и максимум докупа меняются в Настройках.</p><div class="btnrow"><button class="ghost" type="button" id="pr-settings">⚙️ Настройки</button></div>';
   box.innerHTML = h;
-  $("pr-trial-save").onclick = async function(){
+  $("pr-trial-save").onclick = withSpin($("pr-trial-save"), async function(){
     const sec = parseDuration($("pr-trial-in").value);
     if (!sec) { $("pr-trial-msg").textContent = "Не удалось распознать. Примеры: «5 часов», «7 дней», «2 недели»."; return; }
     await savePreset({paid_trial_period: sec}, "pr-trial-msg", "Пробный период сохранён");
-  };
-  $("pr-auto").onclick = async function(){
+  });
+  $("pr-auto").onclick = withSpin($("pr-auto"), async function(){
     await savePreset({auto_approve_trial: !auto}, "pr-auto-msg", "Авто-триал " + (auto ? "выключен" : "включён"));
-  };
-  $("pr-hwid-save").onclick = async function(){
+  });
+  $("pr-hwid-save").onclick = withSpin($("pr-hwid-save"), async function(){
     const v = $("pr-hwid-in").value.trim();
     if (!/^\d+$/.test(v)) { $("pr-hwid-msg").textContent = "Введи число (0 — безлимит)."; return; }
     await savePreset({paid_preset_hwid: parseInt(v, 10)}, "pr-hwid-msg", "Лимит устройств сохранён");
-  };
-  $("pr-traffic-save").onclick = async function(){
+  });
+  $("pr-traffic-save").onclick = withSpin($("pr-traffic-save"), async function(){
     const v = $("pr-traffic-in").value.trim();
     if (v === "-") { await savePreset({paid_preset_traffic: 0}, "pr-traffic-msg", "Трафик: безлимит"); return; }
     if (!/^\d+$/.test(v)) { $("pr-traffic-msg").textContent = "Число ГБ или «-»."; return; }
     await savePreset({paid_preset_traffic: parseInt(v, 10)}, "pr-traffic-msg", "Трафик сохранён");
-  };
-  $("pr-lte-save").onclick = async function(){
+  });
+  $("pr-lte-save").onclick = withSpin($("pr-lte-save"), async function(){
     const v = $("pr-lte-in").value.trim();
     if (v === "-") { await savePreset({paid_preset_lte: null}, "pr-lte-msg", "LTE: 30 ГБ по умолчанию"); return; }
     if (!/^\d+$/.test(v)) { $("pr-lte-msg").textContent = "Число ГБ или «-»."; return; }
     await savePreset({paid_preset_lte: parseInt(v, 10)}, "pr-lte-msg", "LTE сохранён");
-  };
+  });
   $("pr-tariffs").onclick = function(){ showSection("tariffs"); window.scrollTo(0, 0); };
   $("pr-squads").onclick = function(){ const el = $("squads-out"); if (el) el.scrollIntoView(); };
   $("pr-settings").onclick = function(){ showSection("settings"); window.scrollTo(0, 0); };
@@ -3099,11 +3101,11 @@ $("btn-bc-preview").onclick = async function(){
     body: JSON.stringify({text: $("bc-text").value, segment: $("bc-seg").value, photo: bcPhoto || undefined})});
   $("bc-out").textContent = r.status === 200 ? ("Получателей: " + (r.data.count || 0)) : ("Ошибка: " + (r.data.error || r.status));
 };
-$("btn-bc-send").onclick = async function(){
+$("btn-bc-send").onclick = withSpin($("btn-bc-send"), async function(){
   const r = await postConfirm("/broadcast/send", {text: $("bc-text").value, segment: $("bc-seg").value, photo: bcPhoto || undefined});
   $("bc-out").textContent = r.status === 200 ? "Рассылка запущена" : ("Ошибка: " + (r.data.error || r.status));
   if (r.status === 200) { bcPhoto = ""; toast("Рассылка запущена", "ok"); }
-};
+});
 /* --- Пост в ТГ-канал --- */
 let chPhotos = [], chButtonsSel = [], chButtonsDef = [], channelLoaded = false;
 function chPayload(){
@@ -3900,7 +3902,7 @@ async function loadProfile(){
   renderProfileOut(d.inbounds || [], name);
 }
 $("btn-pf-load").onclick = loadProfile;
-$("btn-pf-save").onclick = async function(){
+$("btn-pf-save").onclick = withSpin($("btn-pf-save"), async function(){
   const uuid = $("pf-uuid").value, tag = $("pf-tag").value;
   const body = {};
   const port = $("pf-port").value;
@@ -3915,7 +3917,7 @@ $("btn-pf-save").onclick = async function(){
   if (r.status !== 200) { renderOut("pf-out", r.data); return; }
   const ib = (r.data || {}).inbound || {};
   renderProfileOut([ib], '<span class="pill ok">Сохранено</span> Инбаунд <b>' + esc(ib.tag || tag) + "</b> обновлён.");
-};
+});
 /* --- Хосты: читаемый результат вместо сырого JSON-дампа --- */
 function hostLine(x){
   if (!x) return "";
@@ -3929,13 +3931,13 @@ function hostResult(r, okText){
   $("ph-out").innerHTML = '<p><span class="pill ok">' + okText + "</span> " + hostLine(x) + "</p>";
   return true;
 }
-$("btn-ph-create").onclick = async function(){
+$("btn-ph-create").onclick = withSpin($("btn-ph-create"), async function(){
   const r = await postConfirm("/panel/hosts", {inboundUuid: $("ph-inbound").value,
     remark: $("ph-remark").value, address: $("ph-addr").value,
     port: parseInt($("ph-port").value || "0", 10), sni: $("ph-sni").value});
   if (hostResult(r, "Хост создан")) loadPanel();
-};
-$("btn-ph-save").onclick = async function(){
+});
+$("btn-ph-save").onclick = withSpin($("btn-ph-save"), async function(){
   const uuid = $("ph-uuid").value.trim();
   if (!uuid) { toast("Укажите UUID хоста — нажмите на его строку в списке выше", "err"); return; }
   const body = {};
@@ -3954,19 +3956,19 @@ $("btn-ph-save").onclick = async function(){
   if (!Object.keys(body).length) { toast("Заполните хотя бы одно поле хоста", "err"); return; }
   const r = await postConfirmAny("/panel/hosts/" + uuid, "PATCH", body);
   if (hostResult(r, "Хост сохранён")) loadPanel();
-};
-$("btn-ph-toggle").onclick = async function(){
+});
+$("btn-ph-toggle").onclick = withSpin($("btn-ph-toggle"), async function(){
   const uuid = $("ph-uuid").value;
   const r = await postConfirmAny("/panel/hosts/" + uuid, "PATCH", {isDisabled: $("ph-disabled").value === "true"});
   if (hostResult(r, "Хост обновлён")) loadPanel();
-};
-$("btn-ph-del").onclick = async function(){
+});
+$("btn-ph-del").onclick = withSpin($("btn-ph-del"), async function(){
   const uuid = $("ph-uuid").value;
   const r = await postConfirmAny("/panel/hosts/" + uuid, "DELETE", {});
   if (r.status !== 200) { renderOut("ph-out", r.data); return; }
   $("ph-out").innerHTML = '<p><span class="pill ok">Хост удалён</span></p>';
   loadPanel();
-};
+});
 /* --- Настройки панели: читаемый вид вместо сырого JSON-дампа --- */
 $("btn-ps-show").onclick = async function(){
   const r = await api("/panel/settings");
@@ -4441,11 +4443,11 @@ function renderSyncReport(d){
   });
   $("psync-out").innerHTML = h;
 }
-$("btn-psync").onclick = async function(){
+$("btn-psync").onclick = withSpin($("btn-psync"), async function(){
   const r = await postConfirm("/panel-sync", {});
   if (r.status !== 200 || !r.data || !r.data.steps) { renderOut("psync-out", r.data); return; }
   renderSyncReport(r.data);
-};
+});
 async function loadSyncSettings(){
   const r = await api("/panel-sync/settings");
   if (r.status !== 200) { renderOut("psync-out", r.data); return; }
@@ -4496,12 +4498,12 @@ async function loadMorning(){
   $("morning-toggles").innerHTML = '<h3>Ежедневно в это время</h3><div class="chkgrid">' + morningTogglesHtml(m, MORNING_TOGGLES) + '</div><h3>Фоновые проверки (на своих интервалах)</h3><div class="chkgrid">' + morningTogglesHtml(m, MORNING_TOGGLES_BG) + "</div>";
 }
 $("btn-morning").onclick = function(){ loadMorning(); };
-$("btn-morning-run").onclick = async function(){
+$("btn-morning-run").onclick = withSpin($("btn-morning-run"), async function(){
   const r = await postConfirm("/morning/run-now", {});
   if (r.status === 200) { toast("Сводка запущена", "ok"); $("morning-out").innerHTML = '<p class="mut">Сводка формируется и придёт в Telegram.</p>'; }
   else renderOut("morning-out", r.data);
-};
-$("btn-morning-save").onclick = async function(){
+});
+$("btn-morning-save").onclick = withSpin($("btn-morning-save"), async function(){
   const body = {morning_sync: {}};
   const t = $("mor-time").value.trim();
   if (t) body.morning_sync.time = t;
@@ -4512,8 +4514,8 @@ $("btn-morning-save").onclick = async function(){
   const r = await api("/morning", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
   if (r.status === 200) { toast("Настройки сводки сохранены", "ok"); loadMorning(); }
   else renderOut("morning-out", r.data);
-};
-$("btn-job").onclick = async function(){
+});
+$("btn-job").onclick = withSpin($("btn-job"), async function(){
   const r = await postConfirm("/jobs/run-now", {job: $("job-sel").value});
   if (r.status === 200) {
     const label = ($("job-sel").selectedOptions && $("job-sel").selectedOptions[0]) ? $("job-sel").selectedOptions[0].textContent : $("job-sel").value;
@@ -4521,7 +4523,7 @@ $("btn-job").onclick = async function(){
   } else if (r.status !== 0) {
     renderOut("job-out", r.data);
   }
-};
+});
 async function loadNetcheck(){
   const r = await api("/netcheck");
   if (r.status !== 200) { renderOut("netcheck-out", r.data); return; }
@@ -4768,7 +4770,7 @@ $("btn-backup-inspect").onclick = async function(){
   backupInspected = true;
   toast("Архив проверен", "ok");
 };
-$("btn-backup-restore").onclick = async function(){
+$("btn-backup-restore").onclick = withSpin($("btn-backup-restore"), async function(){
   const f = $("bk-file").files[0];
   if (!f) { toast("Выберите файл архива", "err"); return; }
   if (!backupInspected) { toast("Сначала проверьте архив кнопкой «Проверить архив»", "err"); return; }
@@ -4790,8 +4792,8 @@ $("btn-backup-restore").onclick = async function(){
   } else if (r.status !== 0) {
     renderOut("backup-out", r.data);
   }
-};
-$("btn-git").onclick = async function(){
+});
+$("btn-git").onclick = withSpin($("btn-git"), async function(){
   const r = await postConfirm("/git-update", {});
   if (r.status === 200) {
     let h;
@@ -4801,7 +4803,7 @@ $("btn-git").onclick = async function(){
   } else if (r.status !== 0) {
     renderOut("git-out", r.data);
   }
-};
+});
 
 /* --- Поддержка и настройки --- */
 let supportLoaded = false;
@@ -4847,11 +4849,11 @@ $("btn-sup-reply").onclick = withSpin($("btn-sup-reply"), async function(){
   $("sup-msg").textContent = r.status === 200 ? ("Отправлено (" + (r.data.delivered_via || "?") + ")") : ("Ошибка: " + (r.data.error || r.status));
   if (r.status === 200) { $("sup-text").value = ""; toast("Ответ отправлен", "ok"); }
 });
-$("btn-sup-close").onclick = async function(){
+$("btn-sup-close").onclick = withSpin($("btn-sup-close"), async function(){
   const id = $("sup-user").value;
   const r = await api("/support/topics/" + id + "/close", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
   $("sup-msg").textContent = r.status === 200 ? "Обращение закрыто" : ("Ошибка: " + (r.data.error || r.status));
-};
+});
 async function loadSupportSettings(){
   const r = await api("/support/settings");
   if (r.status !== 200) return;
@@ -4868,13 +4870,13 @@ async function loadSupportSettings(){
     if (!st.is_mark) $("sb-form").innerHTML = '<p class="mut">Токен меняет только Mark.</p>';
   }
 }
-$("btn-ss-save").onclick = async function(){
+$("btn-ss-save").onclick = withSpin($("btn-ss-save"), async function(){
   const r = await api("/support/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({support_group_id: parseInt($("ss-group").value || "0", 10),
       log_channel_id: parseInt($("ss-log").value || "0", 10)})});
   if (r.status === 200) { toast("Настройки поддержки сохранены", "ok"); $("ss-out").innerHTML = ""; loadSupportSettings(); }
   else renderOut("ss-out", r.data);
-};
+});
 $("btn-sb-save").onclick = withSpin($("btn-sb-save"), async function(){
   const r = await postConfirm("/support/token", {token: $("sb-token").value});
   if (r.status === 200) {
@@ -4886,7 +4888,7 @@ $("btn-sb-save").onclick = withSpin($("btn-sb-save"), async function(){
     loadSupportSettings();
   } else if (r.status) renderOut("sb-out", r.data);
 });
-$("btn-helper-add").onclick = async function(){
+$("btn-helper-add").onclick = withSpin($("btn-helper-add"), async function(){
   const target = ($("helper-tg").value || "").trim();
   const r = await api("/helpers/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({target: target})});
@@ -4896,21 +4898,21 @@ $("btn-helper-add").onclick = async function(){
     else toast("Помощник добавлен, но написать ему не удалось — пригласи из списка", "");
     loadHelpers();
   } else renderOut("helpers-out", r.data);
-};
-$("btn-helper-perm").onclick = async function(){
+});
+$("btn-helper-perm").onclick = withSpin($("btn-helper-perm"), async function(){
   const id = $("helper-tg").value;
   const r = await api("/helpers/" + id + "/perm", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({perm: $("helper-perm-sel").value})});
   if (r.status === 200) { toast("Право переключено", "ok"); loadHelpers(); } else renderOut("helpers-out", r.data);
-};
-$("btn-helper-del").onclick = async function(){
+});
+$("btn-helper-del").onclick = withSpin($("btn-helper-del"), async function(){
   const id = $("helper-tg").value;
   const r = await postConfirm("/helpers/" + id + "/delete", {});
   if (r.status === 200) {
     toast(r.data.dm_sent ? "Помощник удалён, уведомление отправлено" : "Помощник удалён", "ok");
     loadHelpers();
   } else renderOut("helpers-out", r.data);
-};
+});
 const PERM_LABELS = {users: "Карточки людей", dm: "Писать людям", support: "Поддержка", subs: "Подписки — смотреть", subs_edit: "Подписки — менять", payments: "Оплаты", promos: "Промокоды", blacklist: "Чёрный список", broadcast: "Рассылки", stats: "Статистика"};
 async function loadHelpers(){
   const r = await api("/helpers");
@@ -4964,7 +4966,7 @@ async function loadWebAccess(){
   $("wa-out").innerHTML = h + "</dl>";
 }
 $("btn-webacc").onclick = function(){ loadWebAccess(); };
-$("btn-wa-save").onclick = async function(){
+$("btn-wa-save").onclick = withSpin($("btn-wa-save"), async function(){
   const body = {};
   const port = $("wa-port").value;
   if (port) body.webapi_port = parseInt(port, 10);
@@ -4978,7 +4980,7 @@ $("btn-wa-save").onclick = async function(){
   if (tsSecret) body.turnstile_secret_key = tsSecret;
   const r = await api("/web-access", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
   if (r.status === 200) { toast("Сохранено — применится после рестарта бота", "ok"); $("wa-ts-site").value = ""; $("wa-ts-secret").value = ""; loadWebAccess(); } else renderOut("wa-out", r.data);
-};
+});
 $("btn-wa-check").onclick = async function(){
   const r = await api("/web-access/check", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
   if (r.status !== 200) { renderOut("wa-check-out", r.data); return; }
