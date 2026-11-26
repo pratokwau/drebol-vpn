@@ -835,6 +835,16 @@ body.tg-fullscreen .tabs { top:96px; }
      '<div class="skel"><div class="ln w40"></div><div class="ln"></div><div class="ln w70"></div></div>';
  }
 
+ // Мини-скелетон для тел разделов и ошибка с кнопкой «Повторить»:
+ // единый вид загрузки и сбоя во всех вторичных разделах.
+ function skelBody() {
+   return '<div class="skel" style="margin:0;padding:2px 0;border:0"><div class="ln w40"></div><div class="ln"></div><div class="ln w70"></div></div>';
+ }
+ function errRetry(fn, text) {
+   return '<p class="card-sub">' + text + '</p>' +
+          '<button class="btn btn-ghost" type="button" onclick="' + fn + '()">Повторить</button>';
+ }
+
  function render(p) {
    document.getElementById("login").className = "hide";
    document.getElementById("app").className = "";
@@ -861,7 +871,7 @@ body.tg-fullscreen .tabs { top:96px; }
      // Получить подписку — и тому, у кого только админская: в боте
      // кнопка «🎁 Получить подписку» тоже видна при любой подписке.
      out.push('<div data-sec="sub"><div class="card" id="buy-card">' + title("key", "Получить подписку") +
-              '<div id="buy-body"><p class="card-sub">Загружаем тарифы…</p></div>' +
+              '<div id="buy-body">' + skelBody() + '</div>' +
               '<p class="card-sub" style="margin-top:10px">или <a href="' + botUrl() + '" style="color:var(--ink)">оформить в боте</a></p>' +
               "</div></div>");
      var ref0 = referralCard(p);
@@ -921,11 +931,11 @@ body.tg-fullscreen .tabs { top:96px; }
 
    // Продление: тарифы и оплата прямо здесь, без ухода в бот
    out.push('<div data-sec="sub"><div class="card" id="renew-card">' + title("card", "Продление") +
-            '<div id="renew-body"><p class="card-sub">Загружаем тарифы…</p></div></div></div>');
+            '<div id="renew-body">' + skelBody() + '</div></div></div>');
 
    // Подарок: оплатить подписку другу — как кнопка «🎁 Подарить» в боте
    out.push('<div data-sec="sub"><div class="card" id="gift-card">' + title("card", "Подарить подписку") +
-            '<div id="gift-body"><p class="card-sub">Загружаем тарифы…</p></div></div></div>');
+            '<div id="gift-body">' + skelBody() + '</div></div></div>');
 
    // Детали подписки: что не влезло в главную карточку
    var details = [row("Продлений", esc(s.renewed))];
@@ -974,7 +984,8 @@ body.tg-fullscreen .tabs { top:96px; }
             '<button class="copy" type="button" data-copy="' + esc(s.url) + '">Скопировать</button></div>' +
             '<button class="btn btn-ghost" type="button" id="qr-btn" style="margin-top:12px">📷 QR-код для другого устройства</button>' +
             '<div id="qr-box" class="hide" style="text-align:center;margin-top:12px">' +
-            '<img id="qr-img" alt="QR-код подписки" style="width:220px;height:220px;border-radius:16px;background:#fff;padding:10px;box-sizing:border-box">' +
+            '<img id="qr-img" alt="QR-код подписки" style="display:none;width:220px;height:220px;border-radius:16px;background:#fff;padding:10px;box-sizing:border-box">' +
+            '<p class="card-sub" id="qr-note">Загружаем QR…</p>' +
             '<p class="card-sub" style="margin-top:8px">Наведите камеру второго устройства — подписка добавится сама.</p></div>' +
             "</div></div>");
 
@@ -1306,8 +1317,9 @@ body.tg-fullscreen .tabs { top:96px; }
        if (opening && !img.getAttribute("src")) {
          fetch(API + "/api/qr", {headers: {"Authorization": "Bearer " + token()}})
            .then(function (r) { if (!r.ok) { throw new Error("qr"); } return r.blob(); })
-           .then(function (b) { img.src = URL.createObjectURL(b); })
-           .catch(function () { haptic("error"); toast("Не получилось показать QR — попробуйте позже."); });
+           .then(function (b) { img.src = URL.createObjectURL(b); img.style.display = "inline-block";
+             var n = document.getElementById("qr-note"); if (n) { n.style.display = "none"; } })
+           .catch(function () { box.classList.add("hide"); haptic("error"); toast("Не получилось показать QR — попробуйте позже."); });
        }
      };
    }
@@ -1439,7 +1451,7 @@ body.tg-fullscreen .tabs { top:96px; }
      html += "</div>";
      body.innerHTML = html;
    }).catch(function () {
-     body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
+     body.innerHTML = errRetry("loadRenew", "Не получилось загрузить тарифы.");
    });
  }
  // Промокод при продлении: валидация и скидка — те же, что в боте;
@@ -1563,7 +1575,7 @@ body.tg-fullscreen .tabs { top:96px; }
      html += "</div>";
      body.innerHTML = html;
    }).catch(function () {
-     body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
+     body.innerHTML = errRetry("loadGift", "Не получилось загрузить тарифы.");
    });
  }
  function giftPick(id) {
@@ -1735,7 +1747,7 @@ body.tg-fullscreen .tabs { top:96px; }
      html += "</div>";
      body.innerHTML = html;
    }).catch(function () {
-     body.innerHTML = '<p class="card-sub">Не получилось загрузить тарифы. Попробуйте позже.</p>';
+     body.innerHTML = errRetry("loadBuy", "Не получилось загрузить тарифы.");
    });
  }
  function trialRequest() {
@@ -1835,16 +1847,16 @@ body.tg-fullscreen .tabs { top:96px; }
  // Карточка — оболочка, содержимое подгружается из /api/info.
  function infoCard() {
    return '<div data-sec="info"><div class="card" id="info-card">' + title("info", "Инфо") +
-          '<div id="info-body"><p class="card-sub">Загружаем…</p></div></div></div>';
+          '<div id="info-body">' + skelBody() + '</div></div></div>';
  }
  function loadInfo() {
    var body = document.getElementById("info-body");
    if (!body) { return; }
    api("/api/info").then(function (r) {
      if (r.status === 200) { renderInfo(r.data); return; }
-     body.innerHTML = '<p class="card-sub">Не получилось загрузить — попробуйте позже.</p>';
+     body.innerHTML = errRetry("loadInfo", "Не получилось загрузить.");
    }).catch(function () {
-     body.innerHTML = '<p class="card-sub">Не получилось загрузить — попробуйте позже.</p>';
+     body.innerHTML = errRetry("loadInfo", "Не получилось загрузить.");
    });
  }
  // «устройства» — только при 1, 21, 31…; остальное — «устройств», как в боте.
