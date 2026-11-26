@@ -1588,7 +1588,14 @@ $("btn-recent").onclick = async function(){
   });
   renderUsersTable($("users-out"), rows, "Последний визит");
 };
-async function openUserEditor(tgId){
+/* Профиль пользователя — одно меню с карточкой подписки, как в ТГ
+   (коммит 7b5cbf29: handle_user_profile → handle_paid_sub_view):
+   у юзера с платной подпиской профиль сразу открывает её карточку —
+   там уже есть и профиль человека (оплаты, VPN, рефералы, ЧС), и все
+   кнопки. Профиль отдельным экраном — только юзеру без платной
+   подписки; из карточки «📊 Действия» зовёт сюда с forceProfile,
+   иначе была бы петля. */
+async function openUserEditor(tgId, forceProfile){
   $("drawer-title").textContent = "Пользователь #" + tgId;
   $("drawer-sub").textContent = "Загрузка…";
   $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:18px;width:50%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
@@ -1599,6 +1606,10 @@ async function openUserEditor(tgId){
   catch(e) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить пользователя</p>'; return; }
   if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">Не удалось загрузить пользователя</p>'; return; }
   const d = r.data;
+  if (!forceProfile && d.subscription && d.subscription.id) {
+    openSubEditor(d.subscription.id);
+    return;
+  }
   $("drawer-sub").textContent = (d.first_name || "") + (d.username ? " @" + d.username : "");
   let h = '<dl class="kv">';
   h += kvRow("TG ID", '<span class="mono">' + d.tg_id + '</span>');
@@ -2159,7 +2170,7 @@ function renderSubEditor(data){
   const eb = $("ed-bl");
   if (eb) eb.onclick = function(){ closeDrawer(); showSection("users"); $("bl-tg").value = s.tg_id; $("bl-tg").focus(); window.scrollTo(0, 0); };
   const ea = $("ed-activity");
-  if (ea) ea.onclick = function(){ openUserEditor(s.tg_id); };
+  if (ea) ea.onclick = function(){ openUserEditor(s.tg_id, true); };
 }
 let subHistoryPage = 1;
 async function loadSubHistory(page){
