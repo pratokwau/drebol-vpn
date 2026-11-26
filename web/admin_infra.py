@@ -4037,6 +4037,214 @@ _JOB_TICKS = {
 }
 
 
+def _scrub_value(value):
+    """Рекурсивно вырезает секреты из значений результата тика."""
+    if isinstance(value, str):
+        return _scrub(value)
+    if isinstance(value, dict):
+        return {str(k): _scrub_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrub_value(v) for v in value]
+    return value
+
+
+def _remind_stages(cfg):
+    """Сроки напоминаний в секундах — те же ключи, что expiry_reminder_tick."""
+    return [int(cfg.get("remind_first", 3 * 86400) or 0),
+            int(cfg.get("remind_second", 86400) or 0),
+            int(cfg.get("remind_third", 0) or 0)]
+
+
+def _remind_blocked_note(cfg):
+    """Почему тик напоминаний ничего не отправит (None — не заблокирован)."""
+    if not cfg.get("remind_enabled", True):
+        return "Напоминания выключены"
+    if not any(_remind_stages(cfg)):
+        return "Сроки напоминаний не заданы"
+    from paidsub.handlers import in_quiet_hours
+    if in_quiet_hours(datetime.now(), cfg):
+        return "Тихие часы — отправка отложена"
+    return None
+
+
+async def _remind_due_count(cfg):
+    """Сколько напоминаний тик попытается отправить — те же фильтры,
+    что expiry_reminder_tick (paidsub/handlers.py)."""
+    if _remind_blocked_note(cfg) is not None:
+        return 0
+    from paidsub.storage import get_subs_for_reminder, parse_sub_date
+    from features.blacklist import blacklisted_ids
+    stages = _remind_stages(cfg)
+    skip = await blacklisted_ids()
+    remind_trials = cfg.get("remind_trials", True)
+    now = datetime.now()
+    due = 0
+    for _sub_id, tg_id, period_end, times_renewed, stage in await get_subs_for_reminder():
+        if not tg_id or tg_id in skip:
+            continue
+        if not times_renewed and not remind_trials:
+            continue
+        end = parse_sub_date(period_end)
+        if not end:
+            continue
+        left = int((end - now).total_seconds())
+        if left <= 0:
+            continue
+        target = 0
+        for idx, window in enumerate(stages, start=1):
+            if window and left <= window:
+                target = idx
+        if not target or target <= int(stage or 0):
+            continue
+        due += 1
+    return due
+
+
+async def _expired_candidates():
+    """Сколько подписок тик пометит истёкшими / восстановит активными —
+    те же условия, что check_expired_subs (paidsub/handlers.py)."""
+    from paidsub.storage import get_expired_paid_subs, parse_sub_date
+    now = datetime.now()
+    expired = reactivated = 0
+    for row in await get_expired_paid_subs():
+        (_sid, _tg, _email, _uuid, _sub, _url, expire_str, status,
+         _renewed, _ind, _period_end, frozen_at) = row
+        if frozen_at:
+            continue
+        expire_dt = parse_sub_date(expire_str)
+        if not expire_dt:
+            continue
+        if now < expire_dt:
+            if status != "active":
+                reactivated += 1
+        elif status != "expired":
+            expired += 1
+    return {"expired": expired, "reactivated": reactivated}
+
+
+async def _winback_candidates():
+    """Сколько писем возврата тик попытается отправить — те же условия,
+    что winback_tick (features/winback.py)."""
+    from features.winback import settings as winback_settings
+    from core.database import winback_stage
+    from features.blacklist import is_blacklisted
+    from paidsub.storage import get_expired_paid_subs, parse_sub_date
+    s = winback_settings()
+    if not s["enabled"]:
+        return {"due": 0, "note": "Возврат ушедших выключен"}
+    now = datetime.now()
+    due = 0
+    for row in await get_expired_paid_subs():
+        tg_id, expire_str, status = row[1], row[6], row[7]
+        times_renewed = row[8] if len(row) > 8 else 0
+        if status != "expired" or not tg_id:
+            continue
+        if s["paid_only"] and not times_renewed:
+            continue
+        end = parse_sub_date(expire_str)
+        if not end:
+            continue
+        gone = (now - end).days
+        target = 0
+        if gone >= s["days"]:
+            target = 1
+        if s["days2"] and gone >= s["days2"]:
+            target = 2
+        if not target or target <= await winback_stage(tg_id):
+            continue
+        if await is_blacklisted(tg_id):
+            continue
+        due += 1
+    return {"due": due, "note": None}
+
+
+async def _job_probe(job):
+    """Состояние до запуска тика — для честного итога.
+
+    Возвращает opaque-словарь; падение любого чтения — None, запуск
+    тика это не останавливает.
+    """
+    try:
+        from config import load_config
+        cfg = load_config()
+        if job == "expiry_reminder":
+            return {"due": await _remind_due_count(cfg),
+                    "note": _remind_blocked_note(cfg)}
+        if job == "check_expired":
+            return await _expired_candidates()
+        if job == "winback":
+            return await _winback_candidates()
+        if job == "fraud":
+            from core.database import list_fraud_pairs
+            rows = await list_fraud_pairs(None, limit=100000)
+            return {"pairs": {(r[0], r[1]) for r in rows}}
+        if job == "blacklist_expire":
+            from core.database import bl_expired_now
+            return {"expired": len(await bl_expired_now())}
+        if job == "connect_help":
+            from core.database import connect_help_stats
+            from core import maintenance as mnt_mod
+            note = None
+            if not cfg.get("connect_help_enabled", True):
+                note = "Помощь при подключении выключена"
+            elif mnt_mod.is_maintenance():
+                note = "Техработы — подсказки не отправляются"
+            return {"sent": (await connect_help_stats()).get("total", 0),
+                    "note": note}
+        if job == "purge":
+            from core.database import activity_stats
+            st = await activity_stats()
+            return {"act": st.get("activity_rows", 0),
+                    "err": st.get("error_rows", 0)}
+    except Exception:
+        return None
+    return None
+
+
+async def _job_summarize(job, before, result):
+    """Итог запуска: список {label, value} и примечание (или None).
+
+    Подсчёт — best-effort: любая ошибка здесь не должна ронять ответ,
+    поэтому jobs_run_now оборачивает вызов в try/except.
+    """
+    if job == "expiry_reminder":
+        b = before or {}
+        return [{"label": "Напоминаний", "value": str(b.get("due", 0))}], b.get("note")
+    if job == "check_expired":
+        b = before or {}
+        rows = [{"label": "Помечено истёкшими", "value": str(b.get("expired", 0))}]
+        if b.get("reactivated"):
+            rows.append({"label": "Восстановлено активных",
+                         "value": str(b["reactivated"])})
+        return rows, None
+    if job == "winback":
+        b = before or {}
+        return [{"label": "Писем возврата", "value": str(b.get("due", 0))}], b.get("note")
+    if job == "fraud":
+        from core.database import list_fraud_pairs
+        after = {(r[0], r[1]) for r in await list_fraud_pairs(None, limit=100000)}
+        new = len(after - (before or {}).get("pairs", set()))
+        return [{"label": "Новых находок", "value": str(new)}], None
+    if job == "blacklist_expire":
+        from core.database import bl_expired_now
+        left = len(await bl_expired_now())
+        removed = (before or {}).get("expired", 0) - left
+        return [{"label": "Снято блокировок", "value": str(max(removed, 0))}], None
+    if job == "connect_help":
+        from core.database import connect_help_stats
+        sent = (await connect_help_stats()).get("total", 0) - (before or {}).get("sent", 0)
+        return [{"label": "Подсказок отправлено", "value": str(max(sent, 0))}], (before or {}).get("note")
+    if job == "purge":
+        from core.database import activity_stats
+        st = await activity_stats()
+        b = before or {}
+        return [{"label": "Действий",
+                 "value": f"{b.get('act', 0)} → {st.get('activity_rows', 0)}"},
+                {"label": "Ошибок",
+                 "value": f"{b.get('err', 0)} → {st.get('error_rows', 0)}"}], None
+    return None, None
+
+
 async def jobs_run_now(request):
     import importlib
     actor, err = await _require_mutation(request)
@@ -4051,6 +4259,11 @@ async def jobs_run_now(request):
         return _json_error("no_bot", 503)
     mod_name, func_name = _JOB_TICKS[job]
     context = SimpleNamespace(bot=bot, application=_admin_application)
+    before = None
+    try:
+        before = await _job_probe(job)
+    except Exception:
+        before = None
     try:
         tick = getattr(importlib.import_module(mod_name), func_name)
         res = await tick(context)
@@ -4060,12 +4273,20 @@ async def jobs_run_now(request):
         return _json_error("job_failed", 502)
     if res is None:
         result = None
+    elif isinstance(res, dict):
+        result = _scrub_value(res)
     elif isinstance(res, str):
         result = _scrub(res)
     else:
         result = _scrub(str(res))
+    summary = note = None
+    try:
+        summary, note = await _job_summarize(job, before, result)
+    except Exception:
+        summary = note = None
     await _audit(actor, "jobs_run_now", f"job={job}")
-    return web.json_response({"ok": True, "job": job, "result": result})
+    return web.json_response({"ok": True, "job": job, "result": result,
+                             "summary": summary, "note": note})
 
 
 # ── Регистрация ──────────────────────────────────────────────────────────────

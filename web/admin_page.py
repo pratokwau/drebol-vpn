@@ -213,6 +213,8 @@ label.chk input{width:auto;margin:0}
   .nav-item{width:auto;white-space:nowrap;padding:8px 10px}
   .brand{border-bottom:0;padding-bottom:6px;margin-bottom:6px}
   .main{padding:0 16px 48px}
+  .topbar{flex-wrap:wrap;gap:8px 12px;padding:12px 0}
+  .topbar h1{flex:1 1 100%}
   .kv{grid-template-columns:1fr}
   .chartgrid{grid-template-columns:1fr}
 }
@@ -2827,7 +2829,7 @@ function renderReconcile(d){
   const fixable = d.fixable || [];
   const impact = d.impact || 0;
   if (!checked) {
-    out.innerHTML = '<p class="mut">Счетов Platega за последние 60 дней нет — сверять нечего.</p>';
+    out.innerHTML = '<div class="empty"><span class="big">✅</span>Счетов Platega за последние 60 дней нет — сверять нечего.</div>';
     setFixLabel(0);
     return;
   }
@@ -4599,11 +4601,27 @@ $("btn-morning-save").onclick = withSpin($("btn-morning-save"), async function()
   if (r.status === 200) { toast("Настройки сводки сохранены", "ok"); loadMorning(); }
   else renderOut("morning-out", r.data);
 });
+function renderJobResult(label, d){
+  let h = "<p class='ok'>✅ Задача «" + esc(label) + "» выполнена</p>";
+  const r = d.result;
+  if (d.job === "lte_fallback" && r && typeof r === "object") {
+    if (r.ok === false) h += '<p class="err">' + esc(r.error || "Панель не ответила") + "</p>";
+    else h += lteCheckHtml(r);
+  } else if (Array.isArray(d.summary) && d.summary.length) {
+    h += "<dl class='kv'>";
+    d.summary.forEach(function(row){ h += kvRow(row.label, esc(String(row.value))); });
+    h += "</dl>";
+  } else if (typeof r === "string" && r) {
+    h += r.split(/\\n\\s*\\n/).map(function(p){ return "<p>" + esc(p).replace(/\\n/g, "<br>") + "</p>"; }).join("");
+  }
+  if (d.note) h += '<p class="mut">' + esc(d.note) + "</p>";
+  return h;
+}
 $("btn-job").onclick = withSpin($("btn-job"), async function(){
   const r = await postConfirm("/jobs/run-now", {job: $("job-sel").value});
   if (r.status === 200) {
     const label = ($("job-sel").selectedOptions && $("job-sel").selectedOptions[0]) ? $("job-sel").selectedOptions[0].textContent : $("job-sel").value;
-    $("job-out").innerHTML = "<p>✅ Задача «" + esc(label) + "» выполнена</p>" + (r.data.result != null ? "<pre>" + esc(String(r.data.result)) + "</pre>" : "");
+    $("job-out").innerHTML = renderJobResult(label, r.data || {});
   } else if (r.status !== 0) {
     renderOut("job-out", r.data);
   }
