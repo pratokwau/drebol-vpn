@@ -3858,6 +3858,141 @@ YANDEX_BILLING_LINES = [
     "конца LTE») — тогда CDN-варианты доступны всем без учёта.",
 ]
 
+
+# Структурированные страницы Yandex Cloud для веба (рендер вместо <pre>):
+# блок: {"t": "p"|"h"|"note"|"warn"|"rows"|"table"|"steps", ...}
+#   p     — абзац {"text"}
+#   h     — подзаголовок {"text"}
+#   note  — примечание {"text"}
+#   warn  — предупреждение {"text"}
+#   rows  — таблица «ключ — значение» {"rows": [{"k", "v", "copy"}]},
+#           copy=True — у значения кнопка «Копировать»
+#   table — таблица {"cols": [...], "rows": [[...]], "mono": [индексы
+#           колонок моноширинным шрифтом]}
+#   steps — нумерованные шаги {"steps": [{"title", "body": [...]}]},
+#           элемент body — строка, {"code": "..."} или
+#           {"link": {"text": "...", "href": "..."}}
+# Факты и порядок — те же, что в YANDEX_*_LINES выше; текст
+# переразложен по блокам, ничего не добавлено и не выброшено.
+YANDEX_RESOURCES_BLOCKS = [
+    {"t": "p", "text": "Папка в Yandex Cloud: cloud-frost-287 (новый аккаунт, миграция 2026-11-26). Все ресурсы Active, сертификаты выпущены."},
+    {"t": "rows", "rows": [
+        {"k": "Общий CNAME для всех ресурсов", "v": "bc6681bc57f8bf03.topology.gslb.yccdn.ru", "copy": True},
+    ]},
+    {"t": "h", "text": "Ресурсы и их origins"},
+    {"t": "table", "cols": ["Ресурс", "ID", "Origin", "Хост «- 2»"], "mono": [1], "rows": [
+        ["static", "bc8rhsx4snr37xstoxao", "144.31.223.252 по HTTP, Host static.drbl.tech", "Германия"],
+        ["assets", "bc8rjuvq5ztilk7zwrp2", "81.90.21.84 по HTTP, Host — как у клиента", "Швеция"],
+        ["sub", "—", "key.drbl.tech по HTTPS", "Страница подписки, перенос на новый аккаунт"],
+        ["media", "bc8rx4x747fl7l27hpop", "109.248.161.146 по HTTP, Host media.drbl.tech", "Латвия"],
+    ]},
+    {"t": "h", "text": "Цепочка на ноде"},
+    {"t": "p", "text": "CDN приходит на nginx ноды: порт 80, server_name — домен ресурса страны (static/assets/media). Дальше location /drbl7f3a → proxy_pass 127.0.0.1:8880 — это XHTTP-инбаунд VXC-<Country>-1 в панели Remnawave (packet-up, GET-uplink)."},
+    {"t": "note", "text": "«Welcome to nginx» на голом *cdn-домене — НОРМА: рабочий путь — секретный /drbl7f3a, корень домена — заглушка."},
+    {"t": "warn", "text": "В панели VXC-инбаунд должен быть выбран на CDN-ноде страны (1 из 5 инбаундов) — иначе цепочка мертва при живом CDN."},
+]
+
+YANDEX_DNS_BLOCKS = [
+    {"t": "p", "text": "Зона drbl.tech ведётся в SpaceWeb. Записи CDN-части:"},
+    {"t": "rows", "rows": [
+        {"k": "static, assets, media — CNAME", "v": "bc6681bc57f8bf03.topology.gslb.yccdn.ru", "copy": True},
+        {"k": "sub", "v": "пока CNAME на старый аккаунт (cloud-pratokwau), переезд на новый — в работе"},
+        {"k": "denode1", "v": "A 144.31.223.252", "copy": True},
+        {"k": "senode1", "v": "A 81.90.21.84", "copy": True},
+        {"k": "key", "v": "A 144.31.223.252", "copy": True},
+    ]},
+    {"t": "warn", "text": "key.drbl.tech — origin подписки, НЕ трогать."},
+    {"t": "h", "text": "Типовые поломки (реальный ремонт 2026-11-22)"},
+    {"t": "steps", "steps": [
+        {"title": "Нет CNAME у *cdn-домена", "body": [
+            "Страна умирает на резолве, в приложении n/a. Так было с de1cdn: записи просто не существовало.",
+            "Лечение: добавить CNAME на gslb (выше) и подождать распространения DNS.",
+        ]},
+        {"title": "На ноде нет nginx-location /drbl7f3a", "body": [
+            "CDN отвечает («Welcome to nginx»), но трафик не идёт. Так было с FI и SE.",
+            "Конфиг — как на немецкой ноде: listen 80, server_name — cdn-домен страны, location /drbl7f3a → proxy_pass 127.0.0.1:8880, proxy_http_version 1.1, таймауты 86400s, proxy_buffering off, location / → 404.",
+            "После правки:",
+            {"code": "nginx -t && systemctl reload nginx"},
+        ]},
+        {"title": "VXC не выбран на CDN-ноде", "body": [
+            "В карточке CDN-ноды страны в панели должен быть отмечен инбаунд VXC-<Country>-1 (1/5).",
+        ]},
+    ]},
+]
+
+YANDEX_BILLING_BLOCKS = [
+    {"t": "h", "text": "Пакеты"},
+    {"t": "p", "text": "150 ₽/мес за ресурс. Сейчас в новом аккаунте 2 ресурса (static, assets) = 300 ₽/мес; с sub и media будет 4 ресурса = 600 ₽/мес."},
+    {"t": "p", "text": "В пакет каждого ресурса включено: 150 ГБ исходящего трафика + 100 млн запросов. Пакеты между ресурсами НЕ переносятся — неиспользованное сгорает."},
+    {"t": "p", "text": "Сверх пакета — оплата за ГБ, но ставка в консоли не отображается: смотреть детализацию биллинга."},
+    {"t": "h", "text": "Сейчас"},
+    {"t": "p", "text": "Новый аккаунт (cloud-frost-287): стартовый грант 4 000 ₽ до 25.01.2027 покрывает пакеты и трафик. Старый аккаунт после переноса sub выводится из работы."},
+    {"t": "h", "text": "Связь с ботом"},
+    {"t": "p", "text": "У подписок есть месячный LTE-лимит: пресеты paid_preset_lte и preset_lte (настройки подписок), изначально — 30 ГБ/мес. При превышении лимита бот перекидывает подписку в fallback-сквад. Лимит можно полностью отключить тумблером «Лимит LTE» (Платные подписки → «Сквад после конца LTE») — тогда CDN-варианты доступны всем без учёта."},
+]
+
+YANDEX_MIRROR_BLOCKS = [
+    {"t": "p", "text": "sub.drbl.tech — основная ссылка подписки, которую бот даёт пользователям. key.drbl.tech — запасной адрес (origin подписки, НЕ трогать). Кнопка «🪞 Зеркало подписки» из бота убрана 2026-11-18 — пользователям выдаётся только sub.drbl.tech."},
+    {"t": "note", "text": "Кэш полностью ВЫКЛЮЧЕН — иначе один юзер получит чужой конфиг."},
+    {"t": "warn", "text": "Сейчас зеркало живёт в СТАРОМ аккаунте (cloud-pratokwau). Перенос на новый аккаунт (cloud-frost-287) — в работе: сертификат для sub.drbl.tech выпущен, группа источников «sub-key» создана. Осталось: удалить старый ресурс и создать новый в cloud-frost-287, переключить DNS и проверить. Пока перенос не завершён — старый ресурс НЕ трогать."},
+    {"t": "steps", "steps": [
+        {"title": "Сертификат (Certificate Manager)", "body": [
+            "Для зеркала нужен свой сертификат — для sub.drbl.tech. Остальные домены проекта (key, vpn, panel) — на Let's Encrypt на сервере, их не трогаем.",
+            "Certificate Manager → «Создать сертификат»: Имя: sub-drbl-tech, Домены: sub.drbl.tech, Тип проверки: DNS.",
+            "Нажми «Создать» — Яндекс покажет TXT-запись. В DNS добавь TXT _acme-challenge.sub.drbl.tech со значением от Яндекса. Дождись статуса Issued.",
+        ]},
+        {"title": "Ресурс CDN — шаг 1 «Основные параметры»", "body": [
+            "Cloud CDN → «Создать ресурс»: Источник: key.drbl.tech, Протокол для источника: HTTPS. Заголовок Host: «Свое значение» = key.drbl.tech. («Основное доменное имя» — это домен самого ресурса, не источника.) SNI вручную: выкл. Доменное имя: sub.drbl.tech. Тип сертификата: «Из Certificate Manager» → sub-drbl-tech. Нажми «Далее».",
+        ]},
+        {"title": "Ресурс CDN — шаг 2 «Кэширование»", "body": [
+            "Кэширование в CDN: ВЫКЛЮЧИТЬ (тумблер). Кэш браузера: выкл. (В ссылке токен юзера — кэш даст чужой конфиг.) Нажми «Далее».",
+        ]},
+        {"title": "Ресурс CDN — шаг 3 «Заголовки»", "body": [
+            "Заголовки: ничего не добавлять (x-hwid проходит сам). Скрытие заголовков: «Не скрывать». CORS: «Не добавлять». Методы: GET, HEAD. Кастомный HTTP-ответ: выкл. Нажми «Далее», проверь сводку и «Создать ресурс».",
+        ]},
+        {"title": "DNS", "body": [
+            "На вкладке «Обзор» ресурса → «Настройки DNS»: скопируй домен вида xxx.topology.gslb.yccdn.ru. В DNS: CNAME sub.drbl.tech → этот домен. Подожди пару минут, пока edge подхватит сертификат (сразу может дать ERR_CONNECTION_CLOSED — это нормально).",
+        ]},
+        {"title": "Проверка", "body": [
+            {"code": "curl https://sub.drbl.tech/<uuid> → 200"},
+            "Решающий тест: INCY на МТС без VPN обновляет подписку по ссылке sub.drbl.tech.",
+        ]},
+    ]},
+    {"t": "p", "text": "Цена: 150 ₽/мес за ресурс (150 ГБ + 100 млн запросов), сверх — ~1,05 ₽/ГБ. Основная ссылка — sub.drbl.tech, key.drbl.tech — запасной адрес."},
+]
+
+YANDEX_WHITELIST_BLOCKS = [
+    {"t": "p", "text": "В Yandex Cloud CDN белые списки — в двух местах: поле в самом ресурсе и список IP edge-серверов для origin."},
+    {"t": "steps", "steps": [
+        {"title": "В ресурсе CDN — ВЫКЛЮЧЕНО", "body": [
+            "Шаг 1 «Основные параметры», поля «Доступ по IP-адресам», «Доступ по странам», «Доступ по защищённому токену» — выкл. для ВСЕХ наших ресурсов: sub.drbl.tech, static.drbl.tech, assets.drbl.tech, media.drbl.tech.",
+            "Клиенты заходят с любого IP по всей России — включишь и впишешь свой IP, отрежешь всех остальных.",
+        ]},
+        {"title": "Белый список на origin — IP Яндекса", "body": [
+            "Origin (нода) должен отвечать ТОЛЬКО edge-серверам Яндекса, а не кому попало напрямую. Официальный список:",
+            {"link": {"text": "https://tech.cdn.yandex.net/prefixes/yc.json", "href": "https://tech.cdn.yandex.net/prefixes/yc.json"}},
+            "(дока Яндекса «Диапазоны публичных IP-адресов» → Cloud CDN).",
+            "Список меняется — скачивать свежий при каждом применении.",
+        ]},
+        {"title": "Применить на ноде (дубликат [CDN], порт 8880)", "body": [
+            "На сервере ноды (Германия, Швеция, Латвия — дубликат [CDN]):",
+            {"code": "ufw status"},
+            "Если выключен — сначала ufw allow 22/tcp, потом ufw enable, иначе потеряешь SSH.",
+            "Затем разрешить Яндекс на 8880:",
+            {"code": "curl -s https://tech.cdn.yandex.net/prefixes/yc.json | python3 -c \"import json,sys; print('\\n'.join(p for p in json.load(sys.stdin)['prefixes'] if ':' not in p))\" | while read ip; do ufw allow from $ip to any port 8880 proto tcp; done"},
+            "Правило для 12222 (только IP панели) и порт 22 — НЕ трогать. Порты основной ноды (VTR, HY2) — тоже не трогать: они прямые, не через CDN.",
+        ]},
+        {"title": "body-brown (подписка) — НЕ ставится", "body": [
+            "На 443 висят ещё панель и сайт — белый список на файрволе отрежет и их. Для зеркала sub.drbl.tech он не нужен: клиенты идут на sub.drbl.tech, а key.drbl.tech напрямую и так режет DPI.",
+        ]},
+        {"title": "Проверка", "body": [
+            "Напрямую на origin-порт с обычного IP — таймаут (закрыто).",
+            "Через CDN-домен (assets.drbl.tech:443) — подключается.",
+            "Это hardening, без него всё работает — делать после того, как нода [CDN] уже зелёная в панели.",
+        ]},
+    ]},
+]
+
 async def yandex_get(request):
     try:
         await _require_actor(request)
@@ -3872,6 +4007,15 @@ async def yandex_get(request):
         "resources_text": "\n".join(YANDEX_RESOURCES_LINES),
         "dns_text": "\n".join(YANDEX_DNS_LINES),
         "billing_text": "\n".join(YANDEX_BILLING_LINES),
+        # Структурированные страницы для веба (рендер вместо <pre>);
+        # тексты *_text оставлены для совместимости.
+        "pages": {
+            "res": {"title": "Ресурсы и ноды", "blocks": YANDEX_RESOURCES_BLOCKS},
+            "dns": {"title": "DNS и ремонт", "blocks": YANDEX_DNS_BLOCKS},
+            "bill": {"title": "Биллинг Yandex CDN", "blocks": YANDEX_BILLING_BLOCKS},
+            "wl": {"title": "Белые списки", "blocks": YANDEX_WHITELIST_BLOCKS},
+            "mirror": {"title": "Страница подписки — зеркало через CDN", "blocks": YANDEX_MIRROR_BLOCKS},
+        },
     })
 
 

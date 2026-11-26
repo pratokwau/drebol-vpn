@@ -3796,11 +3796,57 @@ $("btn-tags-apply").onclick = withSpin($("btn-tags-apply"), async function(){
    Ресурсы и ноды / DNS и ремонт / Биллинг — новые экраны
    handlers/yandex_cloud.py (a455d759); Страница подписки и
    Белые списки — обновлены под новый аккаунт cloud-frost-287.
-   Каждая страница рендерится текстом в <pre>, ответ /yandex
-   кэшируется при переключении вкладок. */
+   Страницы рендерятся структурированно из d.pages (блоки p/h/
+   note/warn/rows/table/steps); без pages — fallback в <pre>
+   по старому тексту. Ответ /yandex кэшируется при переключении. */
 let yandexDoc = null;
 const YANDEX_PAGES = {res: 'resources_text', dns: 'dns_text', bill: 'billing_text', wl: 'whitelist_text', mirror: 'text'};
 const YANDEX_BTNS = {res: 'btn-yandex-res', dns: 'btn-yandex-dns', bill: 'btn-yandex-bill', wl: 'btn-yandex-wl', mirror: 'btn-yandex'};
+function yandexBodyItem(it){
+  if (typeof it === 'string') return '<p>' + esc(it) + '</p>';
+  if (it && it.code) return '<pre>' + esc(it.code) + '</pre><button class="ghost" data-copy="' + esc(it.code) + '">Копировать команду</button>';
+  if (it && it.link) return '<p><a class="btnlike" href="' + esc(it.link.href) + '" target="_blank" rel="noopener">' + esc(it.link.text) + '</a></p>';
+  return '';
+}
+function renderYandexPage(pg){
+  let h = '<h3>' + esc(pg.title || '') + '</h3>';
+  (pg.blocks || []).forEach(function(b){
+    if (b.t === 'p') h += '<p>' + esc(b.text) + '</p>';
+    else if (b.t === 'h') h += '<h3>' + esc(b.text) + '</h3>';
+    else if (b.t === 'note') h += '<p class="mut">ℹ️ ' + esc(b.text) + '</p>';
+    else if (b.t === 'warn') h += '<p><span class="pill warn">⚠️ Внимание</span> ' + esc(b.text) + '</p>';
+    else if (b.t === 'rows') {
+      h += '<dl class="kv">';
+      (b.rows || []).forEach(function(r){
+        h += kvRow(r.k, r.copy ? '<span class="mono">' + esc(r.v) + '</span> <button class="ghost" data-copy="' + esc(r.v) + '">Копировать</button>' : esc(r.v));
+      });
+      h += '</dl>';
+    }
+    else if (b.t === 'table') {
+      const mono = b.mono || [];
+      h += '<div class="tblwrap"><table><thead><tr>' + b.cols.map(function(c){ return '<th>' + esc(c) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      (b.rows || []).forEach(function(row){
+        h += '<tr>' + row.map(function(cell, i){ return '<td' + (mono.indexOf(i) >= 0 ? ' class="mono"' : '') + '>' + esc(cell) + '</td>'; }).join('') + '</tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    else if (b.t === 'steps') {
+      h += '<ol style="margin:8px 0 0 18px;padding:0">';
+      (b.steps || []).forEach(function(s){
+        h += '<li style="margin:12px 0"><b>' + esc(s.title) + '</b>';
+        (s.body || []).forEach(function(it){ h += yandexBodyItem(it); });
+        h += '</li>';
+      });
+      h += '</ol>';
+    }
+  });
+  $('panel-out').innerHTML = h;
+  $('panel-out').querySelectorAll('[data-copy]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if (navigator.clipboard) navigator.clipboard.writeText(btn.dataset.copy).then(function(){ toast('Скопировано', 'ok'); });
+    });
+  });
+}
 async function loadYandex(page){
   const btn = $(YANDEX_BTNS[page] || 'btn-yandex');
   document.querySelectorAll('#btn-yandex-res, #btn-yandex-dns, #btn-yandex-bill, #btn-yandex, #btn-yandex-wl').forEach(function(x){ x.classList.toggle('active', x === btn); });
@@ -3812,6 +3858,8 @@ async function loadYandex(page){
     if (r.status !== 200) { renderOut('panel-out', r.data); return; }
     yandexDoc = r.data;
   }
+  const pg = (yandexDoc.pages || {})[page];
+  if (pg && pg.blocks) { renderYandexPage(pg); return; }
   const text = yandexDoc[YANDEX_PAGES[page] || 'text'] || '';
   $('panel-out').innerHTML = '<pre>' + esc(text) + '</pre>';
 }
