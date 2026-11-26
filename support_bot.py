@@ -276,6 +276,55 @@ async def on_user_message(update: Update, context) -> None:
             parse_mode="HTML")
 
 
+async def _main_bot(context):
+    """Основной бот как запасной доставщик: его токен — в том же .env,
+    config при импорте его уже подхватил. Собираем один раз и кэшируем."""
+    bot = context.application.bot_data.get("main_bot")
+    if bot is None:
+        from config import BOT_TOKEN
+        if not BOT_TOKEN:
+            return None
+        from telegram import Bot
+        bot = Bot(BOT_TOKEN)
+        await bot.initialize()
+        context.application.bot_data["main_bot"] = bot
+    return bot
+
+
+def _unreachable(e: Exception) -> bool:
+    """Этим ботом человека не достать: заблокировал бота, удалил
+    аккаунт или ни разу не запускал. Класс — telegram.error.Forbidden."""
+    return type(e).__name__ == "Forbidden"
+
+
+async def _deliver_to_user(context, msg, user_id: int) -> str:
+    """Доставка ответа из темы человеку.
+
+    "support" — ушло ботом поддержки; "main" — бот поддержки
+    заблокирован, ушло основным ботом; "failed" — не ушло никак.
+    """
+    try:
+        await msg.copy(chat_id=user_id)
+        return "support"
+    except Exception as e:
+        if not _unreachable(e):
+            log.error("copy to user %s failed: %s", user_id, e)
+            return "failed"
+    main_bot = await _main_bot(context)
+    if main_bot is None:
+        log.error("user %s blocked support bot, main bot token missing", user_id)
+        return "failed"
+    try:
+        await main_bot.copy_message(
+            chat_id=user_id, from_chat_id=msg.chat_id,
+            message_id=msg.message_id)
+        return "main"
+    except Exception as e:
+        if not _unreachable(e):
+            log.error("main-bot copy to user %s failed: %s", user_id, e)
+        return "failed"
+
+
 async def on_group_message(update: Update, context) -> None:
     """Сообщение в группе (в теме) → переслать юзеру в бота поддержки.
 
@@ -310,11 +359,31 @@ async def on_group_message(update: Update, context) -> None:
         full = await db.get_support_topic_full(user_id)
         if full and full[3] == "admin":
             return
-    try:
-        await msg.copy(chat_id=user_id)
+    delivered = await _deliver_to_user(context, msg, user_id)
+    if delivered in ("support", "main"):
         await db.touch_support_topic(user_id)
-    except Exception as e:
-        log.error("copy to user %s failed: %s", user_id, e)
+    if delivered == "main":
+        # Тихий знак прямо на сообщении: ушло основным ботом, потому что
+        # бота поддержки человек заблокировал.
+        try:
+            await context.bot.set_message_reaction(
+                chat_id=msg.chat_id, message_id=msg.message_id,
+                reaction="📨")
+        except Exception:
+            pass
+    elif delivered == "failed":
+        # Не доставлено никак — говорим об этом прямо в теме, ответом
+        # на то самое сообщение, чтобы было видно, что именно не ушло.
+        try:
+            await context.bot.send_message(
+                chat_id=msg.chat_id, message_thread_id=msg.message_thread_id,
+                reply_to_message_id=msg.message_id,
+                text=("⚠️ <b>Не доставлено.</b> Человек заблокировал бота "
+                      "поддержки и основного бота — это сообщение до него "
+                      "не дойдёт, пока он сам не напишет одному из ботов."),
+                parse_mode="HTML")
+        except Exception:
+            pass
 
 
 async def cmd_close(update: Update, context) -> None:
