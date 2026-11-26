@@ -946,7 +946,7 @@ body.tg-fullscreen .tabs { top:96px; }
      // Инфо: как подключиться, цены, о сервисе — как экран «ℹ️ Инфо» в боте.
      out.push(infoCard());
      out.push('<div data-sec="sub"><div class="stack" style="margin-top:6px">' +
-              '<button class="btn btn-ghost" type="button" onclick="load()">' + ICON.refresh + "Обновить данные</button>" +
+              '<button class="btn btn-ghost" type="button" onclick="load(true)">' + ICON.refresh + "Обновить данные</button>" +
               (p.support_url ? '<a class="btn btn-ghost" href="' + esc(p.support_url) + '">🛟 Поддержка</a>' : "") +
               '<a class="btn btn-ghost" href="' + botUrl() + '">' +
               ICON.tg + "Открыть бота</a></div></div>");
@@ -1088,7 +1088,7 @@ body.tg-fullscreen .tabs { top:96px; }
    out.push(infoCard());
 
    out.push('<div data-sec="sub"><div class="stack" style="margin-top:6px">' +
-            '<button class="btn btn-ghost" type="button" onclick="load()">' + ICON.refresh + "Обновить данные</button>" +
+            '<button class="btn btn-ghost" type="button" onclick="load(true)">' + ICON.refresh + "Обновить данные</button>" +
             (p.support_url ? '<a class="btn btn-ghost" href="' + esc(p.support_url) + '">🛟 Поддержка</a>' : "") +
             '<a class="btn btn-ghost" href="' + botUrl() + '">' +
             ICON.tg + "Открыть бота</a></div></div>");
@@ -1317,7 +1317,7 @@ body.tg-fullscreen .tabs { top:96px; }
      if (r.status === 200) {
        var st = r.data.status;
        if (st === "paid" || st === "refund_pending") {
-         toast("Оплата прошла — места добавлены"); haptic(); load(); return;
+         toast("Оплата прошла — места добавлены"); haptic(); load(true); return;
        }
        if (st === "canceled" || st === "cancelled" || st === "expired" || st === "error" ||
            st === "refunded" || st === "chargebacked") {
@@ -1349,6 +1349,10 @@ body.tg-fullscreen .tabs { top:96px; }
 
  function bindActions() {
    animateBars();
+   if (window.__cabScroll) {
+     var y = window.__cabScroll; window.__cabScroll = 0;
+     window.scrollTo(0, y);
+   }
    document.querySelectorAll("[data-del]").forEach(function (btn) {
      btn.onclick = function () {
        var name = btn.getAttribute("data-name") || "это устройство";
@@ -1357,13 +1361,13 @@ body.tg-fullscreen .tabs { top:96px; }
          api("/api/device/delete", {method: "POST",
              body: JSON.stringify({hwid: btn.getAttribute("data-del")})})
            .then(function (r) {
-             if (r.status === 200) { toast("Устройство отключено"); haptic(); return load(); }
+             if (r.status === 200) { toast("Устройство отключено"); haptic(); return load(true); }
              haptic("error");
              toast(r.data && r.data.error === "already_gone"
                ? "Это устройство уже отключено." : "Не получилось — попробуйте позже.");
-             load();
+             load(true);
            })
-           .catch(function () { haptic("error"); toast("Не получилось — попробуйте позже."); load(); });
+           .catch(function () { haptic("error"); toast("Не получилось — попробуйте позже."); load(true); });
        });
      };
    });
@@ -1377,9 +1381,9 @@ body.tg-fullscreen .tabs { top:96px; }
            .then(function (r) {
              if (r.status === 200) { toast("Готово — новая ссылка уже в карточке «Подключение»"); haptic(); }
              else { haptic("error"); toast("Не получилось — попробуйте позже."); }
-             load();
+             load(true);
            })
-           .catch(function () { haptic("error"); toast("Не получилось — попробуйте позже."); load(); });
+           .catch(function () { haptic("error"); toast("Не получилось — попробуйте позже."); load(true); });
        });
      };
    }
@@ -1427,7 +1431,7 @@ body.tg-fullscreen .tabs { top:96px; }
        note.textContent = "Сохраняем…";
        api("/api/profile/email", {method: "POST", body: JSON.stringify({email: v})})
          .then(function (r) {
-           if (r.status === 200) { note.textContent = "Почта сохранена."; toast("Почта сохранена"); load(); return; }
+           if (r.status === 200) { note.textContent = "Почта сохранена."; toast("Почта сохранена"); load(true); return; }
            if (r.data && r.data.error === "email_taken") {
              note.textContent = "Эта почта уже привязана к другому человеку."; return;
            }
@@ -1451,7 +1455,7 @@ body.tg-fullscreen .tabs { top:96px; }
        api("/api/profile/password", {method: "POST",
            body: JSON.stringify({current: cur ? cur.value : "", password: nw})})
          .then(function (r) {
-           if (r.status === 200) { note.textContent = "Пароль сохранён."; toast("Пароль сохранён"); load(); return; }
+           if (r.status === 200) { note.textContent = "Пароль сохранён."; toast("Пароль сохранён"); load(true); return; }
            if (r.data && r.data.error === "bad_current") {
              note.textContent = "Неверный текущий пароль."; return;
            }
@@ -1599,7 +1603,7 @@ body.tg-fullscreen .tabs { top:96px; }
      if (st === "paid" || st === "refund_pending") {
        if (box) { box.innerHTML = '<p class="card-sub">✅ Оплата прошла! Обновляем данные…</p>'; }
        toast("Оплата прошла — подписка продлена"); haptic();
-       load();
+       load(true);
        return;
      }
      if (st === "canceled" || st === "cancelled" || st === "expired" || st === "error" ||
@@ -1752,7 +1756,7 @@ body.tg-fullscreen .tabs { top:96px; }
      if (st === "paid" || st === "refund_pending") {
        if (box) { box.innerHTML = '<p class="card-sub">✅ Оплата прошла! Подписка откроется у друга — ему придёт сообщение от бота.</p>'; }
        toast("Подарок оплачен"); haptic();
-       load();
+       load(true);
        return;
      }
      if (st === "canceled" || st === "cancelled" || st === "expired" || st === "error" ||
@@ -1837,7 +1841,7 @@ body.tg-fullscreen .tabs { top:96px; }
      .then(function (r) {
        if (r.status === 200 && r.data.status === "trial") {
          toast("Пробный период выдан"); haptic();
-         load();
+         load(true);
          return;
        }
        if (r.status === 200 && r.data.status === "requested") {
@@ -1901,7 +1905,7 @@ body.tg-fullscreen .tabs { top:96px; }
      if (st === "paid" || st === "refund_pending") {
        if (box) { box.innerHTML = '<p class="card-sub">✅ Оплата прошла! Обновляем данные…</p>'; }
        toast("Оплата прошла — подписка оформлена"); haptic();
-       load();
+       load(true);
        return;
      }
      if (st === "canceled" || st === "cancelled" || st === "expired" || st === "error" ||
@@ -2032,6 +2036,7 @@ body.tg-fullscreen .tabs { top:96px; }
  function load(quiet) {
    stopRenewPoll();
    lastLoadAt = Date.now();
+   if (quiet) { window.__cabScroll = window.scrollY; }
    if (!quiet) { showSkeleton(); }
    return api("/api/me").then(function (r) {
      if (r.status === 200) { say(""); return render(r.data); }
