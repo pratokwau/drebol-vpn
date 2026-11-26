@@ -159,9 +159,9 @@ body{background:#050505;color:var(--ink);font-family:Manrope,system-ui,-apple-sy
 min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px;overflow:hidden;position:relative}
 .glow{position:absolute;border-radius:50%;pointer-events:none;will-change:transform,opacity}
 .glow.a{width:56vmax;height:56vmax;left:-14vmax;top:-18vmax;
-background:radial-gradient(circle,rgba(126,96,250,.20),rgba(126,96,250,0) 65%);animation:driftA 30s ease-in-out infinite alternate}
+background:radial-gradient(circle,rgba(255,255,255,.20),rgba(255,255,255,0) 65%);animation:driftA 30s ease-in-out infinite alternate}
 .glow.b{width:48vmax;height:48vmax;right:-12vmax;bottom:-16vmax;
-background:radial-gradient(circle,rgba(79,70,229,.16),rgba(79,70,229,0) 65%);animation:driftB 38s ease-in-out infinite alternate}
+background:radial-gradient(circle,rgba(255,255,255,.16),rgba(255,255,255,0) 65%);animation:driftB 38s ease-in-out infinite alternate}
 @keyframes driftA{from{transform:translate(0,0) scale(1);opacity:.85}50%{transform:translate(6vmax,4vmax) scale(1.07);opacity:1}to{transform:translate(11vmax,7vmax) scale(1.13);opacity:.9}}
 @keyframes driftB{from{transform:translate(0,0) scale(1.1);opacity:.9}50%{transform:translate(-5vmax,-4vmax) scale(1.04);opacity:1}to{transform:translate(-10vmax,-7vmax) scale(.98);opacity:.85}}
 .card{position:relative;width:min(480px,100%);text-align:center;padding:40px 30px 34px;border-radius:22px;
@@ -250,10 +250,10 @@ button { -webkit-tap-highlight-color: transparent; }
 /* Живой фон: два фиолетово-индиговых пятна медленно дрейфуют и «дышат», поверх — тонкая сетка */
 .bg { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; }
 .bg .glow { position:absolute; top:-340px; right:-220px; width:820px; height:820px; border-radius:50%;
-  background:radial-gradient(circle at center, rgba(126,96,250,.15), rgba(79,70,229,.05) 45%, rgba(255,255,255,0) 62%);
+  background:radial-gradient(circle at center, rgba(255,255,255,.15), rgba(255,255,255,.05) 45%, rgba(255,255,255,0) 62%);
   animation:drift 30s ease-in-out infinite alternate; }
 .bg .glow-b { top:auto; bottom:-420px; left:-260px; right:auto;
-  background:radial-gradient(circle at center, rgba(79,70,229,.11), rgba(126,96,250,.04) 45%, rgba(255,255,255,0) 62%);
+  background:radial-gradient(circle at center, rgba(255,255,255,.11), rgba(255,255,255,.04) 45%, rgba(255,255,255,0) 62%);
   animation:drift 38s ease-in-out infinite alternate-reverse; }
 .bg .grid { position:absolute; inset:0; opacity:.5;
   background:
@@ -312,8 +312,8 @@ body.tg-fullscreen .tabs { top:96px; }
   .card.hero:hover { transform:none; } }
 .card.hero { border-color:rgba(255,255,255,.18); color:#FFFFFF; overflow:hidden;
              background:
-               radial-gradient(560px 300px at 85% -10%, rgba(126,96,250,.14), rgba(255,255,255,0) 60%),
-               radial-gradient(420px 260px at -10% 110%, rgba(79,70,229,.10), rgba(255,255,255,0) 55%),
+               radial-gradient(560px 300px at 85% -10%, rgba(255,255,255,.14), rgba(255,255,255,0) 60%),
+               radial-gradient(420px 260px at -10% 110%, rgba(255,255,255,.10), rgba(255,255,255,0) 55%),
                linear-gradient(180deg, #101013, #0A0A0B);
              box-shadow:0 22px 50px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.09);
              animation:heroIn .55s var(--ease) both; }
