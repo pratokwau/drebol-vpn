@@ -994,13 +994,41 @@ function fmtDate(s){
   if (m) return m[3] + "." + m[2] + "." + m[1] + " " + m[4] + ":" + m[5];
   return esc(s);
 }
+const PILL_RU = {active: "Активна", paid: "Оплачена", ok: "ОК", success: "Успешно", online: "Онлайн", enabled: "Включено", "true": "Да", "1": "Да",
+  expired: "Истекла", refunded: "Возврат", failed: "Ошибка", error: "Ошибка", offline: "Офлайн", disabled: "Выключено", "false": "Нет", "0": "Нет", blocked: "Заблокирован", banned: "Забанен",
+  pending: "Ожидает", trial: "Триал", warning: "Внимание", frozen: "Заморожена", paused: "Пауза"};
 function pill(v){
   const s = String(v == null ? "" : v).toLowerCase();
-  if (["active","paid","ok","success","online","enabled","true","1"].indexOf(s) >= 0) return '<span class="pill ok">' + esc(v) + "</span>";
-  if (["expired","refunded","failed","error","offline","disabled","false","0","blocked","banned"].indexOf(s) >= 0) return '<span class="pill bad">' + esc(v) + "</span>";
-  if (["pending","trial","warning","frozen","paused"].indexOf(s) >= 0) return '<span class="pill warn">' + esc(v) + "</span>";
-  if (s) return '<span class="pill info">' + esc(v) + "</span>";
+  const label = PILL_RU[s] || v;
+  if (["active","paid","ok","success","online","enabled","true","1"].indexOf(s) >= 0) return '<span class="pill ok">' + esc(label) + "</span>";
+  if (["expired","refunded","failed","error","offline","disabled","false","0","blocked","banned"].indexOf(s) >= 0) return '<span class="pill bad">' + esc(label) + "</span>";
+  if (["pending","trial","warning","frozen","paused"].indexOf(s) >= 0) return '<span class="pill warn">' + esc(label) + "</span>";
+  if (s) return '<span class="pill info">' + esc(label) + "</span>";
   return "—";
+}
+// Коды ошибок API — человеческими словами; готовые фразы проходят как есть,
+// неизвестный код показывается с пометкой, чтобы можно было найти в логах.
+const ERR_RU = {action_failed: "Действие не выполнено", already_gone: "Уже удалено", already_has_sub: "Подписка уже есть",
+  bad_action: "Неизвестное действие", bad_amount: "Некорректная сумма", bad_archive: "Некорректный архив", bad_confirm: "Некорректное подтверждение",
+  bad_days: "Некорректное число дней", bad_email: "Некорректная почта", bad_html: "Некорректный HTML", bad_id: "Некорректный идентификатор",
+  bad_kind: "Некорректный тип", bad_login: "Неверный логин", bad_origin: "Запрос с чужого источника отклонён", bad_page: "Неверная страница",
+  bad_params: "Некорректные параметры", bad_password: "Неверный пароль", bad_period: "Некорректный период", bad_request: "Некорректный запрос",
+  bad_scope: "Некорректная область", bad_signature: "Некорректная подпись", bad_sort: "Некорректная сортировка", bad_squad: "Некорректный сквад",
+  bad_tariff: "Некорректный тариф", bad_tg_id: "Некорректный Telegram ID", bad_token: "Некорректный токен", bad_value: "Некорректное значение",
+  create_failed: "Не получилось создать", email_taken: "Почта уже занята", empty_text: "Пустой текст",
+  forbidden_keys: "Есть поля, недоступные для изменения", fresh_backup_required: "Сначала нужен свежий бэкап", gift_failed: "Не получилось подарить",
+  git_failed: "Git-обновление не удалось", git_timeout: "Git-обновление не уложилось в тайм-аут", lte_check_failed: "Проверка LTE не удалась",
+  mark_only: "Доступно только главному администратору", no_bot: "Бот недоступен", no_session: "Сессия истекла — войдите заново",
+  no_sub: "Подписки нет", no_tg_id: "Не задан Telegram ID", not_admin: "Нет прав администратора", not_found: "Не найдено",
+  panel_failed: "Панель недоступна", password_mismatch: "Пароли не совпадают", presets_not_ready: "Пресеты ещё не готовы",
+  probe_failed: "Проверка не удалась", request_not_found: "Заявка не найдена", send_failed: "Не получилось отправить",
+  server: "Ошибка сервера", service_not_ready: "Сервис ещё не готов", too_large: "Слишком большой объём", too_many: "Слишком много",
+  topic_failed: "Не получилось открыть тему", user_not_found: "Пользователь не найден"};
+function errText(e){
+  const t = String(e == null ? "" : e);
+  if (ERR_RU[t]) return "Ошибка: " + ERR_RU[t];
+  if (/^[a-z0-9_]+$/.test(t)) return "Ошибка (код: " + t + ")";
+  return "Ошибка: " + t;
 }
 function toast(msg, kind){
   const t = document.createElement("div");
@@ -1070,7 +1098,7 @@ function renderKV(el, obj){
 function renderOut(el, data){
   const host = $(el);
   if (data == null) { host.innerHTML = '<div class="empty"><span class="big">🔍</span>Нет данных</div>'; return; }
-  if (data.error) { host.innerHTML = '<p class="err">Ошибка: ' + esc(data.error) + (data.details ? " — " + esc(data.details) : "") + "</p>"; return; }
+  if (data.error) { host.innerHTML = '<p class="err">' + esc(errText(data.error)) + (data.details ? " — " + esc(data.details) : "") + "</p>"; return; }
   if (Array.isArray(data)) { renderTable(el, data); return; }
   const LIST_KEYS = ["users","payments","rows","entries","topics","logs","accounts","pairs","profiles","nodes","tariffs","promos","servers","helpers","messages","devices","squads","events","reviews"];
   for (let i = 0; i < LIST_KEYS.length; i++) {
