@@ -3,7 +3,7 @@ from telegram.ext import ContextTypes
 from config import ADMIN_ID, load_config, save_config
 from core.subscription import is_subscribed, subscribe_keyboard, subscribe_text
 from handlers.user import (
-    handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub, handle_my_lte,
+    handle_about, handle_back_start, handle_my_sub, handle_my_paid_sub,
     handle_app_add,
     handle_how_to, handle_renew_sub, handle_referral,
     handle_copy_sub, handle_enter_promo, handle_remove_promo,
@@ -307,10 +307,6 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_gift_pay(query, context)
     elif data == "my_sub":
         await handle_my_sub(query)
-    elif data == "my_lte":
-        await handle_my_lte(query, "paid")
-    elif data == "my_lte_admin":
-        await handle_my_lte(query, "admin")
     elif data == "news_no_channel":
         await query.answer("Канал пока не настроен.", show_alert=True)
     elif data == "how_to":
