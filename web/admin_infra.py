@@ -2527,6 +2527,35 @@ def _find_inbound(config: dict, tag: str) -> dict | None:
     return None
 
 
+def _inbound_public(ib: dict) -> dict:
+    """Публичный вид инбаунда для веба: только редактируемые поля.
+
+    Полный инбаунд из конфига профиля несёт settings.clients,
+    realitySettings.privateKey и shortIds — в браузер это не отдаём
+    вообще: ни в дамп профиля, ни в ответ после правки."""
+    if not isinstance(ib, dict):
+        return {"tag": "", "protocol": "", "port": None,
+                "serverNames": [], "dest": "", "fingerprint": ""}
+    rs = {}
+    ss = ib.get("streamSettings")
+    if isinstance(ss, dict):
+        rs = ss.get("realitySettings") or {}
+        if not isinstance(rs, dict):
+            rs = {}
+    names = rs.get("serverNames") or []
+    if isinstance(names, str):
+        names = [names]
+    names = [str(n) for n in names if isinstance(n, (str, int))]
+    return {
+        "tag": str(ib.get("tag") or ""),
+        "protocol": str(ib.get("protocol") or ib.get("type") or ""),
+        "port": ib.get("port"),
+        "serverNames": names,
+        "dest": str(rs.get("dest") or ""),
+        "fingerprint": str(rs.get("fingerprint") or ""),
+    }
+
+
 async def panel_hosts_list(request):
     """Все хосты панели — для кликабельного списка в админке.
     Только чтение."""
@@ -2550,7 +2579,20 @@ async def panel_profile_get(request):
     res = await rw_mod.get_config_profile(uuid)
     if not res.get("ok"):
         return _panel_error(res)
-    return web.json_response({"ok": True, "profile": res.get("data")})
+    config = _profile_config(res.get("data") or {})
+    if config is None:
+        return _json_error("panel_failed", 502)
+    data = res.get("data") or {}
+    return web.json_response({
+        "ok": True,
+        "uuid": uuid,
+        "name": data.get("name") or "",
+        # Полный конфиг (privateKey, clients, shortIds) наружу не
+        # отдаём — только публичные поля инбаундов.
+        "inbounds": [_inbound_public(ib)
+                      for ib in (config.get("inbounds") or [])
+                      if isinstance(ib, dict)],
+    })
 
 
 _INBOUND_EDIT_FIELDS = ("port", "serverNames", "dest", "target", "fingerprint")
@@ -2668,7 +2710,8 @@ async def panel_profile_inbound_patch(request):
     await _audit(actor, "panel_profile_inbound_edit",
                  f"profile={uuid} tag={tag} "
                  f"fields={','.join(sorted(fields))}")
-    return web.json_response({"ok": True, "inbound": fresh_inbound})
+    return web.json_response({"ok": True,
+                              "inbound": _inbound_public(fresh_inbound)})
 
 
 _HOST_EDIT_FIELDS = ("remark", "address", "port", "sni", "isDisabled")

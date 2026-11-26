@@ -619,7 +619,7 @@ label.chk input{width:auto;margin:0}
           <div id="tags-table"></div>
           <div id="tags-out"></div>
         </div>
-        <div class="card" id="panel-profile-card"><h2>Редактор инбаунда</h2><p class="sub">Меняются только заполненные поля. Приватные ключи и shortId здесь не трогаются.</p>
+        <div class="card" id="panel-profile-card"><h2>Редактор инбаунда</h2><p class="sub">Меняются только заполненные поля. Приватные ключи и shortId здесь не трогаются. Нажмите на строку инбаунда в таблице профиля, чтобы подставить его текущие значения в форму.</p>
           <input id="pf-uuid" placeholder="UUID профиля">
           <div class="btnrow"><button id="btn-pf-load" class="ghost">Показать профиль</button></div>
           <input id="pf-tag" placeholder="тег инбаунда, напр. VTR-Germany-1">
@@ -630,7 +630,7 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-pf-save" class="ghost">Сохранить инбаунд</button></div>
           <div id="pf-out"></div>
         </div>
-        <div class="card" id="panel-hosts-card"><h2>Создание и правка хостов</h2><p class="sub">Новый хост создаётся выключенным — включите его после проверки.</p>
+        <div class="card" id="panel-hosts-card"><h2>Создание и правка хостов</h2><p class="sub">Новый хост создаётся выключенным — включите его после проверки. Нажмите на строку хоста в списке выше, чтобы подставить его данные в форму.</p>
           <input id="ph-inbound" placeholder="UUID инбаунда (для нового хоста)">
           <input id="ph-remark" placeholder="имя хоста">
           <input id="ph-addr" placeholder="адрес">
@@ -639,7 +639,7 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-ph-create" class="ghost">Создать хост</button></div>
           <input id="ph-uuid" placeholder="UUID хоста — правка / удаление">
           <select id="ph-disabled"><option value="false">Включён</option><option value="true">Выключен</option></select>
-          <div class="btnrow"><button id="btn-ph-toggle" class="ghost">Вкл / выкл хост</button><button id="btn-ph-del" class="danger">Удалить хост</button></div>
+          <div class="btnrow"><button id="btn-ph-save" class="ghost">Сохранить поля хоста</button><button id="btn-ph-toggle" class="ghost">Вкл / выкл хост</button><button id="btn-ph-del" class="danger">Удалить хост</button></div>
           <div id="ph-out"></div>
         </div>
         <div class="card"><h2>Настройки панели</h2><p class="sub">Адрес панели. Токен панели в вебе не показывается и не меняется — только из ТГ.</p>
@@ -3551,12 +3551,20 @@ async function loadPanel(){
     hosts.forEach(function(x){
       const stub = (x.port === 1234 || x.address === "12345");
       const marks = (stub ? ' <span class="pill warn">служебный</span>' : "") + (x.isHidden ? ' <span class="pill info">скрыт</span>' : "");
-      h2 += '<tr data-uuid="' + esc(x.uuid) + '" data-disabled="' + (x.isDisabled ? "true" : "false") + '"><td>' + esc(x.remark || "") + marks + '</td><td class="mono">' + (stub ? "—" : esc(x.address || "")) + '</td><td class="num">' + (stub || x.port == null ? "—" : x.port) + '</td><td>' + statusPill(x.isDisabled ? "disabled" : "enabled", x.isDisabled ? "Выключен" : "Включён") + '</td></tr>';
+      h2 += '<tr data-uuid="' + esc(x.uuid) + '" data-disabled="' + (x.isDisabled ? "true" : "false") + '" data-remark="' + esc(x.remark || "") + '" data-addr="' + esc(x.address || "") + '" data-port="' + (x.port == null ? "" : x.port) + '" data-sni="' + esc(x.sni || "") + '"><td>' + esc(x.remark || "") + marks + '</td><td class="mono">' + (stub ? "—" : esc(x.address || "")) + '</td><td class="num">' + (stub || x.port == null ? "—" : x.port) + '</td><td>' + statusPill(x.isDisabled ? "disabled" : "enabled", x.isDisabled ? "Выключен" : "Включён") + '</td></tr>';
     });
     h2 += '</tbody></table></div>';
     $("hosts-table").innerHTML = h2;
     $("hosts-table").querySelectorAll("tr[data-uuid]").forEach(function(tr){
-      tr.onclick = function(){ $("ph-uuid").value = tr.dataset.uuid; $("ph-disabled").value = tr.dataset.disabled; $("panel-hosts-card").scrollIntoView(); };
+      tr.onclick = function(){
+        $("ph-uuid").value = tr.dataset.uuid;
+        $("ph-disabled").value = tr.dataset.disabled;
+        $("ph-remark").value = tr.dataset.remark || "";
+        $("ph-addr").value = tr.dataset.addr || "";
+        $("ph-port").value = tr.dataset.port || "";
+        $("ph-sni").value = tr.dataset.sni || "";
+        $("panel-hosts-card").scrollIntoView();
+      };
     });
   }
 }
@@ -3693,9 +3701,44 @@ async function openLinksDrawer(){
 }
 $("btn-links-panel").onclick = openLinksDrawer;
 $("btn-links-nodes").onclick = openLinksDrawer;
+/* --- Редактор инбаунда: таблица профиля вместо сырого JSON-дампа ---
+   Полный конфиг профиля (privateKey, clients, shortIds) в браузер
+   больше не отдаётся вообще — бэкенд режет его до этих полей. */
+function inboundRow(ib){
+  return '<tr data-tag="' + esc(ib.tag || "") + '" data-port="' + (ib.port == null ? "" : ib.port) + '" data-sni="' + esc((ib.serverNames || []).join(", ")) + '" data-dest="' + esc(ib.dest || "") + '" data-fp="' + esc(ib.fingerprint || "") + '"><td class="mono">' + esc(ib.tag || "") + '</td><td>' + esc(ib.protocol || "") + '</td><td class="num">' + (ib.port == null ? "—" : ib.port) + '</td><td class="mono">' + esc((ib.serverNames || []).join(", ")) + '</td><td class="mono">' + esc(ib.dest || "") + '</td><td>' + esc(ib.fingerprint || "") + "</td></tr>";
+}
+function renderInboundsTable(ibs){
+  if (!ibs.length) return '<div class="empty">Инбаундов нет</div>';
+  let h = '<div class="tblwrap"><table><thead><tr><th>Инбаунд</th><th>Протокол</th><th>Порт</th><th>SNI</th><th>Dest</th><th>Fingerprint</th></tr></thead><tbody>';
+  ibs.forEach(function(ib){ h += inboundRow(ib); });
+  return h + "</tbody></table></div>";
+}
+function bindInboundRows(host){
+  host.querySelectorAll("tr[data-tag]").forEach(function(tr){
+    tr.onclick = function(){
+      $("pf-tag").value = tr.dataset.tag || "";
+      $("pf-port").value = tr.dataset.port || "";
+      $("pf-sni").value = tr.dataset.sni || "";
+      $("pf-dest").value = tr.dataset.dest || "";
+      $("pf-fp").value = tr.dataset.fp || "";
+    };
+  });
+}
+function renderProfileOut(ibs, note){
+  let h = renderInboundsTable(ibs || []);
+  if (note) h += "<p>" + note + "</p>";
+  h += '<p class="mut">Нажмите на строку инбаунда, чтобы подставить его текущие значения в форму ниже.</p>';
+  $("pf-out").innerHTML = h;
+  bindInboundRows($("pf-out"));
+}
 async function loadProfile(){
-  const r = await api("/panel/profiles/" + $("pf-uuid").value);
-  renderOut("pf-out", r.data);
+  const uuid = $("pf-uuid").value.trim();
+  if (!uuid) { $("pf-out").innerHTML = '<p class="err">Укажите UUID профиля</p>'; return; }
+  const r = await api("/panel/profiles/" + encodeURIComponent(uuid));
+  if (r.status !== 200) { renderOut("pf-out", r.data); return; }
+  const d = r.data || {};
+  const name = d.name ? "Профиль: <b>" + esc(d.name) + "</b>" : "";
+  renderProfileOut(d.inbounds || [], name);
 }
 $("btn-pf-load").onclick = loadProfile;
 $("btn-pf-save").onclick = async function(){
@@ -3710,36 +3753,80 @@ $("btn-pf-save").onclick = async function(){
   const fp = $("pf-fp").value.trim();
   if (fp) body.fingerprint = fp;
   const r = await postConfirmAny("/panel/profiles/" + uuid + "/inbounds/" + encodeURIComponent(tag), "PATCH", body);
-  renderOut("pf-out", r.data);
+  if (r.status !== 200) { renderOut("pf-out", r.data); return; }
+  const ib = (r.data || {}).inbound || {};
+  renderProfileOut([ib], '<span class="pill ok">Сохранено</span> Инбаунд <b>' + esc(ib.tag || tag) + "</b> обновлён.");
 };
+/* --- Хосты: читаемый результат вместо сырого JSON-дампа --- */
+function hostLine(x){
+  if (!x) return "";
+  const stub = (x.port === 1234 || x.address === "12345");
+  const addr = stub ? "служебный" : esc(x.address || "") + ":" + (x.port == null ? "—" : x.port);
+  return "<b>" + esc(x.remark || x.uuid || "") + "</b> — " + addr + (x.sni ? ', SNI <span class="mono">' + esc(x.sni) + "</span>" : "") + " · " + (x.isDisabled ? "выключен" : "включён");
+}
+function hostResult(r, okText){
+  if (r.status !== 200) { renderOut("ph-out", r.data); return false; }
+  const x = (r.data || {}).host || {};
+  $("ph-out").innerHTML = '<p><span class="pill ok">' + okText + "</span> " + hostLine(x) + "</p>";
+  return true;
+}
 $("btn-ph-create").onclick = async function(){
   const r = await postConfirm("/panel/hosts", {inboundUuid: $("ph-inbound").value,
     remark: $("ph-remark").value, address: $("ph-addr").value,
     port: parseInt($("ph-port").value || "0", 10), sni: $("ph-sni").value});
-  renderOut("ph-out", r.data);
-  if (r.status === 200) loadPanel();
+  if (hostResult(r, "Хост создан")) loadPanel();
+};
+$("btn-ph-save").onclick = async function(){
+  const uuid = $("ph-uuid").value.trim();
+  if (!uuid) { toast("Укажите UUID хоста — нажмите на его строку в списке выше", "err"); return; }
+  const body = {};
+  const remark = $("ph-remark").value.trim();
+  if (remark) body.remark = remark;
+  const addr = $("ph-addr").value.trim();
+  if (addr) body.address = addr;
+  const port = $("ph-port").value.trim();
+  if (port) {
+    const p = parseInt(port, 10);
+    if (isNaN(p) || p < 1 || p > 65535) { toast("Порт — число 1–65535", "err"); return; }
+    body.port = p;
+  }
+  const sni = $("ph-sni").value.trim();
+  if (sni) body.sni = sni;
+  if (!Object.keys(body).length) { toast("Заполните хотя бы одно поле хоста", "err"); return; }
+  const r = await postConfirmAny("/panel/hosts/" + uuid, "PATCH", body);
+  if (hostResult(r, "Хост сохранён")) loadPanel();
 };
 $("btn-ph-toggle").onclick = async function(){
   const uuid = $("ph-uuid").value;
   const r = await postConfirmAny("/panel/hosts/" + uuid, "PATCH", {isDisabled: $("ph-disabled").value === "true"});
-  renderOut("ph-out", r.data);
-  if (r.status === 200) loadPanel();
+  if (hostResult(r, "Хост обновлён")) loadPanel();
 };
 $("btn-ph-del").onclick = async function(){
   const uuid = $("ph-uuid").value;
   const r = await postConfirmAny("/panel/hosts/" + uuid, "DELETE", {});
-  renderOut("ph-out", r.data);
-  if (r.status === 200) loadPanel();
+  if (r.status !== 200) { renderOut("ph-out", r.data); return; }
+  $("ph-out").innerHTML = '<p><span class="pill ok">Хост удалён</span></p>';
+  loadPanel();
 };
-$("btn-ps-show").onclick = async function(){ const r = await api("/panel/settings"); renderOut("ps-out", r.data); };
+/* --- Настройки панели: читаемый вид вместо сырого JSON-дампа --- */
+$("btn-ps-show").onclick = async function(){
+  const r = await api("/panel/settings");
+  if (r.status !== 200) { renderOut("ps-out", r.data); return; }
+  const url = (r.data || {}).rw_url || "";
+  $("ps-url").value = url;
+  $("ps-out").innerHTML = url ? '<p>Адрес панели: <span class="mono">' + esc(url) + "</span></p>" : '<p class="mut">Адрес панели не задан.</p>';
+};
 $("btn-ps-save").onclick = async function(){
   const r = await api("/panel/settings", {method: "PATCH", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({rw_url: $("ps-url").value})});
-  renderOut("ps-out", r.data);
+  if (r.status !== 200) { renderOut("ps-out", r.data); return; }
+  $("ps-out").innerHTML = '<p><span class="pill ok">Сохранено</span> Адрес панели: <span class="mono">' + esc((r.data || {}).rw_url || $("ps-url").value) + "</span></p>";
 };
 $("btn-ps-test").onclick = async function(){
   const r = await api("/panel/settings/test", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
-  renderOut("ps-out", r.data);
+  if (r.status !== 200) { renderOut("ps-out", r.data); return; }
+  const n = (r.data || {}).squads;
+  $("ps-out").innerHTML = '<p><span class="pill ok">Связь есть</span> Сквадов в панели: <b>' + (n == null ? "—" : n) + "</b></p>";
 };
 let nodesLoaded = false;
 async function loadNodes(){
