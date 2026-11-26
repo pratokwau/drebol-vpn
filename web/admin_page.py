@@ -129,12 +129,13 @@ button{background:var(--grad);background-size:160% 100%;color:#050505;border:0;b
 button:hover{transform:translateY(-2px);background-position:90% 0;box-shadow:0 12px 26px rgba(255,255,255,.18)}
 button:active{transform:scale(.98)}
 button.ghost{background:rgba(255,255,255,.03);color:var(--txt);border:1px solid var(--line2);box-shadow:none}
-a.btnlike{display:inline-block;padding:8px 14px;border-radius:10px;background:rgba(255,255,255,.03);color:var(--txt);border:1px solid var(--line2);text-decoration:none;font-size:14px}
+a.btnlike{display:inline-block;padding:10px 18px;border-radius:999px;background:rgba(255,255,255,.03);color:var(--txt);border:1px solid var(--line2);text-decoration:none;font-size:14px;font-weight:700;transition:transform .3s var(--ease),background .2s,border-color .2s}
 a.btnlike:hover{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.06)}
+a.btnlike:active{transform:scale(.98)}
 button.ghost:hover{border-color:rgba(255,255,255,.55);background:rgba(255,255,255,.06)}
 button.ghost.active{background:var(--grad);background-size:160% 100%;color:#050505;border-color:transparent}
 button.danger{background:transparent;color:var(--bad);border:1px solid rgba(248,113,113,.4);box-shadow:none}
-button.danger:hover{border-color:var(--bad);background:rgba(248,113,113,.08)}
+button.danger:hover{border-color:var(--bad);background:rgba(248,113,113,.08);box-shadow:none}
 button:disabled{opacity:.55;cursor:default;transform:none}
 .btnrow{display:flex;flex-wrap:wrap;gap:0}
 .btnrow button{margin-right:8px}
@@ -165,7 +166,9 @@ details{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin
 details summary{cursor:pointer;font-weight:700;font-size:14px}
 details p,details ul{margin-top:8px}
 #toast{position:fixed;right:20px;bottom:20px;z-index:50;display:flex;flex-direction:column;gap:8px;max-width:360px}
-.toast{background:rgba(16,16,19,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:var(--txt);border:1px solid var(--line2);border-left:4px solid var(--gold);border-radius:12px;padding:12px 16px;font-size:14px;box-shadow:0 18px 44px rgba(0,0,0,.6);animation:toastIn .3s var(--ease) backwards}
+.toast{background:rgba(16,16,19,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:var(--txt);border:1px solid var(--line2);border-left:4px solid var(--gold);border-radius:12px;padding:12px 16px;font-size:14px;box-shadow:0 18px 44px rgba(0,0,0,.6);animation:toastIn .3s var(--ease) backwards;transition:opacity .25s ease,transform .25s ease}
+.toast.warn{border-left-color:var(--warn)}
+.toast.out{opacity:0;transform:translateY(6px)}
 .toast.err{border-left-color:var(--bad)}
 .toast.ok{border-left-color:var(--ok)}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.18);border-top-color:#FFFFFF;border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px;margin-right:6px}
@@ -191,7 +194,7 @@ label.chk input{width:auto;margin:0}
 .chkgrid>b{display:block;margin-bottom:4px}
 .tbar{display:block;height:6px;background:rgba(255,255,255,.08);border-radius:99px;margin-top:6px;overflow:hidden}
 .tbar-fill{display:block;height:100%;background:#D8DBE0;border-radius:99px}
-.tbar-fill.hi{background:#E5484D}
+.tbar-fill.hi{background:var(--bad)}
 .sublink{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sublink .mono{word-break:break-all;flex:1;min-width:200px}
 
@@ -354,7 +357,7 @@ label.chk input{width:auto;margin:0}
           <input id="bl-tg" type="number" placeholder="tg_id">
           <input id="bl-reason" placeholder="причина">
           <select id="bl-term"><option value="">Срок: навсегда</option><option value="day">1 день</option><option value="week">Неделя</option><option value="month">Месяц</option></select>
-          <div class="btnrow"><button id="btn-bl-add" class="ghost">Добавить в ЧС</button><button id="btn-bl-stop" class="ghost">Остановить подписку</button><button id="btn-bl-readd" class="ghost">Вернуть из ЧС</button></div>
+          <div class="btnrow"><button id="btn-bl-add" class="ghost">Добавить в ЧС</button><button id="btn-bl-stop" class="danger">Остановить подписку</button><button id="btn-bl-readd" class="ghost">Вернуть из ЧС</button></div>
           <div id="bl-result"></div>
           <div id="bl-out"></div>
         </div>
@@ -442,7 +445,7 @@ label.chk input{width:auto;margin:0}
             <button id="btn-asub-next" class="ghost">Вперёд →</button>
           </div>
           <input id="asub-tg" type="number" placeholder="tg_id — создать админскую подписку">
-          <div class="btnrow"><button id="btn-asub" class="ghost">Создать админскую подписку</button></div>
+          <div class="btnrow"><button id="btn-asub">Создать админскую подписку</button></div>
           <div id="asub-out"></div>
         </div>
         <div class="card"><h2>Рефералка</h2><p class="sub">Кто приводит друзей и какие бонусы настроены.</p>
@@ -849,7 +852,7 @@ label.chk input{width:auto;margin:0}
           <div id="backup-out"></div>
         </div>
         <div class="card"><h2>Обновление с GitHub</h2><p class="sub">Mark и Muse. Подтягивает main и перезапускает бота и сап-бота.</p>
-          <button id="btn-git" class="danger">Обновиться с GitHub</button>
+          <button id="btn-git" class="ghost">Обновиться с GitHub</button>
           <div id="git-out"></div>
         </div>
       </section>
@@ -887,7 +890,7 @@ label.chk input{width:auto;margin:0}
           </div>
         </div>
         <div class="card hidden" id="console-term-card"><h2 id="console-term-title">Терминал</h2>
-          <div class="btnrow"><button id="btn-console-close" class="danger">Отключиться</button><span id="console-term-state" class="mut"></span></div>
+          <div class="btnrow"><button id="btn-console-close" class="ghost">Отключиться</button><span id="console-term-state" class="mut"></span></div>
           <div id="console-term"></div>
         </div>
       </section>
@@ -1004,6 +1007,7 @@ function toast(msg, kind){
   t.className = "toast" + (kind ? " " + kind : "");
   t.textContent = msg;
   $("toast").appendChild(t);
+  setTimeout(function(){ t.classList.add("out"); }, 4700);
   setTimeout(function(){ t.remove(); }, 5000);
 }
 function show(id, on){ $(id).classList.toggle("hidden", !on); }
@@ -1032,7 +1036,7 @@ function cellVal(k, v){
   if (DATE_KEYS.indexOf(k) >= 0) return '<span class="mono">' + fmtDate(v) + "</span>";
   if (MONEY_KEYS.indexOf(k) >= 0) return '<span class="num">' + fmtMoney(v) + "</span>";
   if (NUM_KEYS.indexOf(k) >= 0 && typeof v === "number") return '<span class="num">' + fmtNum(v) + "</span>";
-  if (typeof v === "boolean") return pill(v ? "да" : "нет");
+  if (typeof v === "boolean") return statusPill(v ? "active" : "disabled", v ? "Да" : "Нет");
   if (k === "status" || k === "state" || k === "active" || k === "enabled" || k === "disabled" || k === "is_disabled") return pill(v);
   if (typeof v === "object") return '<span class="mono">' + esc(JSON.stringify(v)).slice(0, 120) + "</span>";
   const s = String(v);
@@ -1257,7 +1261,7 @@ async function loadExpiring(){
   $("expiring-out").innerHTML = '<div class="tblwrap"><table><thead><tr><th>Пользователь</th><th>Подписка</th><th>Истекает</th><th>Статус</th><th></th></tr></thead><tbody>' +
     items.map(function(it){
       const name = esc(it.name || "—") + (it.username ? ' <span class="mut">@' + esc(it.username) + '</span>' : "") + ' <span class="mono small">#' + it.tg_id + '</span>';
-      return '<tr><td>' + name + '</td><td><span class="mono">#' + it.sub_id + '</span></td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td>' + pill(statusRu(it.status)) + '</td><td><button class="ghost" data-open-sub="' + it.sub_id + '">Открыть</button></td></tr>';
+      return '<tr><td>' + name + '</td><td><span class="mono">#' + it.sub_id + '</span></td><td><span class="mono">' + fmtDate(it.expire_date) + '</span></td><td>' + subStatusPill(it.status) + '</td><td><button class="ghost" data-open-sub="' + it.sub_id + '">Открыть</button></td></tr>';
     }).join("") + "</tbody></table></div>";
 }
 let chartDays = 30, dashStats = null, dashMoney = null, dashPanel = null, dashRefunds = 0, dashPrice = 0, expiringCount = null;
@@ -1512,7 +1516,7 @@ function renderMuseAccounts(list){
   const roleLabel = {mark: "Mark", muse: "Muse"};
   let h = "<div class='tblwrap'><table><thead><tr><th>Почта</th><th>Роль</th><th>Создан</th><th>Последний вход</th><th>Статус</th></tr></thead><tbody>";
   list.forEach(function(a){
-    h += "<tr><td class='mono'>" + esc(a.email || "") + "</td><td>" + esc(roleLabel[a.role] || a.role || "—") + "</td><td class='mono'>" + esc(String(a.created_at || "").slice(0, 16) || "—") + "</td><td class='mono'>" + (a.last_login_at ? esc(String(a.last_login_at).slice(0, 16)) : "—") + "</td><td>" + (a.disabled ? statusPill("disabled", "Выключен") : statusPill("active", "Включён")) + "</td></tr>";
+    h += "<tr><td class='mono'>" + esc(a.email || "") + "</td><td>" + esc(roleLabel[a.role] || a.role || "—") + "</td><td class='mono'>" + fmtDate(a.created_at) + "</td><td class='mono'>" + (a.last_login_at ? fmtDate(a.last_login_at) : "—") + "</td><td>" + (a.disabled ? statusPill("disabled", "Выключен") : statusPill("active", "Включён")) + "</td></tr>";
   });
   box.innerHTML = h + "</tbody></table></div>";
 }
@@ -1559,7 +1563,7 @@ async function loadUsers(page){
   });
   renderUsersTable($("users-out"), rows, "Создан");
 }
-$("btn-find").onclick = withSpin($("btn-find"), async function(){ loadUsers(1); });
+$("btn-find").onclick = withSpin($("btn-find"), async function(){ await loadUsers(1); });
 $("btn-users-export").onclick = function(){
   const q = $("q-user").value.trim();
   downloadCsv("/users/export?scope=" + usersScope + "&sort=" + $("users-sort").value + (q ? "&q=" + encodeURIComponent(q) : ""));
@@ -1683,7 +1687,7 @@ $("btn-gift").onclick = withSpin($("btn-gift"), async function(){
     {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
   if (r.status === 200) {
     const exp = (r.data.result && r.data.result.expire) || "";
-    $("gift-out").innerHTML = "<p>✅ Подписка подарена" + (exp ? " · действует до <b>" + esc(String(exp).slice(0, 16)) + "</b>" : "") + "</p>";
+    $("gift-out").innerHTML = "<p>✅ Подписка подарена" + (exp ? " · действует до <b>" + fmtDate(exp) + "</b>" : "") + "</p>";
     toast("Подписка подарена", "ok");
   } else if (r.status !== 0) {
     renderOut("gift-out", r.data);
@@ -2077,7 +2081,7 @@ function renderSubEditor(data){
   if (data.blacklist) h += kvRow("Чёрный список", "⛔ " + esc(data.blacklist.source === "manual" ? "вручную" : "общий список") + (data.blacklist.reason ? " — " + esc(data.blacklist.reason) : ""));
   h += kvRow("UUID", '<span class="mono">' + esc(s.uuid || "") + '</span>');
   h += kvRow("Sub ID", '<span class="mono">' + esc(s.sub_id || "") + '</span>');
-  h += kvRow("Создана", '<span class="mono">' + esc(String(s.created_at || "").slice(0, 16)) + '</span>');
+  h += kvRow("Создана", '<span class="mono">' + fmtDate(s.created_at) + '</span>');
   h += kvRow("Истекает", '<span class="mono">' + fmtDate(s.expire_date) + '</span>' + leftTxt);
   h += kvRow("Статус", subStatusPill(s.status));
   // Замороженная платная — как в ТГ: с какого момента и сколько на паузе.
@@ -2213,7 +2217,7 @@ async function loadSubDevices(){
   else {
     h += '<div class="tblwrap"><table><thead><tr><th>Устройство</th><th>Платформа</th><th>IP</th><th>Последний визит</th><th></th></tr></thead><tbody>' +
       items.map(function(d){
-        return '<tr><td>' + esc(d.deviceModel || "Устройство") + '</td><td>' + esc(d.platform || "") + '</td><td class="mono">' + esc(d.requestIp || "") + '</td><td class="mono">' + esc(String(d.lastSeen || "").slice(0, 16).replace("T", " ")) + '</td><td><button class="ghost" data-dev-del="' + esc(d.hwid || d.id || "") + '">Убрать</button></td></tr>';
+        return '<tr><td>' + esc(d.deviceModel || "Устройство") + '</td><td>' + esc(d.platform || "") + '</td><td class="mono">' + esc(d.requestIp || "") + '</td><td class="mono">' + fmtDate(d.lastSeen) + '</td><td><button class="ghost" data-dev-del="' + esc(d.hwid || d.id || "") + '">Убрать</button></td></tr>';
       }).join("") + '</tbody></table></div>';
   }
   h += '<div class="btnrow"><button class="danger" id="ed-dev-clear">Сбросить все устройства</button></div>';
@@ -2244,7 +2248,7 @@ async function loadSubIps(){
   const items = r.data.items || [];
   if (!items.length) { out.innerHTML = '<p class="mut">IP-адресов нет</p>'; return; }
   out.innerHTML = '<div class="tblwrap"><table><thead><tr><th>IP</th><th>Устройство</th><th>Когда</th></tr></thead><tbody>' +
-    items.map(function(it){ return '<tr><td class="mono">' + esc(it.ip || "") + '</td><td>' + esc(it.node || "") + '</td><td class="mono">' + esc(String(it.ts || "").slice(0, 16).replace("T", " ")) + '</td></tr>'; }).join("") +
+    items.map(function(it){ return '<tr><td class="mono">' + esc(it.ip || "") + '</td><td>' + esc(it.node || "") + '</td><td class="mono">' + fmtDate(it.ts) + '</td></tr>'; }).join("") +
     '</tbody></table></div>';
 }
 async function subEditorAction(a){
@@ -2552,7 +2556,7 @@ $("btn-asub").onclick = withSpin($("btn-asub"), async function(){
     body: JSON.stringify({tg_id: parseInt($("asub-tg").value || "0", 10)})});
   if (r.status === 200) {
     const s = r.data.subscription || {};
-    $("asub-out").innerHTML = "<p>✅ Админская подписка <b>#" + esc(String(s.id || "")) + "</b> создана · " + esc(s.email || "") + (s.expire ? " · до <b>" + esc(String(s.expire).slice(0, 16)) + "</b>" : "") + (s.sub_url ? "<br>🔗 Ссылка: <span class='mono'>" + esc(s.sub_url) + "</span>" : "") + "</p>";
+    $("asub-out").innerHTML = "<p>✅ Админская подписка <b>#" + esc(String(s.id || "")) + "</b> создана · " + esc(s.email || "") + (s.expire ? " · до <b>" + fmtDate(s.expire) + "</b>" : "") + (s.sub_url ? "<br>🔗 Ссылка: <span class='mono'>" + esc(s.sub_url) + "</span>" : "") + "</p>";
     loadAdminSubs(1);
   } else if (r.status !== 0) {
     renderOut("asub-out", r.data);
@@ -4028,7 +4032,7 @@ async function loadHealth(){
     h += '<p class="sub">🖧 Узлы — в строю <b>' + up + ' из ' + working.length + '</b></p>';
     h += '<h3>Ноды по данным панели</h3><div class="tblwrap"><table><thead><tr><th>Нода</th><th>Адрес</th><th>Xray</th><th>Онлайн</th><th>Статус</th></tr></thead><tbody>';
     nds.forEach(function(n){
-      h += "<tr><td>" + esc(n.tag || "") + '</td><td class="mono">' + esc(n.host || "") + '</td><td>' + esc(n.xray || "—") + '</td><td class="num">' + (n.clients || 0) + "</td><td>" + (!n.enabled ? '<span class="pill warn">Выключена</span>' : n.reachable ? '<span class="pill ok">Доступна</span>' : '<span class="pill bad">' + esc(n.error || "Недоступна") + "</span>") + "</td></tr>";
+      h += "<tr><td>" + esc(n.tag || "") + '</td><td class="mono">' + esc(n.host || "") + '</td><td>' + esc(n.xray || "—") + '</td><td class="num">' + (n.clients || 0) + "</td><td>" + (!n.enabled ? statusPill("disabled", "Выключена") : n.reachable ? '<span class="pill ok">Доступна</span>' : '<span class="pill bad">' + esc(n.error || "Недоступна") + "</span>") + "</td></tr>";
     });
     h += "</tbody></table></div>";
   }
@@ -4317,8 +4321,8 @@ async function loadStorage(){
   h += kvRow("Срок хранения", "<b>" + esc(String(d.days)) + " дн.</b>");
   h += kvRow("Записей действий", fmtNum(d.activity_rows));
   h += kvRow("Записей ошибок", fmtNum(d.error_rows));
-  h += kvRow("Самая старая запись действий", '<span class="mono">' + esc(String(d.oldest_activity || "—").slice(0, 16)) + "</span>");
-  h += kvRow("Самая старая ошибка", '<span class="mono">' + esc(String(d.oldest_error || "—").slice(0, 16)) + "</span>");
+  h += kvRow("Самая старая запись действий", '<span class="mono">' + fmtDate(d.oldest_activity) + "</span>");
+  h += kvRow("Самая старая ошибка", '<span class="mono">' + fmtDate(d.oldest_error) + "</span>");
   h += kvRow("Размер базы", esc(d.db_size_human || "—"));
   h += "</dl>";
   $("storage-out").innerHTML = h;
