@@ -2142,8 +2142,31 @@ function renderSubEditor(data){
     h += kvRow("Лимит трафика", Number(s.total_gb || 0) > 0 ? (s.total_gb + " ГБ") : "безлимит");
   }
   h += kvRow("Устройства", "лимит " + (s.limit_hwid == null ? "—" : s.limit_hwid) + (s.extra_devices ? " (включая купленные: +" + s.extra_devices + ")" : ""));
-  h += kvRow("LTE", s.lte_gb == null ? "без лимита" : s.lte_gb + " ГБ");
-  if (subsCurrentKind !== "admin") h += kvRow("Триал", s.trial_period == null ? "—" : fmtDays(s.trial_period));
+  // LTE в текущем месяце — как _lte_view_line в ТГ: потребление по узлам
+  // [CDN], лимит с пометкой «свой/по умолчанию». У админских — прежняя
+  // статичная строка (в ТГ админская потребление не показывает).
+  if (subsCurrentKind !== "admin" && data.lte_usage) {
+    const lu = data.lte_usage;
+    if (lu.off) h += kvRow("LTE", "без лимита · учёт отключён");
+    else if (lu.closed) h += kvRow("LTE", "закрыты");
+    else if (lu.used_gb != null) {
+      let t = Number(lu.used_gb).toFixed(2) + " ГБ из " + lu.limit + " ГБ · осталось <b>" + Number(lu.left_gb).toFixed(2) + " ГБ</b>";
+      const pct = Math.min(100, Math.round(Number(lu.ratio || 0) * 100));
+      t += '<span class="tbar"><span class="tbar-fill' + (pct >= 90 ? " hi" : "") + '" style="width:' + pct + '%"></span></span>';
+      if (lu.failed) t += '<br><i class="mut">Часть LTE-серверов не ответила — цифра может быть неполной.</i>';
+      h += kvRow("LTE в " + lu.month, t);
+    } else {
+      h += kvRow("LTE", esc(lu.label || "") + (lu.unavailable ? " · потребление недоступно" : ""));
+    }
+  } else {
+    h += kvRow("LTE", s.lte_gb == null ? "без лимита" : s.lte_gb + " ГБ");
+  }
+  if (subsCurrentKind !== "admin") {
+    // Эффективный триал — как в ТГ (sub_settings): индивидуальный,
+    // иначе пресет; инпут правки ниже — по-прежнему сырой trial_period.
+    const te = (data.trial_effective != null ? data.trial_effective : s.trial_period);
+    h += kvRow("Триал", te == null ? "—" : fmtDays(te));
+  }
   h += '</dl>';
   if (subsCurrentKind !== "admin" && s.tg_id) {
     h += '<div class="btnrow"><button class="ghost" id="ed-topic">💬 Открыть тему</button><button class="ghost" id="ed-promo">🎁 Промокод</button><button class="ghost" id="ed-bl">⛔ Чёрный список</button><button class="ghost" id="ed-activity">📊 Действия</button></div><p class="mut" id="ed-topic-msg"></p>';

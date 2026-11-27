@@ -46,6 +46,11 @@ def _service():
 _ADMIN_SCOPES = ("all", "active", "soon", "expired")
 _ADMIN_SORTS = ("new", "expire", "name")
 
+# Название месяца в предложном падеже («в ноябре») — та же таблица,
+# что _MONTH_PREP в paidsub/handlers.py (строка LTE в карточке).
+_MONTH_PREP = ("", "январе", "феврале", "марте", "апреле", "мае", "июне",
+               "июле", "августе", "сентябре", "октябре", "ноябре", "декабре")
+
 # Вкладки и сортировки платных подписок — те же, что в ТГ
 # (PAID_TABS / SORT_LABELS в paidsub/keyboards.py, экран —
 # handle_paid_subs_menu в paidsub/handlers.py).
@@ -909,6 +914,57 @@ async def sub_card(request):
                              "reason": _bl_reason(ble["reason"])}
         except Exception:
             logging.exception("админка: sub_card #%s: ЧС недоступен", sub_id)
+    # LTE в текущем месяце — как _lte_view_line в ТГ (paidsub/handlers.py):
+    # потребление по узлам [CDN] через user_cdn_usage, лимит — через
+    # lte_limit_gb/lte_limit_label. Best-effort: падение блока не роняет
+    # карточку, фронт тогда показывает прежнюю статичную строку.
+    lte_usage = None
+    try:
+        from services.remnawave import (is_configured, lte_limit_gb,
+                                        lte_limit_label, lte_limit_off,
+                                        make_username, user_cdn_usage)
+        from config import load_config as _load_cfg
+        from datetime import datetime as _dt
+        sub_lte = row[19] if len(row) > 19 else None
+        preset = _load_cfg().get("paid_preset_lte")
+        label = lte_limit_label(sub_lte, preset)
+        if lte_limit_off():
+            lte_usage = {"off": True, "label": label}
+        else:
+            limit = lte_limit_gb(sub_lte, preset)
+            if limit == 0:
+                lte_usage = {"closed": True, "label": label}
+            elif not is_configured():
+                lte_usage = {"label": label}
+            else:
+                r = await user_cdn_usage(make_username(row[2] or "", 0))
+                if not r.get("ok"):
+                    lte_usage = {"label": label, "unavailable": True}
+                elif not r.get("cdn_nodes"):
+                    lte_usage = {"label": label}
+                else:
+                    used_gb = r["used_bytes"] / 1024 ** 3
+                    lte_usage = {
+                        "label": label, "limit": limit,
+                        "used_gb": round(used_gb, 2),
+                        "left_gb": round(max(0.0, limit - used_gb), 2),
+                        "ratio": min(used_gb / limit, 1.0) if limit else 0,
+                        "failed": bool(r.get("failed")),
+                        "month": _MONTH_PREP[_dt.now().month],
+                    }
+    except Exception:
+        logging.exception("админка: sub_card #%s: LTE-потребление "
+                          "недоступно", sub_id)
+    # Эффективный триал — как в ТГ: индивидуальный, иначе пресет
+    # (sub_settings в paidsub/storage.py). Сырой ind_trial_period у
+    # старых подписок пуст, и фронт показывал «—» вместо пресета.
+    trial_effective = None
+    try:
+        from paidsub.storage import sub_settings as _sub_settings
+        trial_effective = _sub_settings(row)["trial_period"]
+    except Exception:
+        logging.exception("админка: sub_card #%s: эффективный триал "
+                          "недоступен", sub_id)
     payments = {"items": [], "count": 0, "sum": 0}
     try:
         from core.database import user_payments
@@ -932,6 +988,7 @@ async def sub_card(request):
         "last_online_ms": last_online_ms,
         "last_online_ok": last_online_ok,
         "invited": invited, "blacklist": blacklist,
+        "lte_usage": lte_usage, "trial_effective": trial_effective,
         "display_url": sub_url_for_display(raw_url),
         "url_sub": sub_url_with_domain(raw_url, SUB_DISPLAY_DOMAIN),
         "url_key": sub_url_with_domain(raw_url, SUB_STORED_DOMAIN),
