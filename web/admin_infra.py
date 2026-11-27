@@ -2296,6 +2296,15 @@ async def downtime_get(request):
 
 
 async def online_get(request):
+    """Кто онлайн + последняя активность — с именами людей, как в ТГ.
+
+    handle_online в ТГ (handlers/control.py): get_online_emails ->
+    users_by_emails -> люди с именем/@username/TG ID. Раньше веб
+    отдавал только сырые email, а фронт показывал их пилюлями без имён.
+    Новые поля people/last — та же привязка; старые online/last_online
+    не меняются (совместимость). Резолв — best-effort: его падение не
+    роняет ответ, email тогда остаются сырыми.
+    """
     try:
         await _require_actor(request)
     except Exception:
@@ -2310,7 +2319,35 @@ async def online_get(request):
     except Exception as ex:
         logging.error("админка: last_online: %s", ex)
         last = {"ok": False, "last": {}}
-    return web.json_response({"online": online, "last_online": last})
+    if not isinstance(online, dict):
+        online = {"ok": False, "emails": []}
+    if not isinstance(last, dict):
+        last = {"ok": False, "last": {}}
+    emails = list(dict.fromkeys(
+        (online.get("emails") or []) + list((last.get("last") or {}).keys())))
+    by_email = {}
+    if emails:
+        try:
+            import core.database as db
+            by_email = await db.users_by_emails(emails) or {}
+        except Exception as ex:
+            logging.error("админка: online: users_by_emails: %s", ex)
+            by_email = {}
+
+    def _person(email):
+        tg_id, fn, un = by_email.get(email, (None, None, None))
+        return {"email": email, "tg_id": tg_id, "name": fn, "username": un}
+
+    people = [_person(e) for e in (online.get("emails") or [])]
+    last_map = last.get("last") or {}
+    last_rows = []
+    for email, ms in sorted(last_map.items(),
+                            key=lambda kv: kv[1] or 0, reverse=True)[:50]:
+        row = _person(email)
+        row["ms"] = ms or 0
+        last_rows.append(row)
+    return web.json_response({"online": online, "last_online": last,
+                              "people": people, "last": last_rows})
 
 
 # ── Веб-доступ и помощь при подключении ──────────────────────────────────────

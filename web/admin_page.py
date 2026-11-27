@@ -4531,22 +4531,57 @@ $("btn-downtime").onclick = async function(){
   }
   $("downtime-out").innerHTML = h;
 };
-$("btn-online").onclick = async function(){
-  const r = await api("/online");
-  if (r.status !== 200) { renderOut("downtime-out", r.data); return; }
-  const on = (r.data.online && r.data.online.emails) || [];
-  const last = (r.data.last_online && r.data.last_online.last) || {};
-  let h = '<h3>Сейчас онлайн: ' + on.length + "</h3>";
-  h += on.length ? '<p>' + on.map(function(e){ return '<span class="pill ok">' + esc(e) + "</span>"; }).join(" ") + "</p>" : '<div class="empty">Никого</div>';
-  const keys = Object.keys(last);
-  if (keys.length) {
-    h += '<h3>Последняя активность (МСК)</h3><div class="tblwrap"><table><thead><tr><th>Клиент</th><th>Был онлайн</th></tr></thead><tbody>';
-    keys.sort(function(a, b){ return (last[b] || 0) - (last[a] || 0); }).slice(0, 50).forEach(function(k){
-      h += '<tr><td class="mono">' + esc(k) + '</td><td class="mono">' + fmtUnix(last[k]) + "</td></tr>";
+/* --- Кто онлайн: люди с именами, как handle_online в ТГ
+   (get_online_emails -> users_by_emails: имя, @username, TG ID).
+   Раньше фронт показывал сырые email пилюлями, а при падении панели —
+   «Никого» вместо ошибки. Клик по строке с TG ID открывает профиль. */
+function renderOnline(d){
+  const on = (d && d.online) || {};
+  const people = (d && d.people) || ((on.emails || []).map(function(e){
+    return {email: e, tg_id: null, name: null, username: null};
+  }));
+  const lastRows = (d && d.last) || Object.keys(((d && d.last_online) || {}).last || {}).map(function(e){
+    return {email: e, tg_id: null, name: null, username: null,
+            ms: ((d.last_online.last || {})[e] || 0)};
+  }).sort(function(a, b){ return (b.ms || 0) - (a.ms || 0); }).slice(0, 50);
+  let h = "";
+  if (on.ok === false) {
+    h += '<div class="empty">❌ Панель не ответила' +
+      (on.error ? ": " + esc(String(on.error)) : "") + "</div>";
+  } else {
+    h += "<h3>Сейчас онлайн: " + people.length + "</h3>";
+    if (!people.length) {
+      h += '<div class="empty">Никого</div>';
+    } else {
+      h += '<div class="tblwrap"><table><thead><tr><th>Имя</th><th>TG ID</th><th>Клиент панели</th></tr></thead><tbody>';
+      people.slice(0, 60).forEach(function(p){
+        const who = p.name ? esc(p.name) + (p.username ? " @" + esc(p.username) : "") : esc(p.email);
+        h += "<tr" + (p.tg_id ? ' data-tg="' + p.tg_id + '"' : "") + "><td>" + who +
+          '</td><td class="mono">' + (p.tg_id || "—") + '</td><td class="mono">' + esc(p.email) + "</td></tr>";
+      });
+      h += "</tbody></table></div>";
+      if (people.length > 60) h += '<p class="mut">…и ещё ' + (people.length - 60) + "</p>";
+    }
+  }
+  if (lastRows.length) {
+    h += '<h3>Последняя активность (МСК)</h3><div class="tblwrap"><table><thead><tr><th>Клиент</th><th>TG ID</th><th>Был онлайн</th></tr></thead><tbody>';
+    lastRows.forEach(function(p){
+      const who = p.name ? esc(p.name) + (p.username ? " @" + esc(p.username) : "") : esc(p.email);
+      h += "<tr" + (p.tg_id ? ' data-tg="' + p.tg_id + '"' : "") + "><td>" + who +
+        '</td><td class="mono">' + (p.tg_id || "—") + '</td><td class="mono">' +
+        (p.ms ? fmtUnix(p.ms) : "Ни разу") + "</td></tr>";
     });
     h += "</tbody></table></div>";
   }
   $("downtime-out").innerHTML = h;
+  $("downtime-out").querySelectorAll("tr[data-tg]").forEach(function(tr){
+    tr.onclick = function(){ openUserEditor(parseInt(tr.dataset.tg, 10)); };
+  });
+}
+$("btn-online").onclick = async function(){
+  const r = await api("/online");
+  if (r.status !== 200) { renderOut("downtime-out", r.data); return; }
+  renderOnline(r.data);
 };
 /* --- Полная синхронизация: отчёт по шагам как в ТГ
    (services/remnawave.py run_full_sync/full_sync_report_text):
