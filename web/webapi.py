@@ -401,7 +401,18 @@ async def profile(tg_id: int) -> dict:
         _max_extra = int(_cfg.get("device_max_extra") or 5)
         _left = max(0, _max_extra - int(extra or 0))
         if _price > 0 and limit_hwid and base_hwid(limit_hwid, extra) and _left > 0:
-            out["subscription"]["devices_buy"] = {"price": _price, "left": _left}
+            # Неоплаченный счёт за места — best-effort: падение запроса
+            # не должно прятать сам блок докупки.
+            _pend = None
+            try:
+                _pend = await _latest_pending(tg_id, devices=True)
+            except Exception:
+                _pend = None
+            out["subscription"]["devices_buy"] = {
+                "price": _price, "left": _left,
+                "pending": ({"id": _pend[0], "amount": _pend[4],
+                             "url": _pend[8], "count": _pend[11]}
+                            if _pend and _pend[8] else None)}
     except Exception:
         pass
 
@@ -413,6 +424,26 @@ async def profile(tg_id: int) -> dict:
                         "promo": r[5] or ""} for r in rows]
     out["payments_total"] = {"count": pays_count, "sum": pays_sum}
     return out
+
+
+async def _latest_pending(tg_id: int, devices: bool) -> tuple | None:
+    """Последний неоплаченный счёт Platega нужного вида — core
+    get_active_payment вид не различает, а счёт за места нельзя
+    показывать в продлении (и наоборот): оплата такого счёта начислит
+    места, а не продлит подписку. Локальный запрос — core не трогается
+    (прецедент: обогащение в admin_users.py). Строки — те же 13 колонок,
+    что у get_active_payment, чтобы распаковки по индексам совпадали."""
+    import aiosqlite
+    from core.database import DB_PATH
+    cond = "kind = 'devices'" if devices else "COALESCE(kind, '') != 'devices'"
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, tg_id, provider, external_id, amount, period_seconds,"
+            " promo_code, status, pay_url, created_at, kind, extra, gift_tg_id"
+            " FROM payments WHERE tg_id = ? AND provider = 'platega'"
+            " AND status = 'pending' AND " + cond +
+            " ORDER BY id DESC LIMIT 1", (tg_id,)) as cur:
+            return await cur.fetchone()
 
 
 # ── Продление ────────────────────────────────────────────────────────────────
@@ -878,7 +909,7 @@ def build_app():
         from features.blacklist import is_blacklisted
         if await is_blacklisted(tg_id):
             return web.json_response({"error": "blocked"}, status=403)
-        from core.database import get_active_payment, list_tariffs
+        from core.database import list_tariffs
         from paidsub.storage import get_paid_sub_by_tg_id
         from paidsub.time_parser import fmt_duration
         row = await get_paid_sub_by_tg_id(tg_id)
@@ -896,7 +927,7 @@ def build_app():
             out.append({"id": t[0], "name": fmt_duration(q["seconds"]),
                         "period": fmt_duration(q["seconds"]),
                         "price": q["price"]})
-        pending = await get_active_payment(tg_id, "platega")
+        pending = await _latest_pending(tg_id, devices=False)
         return web.json_response({
             "tariffs": out,
             "devices": {"count": quote0["extra"], "price": quote0["dev_price"]},
@@ -1109,7 +1140,7 @@ def build_app():
         if await is_blacklisted(tg_id):
             return web.json_response({"error": "blocked"}, status=403)
         from config import load_config
-        from core.database import get_active_payment, list_tariffs
+        from core.database import list_tariffs
         from paidsub.handlers import _paid_presets_ready
         from paidsub.storage import (get_paid_sub_by_tg_id,
                                      get_pending_request)
@@ -1139,7 +1170,7 @@ def build_app():
                         "best": bool(best and per_month
                                      and per_month == best
                                      and len(tariffs) > 1)})
-        pending = await get_active_payment(tg_id, "platega")
+        pending = await _latest_pending(tg_id, devices=False)
         return web.json_response({
             "trial": ({"seconds": trial_sec, "text": fmt_duration(trial_sec)}
                       if trial_sec > 0 else None),

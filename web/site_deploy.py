@@ -1277,8 +1277,21 @@ body.tg-fullscreen .tabs { top:96px; }
    var b = s.devices_buy;
    if (!b) { return ""; }
    window.DEVBUY = {price: b.price, left: b.left, count: 1};
-   return '<div id="devbuy" style="margin-top:14px">' +
-     '<p class="card-sub">Нужно ещё место? Дополнительное устройство — ' + esc(fmtMoney(b.price)) +
+   var html = '<div id="devbuy" style="margin-top:14px">';
+   if (b.pending) {
+     // Неоплаченный счёт за места из прошлого захода — как блок pending
+     // в продлении: его видно сразу, а не только после повторного тапа.
+     var pc = b.pending.count || 1;
+     var pw = pc === 1 ? "место" : pc < 5 ? "места" : "мест";
+     window.devPayUrl = b.pending.url;
+     html += '<p class="card-sub">⏳ У вас есть неоплаченный счёт на <b style="color:var(--ink)">' +
+       esc(fmtMoney(b.pending.amount)) + "</b> · " + esc(pc) + " " + pw + ".</p>" +
+       '<div class="stack" style="margin-bottom:12px"><button class="btn btn-main" type="button" ' +
+       'onclick="openPay(devPayUrl)">Продолжить оплату</button>' +
+       '<button class="btn btn-ghost" type="button" onclick="devCheckPending(' +
+       b.pending.id + ", " + b.pending.amount + ", devPayUrl)\">Проверить оплату</button></div>";
+   }
+   html += '<p class="card-sub">Нужно ещё место? Дополнительное устройство — ' + esc(fmtMoney(b.price)) +
      ", можно докупить ещё " + esc(b.left) + ".</p>" +
      '<div style="display:flex;gap:8px;align-items:stretch">' +
        '<button class="btn btn-ghost" type="button" onclick="devStep(-1)" style="flex:0 0 52px">−</button>' +
@@ -1287,6 +1300,25 @@ body.tg-fullscreen .tabs { top:96px; }
        esc(fmtMoney(b.price)) + "</span></button>" +
        '<button class="btn btn-ghost" type="button" onclick="devStep(1)" style="flex:0 0 52px">+</button>' +
      "</div></div>";
+   return html;
+ }
+ // Экран ожидания оплаты мест: общий для создания счёта и для проверки
+ // неоплаченного — с кнопкой назад, как в renew-wait/buy-wait/gift-wait.
+ function devWaitHtml(amount) {
+   return '<div id="devbuy-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
+     esc(fmtMoney(amount)) + "</b> готов. Оплатите его — места добавятся сами, " +
+     "обычно в течение минуты.</p>" +
+     '<button class="btn btn-main" type="button" onclick="openPay(devPayUrl)">Оплатить</button>' +
+     '<div class="stack" style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="stopDevPoll();load(true)">← К устройствам</button></div>' +
+     '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
+ }
+ // Проверка неоплаченного счёта за места: тот же wait-бокс и тот же опрос,
+ // что после создания счёта.
+ function devCheckPending(id, amount, url) {
+   var box = document.getElementById("devbuy");
+   window.devPayUrl = url;
+   if (box) { box.innerHTML = devWaitHtml(amount); }
+   devPoll(id, 90);
  }
  function devStep(d) {
    var st = window.DEVBUY || {price: 0, left: 1, count: 1};
@@ -1303,27 +1335,30 @@ body.tg-fullscreen .tabs { top:96px; }
  function buyDevices() {
    var st = window.DEVBUY || {count: 1};
    var box = document.getElementById("devbuy");
+   // Двойной тап — второй счёт: блокируем кнопки блока на время запроса,
+   // как lockTariffs() у тарифов.
+   if (box) { box.querySelectorAll("button").forEach(function (b) { b.disabled = true; }); }
    api("/api/devices/buy", {method: "POST", body: JSON.stringify({count: st.count})})
      .then(function (r) {
        if (r.status !== 200 || !r.data.url) {
          haptic("error");
          toast(r.data && r.data.error === "max_reached" ? "Больше мест добавить нельзя."
                : "Не получилось создать счёт. Попробуйте позже.");
+         if (box) { box.querySelectorAll("button").forEach(function (b) { b.disabled = false; }); }
          return;
        }
        window.devPayUrl = r.data.url;
-       if (box) {
-         box.innerHTML = '<div id="devbuy-wait"><p class="card-sub">Счёт на <b style="color:var(--ink)">' +
-           esc(fmtMoney(r.data.amount)) + "</b> готов. Оплатите его — места добавятся сами, " +
-           "обычно в течение минуты.</p>" +
-           '<button class="btn btn-main" type="button" onclick="openPay(devPayUrl)">Оплатить</button>' + '<p class="card-sub" style="margin-top:10px;font-size:12px">Оплачивая, вы соглашаетесь с <a href="/terms/" target="_blank" rel="noopener">Пользовательским соглашением</a> и <a href="/privacy/" target="_blank" rel="noopener">Политикой конфиденциальности</a></p></div>';
-       }
+       if (box) { box.innerHTML = devWaitHtml(r.data.amount); }
        openPay(r.data.url);
        devPoll(r.data.payment_id, 90);
      })
-     .catch(function () { haptic("error"); toast("Не получилось — попробуйте позже."); });
+     .catch(function () {
+       haptic("error"); toast("Не получилось — попробуйте позже.");
+       if (box) { box.querySelectorAll("button").forEach(function (b) { b.disabled = false; }); }
+     });
  }
  var devTimer = null;
+ function stopDevPoll() { if (devTimer) { clearTimeout(devTimer); devTimer = null; } }
  function devPoll(id, tries) {
    if (devTimer) { clearTimeout(devTimer); devTimer = null; }
    api("/api/payment?id=" + id).then(function (r) {
@@ -1335,13 +1370,15 @@ body.tg-fullscreen .tabs { top:96px; }
        }
        if (st === "canceled" || st === "cancelled" || st === "expired" || st === "error" ||
            st === "refunded" || st === "chargebacked") {
-         if (box) { box.innerHTML = '<p class="card-sub">Счёт не оплачен. Обновите данные и попробуйте ещё раз.</p>'; }
+         if (box) { box.innerHTML = '<p class="card-sub">Счёт не оплачен. Обновите данные и попробуйте ещё раз.</p>' +
+           '<div class="stack" style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="stopDevPoll();load(true)">← К устройствам</button></div>'; }
          return;
        }
      }
      if (tries <= 0) {
        if (box) { box.innerHTML = '<p class="card-sub">Пока не оплачено. Если вы уже оплатили, ' +
-         "подождите немного и обновите данные.</p>"; }
+         "подождите немного и обновите данные.</p>" +
+         '<div class="stack" style="margin-top:10px"><button class="btn btn-ghost" type="button" onclick="stopDevPoll();load(true)">← К устройствам</button></div>'; }
        return;
      }
      devTimer = setTimeout(function () { devPoll(id, tries - 1); }, 10000);
@@ -2065,6 +2102,7 @@ body.tg-fullscreen .tabs { top:96px; }
  var lastLoadAt = 0;
  function load(quiet) {
    stopRenewPoll();
+   stopDevPoll();
    lastLoadAt = Date.now();
    if (quiet) { window.__cabScroll = window.scrollY; }
    if (!quiet) { showSkeleton(); }
