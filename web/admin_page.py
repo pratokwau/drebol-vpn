@@ -354,13 +354,20 @@ label.chk input{width:auto;margin:0}
           <button id="btn-gift">Подарить подписку</button>
           <div id="gift-out"></div>
         </div>
-        <div class="card"><h2>Чёрный список</h2><p class="sub">Остановка подписок мошенников и нарушителей. Действие «Остановить» — с подтверждением.</p>
-          <div class="btnrow"><button id="btn-blacklist" class="ghost">Показать список</button></div>
+        <div class="card"><h2>Чёрный список</h2><p class="sub">Остановка подписок мошенников и нарушителей. Действие «Остановить» — с подтверждением. Нажми на строку, чтобы открыть карточку человека.</p>
+          <div id="bl-stats"></div>
+          <div class="btnrow"><button id="btn-blacklist" class="ghost">Показать список</button><button id="btn-bl-sync" class="ghost">🔄 Обновить общий</button><button id="btn-bl-remote" class="ghost">🌐 Общий: …</button></div>
+          <div class="btnrow" id="bl-tabs" style="flex-wrap:wrap"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input id="bl-check" placeholder="Проверить ID: tg_id или @username" style="flex:1;min-width:200px">
+            <button id="btn-bl-check" class="ghost">🔍 Проверить</button>
+          </div>
           <input id="bl-tg" type="number" placeholder="tg_id">
           <input id="bl-reason" placeholder="причина">
-          <select id="bl-term"><option value="">Срок: навсегда</option><option value="day">1 день</option><option value="week">Неделя</option><option value="month">Месяц</option></select>
+          <select id="bl-term"><option value="">Срок: навсегда</option><option value="1d">1 день</option><option value="7d">Неделя</option><option value="30d">Месяц</option></select>
           <div class="btnrow"><button id="btn-bl-add" class="ghost">Добавить в ЧС</button><button id="btn-bl-stop" class="danger">Остановить подписку</button><button id="btn-bl-readd" class="ghost">Вернуть из ЧС</button></div>
           <div id="bl-result"></div>
+          <div class="btnrow"><button id="btn-bl-prev" class="ghost">← Назад</button><button id="btn-bl-next" class="ghost">Вперёд →</button><span id="bl-page-label" class="mut"></span></div>
           <div id="bl-out"></div>
         </div>
         <div class="card"><h2>Повторные триалы</h2><p class="sub">Пары аккаунтов, которые, возможно, берут триал повторно. Нажми на строку, чтобы разобрать находку.</p>
@@ -1726,21 +1733,160 @@ $("btn-gift").onclick = withSpin($("btn-gift"), async function(){
     renderOut("gift-out", r.data);
   }
 });
-$("btn-blacklist").onclick = async function(){
-  const r = await api("/blacklist");
+/* Чёрный список — как handle_bl_menu/handle_bl_list/handle_bl_view в ТГ:
+   статистика, вкладки manual/allow/people, пагинация, карточка записи. */
+let blScope = "manual", blPage = 1, blPages = 1;
+const BL_TABS = [["manual", "✍️ Вручную"], ["allow", "✅ Исключения"], ["people", "👥 Люди в ЧС"]];
+function renderBlStats(d){
+  const c = d.counts || {}, st = d.stats || {};
+  let h = "<dl class='kv'>";
+  h += kvRow("✍️ Вручную", "<b>" + (c.manual || 0) + "</b> (бессрочно <b>" + (st.forever || 0) + "</b> · со сроком <b>" + (st.temporary || 0) + "</b>) · исключений: <b>" + (c.allow || 0) + "</b>");
+  h += kvRow("🌐 Общий список", (d.remote_enabled ? "вкл ✅" : "выкл") + " · записей: <b>" + (c.remote || 0) + "</b>");
+  h += kvRow("🔄 Обновлён", esc(d.synced_at || "ещё не обновлялся"));
+  h += kvRow("🌐 Доп. список ban-vpn", "<b>" + (c.extra || 0) + "</b> записей · обновлён: " + esc(d.extra_synced_at ? fmtDate(d.extra_synced_at) : "ещё не обновлялся") + " (раз в неделю)");
+  h += kvRow("📆 За 30 дней", "заблокировано <b>" + (st.added_30d || 0) + "</b> · снято <b>" + (st.removed_30d || 0) + "</b>");
+  if (st.held) h += kvRow("🧊 Подписок на паузе", "<b>" + st.held + "</b> · сохранено срока: <b>" + fmtDur(st.held_seconds || 0) + "</b>");
+  h += "</dl>";
+  if (d.last_error) h += '<p class="err">⚠️ Последнее обновление не удалось: ' + esc(d.last_error) + "</p>";
+  if (d.extra_last_error) h += '<p class="err">⚠️ Доп. список не обновился: ' + esc(d.extra_last_error) + "</p>";
+  h += '<p class="mut">ЧС закрывает покупки и подписку, оставляя поддержку. Запись можно поставить на срок — снимется сама.</p>';
+  $("bl-stats").innerHTML = h;
+  $("btn-bl-remote").textContent = "🌐 Общий: " + (d.remote_enabled ? "вкл ✅" : "выкл");
+}
+async function loadBlacklist(page){
+  blPage = Math.max(1, page || 1);
+  let r;
+  try { r = await api("/blacklist?scope=" + blScope + "&page=" + blPage); }
+  catch(e) { $("bl-out").innerHTML = '<p class="err">Ошибка загрузки — проверьте соединение и обновите раздел.</p>'; return; }
   if (r.status !== 200) { renderOut("bl-out", r.data); return; }
-  const rows = r.data.entries || [];
+  const d = r.data, c = d.counts || {};
+  renderBlStats(d);
+  const counts = {manual: c.manual || 0, allow: c.allow || 0, people: c.ours || 0};
+  $("bl-tabs").innerHTML = BL_TABS.map(function(t){
+    return '<button class="ghost' + (t[0] === blScope ? " active" : "") + '" data-bl-tab="' + t[0] + '">' + t[1] + " · " + (counts[t[0]] || 0) + "</button>";
+  }).join("");
+  blPages = d.pages || 1; blPage = d.page || 1;
+  $("bl-page-label").textContent = "Стр. " + blPage + " из " + blPages;
+  const rows = d.entries || [];
   if (!rows.length) { $("bl-out").innerHTML = '<div class="empty">Чёрный список пуст</div>'; return; }
-  let h = '<div class="tblwrap"><table><thead><tr><th>Имя</th><th>Username</th><th>TG ID</th><th>Причина</th></tr></thead><tbody>';
+  const icons = {manual: "✍️", remote: "🌐", allow: "✅"};
+  let h = '<div class="tblwrap"><table><thead><tr><th></th><th>Имя</th><th>Username</th><th>TG ID</th><th>Причина</th></tr></thead><tbody>';
   rows.forEach(function(e){
-    h += '<tr data-tg="' + e.tg_id + '"><td>' + esc(e.first_name || "") + '</td><td class="mono">' + (e.username ? "@" + esc(e.username) : "—") + '</td><td class="mono">' + e.tg_id + '</td><td>' + esc(e.reason || "") + '</td></tr>';
+    h += '<tr data-tg="' + e.tg_id + '"><td>' + (icons[e.source] || "•") + '</td><td>' + esc(e.first_name || "") + '</td><td class="mono">' + (e.username ? "@" + esc(e.username) : "—") + '</td><td class="mono">' + e.tg_id + '</td><td>' + esc(e.reason || "") + "</td></tr>";
   });
-  h += '</tbody></table></div>';
+  h += "</tbody></table></div>";
   $("bl-out").innerHTML = h;
   $("bl-out").querySelectorAll("tr[data-tg]").forEach(function(tr){
-    tr.onclick = function(){ $("bl-tg").value = tr.dataset.tg; };
+    tr.onclick = function(){ openBlEntry(parseInt(tr.dataset.tg, 10)); };
   });
-};
+}
+$("btn-blacklist").onclick = function(){ loadBlacklist(1); };
+$("bl-tabs").addEventListener("click", function(e){
+  const b = e.target.closest("button[data-bl-tab]");
+  if (!b) return;
+  blScope = b.dataset.blTab;
+  loadBlacklist(1);
+});
+$("btn-bl-prev").onclick = function(){ if (blPage > 1) loadBlacklist(blPage - 1); };
+$("btn-bl-next").onclick = function(){ if (blPage < blPages) loadBlacklist(blPage + 1); };
+$("btn-bl-sync").onclick = withSpin($("btn-bl-sync"), async function(){
+  const r = await postConfirm("/blacklist/sync", {});
+  if (r.status === 200 && r.data.ok) {
+    toast("Обновлено: " + (r.data.total || 0) + " записей (+" + (r.data.added || 0) + " / −" + (r.data.removed || 0) + ")", "ok");
+    loadBlacklist(blPage);
+  } else if (r.status !== 0) {
+    $("bl-result").innerHTML = '<p class="err">⚠️ Не удалось обновить: ' + esc((r.data && (r.data.error || r.data.message)) || r.status) + "</p>";
+  }
+});
+$("btn-bl-remote").onclick = withSpin($("btn-bl-remote"), async function(){
+  const r = await postConfirm("/blacklist/remote-toggle", {});
+  if (r.status === 200 && r.data.ok) {
+    let msg = r.data.enabled ? "Общий список включён и обновлён" : "Общий список выключен";
+    if (r.data.enabled && !r.data.sync_ok) msg += ", но обновить не удалось: " + (r.data.sync_error || "?");
+    if (!r.data.enabled && r.data.restored) msg += ". Возвращены подписки: " + r.data.restored;
+    toast(msg, "ok");
+    loadBlacklist(blPage);
+  } else if (r.status !== 0) renderOut("bl-out", r.data);
+});
+$("btn-bl-check").onclick = withSpin($("btn-bl-check"), async function(){
+  const raw = $("bl-check").value.trim();
+  if (!raw) { $("bl-result").innerHTML = '<p class="err">Введи TG ID или @username</p>'; return; }
+  if (/^[0-9]+$/.test(raw)) { openBlEntry(parseInt(raw, 10)); return; }
+  const name = raw.replace(/^@/, "").toLowerCase();
+  let r;
+  try { r = await api("/users?q=" + encodeURIComponent(name)); }
+  catch(e) { $("bl-result").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { renderOut("bl-out", r.data); return; }
+  const hit = (r.data.users || []).filter(function(u){ return (u.username || "").toLowerCase() === name; })[0];
+  if (hit) openBlEntry(hit.tg_id);
+  else $("bl-result").innerHTML = '<p class="err">Человек не найден: @' + esc(name) + "</p>";
+});
+async function openBlEntry(tgId){
+  /* Карточка записи ЧС — как handle_bl_view в ТГ. */
+  $("drawer-title").textContent = "⛔ ЧС · #" + tgId;
+  $("drawer-sub").textContent = "Загрузка…";
+  $("drawer-body").innerHTML = '<div class="skel" style="height:18px;width:70%;margin-bottom:10px"></div><div class="skel" style="height:120px"></div>';
+  $("drawer-foot").innerHTML = "";
+  openDrawer();
+  let r;
+  try { r = await api("/blacklist/" + tgId); }
+  catch(e) { $("drawer-body").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  if (r.status !== 200) { $("drawer-body").innerHTML = '<p class="err">' + esc((r.data && r.data.error) || "Ошибка загрузки") + "</p>"; return; }
+  const e = r.data;
+  const who = (e.first_name || "") + (e.username ? " @" + e.username : "") + " #" + e.tg_id;
+  $("drawer-sub").textContent = e.first_name ? who : "#" + e.tg_id + " · ботом не пользовался";
+  const STATUS_LABEL = {manual: "в чёрном списке", remote: "в чёрном списке", allowed: "исключение — есть в общем списке, но разрешён", remote_off: "есть в общем списке, но он выключен", none: "не в чёрном списке"};
+  let h = "<dl>";
+  h += kvRow("📌 Статус", "<b>" + esc(STATUS_LABEL[e.status] || e.status) + "</b>");
+  if (e.reason) h += kvRow("📝 Причина", esc(e.reason));
+  if (e.source === "remote") h += kvRow("🌐 Источник", e.remote_src === "extra" ? "доп. список ban-vpn" : "общий список");
+  if (e.status === "manual") h += kvRow("⏳ Срок", "<b>" + esc(e.until_text || "бессрочно") + "</b>");
+  if (e.status === "manual" && (e.by_id || e.since)) h += kvRow("✍️ Внёс", esc(e.by_name ? e.by_name + " (#" + e.by_id + ")" : (e.by_id ? "#" + e.by_id : "неизвестно кто")) + (e.since ? " · " + fmtDate(e.since) : ""));
+  if (e.public_reason) h += kvRow("👁 Человек видит", "«" + esc(e.public_reason) + "»");
+  const sub = e.sub || {};
+  let subLine;
+  if (sub.held_seconds != null) subLine = "💳 Подписка остановлена из-за ЧС · сохранён остаток: <b>" + fmtDur(sub.held_seconds) + "</b>";
+  else if (sub.live) subLine = "💳 Подписка действует до <b>" + fmtDate(sub.until) + "</b>";
+  else if (sub.until) subLine = "💳 Подписка закончилась";
+  else subLine = "💳 Подписки нет";
+  h += kvRow("Подписка", subLine);
+  h += "</dl>";
+  if (e.history && e.history.length) {
+    h += '<h3>🕘 Попадал в ЧС: <b>' + (e.times || 0) + "</b> раз</h3><blockquote>" + e.history.map(function(it){
+      return "• " + fmtDate(it.when) + " — " + esc(it.word) + (it.reason ? " — " + esc(it.reason) : "");
+    }).join("<br>") + "</blockquote>";
+  }
+  $("drawer-body").innerHTML = h;
+  let foot = "";
+  if (e.status === "manual") foot += '<button class="ghost" id="btn-bl-entry-remove">✅ Убрать из ЧС</button>';
+  else if (e.status === "remote") foot += '<button class="ghost" id="btn-bl-entry-remove">✅ Убрать (исключение)</button>';
+  else if (e.status === "allowed") foot += '<button class="ghost" id="btn-bl-entry-readd">⛔ Вернуть в ЧС</button>';
+  else if (e.status === "none") foot += '<button class="ghost" id="btn-bl-entry-add">⛔ Внести в ЧС</button>';
+  if (sub.live) foot += '<button class="danger" id="btn-bl-entry-stop">⛔ Остановить подписку</button>';
+  foot += '<button class="ghost" id="btn-bl-entry-user">👤 Профиль</button>';
+  $("drawer-foot").innerHTML = foot;
+  const rm = $("btn-bl-entry-remove");
+  if (rm) rm.onclick = withSpin(rm, async function(){
+    const rr = await postConfirm("/blacklist/" + tgId + "/remove", {});
+    if (rr.status === 200) { toast("Убран из чёрного списка", "ok"); closeDrawer(); loadBlacklist(blPage); }
+    else if (rr.status !== 0) renderOut("bl-out", rr.data);
+  });
+  const rd = $("btn-bl-entry-readd");
+  if (rd) rd.onclick = withSpin(rd, async function(){
+    const rr = await api("/blacklist/" + tgId + "/readd", {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
+    if (rr.status === 200) { toast("Снова в чёрном списке", "ok"); closeDrawer(); loadBlacklist(blPage); }
+    else if (rr.status !== 0) renderOut("bl-out", rr.data);
+  });
+  const ad = $("btn-bl-entry-add");
+  if (ad) ad.onclick = function(){ closeDrawer(); $("bl-tg").value = tgId; $("bl-reason").focus(); window.scrollTo(0, 0); };
+  const st = $("btn-bl-entry-stop");
+  if (st) st.onclick = withSpin(st, async function(){
+    const rr = await postConfirm("/blacklist/" + tgId + "/stop", {});
+    if (rr.status === 200) { toast("Подписка остановлена", "ok"); closeDrawer(); loadBlacklist(blPage); }
+    else if (rr.status !== 0) renderOut("bl-out", rr.data);
+  });
+  $("btn-bl-entry-user").onclick = function(){ closeDrawer(); openUserEditor(tgId, true); };
+}
 /* Результат действия с ЧС — строкой вместо сырого JSON: что остановлено
    (stop_subs: paid — остаток срока в секундах или null, admin — была ли
    остановлена админская подписка, errors — ошибки панели). Список
@@ -1759,20 +1905,20 @@ $("btn-bl-add").onclick = withSpin($("btn-bl-add"), async function(){
   const tg = parseInt($("bl-tg").value || "0", 10);
   const r = await api("/blacklist/add", {method: "POST", headers: {"X-CSRF-Token": csrf()},
     body: JSON.stringify({tg_id: tg, reason: $("bl-reason").value, term: $("bl-term").value || undefined})});
-  if (r.status === 200) { renderBlResult(tg, "В чёрный список:", r.data.result || {}); $("btn-blacklist").click(); }
+  if (r.status === 200) { renderBlResult(tg, "В чёрный список:", r.data.result || {}); loadBlacklist(blPage); }
   else if (r.status !== 0) renderOut("bl-out", r.data);
 });
 $("btn-bl-stop").onclick = withSpin($("btn-bl-stop"), async function(){
   const tg = parseInt($("bl-tg").value || "0", 10);
   const r = await postConfirm("/blacklist/" + tg + "/stop", {});
-  if (r.status === 200) { renderBlResult(tg, "Подписка остановлена (ЧС):", r.data.result || {}); $("btn-blacklist").click(); }
+  if (r.status === 200) { renderBlResult(tg, "Подписка остановлена (ЧС):", r.data.result || {}); loadBlacklist(blPage); }
   else if (r.status !== 0) renderOut("bl-out", r.data);
 });
 $("btn-bl-readd").onclick = withSpin($("btn-bl-readd"), async function(){
   const tg = parseInt($("bl-tg").value || "0", 10);
   const r = await api("/blacklist/" + tg + "/readd",
     {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({})});
-  if (r.status === 200) { renderBlResult(tg, "Снова в чёрном списке:", r.data.result || {}); $("btn-blacklist").click(); }
+  if (r.status === 200) { renderBlResult(tg, "Снова в чёрном списке:", r.data.result || {}); loadBlacklist(blPage); }
   else if (r.status !== 0) renderOut("bl-out", r.data);
 });
 let fraudStatus = "new", fraudIsMark = false;

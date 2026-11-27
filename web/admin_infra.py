@@ -734,6 +734,8 @@ _ADMIN_LABELS = {
     "backup_inspect": "🔍 Проверил архив бэкапа",
     "backup_restore_failed": "⚠️ Восстановление из бэкапа не удалось",
     "blacklist_add": "⛔ Внёс в чёрный список", "blacklist_readd": "⛔ Вернул в чёрный список",
+    "blacklist_remove": "✅ Убрал из чёрного списка", "blacklist_sync": "🔄 Обновил общий чёрный список",
+    "blacklist_remote_toggle": "🌐 Общий чёрный список вкл/выкл",
     "blacklist_stop": "⛔ ЧС: стоп триала",
     "broadcast_photo_upload": "🖼 Загрузил фото рассылки",
     "broadcast_send": "📣 Отправил рассылку",
@@ -1774,6 +1776,7 @@ async def blacklist_get(request):
         await _require_actor(request)
     except Exception:
         return _json_error("no_session", 401)
+    from config import load_config
     from core.database import bl_counts, bl_list, bl_stats
     scope = request.query.get("scope") or "manual"
     if scope not in ("manual", "allow", "people"):
@@ -1781,14 +1784,88 @@ async def blacklist_get(request):
     page = max(1, _int_query(request, "page", 1))
     use_remote = bl_mod.remote_on()
     rows, pages = await bl_list(scope, use_remote, page, 10)
+    page = min(max(1, page), pages)
+    cfg = load_config()
     return web.json_response({
         "scope": scope, "page": page, "pages": pages,
         "counts": await bl_counts(use_remote),
         "stats": await bl_stats(),
         "remote_enabled": use_remote,
+        # те же поля, что handle_bl_menu: когда обновлялся общий и доп.
+        # списки и чем кончилось последнее обновление
+        "synced_at": cfg.get("blacklist_synced_at") or None,
+        "extra_synced_at": cfg.get("blacklist_extra_synced_at") or None,
+        "last_error": cfg.get("blacklist_last_error") or None,
+        "extra_last_error": cfg.get("blacklist_extra_last_error") or None,
         "entries": [{"tg_id": r[0], "first_name": r[1] or "",
                      "username": r[2] or "", "reason": r[3] or "",
                      "source": r[4]} for r in rows],
+    })
+
+
+async def blacklist_entry(request):
+    """Карточка записи ЧС — как handle_bl_view в ТГ."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    try:
+        tg_id = int(request.match_info.get("tg_id") or 0)
+    except (TypeError, ValueError):
+        tg_id = 0
+    if not tg_id:
+        return _json_error("bad_id", 400)
+    from core.database import (
+        bl_history, bl_holds, bl_lookup, bl_times_listed, get_user_info,
+    )
+    from paidsub.storage import get_paid_sub_by_tg_id
+    e = await bl_mod.entry(tg_id)
+    info = await bl_lookup(tg_id)
+    u = await get_user_info(tg_id)
+    holds = {h[1]: h[3] for h in await bl_holds(tg_id)}
+    sub = await get_paid_sub_by_tg_id(tg_id)
+    sub_live = bool(sub) and sub[11] in ("active", "renewal")
+    if e:
+        status = "manual" if e["source"] == "manual" else "remote"
+        reason = e["reason"] or ""
+        source = e["source"]
+        remote_src = e.get("remote_src") or None
+        until = e.get("until")
+        by_id = e.get("by_id")
+        since = e.get("since")
+    elif info["allowed"]:
+        status, reason, source = "allowed", info["remote"] or "", "remote"
+        remote_src, until, by_id, since = info.get("remote_src"), None, None, None
+    elif info["remote_listed"] and not bl_mod.remote_on():
+        status, reason, source = "remote_off", info["remote"] or "", "remote"
+        remote_src, until, by_id, since = info.get("remote_src"), None, None, None
+    else:
+        status, reason, source = "none", "", None
+        remote_src, until, by_id, since = None, None, None, None
+    by_name = None
+    if by_id:
+        bu = await get_user_info(by_id)
+        by_name = bu[1] if bu and len(bu) > 1 else None
+    hist = await bl_history(tg_id, 5)
+    return web.json_response({
+        "tg_id": tg_id,
+        "first_name": u[1] if u else None,
+        "username": u[2] if u else None,
+        "status": status, "reason": reason,
+        "public_reason": bl_mod.public_reason(reason) if reason else None,
+        "source": source, "remote_src": remote_src,
+        "until": str(until or "")[:16] or None,
+        "until_text": bl_mod.fmt_until(until) if status == "manual" else None,
+        "by_id": by_id, "by_name": by_name,
+        "since": str(since or "")[:16] or None,
+        "sub": {"live": sub_live,
+                "until": str(sub[6])[:16] if sub else None,
+                "held_seconds": holds.get("paid")},
+        "history": [{"when": str(h[3] or "")[:16],
+                     "word": bl_mod.HIST_WORDS.get(h[0], h[0]),
+                     "reason": bl_mod.public_reason(h[1]) if h[1] else None}
+                    for h in hist],
+        "times": await bl_times_listed(tg_id),
     })
 
 
@@ -1806,6 +1883,9 @@ async def blacklist_add(request):
         return _json_error("bad_request")
     until = None
     term = str(body.get("term") or "")
+    # старые страницы админки шлют day/week/month — маппим их тоже,
+    # иначе срок молча сбрасывался бы в «навсегда»
+    term = {"day": "1d", "week": "7d", "month": "30d"}.get(term, term)
     if term and term in bl_mod.TERM_SECONDS:
         until = bl_mod.until_utc(bl_mod.TERM_SECONDS[term])
     elif body.get("until"):
@@ -1868,6 +1948,108 @@ async def blacklist_readd(request):
         return _json_error("not_found", 404)
     await _audit(actor, "blacklist_readd", f"tg_id={tg_id}")
     return web.json_response({"ok": True, "result": res})
+
+
+async def blacklist_remove(request):
+    """Убрать из ЧС — как handle_bl_del в ТГ (двухшаговое подтверждение)."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    try:
+        tg_id = int(request.match_info.get("tg_id") or 0)
+    except (TypeError, ValueError):
+        tg_id = 0
+    if not tg_id:
+        return _json_error("bad_request")
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    if not token:
+        return confirm_needed_response(
+            issue_confirm(actor, "blacklist_remove", {"tg_id": tg_id},
+                          f"Убрать {tg_id} из чёрного списка?"),
+            f"Убрать {tg_id} из чёрного списка?")
+    payload = take_confirm(actor, token, "blacklist_remove")
+    if payload is None or int(payload.get("tg_id") or 0) != tg_id:
+        return _json_error("bad_confirm", 403)
+    bot = get_bot()
+    if bot is None:
+        return _json_error("no_bot", 503)
+    by_id = _actor_id(actor) if actor["kind"] == "mark" else None
+    res = await bl_mod.blacklist_remove(bot, tg_id, by_id=by_id)
+    await _audit(actor, "blacklist_remove", f"tg_id={tg_id}")
+    return web.json_response({"ok": True, "result": res or {}})
+
+
+async def blacklist_sync(request):
+    """Ручное обновление общего списка — как handle_bl_sync_now в ТГ."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    bot = get_bot()
+    if bot is None:
+        return _json_error("no_bot", 503)
+    r = await bl_mod.sync_remote(bot, force_extra=True)
+    if r.get("ok"):
+        try:
+            await bl_mod.send_report(bot, r)
+        except Exception:
+            pass
+        await _audit(actor, "blacklist_sync",
+                     f"total={r.get('total')} +{r.get('added')} -{r.get('removed')}")
+        return web.json_response({"ok": True, "total": r.get("total", 0),
+                                  "added": r.get("added", 0),
+                                  "removed": r.get("removed", 0),
+                                  "extra_total": r.get("extra_total", 0),
+                                  "extra_fetched": bool(r.get("extra_fetched")),
+                                  "extra_error": r.get("extra_error")})
+    return web.json_response({"ok": False,
+                              "error": str(r.get("error") or "sync_failed")})
+
+
+async def blacklist_remote_toggle(request):
+    """Тумблер общего списка — как handle_bl_remote_toggle в ТГ."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    body = await _json_body(request)
+    token = str(body.get("confirm_token") or "")
+    turn_on = not bl_mod.remote_on()
+    if not token:
+        summary = ("Включить общий чёрный список и обновить его?"
+                   if turn_on else
+                   "Выключить общий чёрный список? "
+                   "Остановленные из-за него подписки вернутся.")
+        return confirm_needed_response(
+            issue_confirm(actor, "blacklist_remote_toggle",
+                          {"on": turn_on}, summary),
+            summary)
+    payload = take_confirm(actor, token, "blacklist_remote_toggle")
+    if payload is None or bool(payload.get("on")) != turn_on:
+        return _json_error("bad_confirm", 403)
+    bot = get_bot()
+    if bot is None:
+        return _json_error("no_bot", 503)
+    from config import atomic_update
+
+    def _apply(cfg):
+        cfg["blacklist_remote_enabled"] = turn_on
+    atomic_update(_apply)
+    out = {"ok": True, "enabled": turn_on}
+    if turn_on:
+        r = await bl_mod.sync_remote(bot, full_scan=True, force_extra=True)
+        try:
+            await bl_mod.send_report(bot, r)
+        except Exception:
+            pass
+        out.update(sync_ok=bool(r.get("ok")), total=r.get("total", 0),
+                   added=r.get("added", 0), removed=r.get("removed", 0),
+                   sync_error=str(r.get("error") or "") or None)
+    else:
+        restored = await bl_mod.restore_unlisted(bot)
+        out["restored"] = len(restored)
+    await _audit(actor, "blacklist_remote_toggle",
+                 "on" if turn_on else "off")
+    return web.json_response(out)
 
 
 # ── Фрод ─────────────────────────────────────────────────────────────────────
@@ -4395,9 +4577,13 @@ def register(app) -> None:
     app.router.add_post("/helpers/{tg_id}/invite", helpers_invite)
     app.router.add_post("/helpers/{tg_id}/delete", helpers_delete)
     app.router.add_get("/blacklist", blacklist_get)
+    app.router.add_get("/blacklist/{tg_id}", blacklist_entry)
     app.router.add_post("/blacklist/add", blacklist_add)
+    app.router.add_post("/blacklist/sync", blacklist_sync)
+    app.router.add_post("/blacklist/remote-toggle", blacklist_remote_toggle)
     app.router.add_post("/blacklist/{tg_id}/stop", blacklist_stop)
     app.router.add_post("/blacklist/{tg_id}/readd", blacklist_readd)
+    app.router.add_post("/blacklist/{tg_id}/remove", blacklist_remove)
     app.router.add_get("/fraud", fraud_get)
     app.router.add_get("/fraud/pair", fraud_pair)
     app.router.add_post("/fraud/toggle", fraud_toggle)
