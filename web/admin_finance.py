@@ -1508,6 +1508,9 @@ async def broadcast_send(request):
         count = len(await get_users_by_segment(data["segment"]))
         summary = (f"Рассылка «{SEGMENTS[data['segment']]}»: "
                    f"{count} получателей")
+        btn_count = sum(len(row) for row in (data.get("buttons") or []))
+        if btn_count:
+            summary += f" · кнопок: {btn_count}"
         token = _admin.issue_confirm(actor, "broadcast_send", data, summary)
         return _admin.confirm_needed_response(token, summary)
     payload = _admin.take_confirm(actor, token, "broadcast_send")

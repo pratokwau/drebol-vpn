@@ -515,16 +515,18 @@ label.chk input{width:auto;margin:0}
 
       <!-- Рассылка -->
       <section id="sec-broadcast" class="page hidden">
-        <div class="card"><h2>Рассылка</h2><p class="sub">Сначала предпросмотр — сколько человек получит сообщение, — потом отправка с подтверждением.</p>
+        <div class="card"><h2>Рассылка</h2><p class="sub">Сначала предпросмотр — как увидят получатели, — потом отправка с подтверждением.</p>
           <textarea id="bc-text" placeholder="текст рассылки (HTML)"></textarea>
           <select id="bc-seg">
             <option value="all">Все</option><option value="active">Активные</option>
             <option value="expired">Истёкшие</option><option value="trial">Триал</option>
             <option value="paying">Платящие</option><option value="no_sub">Без подписки</option>
           </select>
+          <label>Кнопки-ссылки (необязательно) — по одной кнопке в строке: «Текст - https://ссылка»; несколько кнопок в один ряд — через «|»</label>
+          <textarea id="bc-buttons" placeholder="Продлить - https://t.me/drebolvpn_bot"></textarea>
           <label>Фото (необязательно, до 10 МБ — загрузится в Telegram и прикрепится к рассылке)</label>
           <input id="bc-photo" type="file" accept="image/*">
-          <div class="btnrow"><button id="btn-bc-upload" class="ghost">Загрузить фото</button><span id="bc-photo-msg" class="mut"></span></div>
+          <div class="btnrow"><button id="btn-bc-upload" class="ghost">Загрузить фото</button><button id="btn-bc-photo-del" class="ghost">✕ Убрать фото</button><span id="bc-photo-msg" class="mut"></span></div>
           <div class="btnrow"><button id="btn-bc-preview" class="ghost">Предпросмотр</button><button id="btn-bc-send">Отправить</button></div>
           <div id="bc-out" class="mut"></div>
         </div>
@@ -3408,6 +3410,27 @@ async function openPaymentEditor(pid){
 
 /* --- Рассылка, промокоды, тарифы --- */
 let bcPhoto = "";
+function bcPayload(){
+  const b = {text: $("bc-text").value, segment: $("bc-seg").value};
+  if (bcPhoto) b.photo = bcPhoto;
+  const btns = $("bc-buttons").value.trim();
+  if (btns) b.buttons = btns;
+  return b;
+}
+function renderBcPreview(d){
+  let h = '<p>🎯 ' + esc(d.segment_label || d.segment || '') + ' · 👥 получателей: <b>' + (d.recipients || 0) + '</b></p>';
+  if (d.photo) h += '<p>🖼 Фото: прикреплено</p>';
+  h += '<pre>' + esc(d.text || '') + '</pre>';
+  const btns = d.buttons || [];
+  if (btns.length) {
+    h += '<p>🔘 Кнопки:</p>';
+    btns.forEach(function(row){
+      h += '<p>' + row.map(function(b){ return '<span class="pill info">' + esc(b[0]) + '</span>'; }).join(' ') + '</p>';
+    });
+  }
+  if (d.split_photo) h += '<p class="mut">⚠️ Текст длиннее 1024 символов — фото уйдёт отдельным сообщением перед текстом.</p>';
+  return h;
+}
 $("btn-bc-upload").onclick = async function(){
   const f = $("bc-photo").files[0];
   if (!f) { $("bc-photo-msg").textContent = "Выберите файл"; return; }
@@ -3417,15 +3440,24 @@ $("btn-bc-upload").onclick = async function(){
   if (r.status === 200) { bcPhoto = data.photo_file_id || ""; $("bc-photo-msg").textContent = "Фото загружено (" + (data.width || "?") + "×" + (data.height || "?") + ")"; }
   else $("bc-photo-msg").textContent = "Ошибка: " + (data.error || r.status);
 };
+$("btn-bc-photo-del").onclick = function(){
+  bcPhoto = ""; $("bc-photo").value = ""; $("bc-photo-msg").textContent = "Фото убрано";
+};
 $("btn-bc-preview").onclick = async function(){
   const r = await api("/broadcast/preview", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({text: $("bc-text").value, segment: $("bc-seg").value, photo: bcPhoto || undefined})});
-  $("bc-out").textContent = r.status === 200 ? ("Получателей: " + (r.data.count || 0)) : ("Ошибка: " + (r.data.error || r.status));
+    body: JSON.stringify(bcPayload())});
+  if (r.status !== 200) { $("bc-out").textContent = "Ошибка: " + (r.data.error || r.status) + (r.data.details ? (" — " + r.data.details) : ""); return; }
+  $("bc-out").innerHTML = renderBcPreview(r.data);
 };
 $("btn-bc-send").onclick = withSpin($("btn-bc-send"), async function(){
-  const r = await postConfirm("/broadcast/send", {text: $("bc-text").value, segment: $("bc-seg").value, photo: bcPhoto || undefined});
-  $("bc-out").textContent = r.status === 200 ? "Рассылка запущена" : ("Ошибка: " + (r.data.error || r.status));
-  if (r.status === 200) { bcPhoto = ""; toast("Рассылка запущена", "ok"); }
+  const r = await postConfirm("/broadcast/send", bcPayload());
+  if (r.status === 200) {
+    $("bc-out").textContent = "✅ Рассылка завершена: доставлено " + (r.data.sent || 0) + " · не дошло " + (r.data.failed || 0);
+    bcPhoto = ""; $("bc-buttons").value = ""; $("bc-text").value = ""; $("bc-photo").value = ""; $("bc-photo-msg").textContent = "";
+    toast("Рассылка отправлена", "ok");
+  } else if (r.status !== 0) {
+    $("bc-out").textContent = "Ошибка: " + (r.data.error || r.status) + (r.data.details ? (" — " + r.data.details) : "");
+  }
 });
 /* --- Пост в ТГ-канал --- */
 let chPhotos = [], chButtonsSel = [], chButtonsDef = [], channelLoaded = false;
