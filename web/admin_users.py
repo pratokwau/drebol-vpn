@@ -1100,14 +1100,25 @@ async def _sub_action(request, action: str):
     except (KeyError, ValueError):
         return web.json_response({"error": "bad_id"}, status=400)
     body = await _json_body(request)
-    confirm_actions = {"delete", "reissue", "bulk_extend", "bulk_limits"}
+    if action == "reduce":
+        # Убавить срок — только положительное число секунд (как parse_duration
+        # в ТГ: 0 и мусор не принимаются). Проверяется ДО confirm-гейта,
+        # чтобы не выдавать подтверждение на заведомо битое тело.
+        _secs = body.get("seconds")
+        if isinstance(_secs, bool) or not isinstance(_secs, int) or _secs <= 0:
+            return web.json_response({"error": "bad_params"}, status=400)
+    confirm_actions = {"delete", "reissue", "bulk_extend", "bulk_limits",
+                       "reduce"}
     if action in confirm_actions:
         token = str(body.get("confirm_token") or "")
         if not token:
+            from paidsub.time_parser import fmt_duration as _fmt_dur
             summary = {"delete": f"Удалить подписку #{sub_id} (БД + панель)",
                        "reissue": f"Перевыпустить подписку #{sub_id}",
                        "bulk_extend": "Массовый сдвиг сроков",
-                       "bulk_limits": "Массовая смена лимитов"}.get(action, action)
+                       "bulk_limits": "Массовая смена лимитов",
+                       "reduce": f"Убавить подписку #{sub_id} на "
+                                 f"{_fmt_dur(body.get('seconds'))}"}.get(action, action)
             tok = issue_confirm(actor, f"sub_{action}",
                                 {"sub_id": sub_id, "body": body}, summary)
             return confirm_needed_response(tok, summary)
@@ -1122,7 +1133,8 @@ async def _sub_action(request, action: str):
     fn = {"toggle": svc.toggle_sub, "freeze": svc.freeze_sub,
           "unfreeze": svc.unfreeze_sub,
           "delete": svc.delete_sub, "reissue": svc.reissue_sub,
-          "extend": svc.extend_sub, "expire": svc.set_expire,
+          "extend": svc.extend_sub, "reduce": svc.extend_sub,
+          "expire": svc.set_expire,
           "hwid": svc.set_hwid_limit, "traffic": svc.set_traffic_limit,
           "lte": svc.set_lte_limit, "trial": svc.set_trial}.get(action)
     if fn is None:
@@ -1137,6 +1149,10 @@ async def _sub_action(request, action: str):
                 seconds = int(body.get("days") or 0) * 86400
             kwargs["seconds"] = int(seconds)
             res = await fn(sub_id, kwargs.pop("seconds"), **kwargs)
+        elif action == "reduce":
+            # Тот же svc.extend_sub, что продление, но с отрицательными
+            # секундами — как handle_paid_sub_reduce/handle_sub_reduce в ТГ.
+            res = await fn(sub_id, -int(body.get("seconds")), **kwargs)
         elif action == "expire":
             res = await fn(sub_id, str(body.get("until") or ""), **kwargs)
         elif action == "hwid":
@@ -2265,7 +2281,7 @@ def register(app) -> None:
     app.router.add_get("/subs/{sub_id}", sub_card)
     app.router.add_get("/subs/{sub_id}/history", sub_history)
     for action in ("toggle", "freeze", "unfreeze", "delete", "reissue",
-                   "extend", "expire", "hwid", "traffic", "lte", "trial"):
+                   "extend", "reduce", "expire", "hwid", "traffic", "lte", "trial"):
         app.router.add_post(
             f"/subs/{{sub_id}}/{action}",
             lambda req, a=action: _sub_action(req, a))

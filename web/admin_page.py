@@ -2345,7 +2345,7 @@ function renderSubEditor(data){
       }).join("") + '</tbody></table></div><p class="mut">Всего платежей: ' + pays.count + ' · на сумму ' + fmtMoney(pays.sum) + '</p>';
   }
   h += '<h3>Продлить / изменить</h3>';
-  h += '<label>Продлить на дней<input id="ed-days" type="number" placeholder="дней"></label><div class="btnrow"><button class="ghost" data-ed="extend">Продлить</button><button class="ghost" data-quick="30">+30</button><button class="ghost" data-quick="90">+90</button><button class="ghost" data-quick="365">+365</button></div>';
+  h += '<label>Срок — свободная длительность<input id="ed-duration" placeholder="напр. 7 дней, 12 часов, 2 недели"></label><div class="btnrow"><button class="ghost" data-ed="extend">➕ Продлить</button><button class="ghost" data-ed="reduce">➖ Убавить</button><button class="ghost" data-quick="30 дней">+30</button><button class="ghost" data-quick="90 дней">+90</button><button class="ghost" data-quick="365 дней">+365</button></div>';
   h += '<label>Новая дата истечения<input id="ed-until" placeholder="напр. 2026-12-31 23:59" value="' + esc(s.expire_date || "") + '"></label><div class="btnrow"><button class="ghost" data-ed="expire">Установить дату</button></div>';
   h += '<label>Лимит устройств (HWID)<input id="ed-hwid" type="number" value="' + (s.limit_hwid || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="hwid">Сохранить лимит</button></div>';
   h += '<label>Лимит трафика, ГБ<input id="ed-traffic" type="number" value="' + (s.total_gb || 0) + '"></label><div class="btnrow"><button class="ghost" data-ed="traffic">Сохранить лимит</button></div>';
@@ -2369,7 +2369,7 @@ function renderSubEditor(data){
   };
   bind($("drawer-body")); bind($("drawer-foot"));
   $("drawer-body").querySelectorAll("[data-quick]").forEach(function(b){
-    b.onclick = withSpin(b, function(){ $("ed-days").value = b.dataset.quick; return subEditorAction("extend"); });
+    b.onclick = withSpin(b, function(){ $("ed-duration").value = b.dataset.quick; return subEditorAction("extend"); });
   });
   $("drawer-body").querySelectorAll("[data-copy]").forEach(function(b){
     b.onclick = function(){
@@ -2475,7 +2475,14 @@ async function subEditorAction(a){
   // Действия админской подписки идут тем же маршрутом, что у платной,
   // но с kind="admin" — сервис тогда правит таблицу admin_subs.
   if (subsCurrentKind === "admin") body.kind = "admin";
-  if (a === "extend") body.days = parseInt($("ed-days").value || "0", 10);
+  // Продление и убавление — свободной длительностью, как в ТГ
+  // (parse_duration: «7 дней», «12 часов», «2 недели»); «0» и мусор —
+  // ошибка без вызова API, как в ТГ.
+  if (a === "extend" || a === "reduce") {
+    const secs = parseDuration($("ed-duration").value);
+    if (!secs) { const m = $("ed-msg"); if (m) m.textContent = "Не удалось распознать длительность. Примеры: 7 дней, 12 часов, 2 недели"; return; }
+    body.seconds = secs;
+  }
   if (a === "expire") body.until = $("ed-until").value;
   if (a === "hwid") body.limit = parseInt($("ed-hwid").value || "0", 10);
   if (a === "traffic") body.gb = parseInt($("ed-traffic").value || "0", 10);
@@ -2483,7 +2490,15 @@ async function subEditorAction(a){
   if (a === "trial") body.period_days = parseInt($("ed-trial").value || "0", 10);
   const r = await postConfirm("/subs/" + id + "/" + a, body);
   const msg = $("ed-msg");
-  if (msg) msg.textContent = r.status === 200 ? "Готово" : ("Ошибка: " + (r.data.error || r.status));
+  if (r.status === 0) { if (msg) msg.textContent = ""; return; }
+  if (r.status === 200) {
+    let doneTxt = "Готово";
+    if (a === "extend" || a === "reduce") {
+      const until = r.data && r.data.result && r.data.result.until;
+      doneTxt = (a === "reduce" ? "Срок убавлен на " : "Срок продлён на ") + fmtDur(body.seconds) + (until ? " · новая дата " + until : "");
+    }
+    if (msg) msg.textContent = doneTxt;
+  } else if (msg) msg.textContent = "Ошибка: " + ((r.data && r.data.error) || r.status);
   if (r.status === 200) {
     toast("Подписка обновлена", "ok");
     const c = await api((subsCurrentKind === "admin" ? "/admin-subs/" : "/subs/") + id);
