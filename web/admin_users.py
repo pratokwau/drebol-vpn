@@ -388,6 +388,21 @@ async def user_activity(request):
 # ── DM и подарок ───────────────────────────────────────────────────────────
 
 async def user_dm(request):
+    """«📌 Написать» — как handle_dm_user в ТГ: сообщение идёт через тему
+    поддержки (core/admin_dm.deliver_admin_message), а не напрямую человеку.
+
+    - Диалог в поддержке есть (тема origin != 'admin'): текст — в его тему
+      в группе; бот поддержки перешлёт человеку сам (support_bot.py
+      on_group_message: ответы основного бота из веб-админки пересылаются).
+    - Диалога нет: человеку — в основной бот с шапкой «📌 Сообщение от
+      Drebol VPN» + footer из того же _footer(), копия сырого текста —
+      в свежесозданную тему.
+    - Группы поддержки нет (темы нет): человеку — в основной бот с шапкой,
+      без footer (main_plain).
+    Отклонение от ТГ (сознательное): send_log — best-effort, как в
+    promo_give: падение лог-канала не маскирует успешную доставку ошибкой
+    (в deliver_admin_message send_log внутри общего try).
+    """
     from aiohttp import web
     actor, err = await _require_mutation(request)
     if err is not None:
@@ -403,13 +418,55 @@ async def user_dm(request):
     bot = get_bot()
     if bot is None:
         return web.json_response({"error": "no_bot"}, status=503)
+    from html import escape
+    import core.database as db
+    from config import load_config
+    from core.admin_dm import _footer, ensure_user_topic
     try:
-        await bot.send_message(chat_id=tg_id, text=text)
+        cfg = load_config()
+        group_id = cfg.get("support_group_id")
+        row = await db.get_support_topic_full(tg_id)
+        has_dialog = bool(
+            row and group_id and int(row[1]) == int(group_id)
+            and row[3] != "admin")
+        topic = await ensure_user_topic(bot, tg_id)
+        if has_dialog and topic:
+            topic_id, gid = topic
+            await bot.send_message(
+                chat_id=gid, message_thread_id=topic_id, text=text)
+            await db.touch_support_topic(tg_id)
+            via = "support"
+        elif topic:
+            topic_id, gid = topic
+            footer = _footer()
+            await bot.send_message(
+                chat_id=tg_id,
+                text=("📌 <b>Сообщение от Drebol VPN</b>\n\n"
+                      f"<blockquote>{escape(text)}</blockquote>"
+                      f"{footer}"),
+                parse_mode="HTML")
+            await bot.send_message(
+                chat_id=gid, message_thread_id=topic_id, text=text)
+            await db.touch_support_topic(tg_id)
+            via = "main"
+        else:
+            await bot.send_message(
+                chat_id=tg_id,
+                text=("📌 <b>Сообщение от Drebol VPN</b>\n\n"
+                      f"<blockquote>{escape(text)}</blockquote>"),
+                parse_mode="HTML")
+            via = "main_plain"
     except Exception as ex:
         logging.error("админка: dm %s: %s", tg_id, ex)
         return web.json_response({"error": "send_failed"}, status=502)
+    try:
+        from core.log_channel import send_log
+        await send_log(bot, f"📌 Админ → <code>{tg_id}</code> "
+                            f"({via}): {escape(text[:100])}")
+    except Exception as ex:
+        logging.error("админка: dm send_log %s: %s", tg_id, ex)
     await _audit(actor, "user_dm", f"tg_id: {tg_id}")
-    return web.json_response({"ok": True})
+    return web.json_response({"ok": True, "via": via})
 
 
 async def user_gift(request):

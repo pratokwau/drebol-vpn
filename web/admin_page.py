@@ -340,7 +340,7 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-find">Найти</button><button id="btn-users-export" class="ghost">⬇️ CSV</button><button id="btn-recent" class="ghost">Недавние</button><button id="btn-users-prev" class="ghost">← Назад</button><button id="btn-users-next" class="ghost">Вперёд →</button><span id="users-page-label" class="mut"></span></div>
           <div id="users-out"></div>
         </div>
-        <div class="card"><h2>Сообщение пользователю</h2><p class="sub">Отправляется от имени бота Drebol VPN.</p>
+        <div class="card"><h2>Сообщение пользователю</h2><p class="sub">Отправляется от имени бота Drebol VPN. Если у человека есть диалог в поддержке — сообщение уйдёт в его тему в группе, иначе — в основной бот.</p>
           <input id="dm-id" type="number" placeholder="tg_id">
           <textarea id="dm-text" placeholder="текст сообщения"></textarea>
           <button id="btn-dm">Отправить</button>
@@ -1718,10 +1718,18 @@ async function loadUserActivity(tgId, scope, page){
   });
   out.innerHTML = h + "</tbody></table></div>";
 }
+/* Куда ушло сообщение — те же три пути, что в ТГ (deliver_admin_message):
+   support — в тему поддержки, main — в основной бот + копия в тему,
+   main_plain — в основной бот (группы поддержки нет). */
+const DM_VIA_TEXT = {support: "Отправлено в тему поддержки — человеку перешлёт бот поддержки",
+  main: "Отправлено пользователю в основной бот · тема в группе создана",
+  main_plain: "Отправлено пользователю"};
 $("btn-dm").onclick = withSpin($("btn-dm"), async function(){
   const r = await api("/users/" + $("dm-id").value + "/dm",
     {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({text: $("dm-text").value})});
-  $("dm-msg").textContent = r.status === 200 ? "Отправлено" : ("Ошибка: " + (r.data.error || r.status));
+  $("dm-msg").textContent = r.status === 200
+    ? (DM_VIA_TEXT[r.data.via] || "Отправлено")
+    : ("Ошибка: " + (r.data.error || r.status));
   if (r.status === 200) toast("Сообщение отправлено", "ok");
 });
 $("btn-gift").onclick = withSpin($("btn-gift"), async function(){
