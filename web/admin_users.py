@@ -1490,8 +1490,11 @@ async def admin_subs_list(request):
                      "expire_date": _expire_to_iso(r[3]),
                      "total_gb": r[4], "created_at": str(r[5] or ""),
                      "first_name": first_name, "username": username})
+    from config import load_config
     return web.json_response({"subs": subs, "page": page, "pages": pages,
-                              "scope": scope, "sort": sort, "counts": counts})
+                              "scope": scope, "sort": sort, "counts": counts,
+                              "presets_ready": _admin_presets_ready(
+                                  load_config())})
 
 
 async def admin_sub_card(request):
@@ -1594,6 +1597,95 @@ async def admin_sub_create(request):
     return web.json_response({"ok": True, "subscription": {
         "id": res["sub_id"], "tg_id": tg_id, "email": res["email"],
         "expire": res["expire"], "sub_url": res["sub_url"]}})
+
+
+# ── Пресеты админских подписок ──────────────────────────────────────────────
+# Паритет с ТГ (adminsub/handlers.py handle_presets_menu +
+# handle_preset_expire/hwid/traffic/lte, handlers/messages.py
+# AWAITING_PRESET_*): условия выдачи новых админских подписок. В вебе их
+# раньше не задать было вообще — создание админской подписки без пресетов
+# падало presets_not_ready, а задать их можно было только из ТГ.
+
+_ADMIN_PRESET_KEYS = ("preset_expire", "preset_hwid", "preset_traffic",
+                      "preset_lte")
+
+
+def _admin_presets_ready(cfg: dict) -> bool:
+    """Та же проверка, что _presets_ready() в adminsub/handlers.py:
+    заданы срок, устройства и трафик (LTE необязателен — по умолчанию
+    30 ГБ)."""
+    return all(cfg.get(k) is not None
+               for k in ("preset_expire", "preset_hwid", "preset_traffic"))
+
+
+async def admin_subs_presets_get(request):
+    """Настройки админских подписок: те же 4 пресета, что _fmt_presets
+    в ТГ, плюс готовность и имена выдаваемых сквадов."""
+    from aiohttp import web
+    try:
+        await _require_actor(request)
+    except Exception:
+        return web.json_response({"error": "no_session"}, status=401)
+    from config import load_config
+    cfg = load_config()
+    squads = []
+    try:
+        from services.remnawave import list_squads
+        squads = await list_squads()
+    except Exception:
+        pass
+    return web.json_response({
+        "presets": {k: cfg.get(k) for k in _ADMIN_PRESET_KEYS},
+        "ready": _admin_presets_ready(cfg),
+        "rw_squads": cfg.get("rw_squads"),
+        "squads": squads})
+
+
+async def admin_subs_presets_patch(request):
+    """Правка пресетов админских подписок — те же правила ввода, что
+    в ТГ (handlers/messages.py AWAITING_PRESET_*): срок — «дд.мм.гггг»,
+    устройства/трафик/LTE — целое число ≥ 0 (0 у устройств и трафика —
+    безлимит); null — сброс ключа. Для срока и устройств ТГ сброса не
+    даёт, но в вебе он нужен, чтобы вернуть пресеты в состояние
+    «не заданы»: создание тогда честно блокируется presets_not_ready,
+    как в ТГ при незаданных пресетах."""
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    from config import atomic_update
+    from datetime import datetime
+    body = await _json_body(request)
+    patch = {}
+    pop_keys = []
+    for k, v in body.items():
+        if k not in _ADMIN_PRESET_KEYS:
+            return web.json_response({"error": "forbidden_keys", "keys": [k]},
+                                     status=403)
+        if v is None:
+            pop_keys.append(k)
+            continue
+        if k == "preset_expire":
+            if not isinstance(v, str):
+                return web.json_response({"error": "bad_value"}, status=400)
+            try:
+                datetime.strptime(v.strip(), "%d.%m.%Y")
+            except ValueError:
+                return web.json_response({"error": "bad_value"}, status=400)
+            patch[k] = v.strip()
+        elif k in ("preset_hwid", "preset_traffic", "preset_lte"):
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                return web.json_response({"error": "bad_value"}, status=400)
+            patch[k] = v
+    if patch or pop_keys:
+        def _apply(cfg):
+            cfg.update(patch)
+            for k in pop_keys:
+                cfg.pop(k, None)
+        atomic_update(_apply)
+    await _audit(actor, "admin_subs_presets_update",
+                 "keys: " + ", ".join(sorted(set(patch) | set(pop_keys))))
+    return web.json_response({"ok": True})
 
 
 # ── Рефералка ───────────────────────────────────────────────────────────────
@@ -2102,6 +2194,8 @@ def register(app) -> None:
     app.router.add_get("/subs/export", subs_export)
     app.router.add_get("/admin-subs", admin_subs_list)
     app.router.add_post("/admin-subs", admin_sub_create)
+    app.router.add_get("/admin-subs/presets", admin_subs_presets_get)
+    app.router.add_patch("/admin-subs/presets", admin_subs_presets_patch)
     app.router.add_get("/admin-subs/{sub_id}", admin_sub_card)
     app.router.add_get("/admin-subs/{sub_id}/history", admin_sub_history)
     app.router.add_get("/admin-subs/{sub_id}/devices", admin_sub_devices)

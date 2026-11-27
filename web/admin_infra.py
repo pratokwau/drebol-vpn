@@ -784,6 +784,7 @@ _ADMIN_LABELS = {
     "site_texts": "📝 Тексты сайта",
     "site_texts_reset": "🔄 Сбросил все тексты сайта",
     "subs_presets_update": "⚙️ Пресеты подписок",
+    "admin_subs_presets_update": "⚙️ Пресеты админских подписок",
     "support_close": "💬 Закрыл обращение", "support_reply": "💬 Ответил в поддержке",
     "support_settings": "💬 Настройки поддержки",
     "support_token": "🤖 Токен бота поддержки",

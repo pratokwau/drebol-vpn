@@ -436,6 +436,7 @@ label.chk input{width:auto;margin:0}
           <div id="squads-lte-out"></div>
         </div>
         <div class="card"><h2>Админские подписки</h2><p class="sub">Подписки, выданные вручную администратором. Вкладки и сортировка — как в ТГ, нажми на строку, чтобы открыть карточку со всеми действиями: заморозка, продление, устройства, история.</p>
+          <div id="asub-presets-warn"></div>
           <div class="btnrow" id="asub-tabs" style="flex-wrap:wrap"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
             <input id="asub-q" placeholder="Поиск: имя, @username, email, tg_id" style="flex:1;min-width:200px">
@@ -456,6 +457,10 @@ label.chk input{width:auto;margin:0}
           <input id="asub-tg" type="number" placeholder="tg_id — создать админскую подписку">
           <div class="btnrow"><button id="btn-asub">Создать админскую подписку</button></div>
           <div id="asub-out"></div>
+        </div>
+        <div class="card"><h2>⚙️ Настройки админских подписок</h2><p class="sub">Условия выдачи новых админских подписок — как экран «⚙️ Настройки подписок» в ТГ. Применяются только к новым подпискам.</p>
+          <div class="btnrow"><button id="btn-admin-presets" class="ghost">Обновить</button></div>
+          <div id="admin-presets-out"></div>
         </div>
         <div class="card"><h2>Рефералка</h2><p class="sub">Кто приводит друзей и какие бонусы настроены.</p>
           <div class="btnrow"><button id="btn-referrals" class="ghost">Показать рефералку</button><button id="btn-lte" class="ghost">Проверить LTE сейчас</button></div>
@@ -2112,7 +2117,7 @@ $("subs-table").addEventListener("click", function(e){
   if (tr) openSubEditor(parseInt(tr.dataset.subId, 10));
 });
 document.querySelector('[data-nav="subs"]').addEventListener("click", function(){
-  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); loadBulkScopes(); loadCreateOptions(); loadSquads(); loadPresets(); }
+  if (!subsLoaded) { subsLoaded = true; loadSubs(1); loadRequests(); loadAdminSubs(1); loadBulkScopes(); loadCreateOptions(); loadSquads(); loadPresets(); loadAdminPresets(); }
 });
 
 /* --- Админские подписки: список с вкладками --- */
@@ -2126,6 +2131,7 @@ async function loadAdminSubs(page){
   catch(e) { $("asub-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { $("asub-table").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   const counts = r.data.counts || {};
+  $("asub-presets-warn").innerHTML = (r.data.presets_ready === false) ? '<p class="warn">⚠️ Пресеты админских подписок не заданы — задай их в карточке «⚙️ Настройки админских подписок» ниже.</p>' : "";
   $("asub-tabs").innerHTML = Object.keys(ASUB_TABS).map(function(k){
     const c = counts[k];
     return '<button class="ghost' + (k === asubScope ? " active" : "") + '" data-asub-tab="' + k + '">' + ASUB_TABS[k][0] + " " + ASUB_TABS[k][1] + (c == null ? "" : " · " + c) + "</button>";
@@ -2670,6 +2676,67 @@ async function savePreset(body, msgId, okText){
   loadPresets();
 }
 $("btn-presets").onclick = function(){ loadPresets(); };
+/* --- Настройки админских подписок: паритет с ТГ (adminsub/handlers.py
+   handle_presets_menu + _fmt_presets, handlers/messages.py
+   AWAITING_PRESET_*): дата окончания, лимиты устройств / трафика / LTE
+   новых админских подписок. --- */
+async function loadAdminPresets(){
+  let r;
+  try { r = await api("/admin-subs/presets"); }
+  catch(e) { $("admin-presets-out").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
+  renderAdminPresets(r);
+}
+function renderAdminPresets(r){
+  const box = $("admin-presets-out");
+  if (r.status !== 200) { box.innerHTML = '<p class="err">Ошибка: ' + esc((r.data && r.data.error) || r.status) + '</p>'; return; }
+  const d = r.data || {}, p = d.presets || {};
+  const names = {};
+  ((d.squads && d.squads.squads) || []).forEach(function(s){ names[s.uuid] = s.name; });
+  const issued = (d.rw_squads || []).map(function(u){ return names[u] || u; });
+  let h = '';
+  if (!d.ready) h += '<p class="warn">⚠️ Задай настройки, чтобы создавать админские подписки.</p>';
+  h += '<p class="sub">Применяются только к новым подпискам. У выданных условия зафиксированы при создании — меняются в самой подписке. Исключение: LTE-пресет подхватывают и старые подписки без своего лимита.</p>';
+  h += '<h3>⏱ Срок</h3><dl class="kv">' + kvRow("📅 Дата окончания", p.preset_expire ? esc(p.preset_expire) : "не задана") + '</dl>';
+  h += '<div class="btnrow"><input id="ap-expire-in" placeholder="Дата окончания: дд.мм.гггг" autocomplete="off"><button class="ghost" type="button" id="ap-expire-save">Сохранить</button></div><div id="ap-expire-msg" class="mut"></div>';
+  h += '<h3>📊 Лимиты</h3><dl class="kv">' + kvRow("🖥 Устройств", p.preset_hwid == null ? "не задан" : (p.preset_hwid ? p.preset_hwid : "безлимит")) + kvRow("📶 Трафик", presetTrafficText(p.preset_traffic)) + kvRow("🌐 LTE новых подписок", presetLteText(p.preset_lte)) + '</dl>';
+  h += '<div class="btnrow"><input id="ap-hwid-in" placeholder="Устройств: число, 0 — безлимит" autocomplete="off"><button class="ghost" type="button" id="ap-hwid-save">Сохранить</button></div><div id="ap-hwid-msg" class="mut"></div>';
+  h += '<div class="btnrow"><input id="ap-traffic-in" placeholder="Трафик, ГБ или «-» — безлимит" autocomplete="off"><button class="ghost" type="button" id="ap-traffic-save">Сохранить</button></div><div id="ap-traffic-msg" class="mut"></div>';
+  h += '<div class="btnrow"><input id="ap-lte-in" placeholder="LTE, ГБ или «-» — 30 ГБ по умолчанию" autocomplete="off"><button class="ghost" type="button" id="ap-lte-save">Сохранить</button></div><div id="ap-lte-msg" class="mut"></div>';
+  h += '<h3>🗂 Сквады Remnawave</h3><dl class="kv">' + kvRow("Выдаём", issued.length ? esc(issued.join(", ")) : "не выбраны") + '</dl>';
+  h += '<div class="btnrow"><button class="ghost" type="button" id="ap-squads">🗂 Сквады Remnawave</button></div>';
+  box.innerHTML = h;
+  $("ap-expire-save").onclick = withSpin($("ap-expire-save"), async function(){
+    const v = $("ap-expire-in").value.trim();
+    if (!/^(0?[1-9]|[12][0-9]|3[01])[.](0?[1-9]|1[0-2])[.]\d{4}$/.test(v)) { $("ap-expire-msg").textContent = "Формат: дд.мм.гггг."; return; }
+    await saveAdminPreset({preset_expire: v}, "ap-expire-msg", "Дата окончания сохранена");
+  });
+  $("ap-hwid-save").onclick = withSpin($("ap-hwid-save"), async function(){
+    const v = $("ap-hwid-in").value.trim();
+    if (!/^\d+$/.test(v)) { $("ap-hwid-msg").textContent = "Введи число (0 — безлимит)."; return; }
+    await saveAdminPreset({preset_hwid: parseInt(v, 10)}, "ap-hwid-msg", "Лимит устройств сохранён");
+  });
+  $("ap-traffic-save").onclick = withSpin($("ap-traffic-save"), async function(){
+    const v = $("ap-traffic-in").value.trim();
+    if (v === "-") { await saveAdminPreset({preset_traffic: 0}, "ap-traffic-msg", "Трафик: безлимит"); return; }
+    if (!/^\d+$/.test(v)) { $("ap-traffic-msg").textContent = "Число ГБ или «-»."; return; }
+    await saveAdminPreset({preset_traffic: parseInt(v, 10)}, "ap-traffic-msg", "Трафик сохранён");
+  });
+  $("ap-lte-save").onclick = withSpin($("ap-lte-save"), async function(){
+    const v = $("ap-lte-in").value.trim();
+    if (v === "-") { await saveAdminPreset({preset_lte: null}, "ap-lte-msg", "LTE: 30 ГБ по умолчанию"); return; }
+    if (!/^\d+$/.test(v)) { $("ap-lte-msg").textContent = "Число ГБ или «-»."; return; }
+    await saveAdminPreset({preset_lte: parseInt(v, 10)}, "ap-lte-msg", "LTE сохранён");
+  });
+  $("ap-squads").onclick = function(){ const el = $("squads-out"); if (el) el.scrollIntoView(); };
+}
+async function saveAdminPreset(body, msgId, okText){
+  const r = await api("/admin-subs/presets", {method: "PATCH", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
+  if (r.status !== 200) { $(msgId).textContent = "Ошибка: " + ((r.data && r.data.error) || r.status); return; }
+  $(msgId).textContent = "";
+  toast(okText, "ok");
+  loadAdminPresets();
+}
+$("btn-admin-presets").onclick = function(){ loadAdminPresets(); };
 /* --- Сквады Remnawave: паритет с «🗂 Сквады Remnawave» в ТГ
    (paidsub/handlers.py handle_paid_squads_menu): выдаваемые сквады,
    сквад LTE-серверов, сквад после конца LTE; тумблеры — мгновенные,
@@ -2761,7 +2828,9 @@ $("btn-asub").onclick = withSpin($("btn-asub"), async function(){
     $("asub-out").innerHTML = "<p>✅ Админская подписка <b>#" + esc(String(s.id || "")) + "</b> создана · " + esc(s.email || "") + (s.expire ? " · до <b>" + fmtDate(s.expire) + "</b>" : "") + (s.sub_url ? "<br>🔗 Ссылка: <span class='mono'>" + esc(s.sub_url) + "</span>" : "") + "</p>";
     loadAdminSubs(1);
   } else if (r.status !== 0) {
-    renderOut("asub-out", r.data);
+    if (r.data && r.data.error === "presets_not_ready") {
+      $("asub-out").innerHTML = '<p class="err">⚠️ Пресеты админских подписок не заданы — задай их в карточке «⚙️ Настройки админских подписок» ниже.</p>';
+    } else renderOut("asub-out", r.data);
   }
 });
 /* --- Рефералка: паритет с «👥 Реферальная система» в ТГ
