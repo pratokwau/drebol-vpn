@@ -3075,9 +3075,14 @@ async function openPaymentEditor(pid){
   }
   if (p.status === "paid") {
     h += '<label><input id="ed-pay-revoke" type="checkbox"> отозвать подписку при возврате</label>';
+    if (p.provider === "platega" && p.external_id) {
+      h += '<div class="btnrow" style="margin-top:10px"><button id="ed-pay-refund-check" class="ghost">↩️ Проверить возврат</button></div>';
+      h += '<div id="ed-pay-refund-check-out" style="margin-top:8px"></div>';
+    }
     h += '<p class="mut" id="ed-pay-msg" style="margin-top:10px"></p>';
   }
   $("drawer-body").innerHTML = h;
+  let refundCheck = null;
   const chkBtn = $("ed-pay-check");
   if (chkBtn) {
     chkBtn.onclick = withSpin(chkBtn, async function(){
@@ -3105,10 +3110,49 @@ async function openPaymentEditor(pid){
       box.innerHTML = hh;
     });
   }
+  const rcBtn = $("ed-pay-refund-check");
+  if (rcBtn) {
+    rcBtn.onclick = withSpin(rcBtn, async function(){
+      const box = $("ed-pay-refund-check-out");
+      if (box) box.innerHTML = '<p class="mut">Проверяю возврат в Platega…</p>';
+      let rr;
+      try { rr = await api("/payments/" + pid + "/refund-check"); }
+      catch(e) { if (box) box.innerHTML = '<p class="err">Не удалось проверить возврат</p>'; return; }
+      if (!box) return;
+      if (rr.status !== 200) {
+        const d = rr.data || {};
+        box.innerHTML = '<p class="err">' + esc(d.error === "not_refundable" ? "Этот платёж вернуть нельзя" : "Platega не ответила: " + (d.details || d.error || rr.status)) + '</p>';
+        return;
+      }
+      const d = rr.data || {};
+      refundCheck = d;
+      const rb = $("ed-pay-refund");
+      let hh = '';
+      if (!d.supported) {
+        hh += '<p class="err">❌ Вернуть нельзя</p>';
+        if (d.block_reason) hh += '<p>' + esc(d.block_reason) + '</p>';
+        hh += '<p class="mut">Возможно, на балансе мерчанта не хватает средств — возврат оплачивается с него.</p>';
+        if (rb) rb.disabled = true;
+      } else {
+        hh += '<dl class="kv">';
+        hh += kvRow("Сумма", fmtMoney(d.amount));
+        hh += kvRow("К возврату", fmtMoney(d.refundable_amount));
+        if (d.refunded_amount) hh += kvRow("Уже возвращено", fmtMoney(d.refunded_amount));
+        if (d.deduct_usdt != null) hh += kvRow("Спишется с баланса", fmtUsdt(d.deduct_usdt));
+        if (d.penalty_usdt != null) hh += kvRow("Штраф", fmtUsdt(d.penalty_usdt));
+        hh += '</dl>';
+        hh += '<p class="mut">Возврат может пройти не сразу: Platega обрабатывает его и присылает итог колбэком. Срок подписки можно отозвать или оставить — выбери.</p>';
+        if (rb) rb.disabled = false;
+      }
+      box.innerHTML = hh;
+    });
+  }
   if (p.status === "paid") {
     $("drawer-foot").innerHTML = '<button class="danger" id="ed-pay-refund">Вернуть оплату</button>';
     $("ed-pay-refund").onclick = withSpin($("ed-pay-refund"), async function(){
-      const rr = await postConfirm("/payments/" + pid + "/refund", {revoke: $("ed-pay-revoke").checked});
+      const body = {revoke: $("ed-pay-revoke").checked};
+      if (refundCheck && refundCheck.refundable_amount != null) body.refundable_amount = refundCheck.refundable_amount;
+      const rr = await postConfirm("/payments/" + pid + "/refund", body);
       const msg = $("ed-pay-msg");
       if (msg) msg.textContent = rr.status === 200 ? "Возврат оформлен" : ("Ошибка: " + (rr.data.error || rr.status));
       if (rr.status === 200) { toast("Возврат оформлен", "ok"); openPaymentEditor(pid); loadPayments(paymentsPage); }

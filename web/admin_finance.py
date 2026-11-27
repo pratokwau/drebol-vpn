@@ -452,6 +452,43 @@ async def payment_platega_check(request):
         "match": live_status == status})
 
 
+async def payment_refund_check(request):
+    """Предпроверка возврата в Platega — паритет с ТГ
+    handle_platega_refund: pg.refund_supported до возврата:
+    можно ли вернуть, сколько вернётся, что спишется с баланса
+    мерчанта и штраф. Только чтение, аудита нет."""
+    from aiohttp import web
+    from core.database import get_payment_full
+    import services.platega_api as pg
+    _, err = await _actor_or_401(request)
+    if err is not None:
+        return err
+    pid = _int_id(request.match_info.get("pid"))
+    if pid is None:
+        return web.json_response({"error": "bad_id"}, status=400)
+    p = await get_payment_full(pid)
+    if not p:
+        return web.json_response({"error": "no_payment"}, status=404)
+    (_id, _tg, provider, ext_id, amount, _period, _promo,
+     status, _url, _err, _created, _paid, _fn, _un) = p
+    if provider != "platega" or status != "paid" or not ext_id:
+        return web.json_response({"error": "not_refundable"}, status=409)
+    r = await pg.refund_supported(ext_id)
+    if not r.get("ok"):
+        return web.json_response({"error": "platega_error",
+                                  "details": r.get("error")}, status=502)
+    return web.json_response({
+        "payment_id": pid,
+        "amount": amount,
+        "supported": bool(r.get("supported")),
+        "partial_supported": r.get("partial_supported"),
+        "refundable_amount": r.get("refundable_amount"),
+        "refunded_amount": r.get("refunded_amount"),
+        "deduct_usdt": r.get("deduct_usdt"),
+        "penalty_usdt": r.get("penalty_usdt"),
+        "block_reason": r.get("block_reason") or ""})
+
+
 async def payment_refund(request):
     """Возврат платежа: двухшаговое подтверждение, потом возврат
     в Platega и finalize_refund(). Идемпотентно: повторный вызов
@@ -481,10 +518,20 @@ async def payment_refund(request):
     revoke = body.get("revoke")
     if revoke is not None and not isinstance(revoke, bool):
         return web.json_response({"error": "revoke must be bool"}, status=400)
+    # Сумма к возврату из предпроверки /refund-check — только для
+    # текста подтверждения, на сам возврат не влияет.
+    refundable = body.get("refundable_amount")
+    if refundable is not None and (
+            isinstance(refundable, bool) or not isinstance(refundable, int)
+            or refundable < 0):
+        return web.json_response({"error": "refundable_amount must be int >= 0"},
+                                 status=400)
     token = body.get("confirm_token") or ""
     if not token:
         summary = (f"Вернуть платёж #{pid} — {amount} ₽ "
-                   f"({'срок отозвать' if revoke else 'срок оставить' if revoke is False else 'срок — по настройке'})")
+                   + (f"(к возврату {refundable} ₽) "
+                      if refundable is not None else "")
+                   + f"({'срок отозвать' if revoke else 'срок оставить' if revoke is False else 'срок — по настройке'})")
         token = _admin.issue_confirm(
             actor, "payment_refund",
             {"payment_id": pid, "revoke": revoke}, summary)
@@ -2036,6 +2083,7 @@ def register(app):
     app.router.add_get("/payments/export", payments_export)
     app.router.add_get("/payments/{pid}", payment_detail)
     app.router.add_get("/payments/{pid}/platega", payment_platega_check)
+    app.router.add_get("/payments/{pid}/refund-check", payment_refund_check)
     app.router.add_post("/payments/{pid}/refund", payment_refund)
     app.router.add_get("/finance", finance_hub)
     app.router.add_post("/reconcile/run", reconcile_run)
