@@ -1,15 +1,20 @@
-"""Проверка наших доменов и IP по спискам блокировок РКН.
+"""Проверка наших доменов и IP по блокировкам и доступности из РФ.
 
-Экран в админке «🌐 Проверка операторов»: Cheburcheck
-(services/cheburcheck.py) — статус доменов и IP прямых хостов по
-спискам блокировок: цель в списках или нет, заблокированные
-подсети, счётчики жалоб.
+Экран в админке «🌐 Проверка операторов», два слоя:
 
-Запросы к Cheburcheck идут по одному, с паузами и повторами при
-лимитах (HTTP 429) — проверка занимает от ~30 секунд до пары
-минут, зато каждая цель доводится до окончательного ответа, а не
-остаётся «не проверенной». Сначала показываем «⏳ Проверяю…»,
-потом таблицу.
+1. GhostMesh (services/ghostmesh.py) — главный: живые пробы из
+   ~23 российских сетей пытаются подключиться к доменам и IP
+   прямых хостов. Ловит ТСПУ-блокировки по IP, которых нет в
+   публичных списках (Швеция, 2026-11-28).
+2. Cheburcheck (services/cheburcheck.py) — статус тех же целей
+   по спискам блокировок РКН: в списках или нет, заблокированные
+   подсети, счётчики жалоб.
+
+Оба сервиса режут частые запросы лимитами, поэтому запросы идут
+по одному, с паузами и повторами до окончательного ответа —
+проверка занимает от ~30 секунд до пары минут. Сначала
+показываем «⏳ Проверяю…», потом таблицу. Сбой одного слоя не
+роняет второй — его блок показывается как недоступный.
 
 Настройки («⚙️ Настройки»): какие домены проверять (IP прямых
 хостов проверяются всегда). Хранятся в config.json, ключ
@@ -27,6 +32,7 @@ from telegram.ext import ContextTypes
 
 from config import load_config, save_config
 import services.cheburcheck as cc
+import services.ghostmesh as gm
 import services.globalping as gp  # только OPERATORS для веб-админки
 
 
@@ -55,12 +61,58 @@ def _save_selection(domains: list[str], operators: list[str]) -> None:
     save_config(cfg)
 
 
-def _render(results: list[dict]) -> str:
-    now = datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m %H:%M")
-    ok, blocked, unknown, error = cc.summarize(results)
-    lines = ["🌐 <b>Проверка операторов</b>",
-             f"<i>Проверено {now} МСК · Cheburcheck · списки блокировок РКН</i>",
-             ""]
+def _render_ghost(results: list[dict] | None) -> list[str]:
+    """Блок GhostMesh: доступность целей из российских сетей."""
+    lines = ["📡 <b>Доступность из России (GhostMesh)</b>"]
+    if results is None:
+        lines.append("⚠️ GhostMesh недоступен — проверка из "
+                     "российских сетей в этот раз не удалась.")
+        return lines
+    problems: list[str] = []
+    for r in results:
+        head = f"<b>{r['label']}</b> — {r['shown']}"
+        state = r.get("state")
+        if state == "ok":
+            tail = f"✅ доступен · проб: {r['total']}"
+            if r.get("available") == 0 and r.get("tls"):
+                tail += " (по голому IP только TLS-ошибки — это норма)"
+            lines.append(f"{head}\n{tail}")
+        elif state == "partial":
+            nets = ", ".join(r.get("failed_networks", [])[:4])
+            tail = (f"⚠️ <b>частично недоступен</b>: нет связи у "
+                    f"{r['failed']} из {r['total']} проб")
+            if nets:
+                tail += f" · сети: {nets}"
+            lines.append(f"{head}\n{tail}")
+            problems.append(r["label"])
+        elif state == "blocked":
+            nets = ", ".join(r.get("failed_networks", [])[:4])
+            tail = (f"❌ <b>блок ТСПУ</b>: нет связи у {r['failed']} "
+                    f"из {r['total']} проб")
+            if nets:
+                tail += f" · сети: {nets}"
+            lines.append(f"{head}\n{tail}")
+            problems.append(r["label"])
+        else:
+            lines.append(f"{head}\n⚠️ не проверено ({r.get('error') or 'ошибка'})")
+    ok, partial, blocked, error = gm.summarize(results)
+    lines.append("")
+    if blocked or partial:
+        lines.append(f"❌ <b>Проблемы:</b> {', '.join(problems)} · "
+                     f"✅ доступно: {ok} · ⚠️ не проверено: {error}")
+    else:
+        lines.append(f"✅ Все цели доступны из России · доступно: {ok} · "
+                     f"⚠️ не проверено: {error}")
+    return lines
+
+
+def _render_chebur(results: list[dict] | None) -> list[str]:
+    """Блок Cheburcheck: статус целей по спискам блокировок РКН."""
+    lines = ["🛡 <b>Списки блокировок (Cheburcheck)</b>"]
+    if results is None:
+        lines.append("⚠️ Cheburcheck недоступен — статус по спискам "
+                     "в этот раз не проверен.")
+        return lines
     problems: list[str] = []
     for r in results:
         head = f"<b>{r['label']}</b> — {r['shown']}"
@@ -81,15 +133,24 @@ def _render(results: list[dict]) -> str:
             lines.append(f"{head}\n❔ нет данных в базе Cheburcheck")
         else:
             lines.append(f"{head}\n⚠️ не проверено ({r.get('error') or 'ошибка'})")
-        lines.append("")
-    if problems:
-        lines.append("❌ <b>В списках блокировок:</b> " + ", ".join(problems))
-    elif error == 0:
-        lines.append(f"✅ <b>В списках никого нет.</b> Чисто: {ok} · "
-                     f"нет данных: {unknown}")
+    ok, blocked, unknown, error = cc.summarize(results)
+    lines.append("")
+    if blocked:
+        lines.append(f"❌ <b>В списках: {blocked}</b> · ✅ чисто: {ok} · "
+                     f"❔ нет данных: {unknown} · ⚠️ ошибок: {error}")
     else:
-        lines.append(f"✅ Чисто: {ok} · ❔ нет данных: {unknown} · "
-                     f"⚠️ не проверено: {error}")
+        lines.append(f"✅ В списках никого нет · чисто: {ok} · "
+                     f"❔ нет данных: {unknown} · ⚠️ ошибок: {error}")
+    return lines
+
+
+def _render(ghost: list[dict] | None, chebur: list[dict] | None) -> str:
+    now = datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m %H:%M")
+    lines = ["🌐 <b>Проверка операторов</b>",
+             f"<i>Проверено {now} МСК</i>", ""]
+    lines.extend(_render_ghost(ghost))
+    lines.append("")
+    lines.extend(_render_chebur(chebur))
     return "\n".join(lines).strip()
 
 
@@ -135,17 +196,20 @@ async def handle_netcheck_menu(query, context: ContextTypes.DEFAULT_TYPE = None)
     targets = ", ".join(d for _, d in domains)
     lines = [
         "🌐 <b>Проверка операторов</b>", "",
-        "<i>Проверка по спискам блокировок РКН через Cheburcheck: "
-        "домены и IP наших серверов — в списках они или нет.</i>",
+        "<i>Два слоя. GhostMesh: живые пробы из ~23 российских "
+        "сетей пытаются подключиться к нашим доменам и IP — ловит "
+        "блоки ТСПУ. Cheburcheck: те же цели по спискам "
+        "блокировок РКН.</i>",
         "",
         f"Домены: {targets}",
         "Плюс IP прямых хостов: Германия, Швеция, Латвия, Германия-2 "
         "(адреса определяются по именам хостов в момент проверки).", "",
-        "<i>Запросы идут по одному с паузами — Cheburcheck режет "
-        "частые запросы лимитом, поэтому проверка занимает от "
-        "~30 секунд до пары минут, но дожидается окончательного "
-        "ответа по каждой цели. «❔ нет данных» значит, что цели "
-        "нет в базе Cheburcheck — это не блокировка.</i>",
+        "<i>Проверка занимает от ~30 секунд до пары минут: "
+        "GhostMesh реально гоняет пробы по российским сетям, а "
+        "при лимитах оба сервиса ждут и повторяют до "
+        "окончательного ответа по каждой цели. «❔ нет данных» у "
+        "Cheburcheck значит, что цели нет в его базе — это не "
+        "блокировка.</i>",
     ]
     await query.edit_message_text(
         "\n".join(lines), parse_mode="HTML", disable_web_page_preview=True,
@@ -202,20 +266,26 @@ async def handle_netcheck_toggle(query, context: ContextTypes.DEFAULT_TYPE,
 async def handle_netcheck_run(query, context: ContextTypes.DEFAULT_TYPE):
     """Запускает проверку и показывает таблицу результатов."""
     await query.edit_message_text(
-        "⏳ <b>Проверяю по спискам блокировок…</b>\n\n"
-        "<i>Запросы идут по одному: от ~30 секунд до пары минут. "
-        "При лимите Cheburcheck жду и повторяю, пока каждая цель "
-        "не даст окончательный ответ.</i>",
+        "⏳ <b>Проверяю доступность и списки…</b>\n\n"
+        "<i>GhostMesh гоняет пробы из российских сетей, Cheburcheck "
+        "смотрит списки РКН. От ~30 секунд до пары минут: при "
+        "лимитах жду и повторяю до окончательного ответа.</i>",
         parse_mode="HTML",
     )
     domains, _ = get_netcheck_selection()
+    ghost = chebur = None
     try:
-        results = await cc.check_all(domains)
-    except Exception as exc:  # сеть легла, Cheburcheck недоступен и т.п.
+        ghost = await gm.check_all(domains)
+    except Exception:
+        ghost = None
+    try:
+        chebur = await cc.check_all(domains)
+    except Exception:
+        chebur = None
+    if ghost is None and chebur is None:
         await query.edit_message_text(
             "❌ <b>Не удалось проверить</b>\n\n"
-            f"<blockquote><code>{exc}</code></blockquote>\n\n"
-            "<i>Попробуй ещё раз через минуту.</i>",
+            "<i>Оба сервиса недоступны. Попробуй ещё раз через минуту.</i>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔁 Ещё раз",
@@ -226,7 +296,7 @@ async def handle_netcheck_run(query, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     await query.edit_message_text(
-        _render(results), parse_mode="HTML", disable_web_page_preview=True,
+        _render(ghost, chebur), parse_mode="HTML", disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Проверить ещё раз",
                                   callback_data="netcheck_run"),

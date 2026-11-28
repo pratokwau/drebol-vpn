@@ -172,26 +172,51 @@ async def _netcheck_section(cfg: dict) -> tuple[str | None, bool]:
                 return None, False
         except ValueError:
             pass
+    from handlers.netcheck import get_netcheck_selection
+    domains, _operators = get_netcheck_selection()
+    lines: list[str] = []
+    # GhostMesh — доступность из российских сетей (главный сигнал)
+    try:
+        import services.ghostmesh as gm
+        gres = await gm.check_all(domains)
+        g_ok, g_partial, g_blocked, g_error = gm.summarize(gres)
+        lines.append(f"🌐 Проверка операторов (GhostMesh): "
+                     f"доступно {g_ok} из {len(gres)}")
+        gproblems = [f"{r['label']} ({r['shown']}): нет связи у "
+                     f"{r['failed']} из {r['total']} проб"
+                     for r in gres if r.get("state") == "blocked"]
+        gproblems += [f"{r['label']} ({r['shown']}): частично, "
+                      f"нет связи у {r['failed']} из {r['total']}"
+                      for r in gres if r.get("state") == "partial"]
+        if gproblems:
+            lines.append("🔴 <b>Проблемы доступности:</b> "
+                         + "; ".join(gproblems))
+        elif g_error:
+            lines.append(f"⚠️ GhostMesh: не проверено целей: {g_error}")
+        else:
+            lines.append("✅ Все цели доступны из России.")
+    except Exception as exc:
+        lines.append(f"🌐 Проверка операторов (GhostMesh): "
+                     f"❌ не удалось проверить: <code>{exc}</code>")
+    # Cheburcheck — списки блокировок РКН
     try:
         import services.cheburcheck as cc
-        from handlers.netcheck import get_netcheck_selection
-        domains, _operators = get_netcheck_selection()
         results = await cc.check_all(domains)
     except Exception as exc:
-        return (f"🌐 Проверка операторов: ❌ не удалось проверить: "
-                f"<code>{exc}</code>"), True
+        lines.append(f"🛡 Списки РКН: ❌ не удалось проверить: "
+                     f"<code>{exc}</code>")
+        return "\n".join(lines), True
     ok, blocked, unknown, error = cc.summarize(results)
-    line = (f"🌐 Проверка операторов (списки РКН): "
-            f"чисто {ok} из {len(results)}")
+    lines.append(f"🛡 Списки РКН (Cheburcheck): чисто {ok} из {len(results)}")
     problems = [f"{r['label']} ({r['shown']})"
                 for r in results if r.get("state") == "blocked"]
     if problems:
-        line += "\n🔴 <b>В списках блокировок:</b> " + ", ".join(problems)
+        lines.append("🔴 <b>В списках блокировок:</b> " + ", ".join(problems))
     elif error:
-        line += f"\n⚠️ Не проверено целей: {error}"
+        lines.append(f"⚠️ Списки РКН: не проверено целей: {error}")
     else:
-        line += "\n✅ В списках никого нет."
-    return line, True
+        lines.append("✅ В списках никого нет.")
+    return "\n".join(lines), True
 
 
 async def _support_topics_section(bot) -> str | None:
