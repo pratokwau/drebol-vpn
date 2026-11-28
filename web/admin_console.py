@@ -58,11 +58,11 @@ DEFAULT_KEY_PATH = "/root/drebol-vpn/.console_key"
 # Финляндии нет и не будет: сервер умирает 2026-11-24.
 DEFAULT_SERVERS = [
     {"id": "main", "name": "🇩🇪 Главная", "local": True},
-    {"id": "latvia", "name": "🇱🇻 Латвия (мост)",
-     "host": "31.59.168.90", "user": "root", "port": 22},
+    {"id": "latvia", "name": "🇱🇻 Латвия",
+     "host": "109.248.161.146", "user": "root", "port": 22},
     {"id": "sweden", "name": "🇸🇪 Швеция",
      "host": "81.90.21.84", "user": "root", "port": 22},
-    {"id": "oblako", "name": "☁️ Oblako (мост)",
+    {"id": "oblako", "name": "☁️ Oblako",
      "host": "187.54.0.243", "user": "root", "port": 22},
 ]
 
@@ -174,6 +174,77 @@ async def _ensure_keypair(cfg: dict):
             pass
         return priv, pub + " drebol-console"
     return priv, None
+
+
+# ── Проверка доступа ───────────────────────────────────────────────────────
+
+async def _run_probe(argv: list) -> tuple:
+    """(returncode, stderr-первая-строка) подпроцесса; (-1, '…') при
+    ошибке запуска или таймауте. Секретов в выводе нет: ssh в BatchMode
+    пишет только про подключение и ключ."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *argv, stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE)
+        _, err = await asyncio.wait_for(proc.communicate(), timeout=12)
+        first = (err or b"").decode("utf-8", "replace").strip().splitlines()
+        return proc.returncode or 0, (first[0].strip()[:160] if first else "")
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+        return -1, "таймаут подключения (12 с)"
+    except Exception as ex:
+        logging.error("консоль: probe %s: %s", argv[0], ex)
+        return -1, "не удалось запустить проверку"
+
+
+async def _probe_server(cfg: dict, srv: dict) -> dict:
+    """Один сервер: {id, name, target, ok, error}. Локальный — проба
+    запуска /bin/true; остальные — тот же ssh и тот же ключ, что в
+    console_ws, только неинтерактивно (BatchMode + `true`)."""
+    base = {"id": srv["id"], "name": srv["name"],
+            "target": _server_target(srv)}
+    if srv["local"]:
+        code, err = await _run_quiet(["/bin/true"])
+        if code == 0:
+            return {**base, "ok": True, "error": ""}
+        return {**base, "ok": False,
+                "error": err or "локальная оболочка недоступна"}
+    priv, pub = await _ensure_keypair(cfg)
+    if not pub:
+        return {**base, "ok": False, "error": "ключ консоли не создан"}
+    argv = ["ssh", "-i", priv,
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=8",
+            "-p", str(srv["port"]), f"{srv['user']}@{srv['host']}",
+            "true"]
+    code, err = await _run_probe(argv)
+    if code == 0:
+        return {**base, "ok": True, "error": ""}
+    return {**base, "ok": False,
+            "error": err or "ssh завершился с ошибкой"}
+
+
+async def console_check(request):
+    """Проба доступа ко всем серверам консоли одним запросом. Только
+    чтение: ничего не меняет, ключ не возвращается. Выключенная
+    консоль — 404, как у остальных эндпоинтов раздела."""
+    try:
+        actor = await _actor(request)
+    except Exception:
+        actor = None
+    if not actor:
+        return web.json_response({"error": "no_session"}, status=401)
+    cfg = _load_cfg()
+    if not _console_enabled(cfg):
+        raise web.HTTPNotFound()
+    servers = _servers(cfg)
+    results = await asyncio.gather(
+        *(_probe_server(cfg, s) for s in servers))
+    return web.json_response({"servers": list(results)})
 
 
 # ── HTTP-эндпоинты ───────────────────────────────────────────────────────────
@@ -469,6 +540,7 @@ def register(app) -> None:
     """Маршруты в админ-подприложение (пути без /api/admin)."""
     app.router.add_get("/console/servers", console_servers)
     app.router.add_get("/console/pubkey", console_pubkey)
+    app.router.add_get("/console/check", console_check)
     app.router.add_get("/console/ws", console_ws)
     # Тот же вход, что и /admin/muse-login, но этот путь проксирует
     # nginx сайта (/api/admin/), чистый /admin/ на сайте — статика.

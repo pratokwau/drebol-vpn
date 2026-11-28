@@ -898,6 +898,8 @@ label.chk input{width:auto;margin:0}
         <div class="card"><h2>🖥 Консоль серверов</h2><p class="sub">Веб-терминал: подключение к серверам проекта прямо из админки. Доступ — Mark и Muse. Одна активная сессия на аккаунт (новая вытесняет старую), простой — 10 минут, предел сессии — 60 минут. Все подключения пишутся в журнал действий.</p>
           <div id="console-status" class="mut">Загрузка…</div>
           <div id="console-servers" class="btnrow" style="margin-top:10px"></div>
+          <div class="btnrow" style="margin-top:10px"><button id="btn-console-check" class="ghost">🔍 Проверить доступ</button></div>
+          <div id="console-check-out" style="margin-top:10px"></div>
           <div id="console-pubkey-box" class="hidden">
             <h3>Ключ консоли (только Mark)</h3>
             <p class="sub">Добавь этот публичный ключ в authorized_keys на каждом сервере — без него SSH не пустит. Ключ создаётся на главном сервере при первом открытии раздела и не меняется.</p>
@@ -5577,6 +5579,33 @@ async function loadConsole(){
   }
 }
 
+function renderConsoleCheck(d){
+  const rows = d.servers || [];
+  if (!rows.length) { $("console-check-out").innerHTML = '<p class="empty">Серверов нет</p>'; return; }
+  let failed = 0;
+  let h = '<table><tr><th>Сервер</th><th>Адрес</th><th>Доступ</th></tr>';
+  rows.forEach(function(s){
+    if (!s.ok) failed++;
+    h += '<tr><td>' + esc(s.name) + '</td><td class="mono">' + esc(s.target || "") + '</td><td>'
+      + (s.ok ? statusPill("ok", "✅ Доступ есть")
+        : statusPill("failed", "❌ Нет доступа") + (s.error ? '<div class="mut">' + esc(s.error) + '</div>' : ""))
+      + '</td></tr>';
+  });
+  h += '</table>';
+  if (failed) h += '<p class="mut" style="margin-top:8px">Нет доступа — добавь публичный ключ из блока ниже в authorized_keys на этом сервере (только Mark) и проверь снова. Если сервер не отвечает по сети — сверь его адрес.</p>';
+  $("console-check-out").innerHTML = h;
+}
+
+async function checkConsoleAccess(){
+  const out = $("console-check-out");
+  out.innerHTML = '<p class="mut">Проверка доступа…</p>';
+  let r;
+  try { r = await api("/console/check"); }
+  catch(e) { out.innerHTML = '<p class="err">Ошибка проверки</p>'; return; }
+  if (r.status !== 200) { out.innerHTML = '<p class="err">Ошибка: ' + esc(r.data.error || r.status) + '</p>'; return; }
+  renderConsoleCheck(r.data);
+}
+
 function closeConsole(){
   if (consoleWS) { try { consoleWS.close(); } catch(e) {} consoleWS = null; }
   if (consoleTerm) { try { consoleTerm.dispose(); } catch(e) {} consoleTerm = null; consoleFit = null; }
@@ -5632,6 +5661,7 @@ document.querySelector('[data-nav="console"]').addEventListener("click", functio
   if (!consoleLoaded) { consoleLoaded = true; loadConsole(); }
 });
 $("btn-console-close").onclick = function(){ closeConsole(); toast("Консоль отключена"); };
+$("btn-console-check").onclick = function(){ checkConsoleAccess(); };
 $("btn-console-pubkey-copy").onclick = function(){
   const ta = $("console-pubkey");
   ta.select();
