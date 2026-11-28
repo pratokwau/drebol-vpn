@@ -4300,6 +4300,11 @@ _JOB_TICKS = {
     "connect_help": ("handlers.control", "connect_help_tick"),
     "purge": ("handlers.control", "purge_tick"),
     "site_sync": ("web.site_deploy", "site_sync_tick"),
+    # Ручной запуск тумблер не проверяет (прецедент site_sync):
+    # тумблер device_watch правит только расписанием, а кнопка —
+    # явное действие админа через postConfirm.
+    "device_watch": ("services.device_watch", "device_watch_tick"),
+    "sessions": ("web.webapi", "sessions_tick"),
 }
 
 
@@ -4424,6 +4429,29 @@ async def _winback_candidates():
     return {"due": due, "note": None}
 
 
+async def _sessions_expired_counts() -> dict:
+    """Сколько просроченных записей в 4 таблицах сессий/кодов — те же
+    WHERE, что purge-функции core/database.py (sessions_tick)."""
+    from core.database import DB_PATH
+    import aiosqlite
+    queries = {
+        "web": "SELECT COUNT(*) FROM web_sessions "
+               "WHERE expires_at <= CURRENT_TIMESTAMP",
+        "resets": "SELECT COUNT(*) FROM password_resets "
+                  "WHERE used = 1 OR expires_at <= CURRENT_TIMESTAMP",
+        "admin": "SELECT COUNT(*) FROM admin_sessions "
+                 "WHERE expires_at <= CURRENT_TIMESTAMP",
+        "setup": "SELECT COUNT(*) FROM admin_setup_tokens "
+                 "WHERE used = 1 OR expires_at <= CURRENT_TIMESTAMP",
+    }
+    out = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        for key, q in queries.items():
+            async with db.execute(q) as cur:
+                out[key] = (await cur.fetchone())[0]
+    return out
+
+
 async def _job_probe(job):
     """Состояние до запуска тика — для честного итога.
 
@@ -4462,6 +4490,8 @@ async def _job_probe(job):
             st = await activity_stats()
             return {"act": st.get("activity_rows", 0),
                     "err": st.get("error_rows", 0)}
+        if job == "sessions":
+            return await _sessions_expired_counts()
     except Exception:
         return None
     return None
@@ -4508,6 +4538,36 @@ async def _job_summarize(job, before, result):
                  "value": f"{b.get('act', 0)} → {st.get('activity_rows', 0)}"},
                 {"label": "Ошибок",
                  "value": f"{b.get('err', 0)} → {st.get('error_rows', 0)}"}], None
+    if job == "device_watch":
+        # Тик сам возвращает счётчики (services/device_watch.py).
+        r = result if isinstance(result, dict) else {}
+        if r.get("skipped") == "already_running":
+            return [], "Вотчер уже работает — повторный запуск пропущен"
+        rows = [{"label": "Проверено подписок",
+                 "value": str(r.get("checked", 0))},
+                {"label": "Новых устройств",
+                 "value": str(r.get("new", 0))},
+                {"label": "Уведомлений отправлено",
+                 "value": str(r.get("notified", 0))}]
+        if r.get("panel_fail"):
+            rows.append({"label": "Ошибок панели",
+                         "value": str(r["panel_fail"])})
+        if r.get("skipped"):
+            rows.append({"label": "Пропущено подписок",
+                         "value": str(r["skipped"])})
+        note = None
+        if r.get("ok") is False:
+            note = r.get("error") or "Панель не ответила"
+        return rows, note
+    if job == "sessions":
+        after = await _sessions_expired_counts()
+        b = before or {}
+        labels = {"web": "Сессий кабинета", "resets": "Кодов сброса",
+                  "admin": "Сессий админки", "setup": "Токенов установки"}
+        rows = [{"label": labels[k],
+                 "value": f"{b.get(k, 0)} → {after.get(k, 0)}"}
+                for k in ("web", "resets", "admin", "setup")]
+        return rows, None
     return None, None
 
 

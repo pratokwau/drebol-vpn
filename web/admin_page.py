@@ -814,6 +814,8 @@ label.chk input{width:auto;margin:0}
             <option value="connect_help">Помощь при подключении</option>
             <option value="purge">Чистка логов</option>
             <option value="site_sync">Синхронизация сайта</option>
+            <option value="device_watch">Вотчер новых устройств</option>
+            <option value="sessions">Чистка просроченных сессий</option>
           </select>
           <button id="btn-job" class="ghost">Запустить сейчас</button>
           <div id="job-out"></div>
@@ -1833,7 +1835,7 @@ $("btn-bl-check").onclick = withSpin($("btn-bl-check"), async function(){
   if (/^[0-9]+$/.test(raw)) { openBlEntry(parseInt(raw, 10)); return; }
   const name = raw.replace(/^@/, "").toLowerCase();
   let r;
-  try { r = await api("/users?q=" + encodeURIComponent(name)); }
+  try { r = await api("/users?search=" + encodeURIComponent(name)); }
   catch(e) { $("bl-result").innerHTML = '<p class="err">Ошибка загрузки</p>'; return; }
   if (r.status !== 200) { renderOut("bl-out", r.data); return; }
   const hit = (r.data.users || []).filter(function(u){ return (u.username || "").toLowerCase() === name; })[0];
