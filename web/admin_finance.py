@@ -89,6 +89,7 @@ def _payment_full_row(p, partial: int = 0, refunded_at=None) -> dict:
             "created": str(p[10] or "")[:16], "paid": str(p[11] or "")[:16],
             "first_name": p[12] or "", "username": p[13] or "",
             "partial_refunded": int(partial or 0),
+            "net_amount": int(p[4] or 0) - int(partial or 0),
             "refunded_at": str(refunded_at or "")[:16] if refunded_at else None}
 
 
@@ -1392,13 +1393,18 @@ MAX_BROADCAST_PHOTO_BYTES = 10 * 1024 * 1024
 
 
 async def _upload_photo(request, audit_action):
-    """Загрузка фото: multipart/form-data, поле "photo".
+    """Загрузка файла: multipart/form-data, поле "photo" или "file".
 
-    Фото заливается ботом самому себе (ADMIN_ID) — Telegram отдаёт
-    file_id, который UI потом передаёт в preview/send как body.photo.
-    Сам файл нигде не хранится: после получения file_id байты
+    Фото (image/*) заливается ботом самому себе (ADMIN_ID) через
+    send_photo, прочий файл — через send_document; Telegram отдаёт
+    file_id, который UI потом передаёт в preview/send, DM или ответ
+    в теме. Сам файл нигде не хранится: после получения file_id байты
     выбрасываются. audit_action — имя действия для журнала
-    (broadcast_photo_upload / channel_photo_upload)."""
+    (broadcast_photo_upload / channel_photo_upload / media_upload).
+    Поле "photo" — как раньше, только image/*; поле "file" — любой тип
+    (картинка из него тоже уходит как фото). Ответ: {ok, file_id,
+    photo_file_id (алиас для фото), file_type: "photo"|"document",
+    file_name, size, width, height}."""
     from aiohttp import web
     from config import ADMIN_ID
     actor, err = await _admin._require_mutation(request)
@@ -1411,7 +1417,7 @@ async def _upload_photo(request, audit_action):
     field = None
     try:
         async for part in reader:
-            if part.name == "photo":
+            if part.name in ("photo", "file"):
                 field = part
                 break
     except Exception:
@@ -1419,8 +1425,11 @@ async def _upload_photo(request, audit_action):
     if field is None:
         return web.json_response({"error": "no_photo"}, status=400)
     ctype = (field.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-    if not ctype.startswith("image/"):
+    is_photo_field = field.name == "photo"
+    if is_photo_field and not ctype.startswith("image/"):
         return web.json_response({"error": "bad_photo_type"}, status=400)
+    is_photo = ctype.startswith("image/")
+    file_name = (getattr(field, "filename", None) or "").strip() or "файл"
     # Читаем чанками: read_chunk() не упирается в client_max_size
     # сервера (1 МБ по умолчанию), лимит 10 МБ проверяем сами.
     data = bytearray()
@@ -1431,33 +1440,56 @@ async def _upload_photo(request, audit_action):
                 break
             data += chunk
             if len(data) > MAX_BROADCAST_PHOTO_BYTES:
-                return web.json_response({"error": "photo_too_large"},
-                                         status=400)
+                return web.json_response(
+                    {"error": "photo_too_large" if is_photo_field
+                     else "file_too_large"}, status=400)
     except Exception:
         return web.json_response({"error": "bad_multipart"}, status=400)
     if not data:
-        return web.json_response({"error": "no_photo"}, status=400)
+        return web.json_response(
+            {"error": "no_photo" if is_photo_field else "no_file"},
+            status=400)
     bot = _admin.get_bot()
     if bot is None:
         return web.json_response({"error": "no_bot"}, status=503)
     try:
-        msg = await bot.send_photo(chat_id=ADMIN_ID, photo=bytes(data))
+        if is_photo:
+            msg = await bot.send_photo(chat_id=ADMIN_ID, photo=bytes(data))
+            sizes = getattr(msg, "photo", None) or []
+            largest = sizes[-1] if sizes else None
+            file_id = getattr(largest, "file_id", None) if largest else None
+            width = getattr(largest, "width", None) if largest else None
+            height = getattr(largest, "height", None) if largest else None
+        else:
+            msg = await bot.send_document(chat_id=ADMIN_ID,
+                                          document=bytes(data),
+                                          filename=file_name)
+            doc = getattr(msg, "document", None)
+            file_id = getattr(doc, "file_id", None) if doc else None
+            width = height = None
     except Exception as ex:
         return web.json_response({"error": "telegram_error",
                                   "details": str(ex)[:200]}, status=502)
-    sizes = getattr(msg, "photo", None) or []
-    largest = sizes[-1] if sizes else None
-    file_id = getattr(largest, "file_id", None) if largest else None
     if not file_id:
         return web.json_response({"error": "telegram_error",
-                                  "details": "no photo in reply"}, status=502)
+                                  "details": "no file_id in reply"}, status=502)
     # В журнал — только размер и первые 8 символов file_id:
-    # полный file_id в логах не нужен, а по префиксу фото находится.
+    # полный file_id в логах не нужен, а по префиксу файл находится.
+    kind = "photo" if is_photo else "document"
     await _admin._audit(actor, audit_action,
-                        f"photo {len(data)} bytes, file_id {file_id[:8]}…")
-    return web.json_response({"ok": True, "photo_file_id": file_id,
-                              "width": getattr(largest, "width", None),
-                              "height": getattr(largest, "height", None)})
+                        f"{kind} {len(data)} bytes, file_id {file_id[:8]}…")
+    resp = {"ok": True, "file_id": file_id, "file_type": kind,
+            "file_name": file_name, "size": len(data)}
+    if is_photo:
+        resp["photo_file_id"] = file_id
+        resp["width"] = width
+        resp["height"] = height
+    return web.json_response(resp)
+
+
+async def media_upload(request):
+    """Загрузка файла для DM / ответа в теме — см. _upload_photo."""
+    return await _upload_photo(request, "media_upload")
 
 
 async def broadcast_upload(request):
@@ -2118,6 +2150,7 @@ def register(app):
     app.router.add_delete("/servers/{sid}", server_delete)
     app.router.add_post("/servers/{sid}/mark", server_mark)
     app.router.add_post("/broadcast/upload", broadcast_upload)
+    app.router.add_post("/media/upload", media_upload)
     app.router.add_post("/broadcast/preview", broadcast_preview)
     app.router.add_post("/broadcast/send", broadcast_send)
     app.router.add_get("/channel", channel_get)

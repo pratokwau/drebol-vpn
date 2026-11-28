@@ -387,6 +387,23 @@ async def user_activity(request):
 
 # ── DM и подарок ───────────────────────────────────────────────────────────
 
+async def _send_media(bot, *, chat_id, file_id, file_type, caption=None,
+                      thread_id=None, parse_mode=None):
+    """Фото/документ по file_id (file_id — из POST /media/upload).
+    Близнец такого же хелпера в admin_infra.py (ответы в теме) — держим
+    оба, чтобы не тянуть кросс-импорт между модулями админки в тестах."""
+    kw = {}
+    if thread_id is not None:
+        kw["message_thread_id"] = thread_id
+    if caption:
+        kw["caption"] = caption
+    if parse_mode:
+        kw["parse_mode"] = parse_mode
+    if file_type == "photo":
+        return await bot.send_photo(chat_id=chat_id, photo=file_id, **kw)
+    return await bot.send_document(chat_id=chat_id, document=file_id, **kw)
+
+
 async def user_dm(request):
     """«📌 Написать» — как handle_dm_user в ТГ: сообщение идёт через тему
     поддержки (core/admin_dm.deliver_admin_message), а не напрямую человеку.
@@ -399,6 +416,10 @@ async def user_dm(request):
       в свежесозданную тему.
     - Группы поддержки нет (темы нет): человеку — в основной бот с шапкой,
       без footer (main_plain).
+    Медиа (file_id из POST /media/upload, file_type photo/document,
+    подпись — text) идёт теми же тремя путями: в тему — сырым, человеку —
+    с подписью + footer как в deliver_admin_message (copy с новой
+    подписью ≤1024, иначе медиа как есть + footer отдельным сообщением).
     Отклонение от ТГ (сознательное): send_log — best-effort, как в
     promo_give: падение лог-канала не маскирует успешную доставку ошибкой
     (в deliver_admin_message send_log внутри общего try).
@@ -413,7 +434,17 @@ async def user_dm(request):
         return web.json_response({"error": "bad_id"}, status=400)
     body = await _json_body(request)
     text = str(body.get("text") or "").strip()
-    if not text:
+    file_id = body.get("file_id")
+    file_type = body.get("file_type")
+    file_name = str(body.get("file_name") or "").strip()
+    is_media = file_id is not None
+    if is_media:
+        if not isinstance(file_id, str) or not file_id.strip():
+            return web.json_response({"error": "bad_file_id"}, status=400)
+        file_id = file_id.strip()
+        if file_type not in ("photo", "document"):
+            return web.json_response({"error": "bad_file_type"}, status=400)
+    elif not text:
         return web.json_response({"error": "empty_text"}, status=400)
     bot = get_bot()
     if bot is None:
@@ -422,6 +453,12 @@ async def user_dm(request):
     import core.database as db
     from config import load_config
     from core.admin_dm import _footer, ensure_user_topic
+    if is_media:
+        label = ("🖼 фото" if file_type == "photo"
+                 else f"📎 {escape(file_name) or 'файл'}")
+        log_preview = label if not text else f"{label}: {escape(text[:100])}"
+    else:
+        log_preview = escape(text[:100])
     try:
         cfg = load_config()
         group_id = cfg.get("support_group_id")
@@ -432,29 +469,57 @@ async def user_dm(request):
         topic = await ensure_user_topic(bot, tg_id)
         if has_dialog and topic:
             topic_id, gid = topic
-            await bot.send_message(
-                chat_id=gid, message_thread_id=topic_id, text=text)
+            if is_media:
+                await _send_media(bot, chat_id=gid, file_id=file_id,
+                                  file_type=file_type, caption=text or None,
+                                  thread_id=topic_id)
+            else:
+                await bot.send_message(
+                    chat_id=gid, message_thread_id=topic_id, text=text)
             await db.touch_support_topic(tg_id)
             via = "support"
         elif topic:
             topic_id, gid = topic
             footer = _footer()
-            await bot.send_message(
-                chat_id=tg_id,
-                text=("📌 <b>Сообщение от Drebol VPN</b>\n\n"
-                      f"<blockquote>{escape(text)}</blockquote>"
-                      f"{footer}"),
-                parse_mode="HTML")
-            await bot.send_message(
-                chat_id=gid, message_thread_id=topic_id, text=text)
+            if is_media:
+                caption_html = ((escape(text) + footer) if text
+                                else footer.strip())
+                if len(caption_html) <= 1024:
+                    await _send_media(bot, chat_id=tg_id, file_id=file_id,
+                                      file_type=file_type,
+                                      caption=caption_html,
+                                      parse_mode="HTML")
+                else:
+                    await _send_media(bot, chat_id=tg_id, file_id=file_id,
+                                      file_type=file_type,
+                                      caption=escape(text),
+                                      parse_mode="HTML")
+                    await bot.send_message(chat_id=tg_id, text=footer,
+                                           parse_mode="HTML")
+                await _send_media(bot, chat_id=gid, file_id=file_id,
+                                  file_type=file_type, caption=text or None,
+                                  thread_id=topic_id)
+            else:
+                await bot.send_message(
+                    chat_id=tg_id,
+                    text=("📌 <b>Сообщение от Drebol VPN</b>\n\n"
+                          f"<blockquote>{escape(text)}</blockquote>"
+                          f"{footer}"),
+                    parse_mode="HTML")
+                await bot.send_message(
+                    chat_id=gid, message_thread_id=topic_id, text=text)
             await db.touch_support_topic(tg_id)
             via = "main"
         else:
-            await bot.send_message(
-                chat_id=tg_id,
-                text=("📌 <b>Сообщение от Drebol VPN</b>\n\n"
-                      f"<blockquote>{escape(text)}</blockquote>"),
-                parse_mode="HTML")
+            if is_media:
+                await _send_media(bot, chat_id=tg_id, file_id=file_id,
+                                  file_type=file_type, caption=text or None)
+            else:
+                await bot.send_message(
+                    chat_id=tg_id,
+                    text=("📌 <b>Сообщение от Drebol VPN</b>\n\n"
+                          f"<blockquote>{escape(text)}</blockquote>"),
+                    parse_mode="HTML")
             via = "main_plain"
     except Exception as ex:
         logging.error("админка: dm %s: %s", tg_id, ex)
@@ -462,7 +527,7 @@ async def user_dm(request):
     try:
         from core.log_channel import send_log
         await send_log(bot, f"📌 Админ → <code>{tg_id}</code> "
-                            f"({via}): {escape(text[:100])}")
+                            f"({via}): {log_preview}")
     except Exception as ex:
         logging.error("админка: dm send_log %s: %s", tg_id, ex)
     await _audit(actor, "user_dm", f"tg_id: {tg_id}")

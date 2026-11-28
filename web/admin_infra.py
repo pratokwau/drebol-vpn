@@ -3177,6 +3177,58 @@ async def panel_settings_test(request):
 
 # ── Поддержка: тема, ответ, закрытие ─────────────────────────────────────────
 
+async def _send_media(bot, *, chat_id, file_id, file_type, caption=None,
+                      thread_id=None, parse_mode=None):
+    """Фото/документ по file_id (file_id — из POST /media/upload).
+    Близнец такого же хелпера в admin_users.py (DM) — держим оба,
+    чтобы не тянуть кросс-импорт между модулями админки в тестах."""
+    kw = {}
+    if thread_id is not None:
+        kw["message_thread_id"] = thread_id
+    if caption:
+        kw["caption"] = caption
+    if parse_mode:
+        kw["parse_mode"] = parse_mode
+    if file_type == "photo":
+        return await bot.send_photo(chat_id=chat_id, photo=file_id, **kw)
+    return await bot.send_document(chat_id=chat_id, document=file_id, **kw)
+
+
+async def media_get(request):
+    """GET /media/{file_id} — файл из Telegram для истории темы:
+    бот скачивает его по file_id и отдаёт браузеру. Только сессия
+    админа; file_id — непрозрачный идентификатор Telegram, сам по себе
+    файл не открывает (скачать его можно только токеном бота)."""
+    try:
+        await _require_actor(request)
+    except Exception:
+        return _json_error("no_session", 401)
+    file_id = (request.match_info.get("file_id") or "").strip()
+    if not file_id:
+        return _json_error("bad_request")
+    bot = get_bot()
+    if bot is None:
+        return _json_error("no_bot", 503)
+    try:
+        tg_file = await bot.get_file(file_id)
+        import io
+        buf = io.BytesIO()
+        await tg_file.download_to_memory(buf)
+        data = buf.getvalue()
+    except Exception as ex:
+        logging.error("админка: media %s: %s", file_id[:8], ex)
+        return _json_error("media_error", 502)
+    import mimetypes
+    import os
+    path = getattr(tg_file, "file_path", "") or ""
+    ctype, _ = mimetypes.guess_type(path)
+    name = os.path.basename(path) or "file"
+    return web.Response(body=data,
+                        content_type=ctype or "application/octet-stream",
+                        headers={"Content-Disposition":
+                                 f'inline; filename="{name}"'})
+
+
 async def support_topic_get(request):
     try:
         await _require_actor(request)
@@ -3221,7 +3273,16 @@ async def support_topic_reply(request):
         return _json_error("bad_request")
     body = await _json_body(request)
     text = str(body.get("text") or "").strip()
-    if not text:
+    file_id = body.get("file_id")
+    file_type = body.get("file_type")
+    is_media = file_id is not None
+    if is_media:
+        if not isinstance(file_id, str) or not file_id.strip():
+            return _json_error("bad_file_id")
+        file_id = file_id.strip()
+        if file_type not in ("photo", "document"):
+            return _json_error("bad_file_type")
+    elif not text:
         return _json_error("bad_request")
     close = bool(body.get("close"))
     from core.database import (
@@ -3240,26 +3301,39 @@ async def support_topic_reply(request):
     # юзера в группе поддержки, а бот поддержки копирует его юзеру.
     # Если основного бота нет в группе (отправка в тему падает) — шлём
     # ответ юзеру напрямую в личку основного бота.
+    # Медиа — тем же путём: send_photo/send_document вместо send_message.
     if group_id:
         try:
-            await bot.send_message(chat_id=group_id,
-                                   message_thread_id=topic_id, text=text)
+            if is_media:
+                await _send_media(bot, chat_id=group_id, file_id=file_id,
+                                  file_type=file_type, caption=text or None,
+                                  thread_id=topic_id)
+            else:
+                await bot.send_message(chat_id=group_id,
+                                       message_thread_id=topic_id, text=text)
             delivered_via = "topic"
         except Exception as ex:
             logging.error("админка: support reply to topic: %s", ex)
     if delivered_via is None:
         try:
-            await bot.send_message(chat_id=user_id, text=text)
+            if is_media:
+                await _send_media(bot, chat_id=user_id, file_id=file_id,
+                                  file_type=file_type, caption=text or None)
+            else:
+                await bot.send_message(chat_id=user_id, text=text)
             delivered_via = "dm"
         except Exception as ex:
             logging.error("админка: support reply DM: %s", ex)
             return _json_error("delivery_failed", 502)
-    await add_support_message(user_id, text, from_admin=True)
+    await add_support_message(user_id, text, from_admin=True,
+                              file_id=file_id if is_media else None,
+                              file_type=file_type if is_media else None)
     await touch_support_topic(user_id)
     if close:
         await set_support_topic_status(user_id, "closed")
     await _audit(actor, "support_reply",
                  f"user_id={user_id} via={delivered_via}"
+                 + (f" {file_type}" if is_media else "")
                  + (" closed" if close else ""))
     return web.json_response({"ok": True, "delivered_via": delivered_via})
 
@@ -4703,6 +4777,7 @@ def register(app) -> None:
     app.router.add_get("/support/topics", support_topics)
     app.router.add_get("/support/topics/{user_id}", support_topic_get)
     app.router.add_post("/support/topics/{user_id}/reply", support_topic_reply)
+    app.router.add_get("/media/{file_id}", media_get)
     app.router.add_post("/support/topics/{user_id}/close", support_topic_close)
     app.router.add_get("/downtime", downtime_get)
     app.router.add_get("/online", online_get)

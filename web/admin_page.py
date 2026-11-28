@@ -340,9 +340,12 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-find">Найти</button><button id="btn-users-export" class="ghost">⬇️ CSV</button><button id="btn-recent" class="ghost">Недавние</button><button id="btn-users-prev" class="ghost">← Назад</button><button id="btn-users-next" class="ghost">Вперёд →</button><span id="users-page-label" class="mut"></span></div>
           <div id="users-out"></div>
         </div>
-        <div class="card"><h2>Сообщение пользователю</h2><p class="sub">Отправляется от имени бота Drebol VPN. Если у человека есть диалог в поддержке — сообщение уйдёт в его тему в группе, иначе — в основной бот.</p>
+        <div class="card"><h2>Сообщение пользователю</h2><p class="sub">Отправляется от имени бота Drebol VPN: текст, фото или файл. Если у человека есть диалог в поддержке — сообщение уйдёт в его тему в группе, иначе — в основной бот.</p>
           <input id="dm-id" type="number" placeholder="tg_id">
           <textarea id="dm-text" placeholder="текст сообщения"></textarea>
+          <label>Файл (необязательно, до 10 МБ): фото уйдёт картинкой, остальное — документом. Подпись — текст выше.</label>
+          <input id="dm-file" type="file">
+          <div class="btnrow"><button id="btn-dm-file-del" class="ghost">✕ Убрать файл</button><span id="dm-file-msg" class="mut"></span></div>
           <button id="btn-dm">Отправить</button>
           <span id="dm-msg" class="mut"></span>
         </div>
@@ -928,6 +931,9 @@ label.chk input{width:auto;margin:0}
           <div class="btnrow"><button id="btn-sup-open" class="ghost">Открыть тему</button></div>
           <div id="sup-msgs"></div>
           <textarea id="sup-text" placeholder="ответ юзеру"></textarea>
+          <label>Файл (необязательно, до 10 МБ): фото уйдёт картинкой, остальное — документом. Подпись — текст выше.</label>
+          <input id="sup-file" type="file">
+          <div class="btnrow"><button id="btn-sup-file-del" class="ghost">✕ Убрать файл</button><span id="sup-file-msg" class="mut"></span></div>
           <label><input id="sup-close" type="checkbox"> закрыть обращение после ответа</label>
           <div class="btnrow"><button id="btn-sup-reply">Ответить</button><button id="btn-sup-close" class="ghost">Закрыть обращение</button></div>
           <span id="sup-msg" class="mut"></span>
@@ -1732,13 +1738,35 @@ async function loadUserActivity(tgId, scope, page){
 const DM_VIA_TEXT = {support: "Отправлено в тему поддержки — человеку перешлёт бот поддержки",
   main: "Отправлено пользователю в основной бот · тема в группе создана",
   main_plain: "Отправлено пользователю"};
+/* Загрузка файла для DM/ответа в теме: POST /media/upload, возвращает
+   {file_id, file_type, file_name}. Общий для обеих карточек. */
+async function uploadMediaFile(f, msgEl){
+  const fd = new FormData(); fd.append("file", f);
+  let r, data = {};
+  try { r = await fetch(API + "/media/upload", {method: "POST", credentials: "same-origin", headers: {"X-CSRF-Token": csrf()}, body: fd}); data = await r.json(); } catch(e) { msgEl.textContent = "Ошибка загрузки"; return null; }
+  if (r.status !== 200 || !data.file_id) { msgEl.textContent = "Ошибка: " + (data.error || r.status); return null; }
+  msgEl.textContent = (data.file_type === "photo" ? "🖼 Фото загружено" : "📎 Файл загружен") + " (" + (data.file_name || "файл") + ")";
+  return {file_id: data.file_id, file_type: data.file_type, file_name: data.file_name || ""};
+}
+let dmFile = null;
+$("dm-file").onchange = async function(){
+  const f = $("dm-file").files && $("dm-file").files[0];
+  if (!f) return;
+  dmFile = await uploadMediaFile(f, $("dm-file-msg"));
+  if (!dmFile) $("dm-file").value = "";
+};
+$("btn-dm-file-del").onclick = function(){
+  dmFile = null; $("dm-file").value = ""; $("dm-file-msg").textContent = "Файл убран";
+};
 $("btn-dm").onclick = withSpin($("btn-dm"), async function(){
+  const body = {text: $("dm-text").value};
+  if (dmFile) { body.file_id = dmFile.file_id; body.file_type = dmFile.file_type; body.file_name = dmFile.file_name; }
   const r = await api("/users/" + $("dm-id").value + "/dm",
-    {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify({text: $("dm-text").value})});
+    {method: "POST", headers: {"X-CSRF-Token": csrf()}, body: JSON.stringify(body)});
   $("dm-msg").textContent = r.status === 200
     ? (DM_VIA_TEXT[r.data.via] || "Отправлено")
     : ("Ошибка: " + (r.data.error || r.status));
-  if (r.status === 200) toast("Сообщение отправлено", "ok");
+  if (r.status === 200) { toast("Сообщение отправлено", "ok"); $("dm-text").value = ""; dmFile = null; $("dm-file").value = ""; $("dm-file-msg").textContent = ""; }
 });
 $("btn-gift").onclick = withSpin($("btn-gift"), async function(){
   const body = {amount: parseInt($("gift-amount").value || "0", 10), period_seconds: parseInt($("gift-seconds").value || "0", 10)};
@@ -3336,9 +3364,11 @@ async function openPaymentEditor(pid){
   h += kvRow("Оплачен", '<span class="mono">' + fmtDate(p.paid) + '</span>');
   if (p.refunded_at) h += kvRow("Возвращён", '<span class="mono">' + fmtDate(p.refunded_at) + '</span>');
   if (p.partial_refunded) h += kvRow("Возвращено частично", fmtMoney(p.partial_refunded));
+  if (p.partial_refunded) h += kvRow("Чистыми", fmtMoney(p.net_amount != null ? p.net_amount : p.amount - p.partial_refunded));
   if (p.pay_url) h += kvRow("Ссылка на оплату", '<a href="' + esc(p.pay_url) + '" target="_blank" rel="noopener">открыть</a>');
   if (p.error) h += kvRow("Ошибка", esc(p.error));
   h += '</dl>';
+  h += '<div class="btnrow" style="margin-top:12px"><button id="ed-pay-profile" class="ghost">👤 Профиль</button></div>';
   if (p.provider === "platega" && p.external_id) {
     h += '<div class="btnrow" style="margin-top:12px"><button id="ed-pay-check" class="ghost">🔍 Проверить в Platega</button></div>';
     h += '<div id="ed-pay-platega" style="margin-top:8px"></div>';
@@ -3352,6 +3382,8 @@ async function openPaymentEditor(pid){
     h += '<p class="mut" id="ed-pay-msg" style="margin-top:10px"></p>';
   }
   $("drawer-body").innerHTML = h;
+  const profBtn = $("ed-pay-profile");
+  if (profBtn) profBtn.onclick = function(){ openUserEditor(p.tg_id, true); };
   let refundCheck = null;
   const chkBtn = $("ed-pay-check");
   if (chkBtn) {
@@ -5356,16 +5388,37 @@ async function openTopic(){
   const r = await api("/support/topics/" + id);
   if (r.status !== 200) { $("sup-msgs").textContent = "Ошибка: " + (r.data.error || r.status); return; }
   $("sup-msgs").innerHTML = (r.data.messages || []).map(function(m){
-    return "<p><b>" + (m.from_admin ? "Админ" : "Юзер") + ":</b> " + esc(m.text) + ' <span class="mut">' + fmtDate(m.created_at) + "</span></p>";
+    return "<p><b>" + (m.from_admin ? "Админ" : "Юзер") + ":</b> " + esc(m.text) + supMsgMedia(m) + ' <span class="mut">' + fmtDate(m.created_at) + "</span></p>";
   }).join("") || '<div class="empty"><span class="big">💬</span>Сообщений нет</div>';
 }
+/* Медиа в истории темы: фото — картинкой через /media, файл — ссылкой
+   на скачивание; подпись — текст сообщения как раньше. */
+function supMsgMedia(m){
+  if (!m.file_id) return "";
+  const url = API + "/media/" + encodeURIComponent(m.file_id);
+  if (m.file_type === "photo") return '<br><a href="' + url + '" target="_blank"><img src="' + url + '" style="max-width:320px;display:block;margin-top:4px"></a>';
+  const label = m.file_type === "document" ? "📎 Файл" : "📎 Вложение";
+  return '<br><a href="' + url + '" target="_blank">' + label + "</a>";
+}
 $("btn-sup-open").onclick = openTopic;
+let supFile = null;
+$("sup-file").onchange = async function(){
+  const f = $("sup-file").files && $("sup-file").files[0];
+  if (!f) return;
+  supFile = await uploadMediaFile(f, $("sup-file-msg"));
+  if (!supFile) $("sup-file").value = "";
+};
+$("btn-sup-file-del").onclick = function(){
+  supFile = null; $("sup-file").value = ""; $("sup-file-msg").textContent = "Файл убран";
+};
 $("btn-sup-reply").onclick = withSpin($("btn-sup-reply"), async function(){
   const id = $("sup-user").value;
+  const body = {text: $("sup-text").value, close: $("sup-close").checked};
+  if (supFile) { body.file_id = supFile.file_id; body.file_type = supFile.file_type; body.file_name = supFile.file_name; }
   const r = await api("/support/topics/" + id + "/reply", {method: "POST", headers: {"X-CSRF-Token": csrf()},
-    body: JSON.stringify({text: $("sup-text").value, close: $("sup-close").checked})});
+    body: JSON.stringify(body)});
   $("sup-msg").textContent = r.status === 200 ? ("Отправлено (" + (r.data.delivered_via || "?") + ")") : ("Ошибка: " + (r.data.error || r.status));
-  if (r.status === 200) { $("sup-text").value = ""; toast("Ответ отправлен", "ok"); }
+  if (r.status === 200) { $("sup-text").value = ""; supFile = null; $("sup-file").value = ""; $("sup-file-msg").textContent = ""; toast("Ответ отправлен", "ok"); }
 });
 $("btn-sup-close").onclick = withSpin($("btn-sup-close"), async function(){
   const id = $("sup-user").value;
