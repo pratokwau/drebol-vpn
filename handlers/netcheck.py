@@ -9,6 +9,11 @@
 домены доступны, крестик — есть недоступные), ниже подробная
 таблица по доменам.
 
+Второй слой — Cheburcheck (services/cheburcheck.py): статус тех же
+доменов и IP прямых хостов по спискам блокировок РКН. Его сбой не
+роняет проверку Globalping — блок просто показывается как
+недоступный.
+
 Настройки («⚙️ Настройки»): какие домены и операторы проверять.
 Хранятся в config.json, ключ "netcheck": {"domains": [подписи],
 "operators": [подписи]}. По умолчанию включены все — это и есть
@@ -16,6 +21,7 @@
 включёнными всегда.
 """
 
+import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -23,6 +29,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from config import load_config, save_config
+import services.cheburcheck as cc
 import services.globalping as gp
 
 _SHORT_OP = {
@@ -67,7 +74,44 @@ def _op_cell(label: str, op: dict) -> str:
     return f"{short} ❌"
 
 
-def _render(results: list[dict]) -> str:
+def _render_chebur(results: list[dict] | None) -> list[str]:
+    """Блок Cheburcheck: статус целей по спискам блокировок РКН."""
+    lines = ["🛡 <b>Списки блокировок (Cheburcheck)</b>"]
+    if results is None:
+        lines.append("⚠️ Cheburcheck недоступен — статус по спискам "
+                     "в этот раз не проверен.")
+        return lines
+    for r in results:
+        head = f"<b>{r['label']}</b> — {r['shown']}"
+        state = r.get("state")
+        if state == "ok":
+            tail = "✅ не в списках"
+            if r.get("complaints"):
+                tail += f" · ⚠️ жалоб за 14 дней: {r['complaints']}"
+            lines.append(f"{head}\n{tail}")
+        elif state == "blocked":
+            tail = "❌ <b>в списках блокировок</b>"
+            if r.get("subnets"):
+                tail += " · подсети: " + ", ".join(
+                    str(s) for s in r["subnets"][:3])
+            lines.append(f"{head}\n{tail}")
+        elif state == "unknown":
+            lines.append(f"{head}\n❔ нет данных в базе Cheburcheck")
+        else:
+            lines.append(f"{head}\n⚠️ не проверено ({r.get('error') or 'ошибка'})")
+    ok, blocked, unknown, error = cc.summarize(results)
+    lines.append("")
+    if blocked:
+        lines.append(f"❌ <b>В списках: {blocked}</b> · ✅ чисто: {ok} · "
+                     f"❔ нет данных: {unknown} · ⚠️ ошибок: {error}")
+    else:
+        lines.append(f"✅ В списках никого нет · чисто: {ok} · "
+                     f"❔ нет данных: {unknown} · ⚠️ ошибок: {error}")
+    return lines
+
+
+def _render(results: list[dict],
+            chebur: list[dict] | None = None) -> str:
     now = datetime.now(ZoneInfo("Europe/Moscow")).strftime("%d.%m %H:%M")
     ok, blocked, no_probe, error = gp.summarize(results)
     marks = gp.summarize_operators(results)
@@ -111,6 +155,8 @@ def _render(results: list[dict]) -> str:
         lines.append("ℹ️ <i>Подписка: 502 без sub ID — это нормально. "
                      "Страница живёт только по ссылке подписки, а здесь "
                      "важно, что оператор не блокирует домен.</i>")
+    lines.append("")
+    lines.extend(_render_chebur(chebur))
     return "\n".join(lines).strip()
 
 
@@ -175,7 +221,9 @@ async def handle_netcheck_menu(query, context: ContextTypes.DEFAULT_TYPE = None)
     lines = [
         "🌐 <b>Проверка операторов</b>", "",
         "<i>Живая проверка через Globalping: HTTP-запрос с домашних "
-        "сетей операторов — так, как сайт видят обычные пользователи.</i>",
+        "сетей операторов — так, как сайт видят обычные пользователи. "
+        "Плюс второй слой — Cheburcheck: те же домены и IP прямых "
+        "хостов по спискам блокировок РКН.</i>",
         "",
         f"Домены: {targets}",
         f"Операторы: {ops}", "",
@@ -253,7 +301,15 @@ async def handle_netcheck_run(query, context: ContextTypes.DEFAULT_TYPE):
     )
     domains, operators = get_netcheck_selection()
     try:
-        results = await gp.check_all(domains, operators)
+        results, chebur = await asyncio.gather(
+            gp.check_all(domains, operators),
+            cc.check_all(),
+            return_exceptions=True,
+        )
+        if isinstance(results, Exception):
+            raise results
+        if isinstance(chebur, Exception):
+            chebur = None
     except Exception as exc:  # сеть легла, Globalping недоступен и т.п.
         await query.edit_message_text(
             "❌ <b>Не удалось проверить</b>\n\n"
@@ -269,7 +325,7 @@ async def handle_netcheck_run(query, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     await query.edit_message_text(
-        _render(results), parse_mode="HTML", disable_web_page_preview=True,
+        _render(results, chebur), parse_mode="HTML", disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Проверить ещё раз",
                                   callback_data="netcheck_run"),
