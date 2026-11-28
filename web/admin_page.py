@@ -459,8 +459,9 @@ label.chk input{width:auto;margin:0}
           <div id="asub-out"></div>
         </div>
         <div class="card"><h2>⚙️ Настройки админских подписок</h2><p class="sub">Условия выдачи новых админских подписок — как экран «⚙️ Настройки подписок» в ТГ. Применяются только к новым подпискам.</p>
-          <div class="btnrow"><button id="btn-admin-presets" class="ghost">Обновить</button></div>
+          <div class="btnrow"><button id="btn-admin-presets" class="ghost">Обновить</button><button id="btn-asub-names" class="ghost">🔄 Обновить ники в панели</button></div>
           <div id="admin-presets-out"></div>
+          <div id="asub-names-out"></div>
         </div>
         <div class="card"><h2>Рефералка</h2><p class="sub">Кто приводит друзей и какие бонусы настроены.</p>
           <div class="btnrow"><button id="btn-referrals" class="ghost">Показать рефералку</button><button id="btn-lte" class="ghost">Проверить LTE сейчас</button></div>
@@ -789,8 +790,9 @@ label.chk input{width:auto;margin:0}
       <!-- Синхронизация -->
       <section id="sec-sync" class="page hidden">
         <div class="card"><h2>Полная синхронизация</h2><p class="sub">Одним проходом: подписки и ники ↔ панель, узлы и хосты, сквады, сайт, чёрный список, сверка Platega. Только вручную.</p>
-          <div class="btnrow"><button id="btn-psync">Запустить полную синхронизацию</button><button id="btn-psync-set" class="ghost">Последний отчёт</button></div>
+          <div class="btnrow"><button id="btn-psync">Запустить полную синхронизацию</button><button id="btn-psync-set" class="ghost">Последний отчёт</button><button id="btn-names-sync" class="ghost">👤 Только ники и юзернеймы</button></div>
           <div id="psync-out"></div>
+          <div id="names-sync-out"></div>
         </div>
         <div class="card"><h2>Утренняя сводка 09:00</h2><p class="sub">Что входит в ежедневную сводку, какие фоновые задачи работают, и во сколько приходит сводка. Галочки — те же тумблеры, что в ТГ на экране «⏰ Синхронизация».</p>
           <div class="btnrow"><button id="btn-morning">Показать настройки</button><button id="btn-morning-run">Запустить сводку сейчас</button></div>
@@ -2764,6 +2766,7 @@ async function saveAdminPreset(body, msgId, okText){
   loadAdminPresets();
 }
 $("btn-admin-presets").onclick = function(){ loadAdminPresets(); };
+$("btn-asub-names").onclick = withSpin($("btn-asub-names"), async function(){ await namesSyncRun("/admin-subs/names-sync", "asub-names-out"); });
 /* --- Сквады Remnawave: паритет с «🗂 Сквады Remnawave» в ТГ
    (paidsub/handlers.py handle_paid_squads_menu): выдаваемые сквады,
    сквад LTE-серверов, сквад после конца LTE; тумблеры — мгновенные,
@@ -4908,6 +4911,43 @@ $("btn-psync").onclick = withSpin($("btn-psync"), async function(){
   if (r.status !== 200 || !r.data || !r.data.steps) { renderOut("psync-out", r.data); return; }
   renderSyncReport(r.data);
 });
+/* --- Только ники и юзернеймы: паритет с ТГ (handle_panel_names_sync
+   в services/remnawave.py): живая проверка каждого человека в Telegram
+   и переписывание описаний в панели; полная синхронизация при этом
+   не запускается. --- */
+function renderNamesSync(d, outId){
+  const box = $(outId);
+  const bt = (d && d.by_table) || {};
+  const paid = bt.paid_subs || null, admin = bt.admin_subs || null;
+  let h = '<h3>👤 Юзернеймы и ники актуализированы</h3><dl class="kv">';
+  let checked = 'Проверено подписок: <b>' + (d.checked || 0) + '</b>';
+  const parts = [];
+  if (paid) parts.push('платных: ' + (paid.checked || 0));
+  if (admin) parts.push('админских: ' + (admin.checked || 0));
+  if (parts.length) checked += ' (' + parts.join(', ') + ')';
+  h += kvRow('Проверено', checked);
+  h += kvRow('Обновлено описаний', '<b>' + (d.updated || 0) + '</b>');
+  h += kvRow('С ошибкой', '<b>' + ((d.errors || []).length) + '</b>');
+  h += '</dl>';
+  const errs = d.errors || [];
+  if (errs.length) {
+    h += '<p class="warn">⚠️ Не получилось</p><div class="mut">' + errs.slice(0, 5).map(function(e){ return esc(String(e).slice(0, 120)); }).join('<br>') + '</div>';
+    if (errs.length > 5) h += '<p class="mut">…и ещё ' + (errs.length - 5) + '</p>';
+  }
+  h += '<p class="mut">Формат описания в панели: Drebol VPN · @юзернейм · Ник · TG ID · Актуализировано ДД.ММ.ГГГГ - ЧЧ.ММ.СС. Ники сверены напрямую с Telegram на момент прогона, а не взяты из базы. Кого Telegram не отдал, того не трогали.</p>';
+  box.innerHTML = h;
+}
+async function namesSyncRun(path, outId){
+  const r = await postConfirm(path, {});
+  if (r.status !== 200 || !r.data || r.data.ok !== true) {
+    const e = (r.data && r.data.error) || '';
+    if (e === 'no_bot') { $(outId).innerHTML = '<p class="err">Нужен доступ к Telegram для проверки</p>'; return; }
+    if (e === 'panel_not_configured') { $(outId).innerHTML = '<p class="err">Сначала задай адрес панели и токен</p>'; return; }
+    renderOut(outId, r.data); return;
+  }
+  renderNamesSync(r.data, outId);
+}
+$("btn-names-sync").onclick = withSpin($("btn-names-sync"), async function(){ await namesSyncRun("/panel/names-sync", "names-sync-out"); });
 async function loadSyncSettings(){
   const r = await api("/panel-sync/settings");
   if (r.status !== 200) { renderOut("psync-out", r.data); return; }

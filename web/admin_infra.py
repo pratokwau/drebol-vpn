@@ -653,6 +653,50 @@ async def panel_sync_run(request):
     })
 
 
+async def _names_sync_run(tables):
+    """Актуализация ников и юзернеймов в панели — тот же
+    refresh_panel_descriptions, что в ТГ handle_panel_names_sync:
+    живая проверка каждого человека в Telegram (getChat по TG ID),
+    свежие юзернейм и ник пишутся в описание клиента панели.
+    Возвращает (status, payload): 409 panel_not_configured без
+    адреса/токена панели (как в ТГ — «Сначала задай адрес панели
+    и токен»), 503 no_bot без бота (живая проверка обязательна),
+    502 panel_failed при исключении сервиса."""
+    if not rw_mod.is_configured():
+        return 409, {"error": "panel_not_configured"}
+    bot = get_bot()
+    if bot is None:
+        return 503, {"error": "no_bot"}
+    try:
+        resolver = await panel_mod.tg_chat_resolver(bot)
+        res = await panel_mod.refresh_panel_descriptions(
+            tables, resolve_chat=resolver)
+    except Exception:
+        logging.exception("panel names-sync failed")
+        return 502, {"error": "panel_failed"}
+    return 200, {"ok": True, "checked": res["checked"],
+                 "updated": res["updated"],
+                 "errors": res.get("errors") or [],
+                 "by_table": res.get("by_table") or {}}
+
+
+async def panel_names_sync(request):
+    """«👤 Только ники и юзернеймы» — паритет с ТГ
+    (handle_panel_names_sync): платные + админские подписки,
+    без запуска полной синхронизации."""
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    status, payload = await _names_sync_run(("paid_subs", "admin_subs"))
+    if status != 200:
+        return web.json_response(payload, status=status)
+    await _audit(actor, "panel_names_sync",
+                 f"checked={payload['checked']} "
+                 f"updated={payload['updated']} "
+                 f"errors={len(payload['errors'])}")
+    return web.json_response(payload)
+
+
 def _panel_sync_settings_snapshot() -> dict:
     """Только последний запуск и отчёт: расписания у синхронизации нет,
     она запускается вручную (решение владельца 2026-11-19)."""
@@ -767,6 +811,7 @@ _ADMIN_LABELS = {
     "panel_settings": "⚙️ Настройки панели", "panel_settings_test": "🔌 Проверка панели",
     "links_update": "🔗 Основные ссылки",
     "panel_sync": "🔄 Синхронизация с панелью", "panel_sync_settings": "🔄 Настройки синхронизации",
+    "panel_names_sync": "👤 Ники и юзернеймы в панели", "admin_subs_names_sync": "👤 Ники админских в панели",
     "panel_tags_apply": "🏷 Применил теги всем",
     "payment_refund": "💸 Оформил возврат", "platega_update": "💳 Настройки Platega",
     "promo_batch": "🎁 Пакетная раздача промокодов", "promo_create": "🎁 Создал промокод",
@@ -4522,6 +4567,7 @@ def register(app) -> None:
     app.router.add_get("/nodes/usage/snapshot", usage_snapshot)
     app.router.add_get("/nodes/{node_id}/users", node_users)
     app.router.add_post("/panel-sync", panel_sync_run)
+    app.router.add_post("/panel/names-sync", panel_names_sync)
     app.router.add_get("/panel-sync/settings", panel_sync_settings_get)
     app.router.add_get("/panel/tags", panel_tags_get)
     app.router.add_post("/panel/tags/apply", panel_tags_apply)

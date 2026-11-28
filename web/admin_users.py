@@ -1761,6 +1761,26 @@ async def admin_subs_presets_patch(request):
     return web.json_response({"ok": True})
 
 
+async def admin_subs_names_sync(request):
+    """«🔄 Обновить ники в панели» — паритет с ТГ
+    (handle_subs_names_sync в adminsub/handlers.py): только
+    админские подписки, тот же refresh_panel_descriptions
+    через общий _names_sync_run из admin_infra."""
+    from aiohttp import web
+    actor, err = await _require_mutation(request)
+    if err is not None:
+        return err
+    from web.admin_infra import _names_sync_run
+    status, payload = await _names_sync_run(("admin_subs",))
+    if status != 200:
+        return web.json_response(payload, status=status)
+    await _audit(actor, "admin_subs_names_sync",
+                 f"checked={payload['checked']} "
+                 f"updated={payload['updated']} "
+                 f"errors={len(payload['errors'])}")
+    return web.json_response(payload)
+
+
 # ── Рефералка ───────────────────────────────────────────────────────────────
 
 async def referrals_get(request):
@@ -2269,6 +2289,7 @@ def register(app) -> None:
     app.router.add_post("/admin-subs", admin_sub_create)
     app.router.add_get("/admin-subs/presets", admin_subs_presets_get)
     app.router.add_patch("/admin-subs/presets", admin_subs_presets_patch)
+    app.router.add_post("/admin-subs/names-sync", admin_subs_names_sync)
     app.router.add_get("/admin-subs/{sub_id}", admin_sub_card)
     app.router.add_get("/admin-subs/{sub_id}/history", admin_sub_history)
     app.router.add_get("/admin-subs/{sub_id}/devices", admin_sub_devices)
