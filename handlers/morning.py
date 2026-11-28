@@ -173,25 +173,24 @@ async def _netcheck_section(cfg: dict) -> tuple[str | None, bool]:
         except ValueError:
             pass
     try:
-        import services.globalping as gp
+        import services.cheburcheck as cc
         from handlers.netcheck import get_netcheck_selection
-        domains, operators = get_netcheck_selection()
-        results = await gp.check_all(domains, operators)
+        domains, _operators = get_netcheck_selection()
+        results = await cc.check_all(domains)
     except Exception as exc:
         return (f"🌐 Проверка операторов: ❌ не удалось проверить: "
                 f"<code>{exc}</code>"), True
-    marks = gp.summarize_operators(results)
-    ok, blocked, _no_probe, error = gp.summarize(results)
-    line = ("🌐 Проверка операторов: " +
-            " · ".join(f"{label} {mark}" for label, mark in marks.items()))
-    problems = [f"{r['label']} — {label}"
-                for r in results
-                for label, op in (r.get("operators") or {}).items()
-                if op.get("state") == "blocked"]
+    ok, blocked, unknown, error = cc.summarize(results)
+    line = (f"🌐 Проверка операторов (списки РКН): "
+            f"чисто {ok} из {len(results)}")
+    problems = [f"{r['label']} ({r['shown']})"
+                for r in results if r.get("state") == "blocked"]
     if problems:
-        line += "\n🔴 <b>Заблокировано:</b> " + ", ".join(problems)
-    elif blocked == 0 and error == 0:
-        line += "\n✅ Всё доступно."
+        line += "\n🔴 <b>В списках блокировок:</b> " + ", ".join(problems)
+    elif error:
+        line += f"\n⚠️ Не проверено целей: {error}"
+    else:
+        line += "\n✅ В списках никого нет."
     return line, True
 
 
